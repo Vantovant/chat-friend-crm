@@ -64,7 +64,7 @@ const Index = () => {
   }
 
   if (!session) {
-    return <AuthPage onSuccess={() => {}} />;
+    return <AuthPage onSuccess={() => setLoading(true)} />;
   }
 
   return (
