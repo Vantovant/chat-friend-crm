@@ -5,6 +5,7 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-webhook-secret',
 };
 
+// ─── Mappers ─────────────────────────────────────────────────────────────────
 function mapTemperature(val: string): 'hot' | 'warm' | 'cold' {
   if (!val) return 'cold';
   const v = val.toLowerCase();
@@ -12,7 +13,6 @@ function mapTemperature(val: string): 'hot' | 'warm' | 'cold' {
   if (v === 'warm') return 'warm';
   return 'cold';
 }
-
 function mapLeadType(val: string): 'prospect' | 'registered' | 'buyer' | 'vip' {
   if (!val) return 'prospect';
   const v = val.toLowerCase();
@@ -21,7 +21,6 @@ function mapLeadType(val: string): 'prospect' | 'registered' | 'buyer' | 'vip' {
   if (v === 'vip') return 'vip';
   return 'prospect';
 }
-
 function mapInterest(val: string): 'high' | 'medium' | 'low' {
   if (!val) return 'medium';
   const v = val.toLowerCase();
@@ -29,87 +28,91 @@ function mapInterest(val: string): 'high' | 'medium' | 'low' {
   if (v === 'low') return 'low';
   return 'medium';
 }
+function normalizePhone(phone: string): string {
+  return phone.replace(/\D/g, '');
+}
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function jsonRes(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
+// ─── Main handler ─────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders });
-  }
+  if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
-  // Validate webhook secret
+  // ── 1. Auth: verify webhook secret ─────────────────────────────────────────
   const webhookSecret = req.headers.get('x-webhook-secret');
   const expectedSecret = Deno.env.get('WEBHOOK_SECRET');
   if (!webhookSecret || webhookSecret !== expectedSecret) {
-    return new Response(JSON.stringify({ error: 'Unauthorized — invalid webhook secret' }), {
-      status: 401,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return jsonRes({ error: 'Unauthorized — invalid webhook secret' }, 401);
   }
 
-  // Use service role for server-to-server operations
+  // ── 2. Service-role client (server-to-server only) ─────────────────────────
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   );
 
+  // ── 3. Parse body ──────────────────────────────────────────────────────────
   let body: any;
-  try {
-    body = await req.json();
-  } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
-      status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
+  try { body = await req.json(); }
+  catch { return jsonRes({ error: 'Invalid JSON body' }, 400); }
 
   const { action, user_id, contacts, contact, phone, name, message_preview } = body;
+  if (!action) return jsonRes({ error: 'Missing action field' }, 400);
 
-  if (!action) {
-    return new Response(JSON.stringify({ error: 'Missing action field' }), {
-      status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
+  // ── 4. Log inbound event ───────────────────────────────────────────────────
+  const eventRow: any = { source: 'zazi', action, status: 'received', payload: body };
+  const { data: eventData } = await supabase
+    .from('webhook_events')
+    .insert(eventRow)
+    .select('id')
+    .single();
+  const eventId: string | null = eventData?.id ?? null;
 
-  // ─── sync_contacts ────────────────────────────────────────────────────────
+  const markEvent = async (status: 'success' | 'error', error?: string) => {
+    if (!eventId) return;
+    await supabase.from('webhook_events').update({ status, ...(error ? { error } : {}) }).eq('id', eventId);
+  };
+
+  // ─── action: sync_contacts ──────────────────────────────────────────────────
   if (action === 'sync_contacts') {
     if (!Array.isArray(contacts) || contacts.length === 0) {
-      return new Response(JSON.stringify({ error: 'contacts must be a non-empty array' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      await markEvent('error', 'contacts must be a non-empty array');
+      return jsonRes({ error: 'contacts must be a non-empty array' }, 400);
     }
 
-    let synced = 0;
-    let skipped = 0;
+    const startedAt = new Date().toISOString();
+    let synced = 0, skipped = 0;
     const errors: string[] = [];
 
     for (const c of contacts) {
-      const phoneNum = c.phone_number || c.phone;
-      if (!phoneNum) { skipped++; continue; }
+      const rawPhone = c.phone_number || c.phone || '';
+      if (!rawPhone) { skipped++; continue; }
+      const normalizedPhone = normalizePhone(rawPhone);
 
-      const mapped = {
+      const mapped: any = {
         name: c.full_name || c.name || 'Unknown',
-        phone: phoneNum,
+        phone: normalizedPhone,
         email: c.email || null,
         notes: c.notes || c.additional_notes || null,
         temperature: mapTemperature(c.lead_temperature || c.temperature || ''),
         lead_type: mapLeadType(c.lead_type || c.type || ''),
         interest: mapInterest(c.interest_level || c.interest || ''),
-        tags: c.tags || [],
+        tags: Array.isArray(c.tags) ? c.tags : [],
         ...(user_id ? { created_by: user_id, assigned_to: user_id } : {}),
       };
 
       const { data: existing } = await supabase
-        .from('contacts')
-        .select('id')
-        .eq('phone', phoneNum)
-        .maybeSingle();
+        .from('contacts').select('id').eq('phone', normalizedPhone).maybeSingle();
 
       if (existing) {
-        const { error } = await supabase
-          .from('contacts')
-          .update({ ...mapped, updated_at: new Date().toISOString() })
-          .eq('id', existing.id);
+        const { error } = await supabase.from('contacts')
+          .update({ ...mapped, updated_at: new Date().toISOString() }).eq('id', existing.id);
         if (!error) synced++; else { skipped++; errors.push(error.message); }
       } else {
         const { error } = await supabase.from('contacts').insert(mapped);
@@ -117,146 +120,116 @@ Deno.serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ synced, skipped, total: contacts.length, errors }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    // Log sync_run
+    await supabase.from('sync_runs').insert({
+      source: 'zazi_webhook',
+      synced, skipped, total: contacts.length, errors,
+      user_id: user_id || null,
+      finished_at: new Date().toISOString(),
     });
+
+    await markEvent(errors.length === 0 ? 'success' : 'error', errors[0]);
+    return jsonRes({ synced, skipped, total: contacts.length, errors });
   }
 
-  // ─── upsert_contact ───────────────────────────────────────────────────────
+  // ─── action: upsert_contact ─────────────────────────────────────────────────
   if (action === 'upsert_contact') {
     if (!contact) {
-      return new Response(JSON.stringify({ error: 'contact object is required' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      await markEvent('error', 'contact object is required');
+      return jsonRes({ error: 'contact object is required' }, 400);
     }
-
-    const phoneNum = contact.phone_number || contact.phone;
-    if (!phoneNum) {
-      return new Response(JSON.stringify({ error: 'contact.phone_number is required' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    const rawPhone = contact.phone_number || contact.phone || '';
+    if (!rawPhone) {
+      await markEvent('error', 'contact.phone_number is required');
+      return jsonRes({ error: 'contact.phone_number is required' }, 400);
     }
+    const normalizedPhone = normalizePhone(rawPhone);
 
-    const mapped = {
+    const mapped: any = {
       name: contact.full_name || contact.name || 'Unknown',
-      phone: phoneNum,
+      phone: normalizedPhone,
       email: contact.email || null,
       notes: contact.notes || contact.additional_notes || null,
       temperature: mapTemperature(contact.lead_temperature || contact.temperature || ''),
       lead_type: mapLeadType(contact.lead_type || contact.type || ''),
       interest: mapInterest(contact.interest_level || contact.interest || ''),
-      tags: contact.tags || [],
+      tags: Array.isArray(contact.tags) ? contact.tags : [],
       ...(user_id ? { created_by: user_id, assigned_to: user_id } : {}),
     };
 
     const { data: existing } = await supabase
-      .from('contacts')
-      .select('id')
-      .eq('phone', phoneNum)
-      .maybeSingle();
+      .from('contacts').select('id').eq('phone', normalizedPhone).maybeSingle();
 
     if (existing) {
-      const { error } = await supabase
-        .from('contacts')
-        .update({ ...mapped, updated_at: new Date().toISOString() })
-        .eq('id', existing.id);
-      if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      const { error } = await supabase.from('contacts')
+        .update({ ...mapped, updated_at: new Date().toISOString() }).eq('id', existing.id);
+      if (error) { await markEvent('error', error.message); return jsonRes({ error: error.message }, 500); }
     } else {
       const { error } = await supabase.from('contacts').insert(mapped);
-      if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      if (error) { await markEvent('error', error.message); return jsonRes({ error: error.message }, 500); }
     }
 
-    return new Response(JSON.stringify({ success: true, phone: phoneNum }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    await markEvent('success');
+    return jsonRes({ success: true, phone: normalizedPhone });
   }
 
-  // ─── log_chat ─────────────────────────────────────────────────────────────
+  // ─── action: log_chat ───────────────────────────────────────────────────────
   if (action === 'log_chat') {
     if (!phone) {
-      return new Response(JSON.stringify({ error: 'phone is required for log_chat' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+      await markEvent('error', 'phone is required for log_chat');
+      return jsonRes({ error: 'phone is required for log_chat' }, 400);
     }
+    const normalizedPhone = normalizePhone(phone);
 
-    // Ensure contact exists
     let contactId: string;
     const { data: existing } = await supabase
-      .from('contacts')
-      .select('id')
-      .eq('phone', phone)
-      .maybeSingle();
+      .from('contacts').select('id').eq('phone', normalizedPhone).maybeSingle();
 
     if (existing) {
       contactId = existing.id;
     } else {
       const { data: newContact, error: insertErr } = await supabase
         .from('contacts')
-        .insert({
-          name: name || 'Unknown',
-          phone,
-          ...(user_id ? { created_by: user_id, assigned_to: user_id } : {}),
-        })
-        .select('id')
-        .single();
+        .insert({ name: name || 'Unknown', phone: normalizedPhone, ...(user_id ? { created_by: user_id, assigned_to: user_id } : {}) })
+        .select('id').single();
       if (insertErr || !newContact) {
-        return new Response(JSON.stringify({ error: insertErr?.message || 'Failed to create contact' }), {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        await markEvent('error', insertErr?.message || 'Failed to create contact');
+        return jsonRes({ error: insertErr?.message || 'Failed to create contact' }, 500);
       }
       contactId = newContact.id;
     }
 
-    // Find or create conversation
     const { data: conv } = await supabase
-      .from('conversations')
-      .select('id')
-      .eq('contact_id', contactId)
-      .maybeSingle();
+      .from('conversations').select('id').eq('contact_id', contactId).maybeSingle();
 
     let conversationId: string;
     if (conv) {
       conversationId = conv.id;
-      await supabase
-        .from('conversations')
-        .update({ last_message: message_preview || '', last_message_at: new Date().toISOString(), unread_count: 1 })
-        .eq('id', conv.id);
+      await supabase.from('conversations').update({
+        last_message: message_preview || '', last_message_at: new Date().toISOString(), unread_count: 1,
+      }).eq('id', conv.id);
     } else {
       const { data: newConv, error: convErr } = await supabase
         .from('conversations')
         .insert({ contact_id: contactId, last_message: message_preview || '', last_message_at: new Date().toISOString() })
-        .select('id')
-        .single();
+        .select('id').single();
       if (convErr || !newConv) {
-        return new Response(JSON.stringify({ error: convErr?.message || 'Failed to create conversation' }), {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        await markEvent('error', convErr?.message || 'Failed to create conversation');
+        return jsonRes({ error: convErr?.message || 'Failed to create conversation' }, 500);
       }
       conversationId = newConv.id;
     }
 
-    // Log message
     if (message_preview) {
       await supabase.from('messages').insert({
-        conversation_id: conversationId,
-        content: message_preview,
-        is_outbound: false,
-        message_type: 'text',
+        conversation_id: conversationId, content: message_preview, is_outbound: false, message_type: 'text',
       });
     }
 
-    return new Response(JSON.stringify({ success: true, contact_id: contactId, conversation_id: conversationId }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    await markEvent('success');
+    return jsonRes({ success: true, contact_id: contactId, conversation_id: conversationId });
   }
 
-  return new Response(JSON.stringify({ error: `Unknown action: ${action}` }), {
-    status: 400,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
+  await markEvent('error', `Unknown action: ${action}`);
+  return jsonRes({ error: `Unknown action: ${action}` }, 400);
 });
