@@ -14,16 +14,338 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      automations: {
+        Row: {
+          action_description: string
+          active: boolean
+          created_at: string
+          created_by: string | null
+          id: string
+          last_run_at: string | null
+          name: string
+          run_count: number
+          trigger_condition: string
+          updated_at: string
+        }
+        Insert: {
+          action_description: string
+          active?: boolean
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          last_run_at?: string | null
+          name: string
+          run_count?: number
+          trigger_condition: string
+          updated_at?: string
+        }
+        Update: {
+          action_description?: string
+          active?: boolean
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          last_run_at?: string | null
+          name?: string
+          run_count?: number
+          trigger_condition?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "automations_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contacts: {
+        Row: {
+          assigned_to: string | null
+          avatar_url: string | null
+          created_at: string
+          created_by: string | null
+          email: string | null
+          id: string
+          interest: Database["public"]["Enums"]["interest_level"]
+          lead_type: Database["public"]["Enums"]["lead_type"]
+          name: string
+          notes: string | null
+          phone: string
+          stage_id: string | null
+          tags: string[] | null
+          temperature: Database["public"]["Enums"]["lead_temperature"]
+          updated_at: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          avatar_url?: string | null
+          created_at?: string
+          created_by?: string | null
+          email?: string | null
+          id?: string
+          interest?: Database["public"]["Enums"]["interest_level"]
+          lead_type?: Database["public"]["Enums"]["lead_type"]
+          name: string
+          notes?: string | null
+          phone: string
+          stage_id?: string | null
+          tags?: string[] | null
+          temperature?: Database["public"]["Enums"]["lead_temperature"]
+          updated_at?: string
+        }
+        Update: {
+          assigned_to?: string | null
+          avatar_url?: string | null
+          created_at?: string
+          created_by?: string | null
+          email?: string | null
+          id?: string
+          interest?: Database["public"]["Enums"]["interest_level"]
+          lead_type?: Database["public"]["Enums"]["lead_type"]
+          name?: string
+          notes?: string | null
+          phone?: string
+          stage_id?: string | null
+          tags?: string[] | null
+          temperature?: Database["public"]["Enums"]["lead_temperature"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contacts_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contacts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contacts_stage_id_fkey"
+            columns: ["stage_id"]
+            isOneToOne: false
+            referencedRelation: "pipeline_stages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conversations: {
+        Row: {
+          contact_id: string
+          created_at: string
+          id: string
+          last_message: string | null
+          last_message_at: string | null
+          status: Database["public"]["Enums"]["comm_status"]
+          unread_count: number
+          updated_at: string
+        }
+        Insert: {
+          contact_id: string
+          created_at?: string
+          id?: string
+          last_message?: string | null
+          last_message_at?: string | null
+          status?: Database["public"]["Enums"]["comm_status"]
+          unread_count?: number
+          updated_at?: string
+        }
+        Update: {
+          contact_id?: string
+          created_at?: string
+          id?: string
+          last_message?: string | null
+          last_message_at?: string | null
+          status?: Database["public"]["Enums"]["comm_status"]
+          unread_count?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conversations_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      messages: {
+        Row: {
+          content: string
+          conversation_id: string
+          created_at: string
+          id: string
+          is_outbound: boolean
+          message_type: Database["public"]["Enums"]["message_type"]
+          sent_by: string | null
+          status: Database["public"]["Enums"]["message_status"] | null
+        }
+        Insert: {
+          content: string
+          conversation_id: string
+          created_at?: string
+          id?: string
+          is_outbound?: boolean
+          message_type?: Database["public"]["Enums"]["message_type"]
+          sent_by?: string | null
+          status?: Database["public"]["Enums"]["message_status"] | null
+        }
+        Update: {
+          content?: string
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          is_outbound?: boolean
+          message_type?: Database["public"]["Enums"]["message_type"]
+          sent_by?: string | null
+          status?: Database["public"]["Enums"]["message_status"] | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_sent_by_fkey"
+            columns: ["sent_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pipeline_stages: {
+        Row: {
+          color: string | null
+          created_at: string
+          id: string
+          name: string
+          stage_order: number
+        }
+        Insert: {
+          color?: string | null
+          created_at?: string
+          id?: string
+          name: string
+          stage_order?: number
+        }
+        Update: {
+          color?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+          stage_order?: number
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          email: string | null
+          full_name: string | null
+          id: string
+          phone: string | null
+          role: Database["public"]["Enums"]["user_role"]
+          updated_at: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id: string
+          phone?: string | null
+          role?: Database["public"]["Enums"]["user_role"]
+          updated_at?: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          phone?: string | null
+          role?: Database["public"]["Enums"]["user_role"]
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      workflows: {
+        Row: {
+          active: boolean
+          contact_count: number
+          created_at: string
+          created_by: string | null
+          description: string | null
+          id: string
+          name: string
+          steps: Json
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          contact_count?: number
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          name: string
+          steps?: Json
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          contact_count?: number
+          created_at?: string
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          name?: string
+          steps?: Json
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workflows_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      get_user_role: {
+        Args: never
+        Returns: Database["public"]["Enums"]["user_role"]
+      }
+      is_admin_or_super_admin: { Args: never; Returns: boolean }
     }
     Enums: {
-      [_ in never]: never
+      comm_status: "active" | "closed" | "pending"
+      interest_level: "high" | "medium" | "low"
+      lead_temperature: "hot" | "warm" | "cold"
+      lead_type: "prospect" | "registered" | "buyer" | "vip"
+      message_status: "sent" | "delivered" | "read"
+      message_type: "text" | "image" | "ai"
+      user_role: "agent" | "admin" | "super_admin"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +472,14 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      comm_status: ["active", "closed", "pending"],
+      interest_level: ["high", "medium", "low"],
+      lead_temperature: ["hot", "warm", "cold"],
+      lead_type: ["prospect", "registered", "buyer", "vip"],
+      message_status: ["sent", "delivered", "read"],
+      message_type: ["text", "image", "ai"],
+      user_role: ["agent", "admin", "super_admin"],
+    },
   },
 } as const
