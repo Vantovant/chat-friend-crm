@@ -49,6 +49,7 @@ function CopyField({ label, value, mono = true }: { label: string; value: string
 }
 
 export function IntegrationsModule({ userId = '' }: { userId?: string }) {
+  console.log('[IntegrationsModule] userId received:', userId);
   const connected = integrations.filter(i => i.status === 'connected').length;
   const { toast } = useToast();
 
@@ -186,7 +187,7 @@ export function IntegrationsModule({ userId = '' }: { userId?: string }) {
 
           <CopyField label="① Endpoint URL" value={WEBHOOK_URL} />
           <CopyField label="② Webhook Secret (header: x-webhook-secret)" value={WEBHOOK_SECRET} />
-          <CopyField label="③ Your User ID (use as user_id in payloads)" value={userId} />
+          <CopyField label="③ Your User ID (use as user_id in payloads)" value={userId || 'Sign in to see your User ID'} />
 
           <div className="rounded-lg bg-background border border-border p-2.5 space-y-1.5">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1.5">Supported Actions</p>
