@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { CheckCircle, XCircle, ExternalLink, Chrome, RefreshCw, ArrowDownToLine, ArrowUpFromLine, Loader2, Copy, Check, Webhook } from 'lucide-react';
+import { CheckCircle, XCircle, ExternalLink, Chrome, RefreshCw, ArrowDownToLine, ArrowUpFromLine, Loader2, Copy, Check, Webhook, X } from 'lucide-react';
 import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -50,6 +50,7 @@ function CopyField({ label, value, mono = true }: { label: string; value: string
 
 export function IntegrationsModule({ userId = '' }: { userId?: string }) {
   console.log('[IntegrationsModule] userId received:', userId);
+  const [showExtensionModal, setShowExtensionModal] = useState(false);
   const connected = integrations.filter(i => i.status === 'connected').length;
   const { toast } = useToast();
 
@@ -107,12 +108,73 @@ export function IntegrationsModule({ userId = '' }: { userId?: string }) {
             </div>
             <p className="text-xs text-muted-foreground">Inject the Vanto CRM sidebar directly into WhatsApp Web.</p>
           </div>
-          <button className="flex items-center gap-2 px-4 py-2 rounded-lg vanto-gradient text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity shrink-0">
+          <button
+            onClick={() => setShowExtensionModal(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg vanto-gradient text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity shrink-0"
+          >
             <Chrome size={15} />
             Install Extension
           </button>
         </div>
       </div>
+
+      {/* Chrome Extension Install Modal */}
+      {showExtensionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-background border border-border rounded-2xl shadow-2xl w-full max-w-md p-6 relative">
+            <button
+              onClick={() => setShowExtensionModal(false)}
+              className="absolute top-4 right-4 p-1.5 rounded-lg hover:bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <X size={16} />
+            </button>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-xl bg-primary/15 flex items-center justify-center text-xl shrink-0">🔌</div>
+              <div>
+                <p className="font-bold text-foreground">Install Chrome Extension</p>
+                <p className="text-xs text-muted-foreground">WhatsApp Web CRM Sidebar</p>
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              The extension is not yet on the Chrome Web Store. Follow these steps to load it manually:
+            </p>
+            <ol className="space-y-3 mb-5">
+              {[
+                { step: '1', text: 'Open Chrome and go to', code: 'chrome://extensions' },
+                { step: '2', text: 'Enable', code: 'Developer mode', suffix: 'using the toggle in the top-right corner.' },
+                { step: '3', text: 'Click', code: 'Load unpacked', suffix: 'and select the extension folder.' },
+                { step: '4', text: 'Open WhatsApp Web — the Vanto sidebar will appear automatically.', code: null },
+              ].map(({ step, text, code, suffix }) => (
+                <li key={step} className="flex items-start gap-3">
+                  <span className="w-5 h-5 rounded-full bg-primary/15 text-primary text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">{step}</span>
+                  <p className="text-sm text-foreground">
+                    {text}{' '}
+                    {code && <code className="bg-secondary text-primary px-1.5 py-0.5 rounded text-[11px] font-mono">{code}</code>}
+                    {suffix && <span className="text-muted-foreground"> {suffix}</span>}
+                  </p>
+                </li>
+              ))}
+            </ol>
+            <div className="flex gap-2">
+              <a
+                href="chrome://extensions"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg vanto-gradient text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity"
+              >
+                <Chrome size={14} />
+                Open Chrome Extensions
+              </a>
+              <button
+                onClick={() => setShowExtensionModal(false)}
+                className="px-4 py-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:text-foreground hover:border-primary/30 transition-colors"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Zazi CRM Two-Way Sync */}
       <div className="px-6 py-4 border-b border-border shrink-0">
