@@ -5,10 +5,11 @@
  */
 
 // ── Config ─────────────────────────────────────────────────────────────────
-const SUPABASE_URL     = 'https://nqyyvqcmcyggvlcswkio.supabase.co';
+const SUPABASE_URL      = 'https://nqyyvqcmcyggvlcswkio.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5xeXl2cWNtY3lnZ3ZsY3N3a2lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1NDYxMjYsImV4cCI6MjA4NzEyMjEyNn0.oK04GkXogHo9pohYd4A7XAV0-Q-qSu-uUiGWaj4ClM8';
-const SIDEBAR_ID       = 'vanto-crm-sidebar';
-const TOGGLE_ID        = 'vanto-crm-toggle';
+const SAVE_CONTACT_URL  = `${SUPABASE_URL}/functions/v1/save-contact`;
+const SIDEBAR_ID        = 'vanto-crm-sidebar';
+const TOGGLE_ID         = 'vanto-crm-toggle';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let currentPhone     = null;
@@ -93,18 +94,24 @@ async function loadContactByPhone(phone) {
   return rows && rows.length > 0 ? rows[0] : null;
 }
 
-// Upsert contact — conflict on phone column (requires UNIQUE constraint on contacts.phone)
+// Upsert contact via edge function (service role server-side — no auth required)
 async function upsertContact(payload) {
-  log('Upserting contact', payload);
-  const rows = await sbFetch('/contacts?on_conflict=phone', {
-    method:  'POST',
+  log('Calling save-contact edge function', payload);
+  const res = await fetch(SAVE_CONTACT_URL, {
+    method: 'POST',
     headers: {
-      'Prefer': 'return=representation,resolution=merge-duplicates',
+      'apikey':        SUPABASE_ANON_KEY,
+      'Content-Type':  'application/json',
     },
-    body: payload,
+    body: JSON.stringify(payload),
   });
-  log('Contact saved', rows && rows.length > 0 ? rows[0] : null);
-  return rows && rows.length > 0 ? rows[0] : null;
+  const text = await res.text();
+  if (!res.ok) {
+    throw new Error(`[${res.status}] ${text}`);
+  }
+  const data = text ? JSON.parse(text) : null;
+  log('Contact saved via edge function', data?.contact?.id);
+  return data?.contact || null;
 }
 
 // ── Phone Sanitizer ────────────────────────────────────────────────────────
