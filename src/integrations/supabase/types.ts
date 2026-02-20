@@ -74,10 +74,13 @@ export type Database = {
           name: string
           notes: string | null
           phone: string
+          phone_normalized: string | null
+          phone_raw: string | null
           stage_id: string | null
           tags: string[] | null
           temperature: Database["public"]["Enums"]["lead_temperature"]
           updated_at: string
+          whatsapp_id: string | null
         }
         Insert: {
           assigned_to?: string | null
@@ -91,10 +94,13 @@ export type Database = {
           name: string
           notes?: string | null
           phone: string
+          phone_normalized?: string | null
+          phone_raw?: string | null
           stage_id?: string | null
           tags?: string[] | null
           temperature?: Database["public"]["Enums"]["lead_temperature"]
           updated_at?: string
+          whatsapp_id?: string | null
         }
         Update: {
           assigned_to?: string | null
@@ -108,10 +114,13 @@ export type Database = {
           name?: string
           notes?: string | null
           phone?: string
+          phone_normalized?: string | null
+          phone_raw?: string | null
           stage_id?: string | null
           tags?: string[] | null
           temperature?: Database["public"]["Enums"]["lead_temperature"]
           updated_at?: string
+          whatsapp_id?: string | null
         }
         Relationships: [
           {

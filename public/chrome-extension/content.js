@@ -93,6 +93,14 @@ function sanitizePhone(raw) {
   return (raw || '').replace(/\D/g, '');
 }
 
+// ── Extract whatsapp_id from DOM (the internal WA number, NOT user-entered) ────
+// currentPhone is the WA-extracted digits (JID number). We keep it as whatsapp_id.
+// The phone INPUT field contains what the user typed — that becomes payload.phone.
+function getPhoneInputValue() {
+  var el = document.getElementById('vanto-f-phone');
+  return el ? (el.value || '').trim() : '';
+}
+
 // ── Auth banner ────────────────────────────────────────────────────────────────
 function updateAuthBanner() {
   var banner = document.getElementById('vanto-auth-banner');
@@ -244,7 +252,8 @@ function populateForm(data) {
     el.readOnly = false;
   }
   setField('vanto-f-name',        data.name        || '');
-  setField('vanto-f-phone',       data.phone       || currentPhone || '');
+  // Prefer phone_raw (user-entered) if available, otherwise empty so user fills it
+  setField('vanto-f-phone',       data.phone_raw   || data.phone_normalized || '');
   setField('vanto-f-email',       data.email       || '');
   setField('vanto-f-lead-type',   data.lead_type   || 'prospect');
   setField('vanto-f-temperature', data.temperature || 'cold');
@@ -334,10 +343,14 @@ function handleSave() {
   var tempEl  = document.getElementById('vanto-f-temperature');
   var notesEl = document.getElementById('vanto-f-notes');
 
-  var phone = sanitizePhone(currentPhone || (phoneEl && phoneEl.value) || '');
-  var name  = ((nameEl && nameEl.value) || '').trim() || currentName || '';
+  // phone = what user typed in the Phone field (user-entered, human-readable)
+  var userPhone = ((phoneEl && phoneEl.value) || '').trim();
+  // whatsapp_id = WA internal number extracted from DOM (may be a JID number)
+  var waId      = currentPhone || null; // currentPhone is always the DOM-extracted raw digits
 
-  if (!phone) {
+  var name = ((nameEl && nameEl.value) || '').trim() || currentName || '';
+
+  if (!userPhone && !waId) {
     showStatus('error', '❌ Phone number required — enter in the Phone field');
     setTimeout(clearStatus, 4000);
     return;
@@ -349,13 +362,14 @@ function handleSave() {
   }
 
   var payload = {
-    name:        name,
-    phone:       phone,
-    email:       ((emailEl && emailEl.value) || '').trim() || null,
-    lead_type:   (ltEl && ltEl.value)   || 'prospect',
-    temperature: (tempEl && tempEl.value) || 'cold',
-    tags:        currentTags.slice(),
-    notes:       ((notesEl && notesEl.value) || '').trim() || null,
+    name:         name,
+    phone:        userPhone || null,        // user-entered (e.g. "+27 84 247 5415")
+    whatsapp_id:  waId      || null,        // WA internal (e.g. "130477532930136")
+    email:        ((emailEl && emailEl.value) || '').trim() || null,
+    lead_type:    (ltEl && ltEl.value)    || 'prospect',
+    temperature:  (tempEl && tempEl.value) || 'cold',
+    tags:         currentTags.slice(),
+    notes:        ((notesEl && notesEl.value) || '').trim() || null,
   };
 
   log('Saving contact via background', payload);
@@ -367,8 +381,9 @@ function handleSave() {
   saveContactViaBackground(payload, function(response) {
     if (response && response.success) {
       currentContact = response.contact;
-      currentPhone   = phone;
-      showStatus('success', '✅ Contact saved!');
+      // Show the user-entered phone in the toast, not WA internal
+      var displayPhone = (response.contact && response.contact.phone_raw) || userPhone || waId || '';
+      showStatus('success', '✅ Saved: ' + name + ' • ' + displayPhone);
       if (saveBtn) saveBtn.textContent = '✅ Saved!';
       setTimeout(function() {
         if (saveBtn) { saveBtn.textContent = '💾 Save Contact'; saveBtn.disabled = false; }
