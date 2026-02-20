@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import type { Module } from '@/lib/vanto-data';
+import logo from '@/assets/logo.jpg';
 import {
   MessageSquare, Users, BarChart3, Zap, Bot, GitBranch,
   Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut
@@ -43,16 +44,12 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
       )}
     >
       {/* Logo */}
-      <div className={cn('flex items-center gap-3 p-4 border-b border-border', collapsed && 'justify-center')}>
-        <div className="w-9 h-9 rounded-xl vanto-gradient flex items-center justify-center shrink-0 shadow-lg">
-          <span className="text-sm font-black text-primary-foreground">V</span>
-        </div>
-        {!collapsed && (
-          <div>
-            <p className="text-sm font-bold text-foreground leading-tight">Vanto</p>
-            <p className="text-xs text-muted-foreground leading-tight">Command Hub 2.0</p>
-          </div>
-        )}
+      <div className={cn('flex items-center gap-2 p-3 border-b border-border', collapsed && 'justify-center')}>
+        <img
+          src={logo}
+          alt="Online Course For MLM"
+          className={cn('object-contain shrink-0', collapsed ? 'w-10 h-10 rounded-lg' : 'h-12 w-auto max-w-[160px]')}
+        />
       </div>
 
       {/* Nav */}
