@@ -17,14 +17,62 @@ function sanitizePhone(raw) {
 }
 
 function getActiveContactInfo() {
-  // WhatsApp Web selectors (may need updating as WA updates their DOM)
-  const headerTitle = document.querySelector('[data-testid="conversation-header"] span[title]');
-  const name = headerTitle ? headerTitle.getAttribute('title') : null;
+  // --- Name: try multiple WhatsApp Web selectors (WA updates DOM often) ---
+  let name = null;
+  const nameSelectors = [
+    '[data-testid="conversation-header"] span[title]',
+    'header [data-testid="conversation-info-header"] span[title]',
+    'header span[dir="auto"][title]',
+    '[data-testid="conv-header-participant"] span[title]',
+    'header ._21S-L span[title]',
+  ];
+  for (const sel of nameSelectors) {
+    const el = document.querySelector(sel);
+    if (el && el.getAttribute('title')) {
+      name = el.getAttribute('title');
+      break;
+    }
+  }
 
-  // Try to extract phone from URL hash or DOM
-  const hash = window.location.hash; // e.g. #/chat/27821234567@s.whatsapp.net
-  const match = hash.match(/\/chat\/(\d+)@/);
-  const phone = match ? match[1] : null;
+  // --- Phone: try URL patterns WhatsApp Web uses ---
+  let phone = null;
+
+  // Pattern 1: hash-based (old) — #/chat/27821234567@s.whatsapp.net
+  const hash = window.location.hash;
+  const hashMatch = hash.match(/\/chat\/(\d+)@/);
+  if (hashMatch) phone = hashMatch[1];
+
+  // Pattern 2: search param — ?phone=27821234567
+  if (!phone) {
+    const params = new URLSearchParams(window.location.search);
+    const p = params.get('phone');
+    if (p) phone = sanitizePhone(p);
+  }
+
+  // Pattern 3: DOM — phone number often visible in header subtitle
+  if (!phone) {
+    const subtitleSelectors = [
+      '[data-testid="conversation-header"] span[title]:last-child',
+      'header [data-testid="conversation-info-header"] div:last-child span',
+      'header ._21S-L + div span',
+      '[data-testid="conv-header-participant"] div span',
+    ];
+    for (const sel of subtitleSelectors) {
+      const el = document.querySelector(sel);
+      const txt = el?.textContent?.trim() || '';
+      if (/^\+?\d[\d\s\-()]{6,}$/.test(txt)) {
+        phone = sanitizePhone(txt);
+        break;
+      }
+    }
+  }
+
+  // Pattern 4: look in <title> tag — WhatsApp Web sets tab title to contact name / number
+  if (!phone) {
+    const titleText = document.title || '';
+    const titleMatch = titleText.match(/\+?(\d{7,15})/);
+    if (titleMatch) phone = titleMatch[1];
+  }
 
   return { name, phone };
 }
@@ -243,17 +291,45 @@ function wireEvents() {
   });
 }
 
-// ── URL Observer (detect chat switches) ──────────────────────────────────────
+// ── Chat change detection via MutationObserver on the header ─────────────────
 function watchChatChanges() {
-  let lastHash = '';
+  // Poll as fallback every second for URL/title changes
+  let lastKey = '';
   setInterval(() => {
     const { name, phone } = getActiveContactInfo();
-    if (phone !== currentPhone || name !== currentName) {
+    const key = `${name}|${phone}`;
+    if (key !== lastKey) {
+      lastKey = key;
       currentPhone = phone;
       currentName = name;
       updateSidebarContact(name, phone);
     }
-  }, 1000);
+  }, 800);
+
+  // Also watch DOM mutations on the header area so we react faster
+  const headerObserver = new MutationObserver(() => {
+    const { name, phone } = getActiveContactInfo();
+    const key = `${name}|${phone}`;
+    if (key !== lastKey) {
+      lastKey = key;
+      currentPhone = phone;
+      currentName = name;
+      updateSidebarContact(name, phone);
+    }
+  });
+
+  // Observe the header element once it exists
+  function attachHeaderObserver() {
+    const header = document.querySelector('header') ||
+                   document.querySelector('[data-testid="conversation-header"]');
+    if (header) {
+      headerObserver.observe(header, { childList: true, subtree: true, characterData: true });
+    } else {
+      // Retry if header not yet in DOM
+      setTimeout(attachHeaderObserver, 1000);
+    }
+  }
+  attachHeaderObserver();
 }
 
 // ── Inject Sidebar ────────────────────────────────────────────────────────────
