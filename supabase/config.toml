@@ -11,3 +11,7 @@ verify_jwt = false
 
 [functions.save-contact]
 verify_jwt = false
+
+[functions.upsert-whatsapp-contact]
+verify_jwt = false
+

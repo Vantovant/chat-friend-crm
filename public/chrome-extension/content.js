@@ -1,29 +1,28 @@
 /**
- * Vanto CRM — WhatsApp Web Content Script v3.0
- * Overlay sidebar — does NOT shift WhatsApp layout.
- * Auth: reads vanto_token from chrome.storage → sends as Bearer header to edge function.
+ * Vanto CRM — WhatsApp Web Content Script v4.0
+ * MV3 compliant: ALL auth + API calls delegated to background.js via sendMessage.
+ * This script only handles DOM detection and sidebar UI.
  */
 
-// ── Config ─────────────────────────────────────────────────────────────────
-const SUPABASE_URL     = 'https://nqyyvqcmcyggvlcswkio.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5xeXl2cWNtY3lnZ3ZsY3N3a2lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1NDYxMjYsImV4cCI6MjA4NzEyMjEyNn0.oK04GkXogHo9pohYd4A7XAV0-Q-qSu-uUiGWaj4ClM8';
-const SAVE_URL         = `${SUPABASE_URL}/functions/v1/save-contact`;
-const SIDEBAR_ID       = 'vanto-crm-sidebar';
-const TOGGLE_ID        = 'vanto-crm-toggle';
+'use strict';
 
-// ── State ──────────────────────────────────────────────────────────────────
-let currentPhone    = null;
-let currentName     = null;
-let currentContact  = null;
-let sidebarVisible  = true;
-let detectionTimer  = null;
-let headerObserver  = null;
-let pollInterval    = null;
-let lastDetectedKey = '';
-let currentTags     = [];
-let authToken       = null; // set from chrome.storage
+// ── Config ─────────────────────────────────────────────────────────────────────
+var SIDEBAR_ID = 'vanto-crm-sidebar';
+var TOGGLE_ID  = 'vanto-crm-toggle';
 
-// ── Logging ────────────────────────────────────────────────────────────────
+// ── State ──────────────────────────────────────────────────────────────────────
+var currentPhone    = null;
+var currentName     = null;
+var currentContact  = null;
+var sidebarVisible  = true;
+var detectionTimer  = null;
+var headerObserver  = null;
+var pollInterval    = null;
+var lastDetectedKey = '';
+var currentTags     = [];
+var isAuthenticated = false; // updated from background
+
+// ── Logging ────────────────────────────────────────────────────────────────────
 function log(msg, data) {
   if (data !== undefined) {
     console.log('[Vanto CRM]', msg, data);
@@ -32,110 +31,81 @@ function log(msg, data) {
   }
 }
 
-// ── Auth Token ─────────────────────────────────────────────────────────────
-function loadAuthToken(callback) {
+// ── Background bridge ──────────────────────────────────────────────────────────
+function sendToBackground(message, callback) {
   try {
-    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      chrome.storage.local.get(['vanto_token'], function(result) {
-        if (result && result.vanto_token) {
-          authToken = result.vanto_token;
-          log('Auth token loaded from storage');
-        } else {
-          authToken = null;
-          log('No auth token found — login via popup required');
-        }
-        if (callback) callback();
-      });
-
-      // Listen for popup login events
-      chrome.runtime.onMessage.addListener(function(msg) {
-        if (msg && msg.type === 'VANTO_TOKEN_UPDATED') {
-          chrome.storage.local.get(['vanto_token'], function(result) {
-            if (result && result.vanto_token) {
-              authToken = result.vanto_token;
-              log('Auth token refreshed');
-              updateAuthBanner();
-            }
-          });
-        }
-      });
-    } else {
-      if (callback) callback();
-    }
+    chrome.runtime.sendMessage(message, function(response) {
+      if (chrome.runtime.lastError) {
+        log('Background error', chrome.runtime.lastError.message);
+        if (callback) callback(null);
+        return;
+      }
+      if (callback) callback(response);
+    });
   } catch (e) {
-    log('Storage error', e.message);
-    if (callback) callback();
+    log('sendToBackground failed', e.message);
+    if (callback) callback(null);
   }
 }
 
-// ── Save contact via edge function (Bearer auth) ───────────────────────────
-async function saveContactViaEdgeFunction(payload) {
-  if (!authToken) {
-    throw new Error('Not authenticated — please log in via the extension popup.');
-  }
-
-  log('POST save-contact edge function', { phone: payload.phone, name: payload.name });
-
-  const res = await fetch(SAVE_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': 'Bearer ' + authToken,
-      'Content-Type':  'application/json',
-      'apikey':        SUPABASE_ANON_KEY,
-    },
-    body: JSON.stringify(payload),
+// ── Auth state ─────────────────────────────────────────────────────────────────
+function checkAuthState(callback) {
+  sendToBackground({ type: 'VANTO_GET_SESSION' }, function(response) {
+    isAuthenticated = !!(response && response.token);
+    log('Auth state', isAuthenticated ? 'logged in' : 'not logged in');
+    updateAuthBanner();
+    if (callback) callback(isAuthenticated);
   });
+}
 
-  const text = await res.text();
-  if (!res.ok) {
-    throw new Error('[' + res.status + '] ' + text);
+// Listen for auth changes from background (login/logout in popup)
+chrome.runtime.onMessage.addListener(function(msg) {
+  if (!msg || !msg.type) return;
+  if (msg.type === 'VANTO_TOKEN_UPDATED') {
+    isAuthenticated = true;
+    log('Token updated — refreshing');
+    updateAuthBanner();
+    runDetection();
   }
-  const data = text ? JSON.parse(text) : null;
-  log('Contact saved', data?.contact?.id);
-  return data?.contact || null;
-}
+  if (msg.type === 'VANTO_TOKEN_CLEARED') {
+    isAuthenticated = false;
+    log('Token cleared');
+    updateAuthBanner();
+  }
+});
 
-// ── Load contact by phone (read-only, uses token if available) ─────────────
-async function loadContactByPhone(phone) {
-  if (!authToken) return null; // can't load without auth
-
-  log('Loading contact for phone', phone);
-  const url = `${SUPABASE_URL}/rest/v1/contacts?phone=eq.${encodeURIComponent(phone)}&limit=1`;
-  const res  = await fetch(url, {
-    headers: {
-      'apikey':        SUPABASE_ANON_KEY,
-      'Authorization': 'Bearer ' + authToken,
-      'Content-Type':  'application/json',
-    },
+// ── Save contact via background ────────────────────────────────────────────────
+function saveContactViaBackground(payload, callback) {
+  sendToBackground({ type: 'VANTO_SAVE_CONTACT', payload: payload }, function(response) {
+    callback(response || { success: false, error: 'No response from background' });
   });
-  if (!res.ok) return null;
-  const rows = await res.json();
-  return rows && rows.length > 0 ? rows[0] : null;
 }
 
-// ── Phone sanitizer ────────────────────────────────────────────────────────
+// ── Load contact via background ────────────────────────────────────────────────
+function loadContactViaBackground(phone, callback) {
+  sendToBackground({ type: 'VANTO_LOAD_CONTACT', phone: phone }, function(response) {
+    callback(response || { success: false, error: 'No response' });
+  });
+}
+
+// ── Phone sanitizer ────────────────────────────────────────────────────────────
 function sanitizePhone(raw) {
   return (raw || '').replace(/\D/g, '');
 }
 
-// ── Auth banner ────────────────────────────────────────────────────────────
+// ── Auth banner ────────────────────────────────────────────────────────────────
 function updateAuthBanner() {
-  const banner = document.getElementById('vanto-auth-banner');
+  var banner = document.getElementById('vanto-auth-banner');
   if (!banner) return;
-  if (authToken) {
-    banner.style.display = 'none';
-  } else {
-    banner.style.display = 'block';
-  }
+  banner.style.display = isAuthenticated ? 'none' : 'block';
 }
 
-// ── Chat detection ─────────────────────────────────────────────────────────
+// ── Chat detection ─────────────────────────────────────────────────────────────
 function getActiveContactInfo() {
-  let name  = null;
-  let phone = null;
+  var name  = null;
+  var phone = null;
 
-  // Name selectors
-  const nameSelectors = [
+  var nameSelectors = [
     '[data-testid="conversation-header"] span[title]',
     '[data-testid="conversation-info-header-chat-title"] span',
     '[data-testid="conversation-info-header-chat-title"]',
@@ -144,112 +114,72 @@ function getActiveContactInfo() {
     '#main header span[title]',
     '#main header span[dir="auto"]',
     '#main header > div > div > div > div span[title]',
-    '#main header > div > div span[dir="auto"]',
   ];
-  for (const sel of nameSelectors) {
-    const el = document.querySelector(sel);
+  for (var i = 0; i < nameSelectors.length; i++) {
+    var el = document.querySelector(nameSelectors[i]);
     if (el) {
-      const t = el.getAttribute('title') || el.textContent?.trim();
+      var t = el.getAttribute('title') || (el.textContent || '').trim();
       if (t && t.length > 0 && t.length < 200) { name = t; break; }
     }
   }
 
-  // Phone — P0: #main data-id
-  const mainPanel = document.getElementById('main');
+  // P0: #main data-id
+  var mainPanel = document.getElementById('main');
   if (mainPanel) {
-    const m = (mainPanel.getAttribute('data-id') || '').match(/(\d{7,15})@/);
+    var m = (mainPanel.getAttribute('data-id') || '').match(/(\d{7,15})@/);
     if (m) phone = m[1];
   }
 
   // P1: URL hash
   if (!phone) {
-    const hm = window.location.hash.match(/\/chat\/(\d{7,15})@/);
+    var hm = window.location.hash.match(/\/chat\/(\d{7,15})@/);
     if (hm) phone = hm[1];
   }
 
-  // P2: URL search
+  // P2: any [data-id] in #main
   if (!phone) {
-    const p = new URLSearchParams(window.location.search).get('phone');
-    if (p) phone = sanitizePhone(p);
+    var els = document.querySelectorAll('#main [data-id]');
+    for (var j = 0; j < els.length; j++) {
+      var dm = (els[j].getAttribute('data-id') || '').match(/(\d{7,15})@/);
+      if (dm) { phone = dm[1]; break; }
+    }
   }
 
-  // P3: subtitle spans
+  // P3: subtitle spans with phone pattern
   if (!phone) {
-    const subtitleSelectors = [
+    var subtitleSelectors = [
       '[data-testid="conversation-info-header"] span[dir="auto"]:not([title])',
       'header span[dir="ltr"]',
-      '#main header div:last-child span',
       '#main header span[dir="ltr"]',
     ];
-    for (const sel of subtitleSelectors) {
-      const el  = document.querySelector(sel);
-      const txt = el?.textContent?.trim() || '';
+    for (var k = 0; k < subtitleSelectors.length; k++) {
+      var se = document.querySelector(subtitleSelectors[k]);
+      var txt = (se && se.textContent && se.textContent.trim()) || '';
       if (/^\+?\d[\d\s\-(). ]{5,}$/.test(txt)) { phone = sanitizePhone(txt); break; }
-    }
-  }
-
-  // P4: scan ALL spans in #main header
-  if (!phone) {
-    for (const span of document.querySelectorAll('#main header span')) {
-      const txt = span.textContent?.trim() || '';
-      if (/^\+?\d{7,15}$/.test(txt.replace(/[\s\-().]/g, ''))) { phone = sanitizePhone(txt); break; }
-    }
-  }
-
-  // P5: selected chat row data-id
-  if (!phone) {
-    for (const sel of ['div[aria-selected="true"]', '[data-testid="cell-frame-container"][aria-selected="true"]']) {
-      const el = document.querySelector(sel);
-      if (el) {
-        const withId = el.querySelector('[data-id]') || el.closest('[data-id]');
-        if (withId) {
-          const m = (withId.getAttribute('data-id') || '').match(/(\d{7,15})@/);
-          if (m) { phone = m[1]; break; }
-        }
-      }
-    }
-  }
-
-  // P6: any data-id element near top
-  if (!phone) {
-    for (const el of document.querySelectorAll('[data-id*="@s.whatsapp"], [data-id*="@c.us"]')) {
-      const rect = el.getBoundingClientRect();
-      if (rect.top > 0 && rect.top < 200) {
-        const m = (el.getAttribute('data-id') || '').match(/(\d{7,15})@/);
-        if (m) { phone = m[1]; break; }
-      }
-    }
-  }
-
-  // P7: all #main [data-id]
-  if (!phone) {
-    for (const el of document.querySelectorAll('#main [data-id]')) {
-      const m = (el.getAttribute('data-id') || '').match(/(\d{7,15})@/);
-      if (m) { phone = m[1]; break; }
     }
   }
 
   return { name: name || null, phone: phone ? sanitizePhone(phone) : null };
 }
 
-// ── Debounced detection ────────────────────────────────────────────────────
+// ── Debounced detection ────────────────────────────────────────────────────────
 function scheduleDetection() {
   clearTimeout(detectionTimer);
-  detectionTimer = setTimeout(runDetection, 500);
+  detectionTimer = setTimeout(runDetection, 600);
 }
 
-async function runDetection() {
-  const { name, phone } = getActiveContactInfo();
-  const key = `${name}|${phone}`;
+function runDetection() {
+  var info = getActiveContactInfo();
+  var key  = info.name + '|' + info.phone;
   if (key === lastDetectedKey) return;
   lastDetectedKey = key;
-  currentPhone = phone;
-  currentName  = name;
-  await refreshSidebar(name, phone);
+  currentPhone = info.phone;
+  currentName  = info.name;
+  refreshSidebar(info.name, info.phone);
 }
 
-// ── Sidebar Refresh ────────────────────────────────────────────────────────
-async function refreshSidebar(name, phone) {
+// ── Sidebar Refresh ────────────────────────────────────────────────────────────
+function refreshSidebar(name, phone) {
   updateContactHeader(name, phone);
   updateAuthBanner();
 
@@ -260,55 +190,58 @@ async function refreshSidebar(name, phone) {
 
   showFormBody();
 
+  if (!isAuthenticated) {
+    populateForm({ name: name || '', phone: phone || '', email: '', lead_type: 'prospect', temperature: 'cold', tags: [], notes: '' });
+    showStatus('info', '🔐 Log in via the extension popup to save contacts');
+    return;
+  }
+
   if (!phone) {
     populateForm({ name: name || '', phone: '', email: '', lead_type: 'prospect', temperature: 'cold', tags: [], notes: '' });
-    showStatus('info', '⚠️ Phone not detected — enter manually if needed');
+    showStatus('info', '⚠️ Phone not detected — enter manually');
     setTimeout(clearStatus, 4000);
     return;
   }
 
-  if (!authToken) {
-    populateForm({ name: name || '', phone: phone, email: '', lead_type: 'prospect', temperature: 'cold', tags: [], notes: '' });
-    showStatus('info', '🔐 Log in via popup to save contacts');
-    return;
-  }
-
   showStatus('loading', '⏳ Loading contact…');
-  try {
-    const contact = await loadContactByPhone(phone);
-    currentContact = contact;
-    if (contact) {
-      populateForm(contact);
-      showStatus('success', '✅ Contact loaded');
+
+  loadContactViaBackground(phone, function(response) {
+    if (response && response.success) {
+      currentContact = response.contact;
+      if (response.contact) {
+        populateForm(response.contact);
+        showStatus('success', '✅ Contact loaded');
+      } else {
+        populateForm({ name: name || '', phone: phone, email: '', lead_type: 'prospect', temperature: 'cold', tags: [], notes: '' });
+        showStatus('info', '📋 New contact — fill in and save');
+      }
     } else {
+      log('Load error', response && response.error);
       populateForm({ name: name || '', phone: phone, email: '', lead_type: 'prospect', temperature: 'cold', tags: [], notes: '' });
-      showStatus('info', '📋 New contact — fill and save');
+      showStatus('error', '❌ ' + ((response && response.error) || 'Load failed'));
     }
-  } catch (err) {
-    log('Error loading contact', err.message);
-    showStatus('error', '❌ Load error: ' + err.message);
-  }
-  setTimeout(clearStatus, 3500);
+    setTimeout(clearStatus, 3500);
+  });
 }
 
-// ── Header ─────────────────────────────────────────────────────────────────
+// ── Header ─────────────────────────────────────────────────────────────────────
 function updateContactHeader(name, phone) {
-  const nameEl   = document.getElementById('vanto-hdr-name');
-  const phoneEl  = document.getElementById('vanto-hdr-phone');
-  const avatarEl = document.getElementById('vanto-avatar');
+  var nameEl   = document.getElementById('vanto-hdr-name');
+  var phoneEl  = document.getElementById('vanto-hdr-phone');
+  var avatarEl = document.getElementById('vanto-avatar');
   if (nameEl)   nameEl.textContent  = name  || 'Select a chat';
-  if (phoneEl)  phoneEl.textContent = phone ? `+${phone}` : '—';
+  if (phoneEl)  phoneEl.textContent = phone ? '+' + phone : '—';
   if (avatarEl) avatarEl.textContent = (name || '?')[0].toUpperCase();
 }
 
-// ── Form populate ──────────────────────────────────────────────────────────
+// ── Form populate ──────────────────────────────────────────────────────────────
 function populateForm(data) {
   function setField(id, val) {
-    const el = document.getElementById(id);
+    var el = document.getElementById(id);
     if (!el) return;
-    el.value = val || '';
-    el.disabled  = false;
-    el.readOnly  = false;
+    el.value    = val || '';
+    el.disabled = false;
+    el.readOnly = false;
   }
   setField('vanto-f-name',        data.name        || '');
   setField('vanto-f-phone',       data.phone       || currentPhone || '');
@@ -316,56 +249,27 @@ function populateForm(data) {
   setField('vanto-f-lead-type',   data.lead_type   || 'prospect');
   setField('vanto-f-temperature', data.temperature || 'cold');
   setField('vanto-f-notes',       data.notes       || '');
-  currentTags = Array.isArray(data.tags) ? [...data.tags] : [];
+  currentTags = Array.isArray(data.tags) ? data.tags.slice() : [];
   renderTags();
 }
 
-// ── Show / Hide states ─────────────────────────────────────────────────────
+// ── Show/Hide states ───────────────────────────────────────────────────────────
 function showNoChatState() {
-  const nc = document.getElementById('vanto-no-chat');
-  const fb = document.getElementById('vanto-form-body');
+  var nc = document.getElementById('vanto-no-chat');
+  var fb = document.getElementById('vanto-form-body');
   if (nc) nc.style.display = 'flex';
   if (fb) fb.style.display = 'none';
   clearStatus();
 }
 
 function showFormBody() {
-  const nc = document.getElementById('vanto-no-chat');
-  const fb = document.getElementById('vanto-form-body');
+  var nc = document.getElementById('vanto-no-chat');
+  var fb = document.getElementById('vanto-form-body');
   if (nc) nc.style.display = 'none';
   if (fb) fb.style.display = 'block';
 }
 
-// ── Tags ───────────────────────────────────────────────────────────────────
-function renderTags() {
-  const container = document.getElementById('vanto-tags-display');
-  if (!container) return;
-  container.innerHTML = currentTags.length === 0
-    ? '<span style="color:hsl(215,20%,35%);font-size:11px;">No tags yet</span>'
-    : currentTags.map(t => `
-        <span class="vanto-tag-chip">
-          ${escapeHtml(t)}
-          <button class="vanto-tag-remove" data-tag="${escapeHtml(t)}" title="Remove tag">×</button>
-        </span>
-      `).join('');
-
-  container.querySelectorAll('.vanto-tag-remove').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      currentTags = currentTags.filter(x => x !== btn.dataset.tag);
-      renderTags();
-    });
-  });
-}
-
-function addTag(raw) {
-  const tag = raw.trim().toLowerCase().replace(/[^a-z0-9_\-]/g, '');
-  if (tag && !currentTags.includes(tag)) {
-    currentTags.push(tag);
-    renderTags();
-  }
-}
-
+// ── Tags ───────────────────────────────────────────────────────────────────────
 function escapeHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -374,47 +278,67 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-// ── Status Banner ──────────────────────────────────────────────────────────
+function renderTags() {
+  var container = document.getElementById('vanto-tags-display');
+  if (!container) return;
+  if (currentTags.length === 0) {
+    container.innerHTML = '<span style="color:hsl(215,20%,35%);font-size:11px;">No tags yet</span>';
+  } else {
+    container.innerHTML = currentTags.map(function(t) {
+      return '<span class="vanto-tag-chip">' + escapeHtml(t) +
+        '<button class="vanto-tag-remove" data-tag="' + escapeHtml(t) + '" title="Remove">×</button></span>';
+    }).join('');
+  }
+  container.querySelectorAll('.vanto-tag-remove').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      currentTags = currentTags.filter(function(x) { return x !== btn.dataset.tag; });
+      renderTags();
+    });
+  });
+}
+
+function addTag(raw) {
+  var tag = raw.trim().toLowerCase().replace(/[^a-z0-9_\-]/g, '');
+  if (tag && currentTags.indexOf(tag) === -1) {
+    currentTags.push(tag);
+    renderTags();
+  }
+}
+
+// ── Status Banner ──────────────────────────────────────────────────────────────
 function showStatus(type, msg) {
-  const el = document.getElementById('vanto-status');
+  var el = document.getElementById('vanto-status');
   if (!el) return;
   el.textContent = msg;
-  el.className   = `vanto-status show ${type}`;
+  el.className   = 'vanto-status show ' + type;
 }
 
 function clearStatus() {
-  const el = document.getElementById('vanto-status');
+  var el = document.getElementById('vanto-status');
   if (el) el.className = 'vanto-status';
 }
 
-// ── Save ───────────────────────────────────────────────────────────────────
-async function handleSave() {
-  // Re-check token before saving
-  await new Promise(resolve => {
-    chrome.storage.local.get(['vanto_token'], function(result) {
-      if (result && result.vanto_token) authToken = result.vanto_token;
-      resolve();
-    });
-  });
-
-  if (!authToken) {
-    showStatus('error', '🔐 Please login via the extension popup first');
+// ── Save ───────────────────────────────────────────────────────────────────────
+function handleSave() {
+  if (!isAuthenticated) {
+    showStatus('error', '🔐 Please log in via the extension popup first');
     setTimeout(clearStatus, 5000);
     return;
   }
 
-  const nameEl  = document.getElementById('vanto-f-name');
-  const phoneEl = document.getElementById('vanto-f-phone');
-  const emailEl = document.getElementById('vanto-f-email');
-  const ltEl    = document.getElementById('vanto-f-lead-type');
-  const tempEl  = document.getElementById('vanto-f-temperature');
-  const notesEl = document.getElementById('vanto-f-notes');
+  var nameEl  = document.getElementById('vanto-f-name');
+  var phoneEl = document.getElementById('vanto-f-phone');
+  var emailEl = document.getElementById('vanto-f-email');
+  var ltEl    = document.getElementById('vanto-f-lead-type');
+  var tempEl  = document.getElementById('vanto-f-temperature');
+  var notesEl = document.getElementById('vanto-f-notes');
 
-  const phone = sanitizePhone(currentPhone || phoneEl?.value || '');
-  const name  = (nameEl?.value || '').trim() || currentName || '';
+  var phone = sanitizePhone(currentPhone || (phoneEl && phoneEl.value) || '');
+  var name  = ((nameEl && nameEl.value) || '').trim() || currentName || '';
 
   if (!phone) {
-    showStatus('error', '❌ Phone number is required — enter it in the Phone field');
+    showStatus('error', '❌ Phone number required — enter in the Phone field');
     setTimeout(clearStatus, 4000);
     return;
   }
@@ -424,154 +348,157 @@ async function handleSave() {
     return;
   }
 
-  const payload = {
-    name,
-    phone,
-    email:       (emailEl?.value || '').trim() || null,
-    lead_type:   ltEl?.value  || 'prospect',
-    temperature: tempEl?.value || 'cold',
-    tags:        currentTags,
-    notes:       (notesEl?.value || '').trim() || null,
+  var payload = {
+    name:        name,
+    phone:       phone,
+    email:       ((emailEl && emailEl.value) || '').trim() || null,
+    lead_type:   (ltEl && ltEl.value)   || 'prospect',
+    temperature: (tempEl && tempEl.value) || 'cold',
+    tags:        currentTags.slice(),
+    notes:       ((notesEl && notesEl.value) || '').trim() || null,
   };
 
-  log('Saving contact', payload);
+  log('Saving contact via background', payload);
 
-  const saveBtn = document.getElementById('vanto-save-btn');
+  var saveBtn = document.getElementById('vanto-save-btn');
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ Saving…'; }
   showStatus('loading', '⏳ Saving contact…');
 
-  try {
-    const saved = await saveContactViaEdgeFunction(payload);
-    currentContact = saved;
-    currentPhone   = phone;
-    showStatus('success', '✅ Contact Saved');
-    if (saveBtn) saveBtn.textContent = '✅ Saved!';
-    setTimeout(() => {
+  saveContactViaBackground(payload, function(response) {
+    if (response && response.success) {
+      currentContact = response.contact;
+      currentPhone   = phone;
+      showStatus('success', '✅ Contact saved!');
+      if (saveBtn) saveBtn.textContent = '✅ Saved!';
+      setTimeout(function() {
+        if (saveBtn) { saveBtn.textContent = '💾 Save Contact'; saveBtn.disabled = false; }
+        clearStatus();
+      }, 2500);
+    } else {
+      var errCode = (response && response.error) || 'unknown';
+      var errMsg;
+      if (errCode === 'not_logged_in') {
+        errMsg = '🔐 Session expired — log in via popup';
+        isAuthenticated = false;
+        updateAuthBanner();
+      } else if (errCode === 'token_expired') {
+        errMsg = '🔐 Token expired — please log in again';
+        isAuthenticated = false;
+        updateAuthBanner();
+      } else if (errCode === 'network_timeout') {
+        errMsg = '🌐 Network timeout — try again';
+      } else {
+        errMsg = '❌ ' + errCode;
+      }
+      log('Save error', errCode);
+      showStatus('error', errMsg);
       if (saveBtn) { saveBtn.textContent = '💾 Save Contact'; saveBtn.disabled = false; }
-      clearStatus();
-    }, 2500);
-  } catch (err) {
-    log('Save error', err.message);
-    showStatus('error', '❌ ' + err.message);
-    if (saveBtn) { saveBtn.textContent = '💾 Save Contact'; saveBtn.disabled = false; }
-    setTimeout(clearStatus, 5000);
-  }
+      setTimeout(clearStatus, 5000);
+    }
+  });
 }
 
-// ── Sidebar HTML ───────────────────────────────────────────────────────────
+// ── Sidebar HTML ───────────────────────────────────────────────────────────────
 function buildSidebarHTML() {
-  return `
-<div id="${SIDEBAR_ID}">
+  return [
+    '<div id="' + SIDEBAR_ID + '">',
 
-  <!-- Header -->
-  <div class="vanto-header">
-    <span class="vanto-logo">⚡ Vanto CRM</span>
-    <button class="vanto-close" id="vanto-close-btn" title="Hide sidebar">✕</button>
-  </div>
+    '  <div class="vanto-header">',
+    '    <span class="vanto-logo">⚡ Vanto CRM</span>',
+    '    <button class="vanto-close" id="vanto-close-btn" title="Hide sidebar">✕</button>',
+    '  </div>',
 
-  <!-- Auth banner — shown when not logged in -->
-  <div id="vanto-auth-banner" style="display:none;padding:8px 12px;background:hsl(33,90%,12%);border-bottom:1px solid hsl(33,90%,25%);font-size:11px;color:hsl(33,90%,70%);">
-    🔐 Log in via the extension popup to save contacts.
-  </div>
+    '  <div id="vanto-auth-banner" style="display:none;padding:8px 12px;background:hsl(33,90%,12%);border-bottom:1px solid hsl(33,90%,25%);font-size:11px;color:hsl(33,90%,70%);">',
+    '    🔐 Log in via the extension popup to save contacts.',
+    '  </div>',
 
-  <!-- Contact card -->
-  <div class="vanto-contact-card">
-    <div class="vanto-avatar" id="vanto-avatar">?</div>
-    <div class="vanto-contact-meta">
-      <p class="vanto-contact-name-display" id="vanto-hdr-name">Select a chat</p>
-      <p class="vanto-contact-phone-display" id="vanto-hdr-phone">—</p>
-    </div>
-  </div>
+    '  <div class="vanto-contact-card">',
+    '    <div class="vanto-avatar" id="vanto-avatar">?</div>',
+    '    <div class="vanto-contact-meta">',
+    '      <p class="vanto-contact-name-display" id="vanto-hdr-name">Select a chat</p>',
+    '      <p class="vanto-contact-phone-display" id="vanto-hdr-phone">—</p>',
+    '    </div>',
+    '  </div>',
 
-  <!-- Status -->
-  <div class="vanto-status" id="vanto-status"></div>
+    '  <div class="vanto-status" id="vanto-status"></div>',
 
-  <!-- Body -->
-  <div class="vanto-body">
+    '  <div class="vanto-body">',
+    '    <div id="vanto-no-chat" class="vanto-no-chat">',
+    '      <span class="vanto-no-chat-icon">💬</span>',
+    '      <span>Open a WhatsApp chat to load or create a contact.</span>',
+    '    </div>',
 
-    <!-- No chat selected -->
-    <div id="vanto-no-chat" class="vanto-no-chat">
-      <span class="vanto-no-chat-icon">💬</span>
-      <span>Open a WhatsApp chat to load or create a contact.</span>
-    </div>
+    '    <div id="vanto-form-body" style="display:none;">',
 
-    <!-- Editable form -->
-    <div id="vanto-form-body" style="display:none;">
+    '      <div class="vanto-section">',
+    '        <p class="vanto-section-title">Contact Info</p>',
+    '        <div class="vanto-field">',
+    '          <label class="vanto-label" for="vanto-f-name">Full Name</label>',
+    '          <input class="vanto-input" id="vanto-f-name" type="text" placeholder="e.g. Olivier Agnin" autocomplete="off" />',
+    '        </div>',
+    '        <div class="vanto-field">',
+    '          <label class="vanto-label" for="vanto-f-phone">Phone Number</label>',
+    '          <input class="vanto-input" id="vanto-f-phone" type="text" placeholder="e.g. 27821234567" autocomplete="off" />',
+    '        </div>',
+    '        <div class="vanto-field">',
+    '          <label class="vanto-label" for="vanto-f-email">Email Address</label>',
+    '          <input class="vanto-input" id="vanto-f-email" type="email" placeholder="email@example.com" autocomplete="off" />',
+    '        </div>',
+    '      </div>',
 
-      <div class="vanto-section">
-        <p class="vanto-section-title">Contact Info</p>
+    '      <div class="vanto-section">',
+    '        <p class="vanto-section-title">Lead Classification</p>',
+    '        <div class="vanto-field">',
+    '          <label class="vanto-label" for="vanto-f-lead-type">Lead Type</label>',
+    '          <select class="vanto-select" id="vanto-f-lead-type">',
+    '            <option value="prospect">Prospect</option>',
+    '            <option value="registered">Registered</option>',
+    '            <option value="buyer">Buyer</option>',
+    '            <option value="vip">VIP</option>',
+    '          </select>',
+    '        </div>',
+    '        <div class="vanto-field">',
+    '          <label class="vanto-label" for="vanto-f-temperature">Temperature</label>',
+    '          <select class="vanto-select" id="vanto-f-temperature">',
+    '            <option value="hot">🔥 Hot</option>',
+    '            <option value="warm">🌤 Warm</option>',
+    '            <option value="cold">❄️ Cold</option>',
+    '          </select>',
+    '        </div>',
+    '      </div>',
 
-        <div class="vanto-field">
-          <label class="vanto-label" for="vanto-f-name">Full Name</label>
-          <input class="vanto-input" id="vanto-f-name" type="text" placeholder="e.g. Olivier Agnin" autocomplete="off" />
-        </div>
+    '      <div class="vanto-section">',
+    '        <p class="vanto-section-title">Tags</p>',
+    '        <div class="vanto-tags-display" id="vanto-tags-display"></div>',
+    '        <div style="display:flex;gap:6px;margin-top:6px;">',
+    '          <input class="vanto-input" id="vanto-tag-input" type="text" placeholder="Add tag, press Enter" style="flex:1;" autocomplete="off" />',
+    '          <button class="vanto-btn" id="vanto-tag-add" style="width:auto;padding:7px 12px;flex-shrink:0;">+</button>',
+    '        </div>',
+    '      </div>',
 
-        <div class="vanto-field">
-          <label class="vanto-label" for="vanto-f-phone">Phone Number</label>
-          <input class="vanto-input" id="vanto-f-phone" type="text" placeholder="e.g. 27821234567" autocomplete="off" />
-        </div>
+    '      <div class="vanto-section">',
+    '        <p class="vanto-section-title">Notes</p>',
+    '        <textarea class="vanto-textarea" id="vanto-f-notes" placeholder="Add notes about this contact…"></textarea>',
+    '      </div>',
 
-        <div class="vanto-field">
-          <label class="vanto-label" for="vanto-f-email">Email Address</label>
-          <input class="vanto-input" id="vanto-f-email" type="email" placeholder="email@example.com" autocomplete="off" />
-        </div>
-      </div>
+    '      <div class="vanto-section">',
+    '        <button class="vanto-btn vanto-btn-primary" id="vanto-save-btn">💾 Save Contact</button>',
+    '      </div>',
 
-      <div class="vanto-section">
-        <p class="vanto-section-title">Lead Classification</p>
+    '    </div>',
+    '  </div>',
 
-        <div class="vanto-field">
-          <label class="vanto-label" for="vanto-f-lead-type">Lead Type</label>
-          <select class="vanto-select" id="vanto-f-lead-type">
-            <option value="prospect">Prospect</option>
-            <option value="registered">Registered</option>
-            <option value="buyer">Buyer</option>
-            <option value="vip">VIP</option>
-          </select>
-        </div>
+    '  <div class="vanto-footer">',
+    '    <a href="https://chat-friend-crm.lovable.app" target="_blank" class="vanto-footer-link">Open Vanto Dashboard ↗</a>',
+    '  </div>',
 
-        <div class="vanto-field">
-          <label class="vanto-label" for="vanto-f-temperature">Temperature</label>
-          <select class="vanto-select" id="vanto-f-temperature">
-            <option value="hot">🔥 Hot</option>
-            <option value="warm">🌤 Warm</option>
-            <option value="cold">❄️ Cold</option>
-          </select>
-        </div>
-      </div>
-
-      <div class="vanto-section">
-        <p class="vanto-section-title">Tags</p>
-        <div class="vanto-tags-display" id="vanto-tags-display"></div>
-        <div style="display:flex;gap:6px;margin-top:6px;">
-          <input class="vanto-input" id="vanto-tag-input" type="text" placeholder="Add tag, press Enter" style="flex:1;" autocomplete="off" />
-          <button class="vanto-btn" id="vanto-tag-add" style="width:auto;padding:7px 12px;flex-shrink:0;">+</button>
-        </div>
-      </div>
-
-      <div class="vanto-section">
-        <p class="vanto-section-title">Notes</p>
-        <textarea class="vanto-textarea" id="vanto-f-notes" placeholder="Add notes about this contact…"></textarea>
-      </div>
-
-      <div class="vanto-section">
-        <button class="vanto-btn vanto-btn-primary" id="vanto-save-btn">💾 Save Contact</button>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- Footer -->
-  <div class="vanto-footer">
-    <a href="https://chat-friend-crm.lovable.app" target="_blank" class="vanto-footer-link">Open Vanto Dashboard ↗</a>
-  </div>
-
-</div>`;
+    '</div>',
+  ].join('\n');
 }
 
-// ── Toggle Button ──────────────────────────────────────────────────────────
+// ── Toggle Button ──────────────────────────────────────────────────────────────
 function buildToggleButton() {
-  const btn = document.createElement('button');
+  var btn = document.createElement('button');
   btn.id    = TOGGLE_ID;
   btn.title = 'Open Vanto CRM';
   btn.innerHTML = '⚡';
@@ -579,74 +506,81 @@ function buildToggleButton() {
   return btn;
 }
 
-// ── Show / Hide Sidebar ────────────────────────────────────────────────────
+// ── Show/Hide Sidebar ──────────────────────────────────────────────────────────
 function showSidebar() {
-  const el = document.getElementById(SIDEBAR_ID);
-  const tg = document.getElementById(TOGGLE_ID);
+  var el = document.getElementById(SIDEBAR_ID);
+  var tg = document.getElementById(TOGGLE_ID);
   if (el) el.style.display = 'flex';
   if (tg) tg.style.display = 'none';
   sidebarVisible = true;
 }
 
 function hideSidebar() {
-  const el = document.getElementById(SIDEBAR_ID);
-  const tg = document.getElementById(TOGGLE_ID);
+  var el = document.getElementById(SIDEBAR_ID);
+  var tg = document.getElementById(TOGGLE_ID);
   if (el) el.style.display = 'none';
   if (tg) tg.style.display = 'flex';
   sidebarVisible = false;
 }
 
-// ── Wire Events ────────────────────────────────────────────────────────────
+// ── Wire Events ────────────────────────────────────────────────────────────────
 function wireEvents() {
-  document.getElementById('vanto-close-btn')?.addEventListener('click', hideSidebar);
-  document.getElementById('vanto-save-btn')?.addEventListener('click', handleSave);
+  var closeBtn = document.getElementById('vanto-close-btn');
+  if (closeBtn) closeBtn.addEventListener('click', hideSidebar);
 
-  document.getElementById('vanto-tag-add')?.addEventListener('click', () => {
-    const inp = document.getElementById('vanto-tag-input');
-    if (inp?.value.trim()) { addTag(inp.value); inp.value = ''; inp.focus(); }
-  });
+  var saveBtn = document.getElementById('vanto-save-btn');
+  if (saveBtn) saveBtn.addEventListener('click', handleSave);
 
-  document.getElementById('vanto-tag-input')?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      e.stopPropagation();
-      const inp = document.getElementById('vanto-tag-input');
-      if (inp?.value.trim()) { addTag(inp.value); inp.value = ''; }
-    }
-  });
+  var tagAddBtn = document.getElementById('vanto-tag-add');
+  if (tagAddBtn) {
+    tagAddBtn.addEventListener('click', function() {
+      var inp = document.getElementById('vanto-tag-input');
+      if (inp && inp.value.trim()) { addTag(inp.value); inp.value = ''; inp.focus(); }
+    });
+  }
 
-  // Prevent sidebar events from leaking into WhatsApp
-  const sidebar = document.getElementById(SIDEBAR_ID);
+  var tagInput = document.getElementById('vanto-tag-input');
+  if (tagInput) {
+    tagInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (tagInput.value.trim()) { addTag(tagInput.value); tagInput.value = ''; }
+      }
+    });
+  }
+
+  // Prevent keyboard events from leaking to WhatsApp
+  var sidebar = document.getElementById(SIDEBAR_ID);
   if (sidebar) {
-    sidebar.addEventListener('keydown',  (e) => e.stopPropagation());
-    sidebar.addEventListener('keyup',    (e) => e.stopPropagation());
-    sidebar.addEventListener('keypress', (e) => e.stopPropagation());
-    sidebar.addEventListener('click',    (e) => e.stopPropagation());
+    ['keydown', 'keyup', 'keypress', 'click'].forEach(function(evt) {
+      sidebar.addEventListener(evt, function(e) { e.stopPropagation(); });
+    });
   }
 }
 
-// ── MutationObserver ───────────────────────────────────────────────────────
+// ── MutationObserver ───────────────────────────────────────────────────────────
 function watchChatChanges() {
-  pollInterval = setInterval(() => scheduleDetection(), 1500);
+  pollInterval = setInterval(function() { scheduleDetection(); }, 1500);
 
-  const titleEl = document.querySelector('title');
+  var titleEl = document.querySelector('title');
   if (titleEl) {
-    new MutationObserver(() => scheduleDetection())
+    new MutationObserver(function() { scheduleDetection(); })
       .observe(titleEl, { childList: true, characterData: true, subtree: true });
   }
 
-  new MutationObserver(() => scheduleDetection())
+  new MutationObserver(function() { scheduleDetection(); })
     .observe(document.body, { childList: true, subtree: false });
 
   function tryAttachHeaderObserver() {
-    const header =
+    var header =
       document.querySelector('#main header') ||
       document.querySelector('[data-testid="conversation-header"]') ||
       document.querySelector('header');
 
     if (header) {
       if (headerObserver) headerObserver.disconnect();
-      headerObserver = new MutationObserver(() => scheduleDetection());
+      headerObserver = new MutationObserver(function() { scheduleDetection(); });
       headerObserver.observe(header, { childList: true, subtree: true, characterData: true });
       log('Header observer attached');
     } else {
@@ -656,38 +590,39 @@ function watchChatChanges() {
   tryAttachHeaderObserver();
 }
 
-// ── Inject ─────────────────────────────────────────────────────────────────
+// ── Inject ─────────────────────────────────────────────────────────────────────
 function injectSidebar() {
   if (document.getElementById(SIDEBAR_ID)) return;
 
-  const wrapper = document.createElement('div');
+  var wrapper = document.createElement('div');
   wrapper.innerHTML = buildSidebarHTML();
   document.body.appendChild(wrapper.firstElementChild);
   document.body.appendChild(buildToggleButton());
 
   wireEvents();
-  updateAuthBanner();
   watchChatChanges();
-  setTimeout(runDetection, 1200);
 
-  log('Sidebar injected v3.0');
+  // Check auth then trigger first detection
+  checkAuthState(function() {
+    setTimeout(runDetection, 1200);
+  });
+
+  log('Sidebar injected v4.0');
 }
 
-// ── Boot ───────────────────────────────────────────────────────────────────
+// ── Boot ───────────────────────────────────────────────────────────────────────
 function boot() {
-  loadAuthToken(function() {
+  if (document.getElementById('app')) {
+    setTimeout(injectSidebar, 1500);
+    return;
+  }
+  var obs = new MutationObserver(function() {
     if (document.getElementById('app')) {
+      obs.disconnect();
       setTimeout(injectSidebar, 1500);
-      return;
     }
-    const obs = new MutationObserver(function() {
-      if (document.getElementById('app')) {
-        obs.disconnect();
-        setTimeout(injectSidebar, 1500);
-      }
-    });
-    obs.observe(document.body, { childList: true, subtree: true });
   });
+  obs.observe(document.body, { childList: true, subtree: true });
 }
 
 boot();
