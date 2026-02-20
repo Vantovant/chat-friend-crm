@@ -21,3 +21,7 @@ verify_jwt = false
 [functions.test-webhook]
 verify_jwt = false
 
+[functions.send-invitation]
+verify_jwt = false
+
+
