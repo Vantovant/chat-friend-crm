@@ -26,7 +26,6 @@
 
     .popup-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
 
-    /* Login view is VISIBLE by default — JS hides it only if already logged in */
     #view-loggedin { display: none; flex-direction: column; gap: 10px; }
     #view-login    { display: flex; flex-direction: column; gap: 10px; }
 
@@ -124,7 +123,7 @@
 
   <div class="popup-body">
 
-    <!-- Logged-in view (hidden by default) -->
+    <!-- Logged-in view -->
     <div id="view-loggedin">
       <div class="user-badge">
         <span class="status-dot"></span>
@@ -158,152 +157,9 @@
 
   </div>
 
-  <div class="popup-footer">Vanto CRM v1.2.0</div>
+  <div class="popup-footer">Vanto CRM v2.0.0</div>
 
-  <script>
-    var SUPABASE_URL      = 'https://nqyyvqcmcyggvlcswkio.supabase.co';
-    var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5xeXl2cWNtY3lnZ3ZsY3N3a2lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1NDYxMjYsImV4cCI6MjA4NzEyMjEyNn0.oK04GkXogHo9pohYd4A7XAV0-Q-qSu-uUiGWaj4ClM8';
-
-    var viewLogin    = document.getElementById('view-login');
-    var viewLoggedin = document.getElementById('view-loggedin');
-    var emailInput   = document.getElementById('input-email');
-    var passInput    = document.getElementById('input-password');
-    var loginBtn     = document.getElementById('btn-login');
-    var logoutBtn    = document.getElementById('btn-logout');
-    var errorEl      = document.getElementById('login-error');
-    var displayEmail = document.getElementById('display-email');
-
-    function showError(msg) {
-      errorEl.textContent = msg;
-      errorEl.style.display = 'block';
-    }
-    function clearError() {
-      errorEl.textContent = '';
-      errorEl.style.display = 'none';
-    }
-    function resetLoginBtn() {
-      loginBtn.disabled    = false;
-      loginBtn.textContent = 'Log in';
-    }
-    function showLoggedIn(email) {
-      viewLogin.style.display    = 'none';
-      viewLoggedin.style.display = 'flex';
-      displayEmail.textContent   = email || '—';
-    }
-    function showLoginView() {
-      viewLoggedin.style.display = 'none';
-      viewLogin.style.display    = 'flex';
-      resetLoginBtn();
-    }
-
-    // ── On load: check for stored session ────────────────────────────────
-    chrome.storage.local.get(['vanto_token', 'vanto_email'], function(result) {
-      console.log('[Vanto Popup] Storage check:', result.vanto_token ? 'token found' : 'no token');
-      if (result.vanto_token) {
-        showLoggedIn(result.vanto_email || '');
-      }
-      // If no token, login view is already visible — do nothing
-    });
-
-    // ── Login handler ─────────────────────────────────────────────────────
-    function doLogin() {
-      console.log('[Vanto Popup] Login clicked');
-      clearError();
-
-      var email    = (emailInput.value || '').trim();
-      var password = passInput.value || '';
-
-      if (!email || !password) {
-        showError('Please enter email and password.');
-        return;
-      }
-
-      loginBtn.disabled    = true;
-      loginBtn.textContent = 'Logging in…';
-
-      var controller = new AbortController();
-      var timeout    = setTimeout(function() { controller.abort(); }, 12000);
-
-      fetch(SUPABASE_URL + '/auth/v1/token?grant_type=password', {
-        method:  'POST',
-        signal:  controller.signal,
-        headers: {
-          'apikey':        SUPABASE_ANON_KEY,
-          'Content-Type':  'application/json'
-        },
-        body: JSON.stringify({ email: email, password: password })
-      })
-      .then(function(res) {
-        clearTimeout(timeout);
-        return res.json().then(function(data) {
-          return { ok: res.ok, data: data };
-        });
-      })
-      .then(function(r) {
-        if (!r.ok || !r.data.access_token) {
-          var msg = (r.data && (r.data.error_description || r.data.msg)) || 'Login failed. Check credentials.';
-          console.log('[Vanto Popup] Login failed:', msg);
-          showError(msg);
-          resetLoginBtn();
-          return;
-        }
-
-        var token    = r.data.access_token;
-        var userEmail = (r.data.user && r.data.user.email) || email;
-
-        console.log('[Vanto Popup] Login success:', userEmail);
-
-        // Store token under key "vanto_token"
-        chrome.storage.local.set({
-          vanto_token: token,
-          vanto_email: userEmail
-        }, function() {
-          // Notify any open WhatsApp tabs
-          try {
-            chrome.tabs.query({ url: 'https://web.whatsapp.com/*' }, function(tabs) {
-              if (tabs && tabs.length) {
-                tabs.forEach(function(tab) {
-                  chrome.tabs.sendMessage(tab.id, { type: 'VANTO_TOKEN_UPDATED' }, function() {
-                    void chrome.runtime.lastError;
-                  });
-                });
-              }
-            });
-          } catch(e) {}
-
-          showLoggedIn(userEmail);
-        });
-      })
-      .catch(function(err) {
-        clearTimeout(timeout);
-        var msg = err.name === 'AbortError'
-          ? 'Request timed out — check your connection.'
-          : 'Network error — check your connection.';
-        console.log('[Vanto Popup] Login error:', err.message);
-        showError(msg);
-        resetLoginBtn();
-      });
-    }
-
-    // ── Event listeners ───────────────────────────────────────────────────
-    loginBtn.addEventListener('click', function(e) {
-      e.preventDefault();
-      doLogin();
-    });
-
-    emailInput.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') doLogin();
-    });
-    passInput.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') doLogin();
-    });
-
-    logoutBtn.addEventListener('click', function() {
-      chrome.storage.local.remove(['vanto_token', 'vanto_email'], function() {
-        passInput.value = '';
-        showLoginView();
-      });
-    });
-  </script>
+  <!-- MV3 requires external script — NO inline JS allowed -->
+  <script src="popup.js"></script>
 </body>
 </html>
