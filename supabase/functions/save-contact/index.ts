@@ -1,7 +1,6 @@
 /**
- * Vanto CRM — Chrome Extension contact save endpoint
- * Uses service role to bypass RLS — safe because the endpoint
- * is only called from the extension with the anon key as a gate.
+ * Vanto CRM — save-contact Edge Function v2.0
+ * Validates user JWT → upserts contact with user_id ownership
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -30,17 +29,38 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // Validate the anon API key is present (basic gate — not a security boundary,
-  // just prevents totally unauthenticated random requests)
-  const apiKey = req.headers.get('apikey') || req.headers.get('x-api-key');
-  const expectedKey = Deno.env.get('SUPABASE_ANON_KEY');
-  if (!apiKey || apiKey !== expectedKey) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+  // ── Extract Bearer token ────────────────────────────────────────────────
+  const authHeader = req.headers.get('Authorization') || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
+
+  if (!token) {
+    console.error('[save-contact] No Bearer token provided');
+    return new Response(JSON.stringify({ error: 'Unauthorized — no token' }), {
       status: 401,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
+  // ── Verify JWT via anon client (respects RLS) ───────────────────────────
+  const anonClient = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_ANON_KEY')!,
+    { global: { headers: { Authorization: `Bearer ${token}` } } }
+  );
+
+  const { data: userData, error: userError } = await anonClient.auth.getUser(token);
+  if (userError || !userData?.user) {
+    console.error('[save-contact] JWT validation failed', userError?.message);
+    return new Response(JSON.stringify({ error: 'Unauthorized — invalid token' }), {
+      status: 401,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const userId = userData.user.id;
+  console.log('[save-contact] Authenticated user', userId);
+
+  // ── Parse body ──────────────────────────────────────────────────────────
   let body: any;
   try {
     body = await req.json();
@@ -59,7 +79,6 @@ Deno.serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
-
   if (!name) {
     return new Response(JSON.stringify({ error: 'name is required' }), {
       status: 400,
@@ -67,8 +86,8 @@ Deno.serve(async (req) => {
     });
   }
 
-  // Use service role — bypasses RLS, safe server-side only
-  const supabase = createClient(
+  // ── Upsert using service role ───────────────────────────────────────────
+  const serviceClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
@@ -81,12 +100,13 @@ Deno.serve(async (req) => {
     temperature: mapTemperature(temperature),
     tags:        Array.isArray(tags) ? tags : [],
     notes:       notes ? String(notes).trim() : null,
+    created_by:  userId,
     updated_at:  new Date().toISOString(),
   };
 
-  console.log('[save-contact] Upserting contact', { phone: payload.phone, name: payload.name });
+  console.log('[save-contact] Upserting', { phone: payload.phone, name: payload.name, userId });
 
-  const { data, error } = await supabase
+  const { data, error } = await serviceClient
     .from('contacts')
     .upsert(payload, { onConflict: 'phone' })
     .select()
