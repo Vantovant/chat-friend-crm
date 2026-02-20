@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 import { CheckCircle, XCircle, ExternalLink, Chrome, RefreshCw, ArrowDownToLine, ArrowUpFromLine, Loader2, Copy, Check, Webhook } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -36,22 +36,15 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-export function IntegrationsModule() {
+export function IntegrationsModule({ userId = '' }: { userId?: string }) {
   const connected = integrations.filter(i => i.status === 'connected').length;
   const { toast } = useToast();
-  const [userId, setUserId] = useState<string>('');
 
   const [syncing, setSyncing] = useState<SyncDirection>(null);
   const [lastPull, setLastPull] = useState<Date | null>(null);
   const [lastPush, setLastPush] = useState<Date | null>(null);
   const [lastPullResult, setLastPullResult] = useState<SyncResult | null>(null);
   const [lastPushResult, setLastPushResult] = useState<SyncResult | null>(null);
-
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) setUserId(data.user.id);
-    });
-  }, []);
 
   const runSync = async (direction: 'pull' | 'push') => {
     setSyncing(direction);

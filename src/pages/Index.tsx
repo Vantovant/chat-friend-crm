@@ -43,7 +43,7 @@ const Index = () => {
       case 'automations': return <AutomationsModule />;
       case 'ai-agent': return <AIAgentModule />;
       case 'workflows': return <WorkflowsModule />;
-      case 'integrations': return <IntegrationsModule />;
+      case 'integrations': return <IntegrationsModule userId={session?.user?.id ?? ''} />;
       case 'api-console': return <APIConsoleModule />;
       case 'settings': return <SettingsModule />;
       default: return <InboxModule />;
