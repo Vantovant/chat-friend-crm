@@ -280,6 +280,42 @@ export type Database = {
         }
         Relationships: []
       }
+      sync_runs: {
+        Row: {
+          errors: string[]
+          finished_at: string | null
+          id: string
+          skipped: number
+          source: string
+          started_at: string
+          synced: number
+          total: number
+          user_id: string | null
+        }
+        Insert: {
+          errors?: string[]
+          finished_at?: string | null
+          id?: string
+          skipped?: number
+          source: string
+          started_at?: string
+          synced?: number
+          total?: number
+          user_id?: string | null
+        }
+        Update: {
+          errors?: string[]
+          finished_at?: string | null
+          id?: string
+          skipped?: number
+          source?: string
+          started_at?: string
+          synced?: number
+          total?: number
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
@@ -295,6 +331,36 @@ export type Database = {
           id?: string
           role?: Database["public"]["Enums"]["user_role"]
           user_id?: string
+        }
+        Relationships: []
+      }
+      webhook_events: {
+        Row: {
+          action: string
+          created_at: string
+          error: string | null
+          id: string
+          payload: Json | null
+          source: string
+          status: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          payload?: Json | null
+          source: string
+          status?: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          payload?: Json | null
+          source?: string
+          status?: string
         }
         Relationships: []
       }
