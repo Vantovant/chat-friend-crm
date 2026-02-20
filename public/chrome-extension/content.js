@@ -104,8 +104,6 @@ function getActiveContactInfo() {
   let phone = null;
 
   // ── Name strategies ──────────────────────────────────────────────────────
-
-  // Strategy N1 — data-testid conversation header (most reliable)
   const nameSelectors = [
     '[data-testid="conversation-header"] span[title]',
     '[data-testid="conversation-info-header-chat-title"] span',
@@ -114,7 +112,6 @@ function getActiveContactInfo() {
     'header span[dir="auto"][title]',
     '#main header span[title]',
     '#main header span[dir="auto"]',
-    // Fallback: any prominent span in the header
     '#main header > div > div > div > div span[title]',
     '#main header > div > div span[dir="auto"]',
   ];
@@ -132,17 +129,29 @@ function getActiveContactInfo() {
 
   // ── Phone strategies ─────────────────────────────────────────────────────
 
-  // Strategy P1 — URL hash (legacy WhatsApp Web)
-  const hashMatch = window.location.hash.match(/\/chat\/(\d{7,15})@/);
-  if (hashMatch) phone = hashMatch[1];
+  // P0 — #main panel itself may carry a data-id like "27821234567@s.whatsapp.net"
+  if (!phone) {
+    const mainPanel = document.getElementById('main');
+    if (mainPanel) {
+      const did = mainPanel.getAttribute('data-id') || '';
+      const m   = did.match(/(\d{7,15})@/);
+      if (m) phone = m[1];
+    }
+  }
 
-  // Strategy P2 — URL search param ?phone=
+  // P1 — URL hash (legacy WhatsApp Web)
+  if (!phone) {
+    const hashMatch = window.location.hash.match(/\/chat\/(\d{7,15})@/);
+    if (hashMatch) phone = hashMatch[1];
+  }
+
+  // P2 — URL search param ?phone=
   if (!phone) {
     const p = new URLSearchParams(window.location.search).get('phone');
     if (p) phone = sanitizePhone(p);
   }
 
-  // Strategy P3 — header subtitle / secondary text contains a phone number
+  // P3 — header subtitle / secondary text contains a phone number
   if (!phone) {
     const subtitleSelectors = [
       '[data-testid="conversation-info-header"] span[dir="auto"]:not([title])',
@@ -161,12 +170,11 @@ function getActiveContactInfo() {
     }
   }
 
-  // Strategy P4 — scan ALL spans in #main header for anything that looks like a phone
+  // P4 — scan ALL spans in #main header for a phone-shaped number
   if (!phone) {
     const allSpans = document.querySelectorAll('#main header span');
     for (const span of allSpans) {
       const txt = span.textContent?.trim() || '';
-      // Matches numbers like +27821234567 or 27821234567
       if (/^\+?\d{7,15}$/.test(txt.replace(/[\s\-().]/g, ''))) {
         phone = sanitizePhone(txt);
         break;
@@ -174,7 +182,7 @@ function getActiveContactInfo() {
     }
   }
 
-  // Strategy P5 — selected chat row data-id attribute (format: PHONE@s.whatsapp.net)
+  // P5 — selected chat row data-id (PHONE@s.whatsapp.net)
   if (!phone) {
     const chatRowSelectors = [
       'div[aria-selected="true"]',
@@ -184,14 +192,12 @@ function getActiveContactInfo() {
     for (const sel of chatRowSelectors) {
       const el = document.querySelector(sel);
       if (el) {
-        // Walk down to find an element with data-id
         const withId = el.querySelector('[data-id]') || el.closest('[data-id]');
         if (withId) {
           const did = withId.getAttribute('data-id') || '';
           const m   = did.match(/(\d{7,15})@/);
           if (m) { phone = m[1]; break; }
         }
-        // Also check if the row element itself has data-id
         const rowId = el.getAttribute('data-id') || '';
         const rm    = rowId.match(/(\d{7,15})@/);
         if (rm) { phone = rm[1]; break; }
@@ -199,13 +205,11 @@ function getActiveContactInfo() {
     }
   }
 
-  // Strategy P6 — scan entire chat list for the highlighted/active item
+  // P6 — any element with a JID data-id near top of viewport
   if (!phone) {
-    // Look for elements that contain a JID in their data attributes
     const allWithDataId = document.querySelectorAll('[data-id*="@s.whatsapp"], [data-id*="@c.us"]');
     for (const el of allWithDataId) {
       const rect = el.getBoundingClientRect();
-      // Prefer elements that are visible and near top of viewport (active chat)
       if (rect.top > 0 && rect.top < 200) {
         const did = el.getAttribute('data-id') || '';
         const m   = did.match(/(\d{7,15})@/);
@@ -214,7 +218,17 @@ function getActiveContactInfo() {
     }
   }
 
-  // Strategy P7 — tab title (WhatsApp includes contact name, sometimes phone)
+  // P7 — scan ALL elements in #main for any data-id with a JID
+  if (!phone) {
+    const allInMain = document.querySelectorAll('#main [data-id]');
+    for (const el of allInMain) {
+      const did = el.getAttribute('data-id') || '';
+      const m   = did.match(/(\d{7,15})@/);
+      if (m) { phone = m[1]; break; }
+    }
+  }
+
+  // P8 — tab title (sometimes contains phone)
   if (!phone) {
     const titleMatch = (document.title || '').match(/\+?(\d{7,15})/);
     if (titleMatch) phone = titleMatch[1];
@@ -245,13 +259,32 @@ async function runDetection() {
 async function refreshSidebar(name, phone) {
   updateContactHeader(name, phone);
 
-  if (!phone) {
+  // Always show the form if we have at least a name — never hide it
+  if (!name && !phone) {
     showNoChatState();
     return;
   }
 
-  showStatus('loading', '⏳ Loading contact…');
   showFormBody();
+
+  if (!phone) {
+    // Name detected but no phone — pre-fill name, let user save manually
+    log('Name detected but no phone number found', name);
+    populateForm({
+      name:        name || '',
+      phone:       '',
+      email:       '',
+      lead_type:   'prospect',
+      temperature: 'cold',
+      tags:        [],
+      notes:       '',
+    });
+    showStatus('info', '⚠️ Phone not detected — add manually if needed');
+    setTimeout(clearStatus, 4000);
+    return;
+  }
+
+  showStatus('loading', '⏳ Loading contact…');
 
   try {
     const contact = await loadContactByPhone(phone);
@@ -293,7 +326,6 @@ function updateContactHeader(name, phone) {
 
 // ── Form populate — fills all fields, enables editing ─────────────────────
 function populateForm(data) {
-  // Helper — set value and ensure editable
   function setField(id, val) {
     const el = document.getElementById(id);
     if (!el) return;
@@ -305,6 +337,7 @@ function populateForm(data) {
   }
 
   setField('vanto-f-name',        data.name        || '');
+  setField('vanto-f-phone',       data.phone       || currentPhone || '');
   setField('vanto-f-email',       data.email       || '');
   setField('vanto-f-lead-type',   data.lead_type   || 'prospect');
   setField('vanto-f-temperature', data.temperature || 'cold');
@@ -383,17 +416,21 @@ function clearStatus() {
 
 // ── Save ───────────────────────────────────────────────────────────────────
 async function handleSave() {
-  if (!currentPhone) {
-    showStatus('error', '❌ No chat selected');
-    setTimeout(clearStatus, 3000);
-    return;
-  }
-
   const nameEl   = document.getElementById('vanto-f-name');
+  const phoneEl  = document.getElementById('vanto-f-phone');
   const emailEl  = document.getElementById('vanto-f-email');
   const ltEl     = document.getElementById('vanto-f-lead-type');
   const tempEl   = document.getElementById('vanto-f-temperature');
   const notesEl  = document.getElementById('vanto-f-notes');
+
+  // Phone: prefer auto-detected, fall back to what user typed in the field
+  const phone = sanitizePhone(currentPhone || phoneEl?.value || '');
+
+  if (!phone) {
+    showStatus('error', '❌ Phone number is required — type it in the Phone field');
+    setTimeout(clearStatus, 4000);
+    return;
+  }
 
   const name        = (nameEl?.value || '').trim() || currentName || '';
   const email       = (emailEl?.value || '').trim() || null;
@@ -411,13 +448,15 @@ async function handleSave() {
 
   const payload = {
     name,
-    phone:       currentPhone,
+    phone,
     email,
     lead_type,
     temperature,
-    tags:        currentTags,
+    tags:  currentTags,
     notes,
   };
+
+  log('Saving contact', payload);
 
   const saveBtn = document.getElementById('vanto-save-btn');
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ Saving…'; }
@@ -426,6 +465,8 @@ async function handleSave() {
   try {
     const saved = await upsertContact(payload);
     currentContact = saved;
+    // Update currentPhone in case it was typed manually
+    currentPhone = phone;
 
     const msg = isExisting ? '✅ Contact Updated' : '✅ Contact Saved';
     showStatus('success', msg);
@@ -439,7 +480,7 @@ async function handleSave() {
   } catch (err) {
     log('Error saving contact', err.message);
     const errMsg = err.message.includes('42501') || err.message.includes('permission')
-      ? '❌ Permission denied — please log in to Vanto first'
+      ? '❌ Permission denied — log in to Vanto first'
       : '❌ Save failed: ' + err.message;
     showStatus('error', errMsg);
     if (saveBtn) { saveBtn.textContent = '💾 Save Contact'; saveBtn.disabled = false; }
@@ -488,6 +529,11 @@ function buildSidebarHTML() {
         <div class="vanto-field">
           <label class="vanto-label" for="vanto-f-name">Full Name</label>
           <input class="vanto-input" id="vanto-f-name" type="text" placeholder="e.g. Olivier Agnin" autocomplete="off" />
+        </div>
+
+        <div class="vanto-field">
+          <label class="vanto-label" for="vanto-f-phone">Phone Number</label>
+          <input class="vanto-input" id="vanto-f-phone" type="text" placeholder="e.g. 27821234567" autocomplete="off" />
         </div>
 
         <div class="vanto-field">
