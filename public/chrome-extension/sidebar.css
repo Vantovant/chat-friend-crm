@@ -1,0 +1,294 @@
+/* ═══════════════════════════════════════════════
+   Vanto CRM — WhatsApp Web Sidebar Styles
+   ═══════════════════════════════════════════════ */
+
+/* ── Sidebar Container ───────────────────────── */
+#vanto-crm-sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 280px;
+  height: 100vh;
+  background: hsl(222, 47%, 6%);
+  border-left: 1px solid hsl(217, 33%, 17%);
+  display: flex;
+  flex-direction: column;
+  z-index: 999999;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  color: hsl(210, 40%, 98%);
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ── Header ──────────────────────────────────── */
+.vanto-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid hsl(217, 33%, 17%);
+  background: hsl(222, 47%, 7%);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.vanto-logo {
+  font-weight: 700;
+  font-size: 14px;
+  color: hsl(172, 66%, 50%);
+  letter-spacing: 0.3px;
+}
+
+.vanto-close {
+  background: none;
+  border: none;
+  color: hsl(215, 20%, 55%);
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 13px;
+  transition: background 0.15s, color 0.15s;
+}
+.vanto-close:hover {
+  background: hsl(217, 33%, 17%);
+  color: hsl(210, 40%, 98%);
+}
+
+/* ── Contact Card ────────────────────────────── */
+.vanto-contact-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid hsl(217, 33%, 17%);
+  background: hsl(222, 47%, 8%);
+}
+
+.vanto-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: hsl(172, 66%, 15%);
+  color: hsl(172, 66%, 50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+  flex-shrink: 0;
+  border: 1px solid hsl(172, 66%, 25%);
+}
+
+.vanto-contact-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.vanto-contact-name {
+  font-weight: 600;
+  font-size: 13px;
+  color: hsl(210, 40%, 98%);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0 0 2px;
+}
+
+.vanto-contact-phone {
+  font-size: 11px;
+  color: hsl(215, 20%, 55%);
+  margin: 0;
+  font-family: monospace;
+}
+
+/* ── Tags Row ────────────────────────────────── */
+.vanto-tags-row {
+  display: flex;
+  gap: 6px;
+  padding: 10px 16px;
+  border-bottom: 1px solid hsl(217, 33%, 17%);
+}
+
+.vanto-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 20px;
+  border: 1px solid transparent;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.vanto-tag-hot { background: hsl(0, 84%, 15%); color: hsl(0, 84%, 65%); border-color: hsl(0, 84%, 30%); }
+.vanto-tag-warm { background: hsl(38, 96%, 15%); color: hsl(38, 96%, 65%); border-color: hsl(38, 96%, 30%); }
+.vanto-tag-cold { background: hsl(217, 91%, 15%); color: hsl(217, 91%, 65%); border-color: hsl(217, 91%, 30%); }
+.vanto-tag-default { background: hsl(217, 33%, 14%); color: hsl(215, 20%, 55%); border-color: hsl(217, 33%, 20%); }
+.vanto-tag-stage { background: hsl(172, 66%, 10%); color: hsl(172, 66%, 50%); border-color: hsl(172, 66%, 25%); }
+
+/* ── Section ─────────────────────────────────── */
+.vanto-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid hsl(217, 33%, 17%);
+}
+
+.vanto-section-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: hsl(215, 20%, 55%);
+  margin: 0 0 8px;
+}
+
+/* ── Buttons ─────────────────────────────────── */
+.vanto-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vanto-btn {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid hsl(217, 33%, 17%);
+  background: hsl(217, 33%, 14%);
+  color: hsl(210, 40%, 98%);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+}
+.vanto-btn:hover {
+  background: hsl(217, 33%, 20%);
+  border-color: hsl(172, 66%, 30%);
+}
+
+.vanto-btn-primary {
+  background: hsl(172, 66%, 50%);
+  color: hsl(222, 47%, 6%);
+  border-color: transparent;
+  font-weight: 600;
+}
+.vanto-btn-primary:hover {
+  background: hsl(172, 66%, 45%);
+}
+
+/* ── Textarea ─────────────────────────────────── */
+.vanto-textarea {
+  width: 100%;
+  min-height: 70px;
+  background: hsl(222, 47%, 8%);
+  border: 1px solid hsl(217, 33%, 17%);
+  border-radius: 8px;
+  color: hsl(210, 40%, 98%);
+  font-size: 12px;
+  padding: 8px 10px;
+  resize: vertical;
+  margin-bottom: 8px;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+.vanto-textarea:focus {
+  outline: none;
+  border-color: hsl(172, 66%, 40%);
+}
+
+/* ── AI Bubble ───────────────────────────────── */
+.vanto-ai-bubble {
+  background: hsl(172, 66%, 8%);
+  border: 1px solid hsl(172, 66%, 20%);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: hsl(172, 66%, 75%);
+  line-height: 1.5;
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+}
+
+/* ── Notes ────────────────────────────────────── */
+.vanto-notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vanto-note-item {
+  background: hsl(222, 47%, 8%);
+  border: 1px solid hsl(217, 33%, 17%);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.vanto-note-text {
+  font-size: 12px;
+  color: hsl(210, 40%, 98%);
+  margin: 0 0 4px;
+  line-height: 1.4;
+}
+
+.vanto-note-date {
+  font-size: 10px;
+  color: hsl(215, 20%, 45%);
+  margin: 0;
+}
+
+.vanto-empty {
+  font-size: 11px;
+  color: hsl(215, 20%, 45%);
+  text-align: center;
+  padding: 8px 0;
+  margin: 0;
+}
+
+/* ── Footer ───────────────────────────────────── */
+.vanto-footer {
+  padding: 12px 16px;
+  margin-top: auto;
+}
+
+.vanto-footer-link {
+  font-size: 11px;
+  color: hsl(172, 66%, 50%);
+  text-decoration: none;
+  font-weight: 500;
+}
+.vanto-footer-link:hover {
+  text-decoration: underline;
+}
+
+/* ── Toggle Button (when sidebar hidden) ─────── */
+#vanto-crm-toggle {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 36px;
+  height: 48px;
+  background: hsl(172, 66%, 50%);
+  color: hsl(222, 47%, 6%);
+  border: none;
+  border-radius: 8px 0 0 8px;
+  font-size: 18px;
+  cursor: pointer;
+  z-index: 999998;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  box-shadow: -2px 2px 12px rgba(0,0,0,0.35);
+  transition: background 0.15s;
+}
+#vanto-crm-toggle:hover {
+  background: hsl(172, 66%, 45%);
+}
+
+/* ── Push WA content left to make room ────────── */
+body #app {
+  margin-right: 280px !important;
+  transition: margin-right 0.2s ease;
+}
