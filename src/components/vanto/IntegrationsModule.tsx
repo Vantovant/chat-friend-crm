@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
-import { CheckCircle, XCircle, ExternalLink, Chrome, RefreshCw, ArrowDownToLine, ArrowUpFromLine, Loader2 } from 'lucide-react';
-import { useState } from 'react';
+import { CheckCircle, XCircle, ExternalLink, Chrome, RefreshCw, ArrowDownToLine, ArrowUpFromLine, Loader2, Copy, Check, Webhook } from 'lucide-react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -19,15 +19,39 @@ const integrations = [
 type SyncResult = { synced: number; skipped: number; total: number; message?: string };
 type SyncDirection = 'pull' | 'push' | null;
 
+const WEBHOOK_URL = 'https://nqyyvqcmcyggvlcswkio.supabase.co/functions/v1/crm-webhook';
+const WEBHOOK_SECRET = '50c55093544a96d14343fc1bc652738a';
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <button onClick={copy} className="ml-2 p-1 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors shrink-0">
+      {copied ? <Check size={13} className="text-primary" /> : <Copy size={13} />}
+    </button>
+  );
+}
+
 export function IntegrationsModule() {
   const connected = integrations.filter(i => i.status === 'connected').length;
   const { toast } = useToast();
+  const [userId, setUserId] = useState<string>('');
 
   const [syncing, setSyncing] = useState<SyncDirection>(null);
   const [lastPull, setLastPull] = useState<Date | null>(null);
   const [lastPush, setLastPush] = useState<Date | null>(null);
   const [lastPullResult, setLastPullResult] = useState<SyncResult | null>(null);
   const [lastPushResult, setLastPushResult] = useState<SyncResult | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user) setUserId(data.user.id);
+    });
+  }, []);
 
   const runSync = async (direction: 'pull' | 'push') => {
     setSyncing(direction);
@@ -161,6 +185,63 @@ export function IntegrationsModule() {
             >
               <RefreshCw size={13} />
             </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Inbound Webhook — for Zazi CRM to push data INTO Vanto */}
+      <div className="px-6 py-4 border-b border-border shrink-0">
+        <div className="vanto-card p-4 border-primary/20 bg-primary/5 space-y-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary/15 flex items-center justify-center shrink-0">
+              <Webhook size={18} className="text-primary" />
+            </div>
+            <div className="flex-1">
+              <p className="font-semibold text-foreground text-sm">Inbound Webhook — Give these to Zazi CRM</p>
+              <p className="text-xs text-muted-foreground">Zazi CRM pushes contacts directly into Vanto using this endpoint</p>
+            </div>
+          </div>
+
+          {/* Endpoint URL */}
+          <div className="rounded-lg bg-background border border-border p-2.5">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Endpoint URL</p>
+            <div className="flex items-center gap-1">
+              <code className="text-[11px] text-foreground font-mono break-all flex-1">{WEBHOOK_URL}</code>
+              <CopyButton text={WEBHOOK_URL} />
+            </div>
+          </div>
+
+          {/* Secret */}
+          <div className="rounded-lg bg-background border border-border p-2.5">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Webhook Secret Header: <span className="font-mono text-primary">x-webhook-secret</span></p>
+            <div className="flex items-center gap-1">
+              <code className="text-[11px] text-foreground font-mono flex-1">{'•'.repeat(32)}</code>
+              <CopyButton text={WEBHOOK_SECRET} />
+            </div>
+          </div>
+
+          {/* User ID */}
+          <div className="rounded-lg bg-background border border-border p-2.5">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">Your User ID (use as <span className="font-mono text-primary">user_id</span> in payloads)</p>
+            <div className="flex items-center gap-1">
+              <code className="text-[11px] text-foreground font-mono flex-1 break-all">{userId || 'Loading...'}</code>
+              {userId && <CopyButton text={userId} />}
+            </div>
+          </div>
+
+          {/* Supported actions */}
+          <div className="rounded-lg bg-background border border-border p-2.5 space-y-1.5">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1.5">Supported Actions</p>
+            {[
+              { action: 'sync_contacts', desc: 'Push an array of contacts (bulk upsert by phone)' },
+              { action: 'upsert_contact', desc: 'Create or update a single contact' },
+              { action: 'log_chat', desc: 'Log a WhatsApp chat message & create conversation' },
+            ].map(a => (
+              <div key={a.action} className="flex items-start gap-2">
+                <code className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded font-mono shrink-0">{a.action}</code>
+                <p className="text-[10px] text-muted-foreground leading-relaxed">{a.desc}</p>
+              </div>
+            ))}
           </div>
         </div>
       </div>
