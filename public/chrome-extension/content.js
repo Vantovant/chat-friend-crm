@@ -31,7 +31,7 @@ function log(msg, data) {
   }
 }
 
-// ── Auth Token — try to get saved JWT from extension storage ──────────────
+// ── Auth Token — load from chrome.storage and listen for updates ──────────
 function loadAuthToken() {
   try {
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
@@ -39,11 +39,25 @@ function loadAuthToken() {
         if (result && result.vanto_auth_token) {
           authToken = result.vanto_auth_token;
           log('Auth token loaded from storage');
+        } else {
+          log('No auth token found — saves will fail RLS. Log in via the extension popup.');
+        }
+      });
+
+      // Listen for token updates from popup login
+      chrome.runtime.onMessage.addListener((msg) => {
+        if (msg && msg.type === 'VANTO_TOKEN_UPDATED') {
+          chrome.storage.local.get(['vanto_auth_token'], (result) => {
+            if (result && result.vanto_auth_token) {
+              authToken = result.vanto_auth_token;
+              log('Auth token refreshed after popup login');
+            }
+          });
         }
       });
     }
   } catch (e) {
-    // Storage not available
+    log('Storage not available', e.message);
   }
 }
 
