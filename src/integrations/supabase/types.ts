@@ -258,7 +258,6 @@ export type Database = {
           full_name: string | null
           id: string
           phone: string | null
-          role: Database["public"]["Enums"]["user_role"]
           updated_at: string
         }
         Insert: {
@@ -268,7 +267,6 @@ export type Database = {
           full_name?: string | null
           id: string
           phone?: string | null
-          role?: Database["public"]["Enums"]["user_role"]
           updated_at?: string
         }
         Update: {
@@ -278,8 +276,25 @@ export type Database = {
           full_name?: string | null
           id?: string
           phone?: string | null
-          role?: Database["public"]["Enums"]["user_role"]
           updated_at?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          id: string
+          role: Database["public"]["Enums"]["user_role"]
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          role?: Database["public"]["Enums"]["user_role"]
+          user_id: string
+        }
+        Update: {
+          id?: string
+          role?: Database["public"]["Enums"]["user_role"]
+          user_id?: string
         }
         Relationships: []
       }
@@ -335,6 +350,13 @@ export type Database = {
       get_user_role: {
         Args: never
         Returns: Database["public"]["Enums"]["user_role"]
+      }
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["user_role"]
+          _user_id: string
+        }
+        Returns: boolean
       }
       is_admin_or_super_admin: { Args: never; Returns: boolean }
     }
