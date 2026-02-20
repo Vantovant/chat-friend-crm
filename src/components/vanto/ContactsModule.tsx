@@ -23,6 +23,19 @@ type Contact = {
   updated_at: string;
 };
 
+// ── Lead Type Config ───────────────────────────────────────────────────────────
+const LEAD_TYPES: { value: string; label: string }[] = [
+  { value: 'prospect',   label: 'Prospect' },
+  { value: 'registered', label: 'Registered_Nopurchase' },
+  { value: 'buyer',      label: 'Purchase_Nostatus' },
+  { value: 'vip',        label: 'Purchase_Status' },
+  { value: 'expired',    label: 'Expired' },
+];
+
+function leadTypeLabel(value: string): string {
+  return LEAD_TYPES.find(lt => lt.value === value)?.label ?? value;
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 function displayPhone(c: Contact): { text: string; label?: string } {
   if (c.phone_raw)        return { text: c.phone_raw };
@@ -121,8 +134,8 @@ function AddContactModal({ onClose, onCreated }: { onClose: () => void; onCreate
                 onChange={e => set('lead_type', e.target.value)}
                 className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
               >
-                {['prospect','registered','buyer','vip'].map(v => (
-                  <option key={v} value={v} className="capitalize">{v}</option>
+                {LEAD_TYPES.map(lt => (
+                  <option key={lt.value} value={lt.value}>{lt.label}</option>
                 ))}
               </select>
             </div>
@@ -275,8 +288,8 @@ function ContactDetailDrawer({ contact, onClose, onUpdated }: {
                 onChange={e => set('lead_type', e.target.value)}
                 className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
               >
-                {['prospect','registered','buyer','vip'].map(v => (
-                  <option key={v} value={v} className="capitalize">{v}</option>
+                {LEAD_TYPES.map(lt => (
+                  <option key={lt.value} value={lt.value}>{lt.label}</option>
                 ))}
               </select>
             </div>
@@ -542,8 +555,8 @@ function ContactRow({ contact, onClick }: { contact: Contact; onClick: () => voi
         </span>
       </td>
       <td className="px-4 py-3">
-        <span className="px-2 py-1 rounded-full text-xs font-medium bg-secondary border border-border text-muted-foreground capitalize">
-          {contact.lead_type}
+        <span className="px-2 py-1 rounded-full text-xs font-medium bg-secondary border border-border text-muted-foreground">
+          {leadTypeLabel(contact.lead_type)}
         </span>
       </td>
       <td className="px-4 py-3">
