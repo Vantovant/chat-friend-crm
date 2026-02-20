@@ -17,7 +17,6 @@ const integrations = [
 ];
 
 const WEBHOOK_URL = `https://nqyyvqcmcyggvlcswkio.supabase.co/functions/v1/crm-webhook`;
-const WEBHOOK_SECRET = '50c55093544a96d14343fc1bc652738a';
 
 type SyncResult = { synced: number; skipped: number; total: number; message?: string; errors?: string[] };
 
@@ -106,36 +105,17 @@ export function IntegrationsModule({ userId = '' }: { userId?: string }) {
     }
   };
 
-  // ── Test inbound webhook with 1 sample contact ────────────────────────────
+  // ── Test inbound webhook via server-side edge function (uses real secret) ──
   const runTest = async () => {
     setTesting(true);
     setTestResult(null);
     try {
-      const resp = await fetch(WEBHOOK_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-webhook-secret': WEBHOOK_SECRET,
-        },
-        body: JSON.stringify({
-          action: 'sync_contacts',
-          user_id: userId || undefined,
-          contacts: [{
-            full_name: 'Webhook Test Contact',
-            phone_number: '15550000001',
-            email: 'webhooktest@vanto.crm',
-            lead_temperature: 'warm',
-            lead_type: 'prospect',
-            interest_level: 'medium',
-            tags: ['webhook-test'],
-          }],
-        }),
-      });
+      const { data, error } = await supabase.functions.invoke('test-webhook');
+      if (error) throw new Error(error.message || 'Webhook test failed');
+      const body = data as any;
+      if (body?.error) throw new Error(body.error);
 
-      const body = await resp.json();
-      if (!resp.ok) throw new Error(body?.error || `HTTP ${resp.status}`);
-
-      setTestResult({ ok: true, message: `✓ ${body.synced} synced · ${body.skipped} skipped · ${body.total} total` });
+      setTestResult({ ok: true, message: `✓ ${body.synced ?? 1} synced · ${body.skipped ?? 0} skipped · ${body.total ?? 1} total` });
       toast({ title: 'Webhook test passed', description: 'Sample contact upserted successfully' });
     } catch (err: any) {
       const msg = err?.message || 'Webhook test failed';
@@ -261,7 +241,7 @@ export function IntegrationsModule({ userId = '' }: { userId?: string }) {
           </div>
 
           <CopyField label="① Endpoint URL" value={WEBHOOK_URL} />
-          <CopyField label="② Webhook Secret (header: x-webhook-secret)" value={WEBHOOK_SECRET} />
+          <CopyField label="② Webhook Secret (header: x-webhook-secret)" value="(stored securely on server — use the value you saved as WEBHOOK_SECRET)" />
           <CopyField label="③ Your User ID (use as user_id in payload body)" value={userId || 'Sign in to see your User ID'} />
 
           {/* Test result */}
