@@ -1,13 +1,16 @@
 {
   "manifest_version": 3,
   "name": "Vanto CRM — WhatsApp Sidebar",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "Inject the Vanto CRM sidebar into WhatsApp Web for seamless lead management.",
   "permissions": ["storage", "activeTab", "tabs"],
   "host_permissions": [
     "https://web.whatsapp.com/*",
     "https://nqyyvqcmcyggvlcswkio.supabase.co/*"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": ["https://web.whatsapp.com/*"],
@@ -16,11 +19,11 @@
       "run_at": "document_idle"
     }
   ],
-  "icons": {
-    "128": "icon128.png"
-  },
   "action": {
     "default_title": "Vanto CRM",
     "default_popup": "popup.html"
+  },
+  "icons": {
+    "128": "icon128.png"
   }
 }
