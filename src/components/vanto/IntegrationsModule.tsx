@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { CheckCircle, XCircle, ExternalLink, Chrome, RefreshCw, ArrowDownToLine, ArrowUpFromLine, Loader2, Copy, Check, Webhook, X, FlaskConical, Send } from 'lucide-react';
+import { CheckCircle, XCircle, Chrome, Loader2, Copy, Check, Webhook, X, FlaskConical, Send, AlertTriangle, ExternalLink } from 'lucide-react';
 import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -75,6 +75,7 @@ export function IntegrationsModule({ userId = '' }: { userId?: string }) {
   const [pushing, setPushing] = useState(false);
   const [lastPushResult, setLastPushResult] = useState<SyncResult | null>(null);
   const [lastPushTime, setLastPushTime] = useState<Date | null>(null);
+  const [zaziSecretMismatch, setZaziSecretMismatch] = useState(false);
 
   // Test webhook state
   const [testing, setTesting] = useState(false);
@@ -89,17 +90,39 @@ export function IntegrationsModule({ userId = '' }: { userId?: string }) {
   const runPush = async () => {
     setPushing(true);
     setLastPushResult(null);
+    setZaziSecretMismatch(false);
     try {
       const { data, error } = await supabase.functions.invoke('push-to-zazi-webhook');
-      if (error) throw error;
+      if (error) {
+        // Detect 401 / secret mismatch
+        const msg = (error?.message || '').toLowerCase();
+        if (msg.includes('401') || msg.includes('unauthorized') || msg.includes('secret')) {
+          setZaziSecretMismatch(true);
+          setPushing(false);
+          return;
+        }
+        throw error;
+      }
+      // Also check if the returned data contains a 401 error
+      if (data && (data as any).error && ((data as any).error.includes('401') || (data as any).error.toLowerCase().includes('unauthorized'))) {
+        setZaziSecretMismatch(true);
+        setPushing(false);
+        return;
+      }
       const result = data as SyncResult;
       setLastPushTime(new Date());
       setLastPushResult(result);
       toast({ title: 'Push complete', description: `${result.synced} contacts sent to Zazi` });
     } catch (err: any) {
-      const msg = err?.message || 'Failed to push to Zazi';
-      toast({ title: 'Push failed', description: msg, variant: 'destructive' });
-      setLastPushResult({ synced: 0, skipped: 0, total: 0, errors: [msg] });
+      const msg = (err?.message || '').toLowerCase();
+      if (msg.includes('401') || msg.includes('unauthorized') || msg.includes('secret')) {
+        setZaziSecretMismatch(true);
+        setPushing(false);
+        return;
+      }
+      const errMsg = err?.message || 'Failed to push to Zazi';
+      toast({ title: 'Push failed', description: errMsg, variant: 'destructive' });
+      setLastPushResult({ synced: 0, skipped: 0, total: 0, errors: [errMsg] });
     } finally {
       setPushing(false);
     }
@@ -287,8 +310,29 @@ export function IntegrationsModule({ userId = '' }: { userId?: string }) {
             </span>
           </div>
 
+          {/* ── 401 Secret Mismatch Instruction Card — stops any debugging loop ── */}
+          {zaziSecretMismatch && (
+            <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/8 p-3 flex gap-3 items-start">
+              <AlertTriangle size={16} className="text-amber-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold text-amber-400 mb-1">Action Required: Secret Mismatch</p>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Zazi must set <code className="bg-secondary px-1 py-0.5 rounded font-mono text-[10px] text-foreground">WEBHOOK_SECRET</code> in their project
+                  to match the outbound secret Vanto is sending. This is a one-time configuration on the Zazi side —
+                  no code changes needed here.
+                </p>
+                <button
+                  onClick={() => setZaziSecretMismatch(false)}
+                  className="mt-2 text-[10px] text-muted-foreground hover:text-foreground underline"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Last push stats */}
-          {lastPushResult && (
+          {lastPushResult && !zaziSecretMismatch && (
             <div className="mb-3">
               <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">
                 Last Push — {formatTime(lastPushTime)}

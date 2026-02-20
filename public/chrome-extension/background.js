@@ -1,5 +1,5 @@
 /**
- * Vanto CRM — Background Service Worker v2.0
+ * Vanto CRM — Background Service Worker v3.0
  * MV3 compliant service worker.
  * OWNS: session storage, auth calls, Edge Function calls.
  * Popup and content script communicate via chrome.runtime.sendMessage.
@@ -9,7 +9,7 @@
 
 var SUPABASE_URL      = 'https://nqyyvqcmcyggvlcswkio.supabase.co';
 var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5xeXl2cWNtY3lnZ3ZsY3N3a2lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1NDYxMjYsImV4cCI6MjA4NzEyMjEyNn0.oK04GkXogHo9pohYd4A7XAV0-Q-qSu-uUiGWaj4ClM8';
-var SAVE_URL          = SUPABASE_URL + '/functions/v1/save-contact';
+var UPSERT_URL        = SUPABASE_URL + '/functions/v1/upsert-whatsapp-contact';
 
 // ── Storage helpers ────────────────────────────────────────────────────────────
 function getSession() {
@@ -47,7 +47,6 @@ async function refreshTokenIfNeeded(session) {
   if (!session.token) return session;
 
   var now = Math.floor(Date.now() / 1000);
-  // Refresh if token expires in less than 5 minutes
   if (session.expires_at && (session.expires_at - now) > 300) {
     return session; // still valid
   }
@@ -88,7 +87,7 @@ async function refreshTokenIfNeeded(session) {
     };
   } catch (err) {
     console.error('[Vanto BG] Token refresh error:', err.message);
-    return session; // keep existing if network fails
+    return session;
   }
 }
 
@@ -123,8 +122,6 @@ async function handleLogin(email, password) {
     var expires   = Math.floor(Date.now() / 1000) + (data.expires_in || 3600);
 
     await saveSession(data.access_token, userEmail, data.refresh_token || null, expires);
-
-    // Notify open WhatsApp tabs
     notifyWhatsAppTabs({ type: 'VANTO_TOKEN_UPDATED', token: data.access_token });
 
     console.log('[Vanto BG] Login success:', userEmail);
@@ -147,7 +144,8 @@ async function handleLogout() {
   return { success: true };
 }
 
-// ── Save contact via Edge Function ─────────────────────────────────────────────
+// ── Save contact via upsert-whatsapp-contact Edge Function ────────────────────
+// payload must contain: name, phone (user-entered), whatsapp_id (WA internal), ...
 async function handleSaveContact(payload) {
   var session = await getSession();
   session = await refreshTokenIfNeeded(session);
@@ -157,13 +155,13 @@ async function handleSaveContact(payload) {
     return { success: false, error: 'not_logged_in' };
   }
 
-  console.log('[Vanto BG] Saving contact:', payload.phone, payload.name);
+  console.log('[Vanto BG] Saving contact:', payload.phone || payload.whatsapp_id, payload.name);
 
   try {
     var controller = new AbortController();
     var timeout = setTimeout(function() { controller.abort(); }, 20000);
 
-    var res = await fetch(SAVE_URL, {
+    var res = await fetch(UPSERT_URL, {
       method: 'POST',
       signal: controller.signal,
       headers: {
@@ -182,7 +180,6 @@ async function handleSaveContact(payload) {
       try { errData = JSON.parse(text); } catch(e) {}
 
       if (res.status === 401) {
-        // Token rejected — clear and report
         await clearSession();
         notifyWhatsAppTabs({ type: 'VANTO_TOKEN_CLEARED' });
         return { success: false, error: 'token_expired' };
@@ -204,7 +201,7 @@ async function handleSaveContact(payload) {
   }
 }
 
-// ── Load contact by phone (read from Edge Function or REST) ────────────────────
+// ── Load contact by phone_normalized or whatsapp_id ────────────────────────────
 async function handleLoadContact(phone) {
   var session = await getSession();
   session = await refreshTokenIfNeeded(session);
@@ -212,7 +209,9 @@ async function handleLoadContact(phone) {
   if (!session.token) return { success: false, error: 'not_logged_in' };
 
   try {
-    var url = SUPABASE_URL + '/rest/v1/contacts?phone=eq.' + encodeURIComponent(phone) + '&limit=1';
+    // Try phone_normalized first, then whatsapp_id
+    var digits = (phone || '').replace(/\D/g, '');
+    var url = SUPABASE_URL + '/rest/v1/contacts?phone_normalized=eq.' + encodeURIComponent(digits) + '&limit=1';
     var res = await fetch(url, {
       headers: {
         'apikey':        SUPABASE_ANON_KEY,
@@ -231,7 +230,22 @@ async function handleLoadContact(phone) {
     }
 
     var rows = await res.json();
-    return { success: true, contact: rows && rows.length > 0 ? rows[0] : null };
+    if (rows && rows.length > 0) {
+      return { success: true, contact: rows[0] };
+    }
+
+    // Fallback: try whatsapp_id
+    var url2 = SUPABASE_URL + '/rest/v1/contacts?whatsapp_id=eq.' + encodeURIComponent(digits) + '&limit=1';
+    var res2 = await fetch(url2, {
+      headers: {
+        'apikey':        SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + session.token,
+        'Content-Type':  'application/json',
+      },
+    });
+    var rows2 = res2.ok ? await res2.json() : [];
+    return { success: true, contact: rows2 && rows2.length > 0 ? rows2[0] : null };
+
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -244,7 +258,7 @@ function notifyWhatsAppTabs(message) {
       if (!tabs || !tabs.length) return;
       tabs.forEach(function(tab) {
         chrome.tabs.sendMessage(tab.id, message, function() {
-          void chrome.runtime.lastError; // suppress errors for inactive tabs
+          void chrome.runtime.lastError;
         });
       });
     });
@@ -265,7 +279,7 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
         sendResponse({ token: refreshed.token, email: refreshed.email });
       });
     });
-    return true; // keep channel open for async
+    return true;
   }
 
   if (msg.type === 'VANTO_LOGIN') {
@@ -291,4 +305,4 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
   return false;
 });
 
-console.log('[Vanto BG] Service worker started');
+console.log('[Vanto BG] Service worker started v3.0');
