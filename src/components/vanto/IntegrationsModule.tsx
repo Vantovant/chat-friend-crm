@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { CheckCircle, XCircle, ExternalLink, Chrome, RefreshCw, ArrowDownToLine, ArrowUpFromLine, Loader2, Copy, Check, Webhook, X } from 'lucide-react';
+import { CheckCircle, XCircle, ExternalLink, Chrome, RefreshCw, ArrowDownToLine, ArrowUpFromLine, Loader2, Copy, Check, Webhook, X, FlaskConical, Send } from 'lucide-react';
 import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -8,7 +8,7 @@ const integrations = [
   { id: 'whatsapp', name: 'WhatsApp Business', category: 'Messaging', status: 'connected', icon: '💬', description: 'Send and receive WhatsApp messages' },
   { id: 'chrome', name: 'Chrome Extension', category: 'Browser', status: 'connected', icon: '🔌', description: 'Inject CRM sidebar into WhatsApp Web' },
   { id: 'openai', name: 'OpenAI GPT-4', category: 'AI', status: 'connected', icon: '🤖', description: 'Power AI responses and suggestions' },
-  { id: 'zazi', name: 'Zazi CRM', category: 'CRM', status: 'connected', icon: '🔄', description: 'Two-way sync with Zazi CRM contacts' },
+  { id: 'zazi', name: 'Zazi CRM', category: 'CRM', status: 'connected', icon: '🔄', description: 'Inbound webhook sync with Zazi CRM contacts' },
   { id: 'stripe', name: 'Stripe', category: 'Payments', status: 'disconnected', icon: '💳', description: 'Accept payments from WhatsApp leads' },
   { id: 'zapier', name: 'Zapier', category: 'Automation', status: 'disconnected', icon: '⚡', description: 'Connect to 5000+ apps via Zapier' },
   { id: 'sheets', name: 'Google Sheets', category: 'Productivity', status: 'disconnected', icon: '📊', description: 'Sync contacts with Google Sheets' },
@@ -16,12 +16,12 @@ const integrations = [
   { id: 'hubspot', name: 'HubSpot CRM', category: 'CRM', status: 'disconnected', icon: '🔶', description: 'Sync deals with HubSpot' },
 ];
 
-const WEBHOOK_URL = 'https://nqyyvqcmcyggvlcswkio.supabase.co/functions/v1/crm-webhook';
+const WEBHOOK_URL = `https://nqyyvqcmcyggvlcswkio.supabase.co/functions/v1/crm-webhook`;
 const WEBHOOK_SECRET = '50c55093544a96d14343fc1bc652738a';
 
-type SyncResult = { synced: number; skipped: number; total: number; message?: string };
-type SyncDirection = 'pull' | 'push' | null;
+type SyncResult = { synced: number; skipped: number; total: number; message?: string; errors?: string[] };
 
+// ─── CopyField ────────────────────────────────────────────────────────────────
 function CopyField({ label, value, mono = true }: { label: string; value: string; mono?: boolean }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
@@ -48,45 +48,102 @@ function CopyField({ label, value, mono = true }: { label: string; value: string
   );
 }
 
+// ─── ResultBadge ──────────────────────────────────────────────────────────────
+function ResultBadge({ result }: { result: SyncResult }) {
+  const hasErrors = result.errors && result.errors.length > 0;
+  return (
+    <div className={cn('rounded-lg border p-2.5 text-[10px] space-y-1', hasErrors ? 'bg-destructive/5 border-destructive/20' : 'bg-primary/5 border-primary/20')}>
+      <div className="flex gap-3">
+        <span className="text-foreground font-semibold">{result.synced} synced</span>
+        <span className="text-muted-foreground">{result.skipped} skipped</span>
+        <span className="text-muted-foreground">{result.total} total</span>
+      </div>
+      {hasErrors && (
+        <p className="text-destructive font-mono leading-relaxed">{result.errors![0]}</p>
+      )}
+      {result.message && <p className="text-muted-foreground">{result.message}</p>}
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 export function IntegrationsModule({ userId = '' }: { userId?: string }) {
-  console.log('[IntegrationsModule] userId received:', userId);
   const [showExtensionModal, setShowExtensionModal] = useState(false);
   const connected = integrations.filter(i => i.status === 'connected').length;
   const { toast } = useToast();
 
-  const [syncing, setSyncing] = useState<SyncDirection>(null);
-  const [lastPull, setLastPull] = useState<Date | null>(null);
-  const [lastPush, setLastPush] = useState<Date | null>(null);
-  const [lastPullResult, setLastPullResult] = useState<SyncResult | null>(null);
+  // Zazi push state
+  const [pushing, setPushing] = useState(false);
   const [lastPushResult, setLastPushResult] = useState<SyncResult | null>(null);
+  const [lastPushTime, setLastPushTime] = useState<Date | null>(null);
 
-  const runSync = async (direction: 'pull' | 'push') => {
-    setSyncing(direction);
-    try {
-      const { data, error } = await supabase.functions.invoke(
-        direction === 'pull' ? 'zazi-sync-pull' : 'zazi-sync-push'
-      );
-      if (error) throw error;
-      const result = data as SyncResult;
-      if (direction === 'pull') {
-        setLastPull(new Date());
-        setLastPullResult(result);
-        toast({ title: 'Pull complete', description: `${result.synced} contacts synced from Zazi CRM` });
-      } else {
-        setLastPush(new Date());
-        setLastPushResult(result);
-        toast({ title: 'Push complete', description: `${result.synced} contacts pushed to Zazi CRM` });
-      }
-    } catch (err: any) {
-      toast({ title: 'Sync failed', description: err?.message || 'Could not connect to Zazi CRM', variant: 'destructive' });
-    } finally {
-      setSyncing(null);
-    }
-  };
+  // Test webhook state
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   const formatTime = (d: Date | null) => {
     if (!d) return 'Never';
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  // ── Push Vanto → Zazi via webhook-based edge function ─────────────────────
+  const runPush = async () => {
+    setPushing(true);
+    setLastPushResult(null);
+    try {
+      const { data, error } = await supabase.functions.invoke('push-to-zazi-webhook');
+      if (error) throw error;
+      const result = data as SyncResult;
+      setLastPushTime(new Date());
+      setLastPushResult(result);
+      toast({ title: 'Push complete', description: `${result.synced} contacts sent to Zazi` });
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to push to Zazi';
+      toast({ title: 'Push failed', description: msg, variant: 'destructive' });
+      setLastPushResult({ synced: 0, skipped: 0, total: 0, errors: [msg] });
+    } finally {
+      setPushing(false);
+    }
+  };
+
+  // ── Test inbound webhook with 1 sample contact ────────────────────────────
+  const runTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const resp = await fetch(WEBHOOK_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-webhook-secret': WEBHOOK_SECRET,
+        },
+        body: JSON.stringify({
+          action: 'sync_contacts',
+          user_id: userId || undefined,
+          contacts: [{
+            full_name: 'Webhook Test Contact',
+            phone_number: '15550000001',
+            email: 'webhooktest@vanto.crm',
+            lead_temperature: 'warm',
+            lead_type: 'prospect',
+            interest_level: 'medium',
+            tags: ['webhook-test'],
+          }],
+        }),
+      });
+
+      const body = await resp.json();
+      if (!resp.ok) throw new Error(body?.error || `HTTP ${resp.status}`);
+
+      setTestResult({ ok: true, message: `✓ ${body.synced} synced · ${body.skipped} skipped · ${body.total} total` });
+      toast({ title: 'Webhook test passed', description: 'Sample contact upserted successfully' });
+    } catch (err: any) {
+      const msg = err?.message || 'Webhook test failed';
+      setTestResult({ ok: false, message: `✗ ${msg}` });
+      toast({ title: 'Webhook test failed', description: msg, variant: 'destructive' });
+    } finally {
+      setTesting(false);
+    }
   };
 
   return (
@@ -176,85 +233,54 @@ export function IntegrationsModule({ userId = '' }: { userId?: string }) {
         </div>
       )}
 
-      {/* Zazi CRM Two-Way Sync */}
-      <div className="px-6 py-4 border-b border-border shrink-0">
-        <div className="vanto-card p-4 border-primary/20 bg-primary/5">
-          <div className="flex items-center gap-3 mb-3">
-            <div className="w-10 h-10 rounded-xl bg-primary/15 flex items-center justify-center text-xl shrink-0">🔄</div>
-            <div className="flex-1">
-              <p className="font-semibold text-foreground text-sm">Zazi CRM · Two-Way Sync</p>
-              <p className="text-xs text-muted-foreground">crm.onlinecourseformlm.com</p>
-            </div>
-            <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary border border-primary/30">
-              <CheckCircle size={10} /> CONNECTED
-            </span>
-          </div>
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            <div className="rounded-lg bg-background/60 border border-border p-3">
-              <p className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wide">Last Pull (Zazi → Vanto)</p>
-              <p className="text-sm font-semibold text-foreground">{formatTime(lastPull)}</p>
-              {lastPullResult && <p className="text-[10px] text-muted-foreground mt-0.5">{lastPullResult.synced} synced · {lastPullResult.skipped} skipped</p>}
-            </div>
-            <div className="rounded-lg bg-background/60 border border-border p-3">
-              <p className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wide">Last Push (Vanto → Zazi)</p>
-              <p className="text-sm font-semibold text-foreground">{formatTime(lastPush)}</p>
-              {lastPushResult && <p className="text-[10px] text-muted-foreground mt-0.5">{lastPushResult.synced} synced · {lastPushResult.skipped} skipped</p>}
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => runSync('pull')}
-              disabled={!!syncing}
-              className={cn('flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all border',
-                syncing === 'pull' ? 'bg-primary/10 text-primary border-primary/30 cursor-not-allowed' : 'bg-background border-border text-foreground hover:bg-primary/5 hover:border-primary/30'
-              )}
-            >
-              {syncing === 'pull' ? <Loader2 size={13} className="animate-spin" /> : <ArrowDownToLine size={13} />}
-              Pull from Zazi
-            </button>
-            <button
-              onClick={() => runSync('push')}
-              disabled={!!syncing}
-              className={cn('flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all border',
-                syncing === 'push' ? 'bg-primary/10 text-primary border-primary/30 cursor-not-allowed' : 'vanto-gradient text-primary-foreground border-transparent hover:opacity-90'
-              )}
-            >
-              {syncing === 'push' ? <Loader2 size={13} className="animate-spin" /> : <ArrowUpFromLine size={13} />}
-              Push to Zazi
-            </button>
-            <button
-              onClick={async () => { await runSync('pull'); await runSync('push'); }}
-              disabled={!!syncing}
-              className="flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:text-foreground hover:border-primary/30 transition-all"
-              title="Full two-way sync"
-            >
-              <RefreshCw size={13} />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Inbound Webhook — for Zazi CRM to push into Vanto */}
+      {/* ── Inbound Webhook — for Zazi → Vanto ─────────────────────────────── */}
       <div className="px-6 py-4 border-b border-border shrink-0">
         <div className="vanto-card p-4 border-primary/20 bg-primary/5 space-y-3">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary/15 flex items-center justify-center shrink-0">
               <Webhook size={18} className="text-primary" />
             </div>
-            <div>
-              <p className="font-semibold text-foreground text-sm">Inbound Webhook</p>
-              <p className="text-xs text-muted-foreground">Give these 3 details to Zazi CRM to push contacts into Vanto</p>
+            <div className="flex-1">
+              <p className="font-semibold text-foreground text-sm">Inbound Webhook · Zazi → Vanto</p>
+              <p className="text-xs text-muted-foreground">Give these 3 values to Zazi CRM to push contacts in</p>
             </div>
+            {/* Test Webhook Button */}
+            <button
+              onClick={runTest}
+              disabled={testing}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all shrink-0',
+                testing
+                  ? 'bg-primary/10 text-primary border-primary/30 cursor-not-allowed'
+                  : 'bg-background border-border text-foreground hover:bg-primary/5 hover:border-primary/30'
+              )}
+            >
+              {testing ? <Loader2 size={12} className="animate-spin" /> : <FlaskConical size={12} />}
+              Test
+            </button>
           </div>
 
           <CopyField label="① Endpoint URL" value={WEBHOOK_URL} />
           <CopyField label="② Webhook Secret (header: x-webhook-secret)" value={WEBHOOK_SECRET} />
-          <CopyField label="③ Your User ID (use as user_id in payloads)" value={userId || 'Sign in to see your User ID'} />
+          <CopyField label="③ Your User ID (use as user_id in payload body)" value={userId || 'Sign in to see your User ID'} />
 
+          {/* Test result */}
+          {testResult && (
+            <div className={cn(
+              'rounded-lg border px-3 py-2 text-[11px] font-mono',
+              testResult.ok
+                ? 'bg-primary/5 border-primary/20 text-primary'
+                : 'bg-destructive/5 border-destructive/20 text-destructive'
+            )}>
+              {testResult.message}
+            </div>
+          )}
+
+          {/* Supported actions reference */}
           <div className="rounded-lg bg-background border border-border p-2.5 space-y-1.5">
             <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1.5">Supported Actions</p>
             {[
-              { action: 'sync_contacts', desc: 'Bulk upsert an array of contacts by phone' },
+              { action: 'sync_contacts', desc: 'Bulk upsert array of contacts by phone (idempotent)' },
               { action: 'upsert_contact', desc: 'Create or update a single contact' },
               { action: 'log_chat', desc: 'Log a WhatsApp message & create a conversation' },
             ].map(a => (
@@ -264,6 +290,50 @@ export function IntegrationsModule({ userId = '' }: { userId?: string }) {
               </div>
             ))}
           </div>
+        </div>
+      </div>
+
+      {/* ── Outbound Push — Vanto → Zazi webhook ───────────────────────────── */}
+      <div className="px-6 py-4 border-b border-border shrink-0">
+        <div className="vanto-card p-4 border-primary/20 bg-primary/5">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="w-10 h-10 rounded-xl bg-primary/15 flex items-center justify-center text-xl shrink-0">🔄</div>
+            <div className="flex-1">
+              <p className="font-semibold text-foreground text-sm">Outbound Push · Vanto → Zazi</p>
+              <p className="text-xs text-muted-foreground">Push your Vanto contacts to Zazi CRM via their webhook</p>
+            </div>
+            <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary border border-primary/30">
+              <CheckCircle size={10} /> WEBHOOK
+            </span>
+          </div>
+
+          {/* Last push stats */}
+          {lastPushResult && (
+            <div className="mb-3">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">
+                Last Push — {formatTime(lastPushTime)}
+              </p>
+              <ResultBadge result={lastPushResult} />
+            </div>
+          )}
+
+          <button
+            onClick={runPush}
+            disabled={pushing}
+            className={cn(
+              'w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all',
+              pushing
+                ? 'bg-primary/10 text-primary border border-primary/30 cursor-not-allowed'
+                : 'vanto-gradient text-primary-foreground hover:opacity-90'
+            )}
+          >
+            {pushing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+            {pushing ? 'Pushing to Zazi...' : 'Push Contacts to Zazi'}
+          </button>
+
+          <p className="text-[10px] text-muted-foreground mt-2 text-center">
+            Uses server-stored Zazi webhook credentials — no keys exposed to browser
+          </p>
         </div>
       </div>
 
