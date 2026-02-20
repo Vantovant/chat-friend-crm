@@ -287,8 +287,5 @@
   background: hsl(172, 66%, 45%);
 }
 
-/* ── Push WA content left to make room ────────── */
-body #app {
-  margin-right: 280px !important;
-  transition: margin-right 0.2s ease;
-}
+/* ── Overlay mode — sidebar floats on top, doesn't shift WA layout ── */
+/* body #app is NOT shifted so clicks on the chat list work normally */
