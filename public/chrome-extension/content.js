@@ -49,13 +49,14 @@ function loadAuthToken() {
 
 // ── Supabase REST helpers ──────────────────────────────────────────────────
 async function sbFetch(path, options = {}) {
-  const url     = `${SUPABASE_URL}/rest/v1${path}`;
-  const token   = authToken || SUPABASE_ANON_KEY;
+  const url   = `${SUPABASE_URL}/rest/v1${path}`;
+  const token = authToken || SUPABASE_ANON_KEY;
+  // Merge caller headers OVER defaults so 'Prefer' can be overridden per-call
   const headers = {
-    'apikey':         SUPABASE_ANON_KEY,
-    'Authorization':  `Bearer ${token}`,
-    'Content-Type':   'application/json',
-    'Prefer':         options.prefer || 'return=representation',
+    'apikey':        SUPABASE_ANON_KEY,
+    'Authorization': `Bearer ${token}`,
+    'Content-Type':  'application/json',
+    'Prefer':        'return=representation',
     ...(options.headers || {}),
   };
   const res  = await fetch(url, {
@@ -78,13 +79,15 @@ async function loadContactByPhone(phone) {
   return rows && rows.length > 0 ? rows[0] : null;
 }
 
-// Upsert contact — conflict on phone column
+// Upsert contact — conflict on phone column (requires UNIQUE constraint on contacts.phone)
 async function upsertContact(payload) {
   log('Upserting contact', payload);
   const rows = await sbFetch('/contacts?on_conflict=phone', {
-    method: 'POST',
-    prefer: 'return=representation,resolution=merge-duplicates',
-    body:   payload,
+    method:  'POST',
+    headers: {
+      'Prefer': 'return=representation,resolution=merge-duplicates',
+    },
+    body: payload,
   });
   log('Contact saved', rows && rows.length > 0 ? rows[0] : null);
   return rows && rows.length > 0 ? rows[0] : null;
