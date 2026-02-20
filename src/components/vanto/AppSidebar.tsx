@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import type { Module } from '@/lib/vanto-data';
 import {
@@ -100,12 +101,16 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
           </div>
           {!collapsed && (
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-foreground truncate">Alex Thompson</p>
-              <p className="text-[10px] text-muted-foreground truncate">Super Admin</p>
+              <p className="text-xs font-medium text-foreground truncate">My Account</p>
+              <p className="text-[10px] text-muted-foreground truncate">Logged in</p>
             </div>
           )}
           {!collapsed && (
-            <button className="text-muted-foreground hover:text-foreground transition-colors shrink-0">
+            <button
+              onClick={() => supabase.auth.signOut()}
+              className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+              title="Sign out"
+            >
               <LogOut size={14} />
             </button>
           )}
