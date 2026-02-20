@@ -191,29 +191,45 @@ div[id="app"] {
   margin-bottom: 4px;
 }
 
+/* Explicitly ensure all inputs are editable */
 .vanto-input,
 .vanto-select,
 .vanto-textarea {
   width: 100%;
-  background: hsl(222, 47%, 9%);
-  border: 1px solid hsl(217, 33%, 20%);
+  background: hsl(222, 47%, 9%) !important;
+  border: 1px solid hsl(217, 33%, 20%) !important;
   border-radius: 7px;
-  color: hsl(210, 40%, 98%);
+  color: hsl(210, 40%, 98%) !important;
   font-size: 12px;
   font-family: inherit;
   padding: 7px 10px;
   box-sizing: border-box;
   transition: border-color 0.15s;
   outline: none;
+  pointer-events: auto !important;
+  opacity: 1 !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  cursor: text;
+}
+.vanto-select {
+  cursor: pointer;
 }
 .vanto-input:focus,
 .vanto-select:focus,
 .vanto-textarea:focus {
-  border-color: hsl(172, 66%, 40%);
+  border-color: hsl(172, 66%, 40%) !important;
+  box-shadow: 0 0 0 2px hsl(172, 66%, 20%);
 }
 .vanto-input::placeholder,
 .vanto-textarea::placeholder {
   color: hsl(215, 20%, 35%);
+}
+.vanto-input:disabled,
+.vanto-select:disabled,
+.vanto-textarea:disabled {
+  opacity: 0.4 !important;
+  cursor: not-allowed;
 }
 
 .vanto-select {
@@ -315,6 +331,9 @@ div[id="app"] {
   color: hsl(215, 20%, 40%);
   font-size: 12px;
   line-height: 1.6;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
 }
 
 .vanto-no-chat-icon {
