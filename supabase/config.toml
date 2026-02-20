@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.crm-webhook]
 verify_jwt = false
+
+[functions.save-contact]
+verify_jwt = false
