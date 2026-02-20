@@ -194,8 +194,15 @@
       }
     });
 
+    // Ensure button always starts enabled on popup open
+    loginBtn.disabled    = false;
+    loginBtn.textContent = 'Log in';
+
     // Login
-    loginBtn.addEventListener('click', async () => {
+    loginBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+
       clearError();
       const email    = emailInput.value.trim();
       const password = passInput.value;
@@ -209,6 +216,9 @@
       loginBtn.textContent = 'Logging in…';
 
       try {
+        const controller = new AbortController();
+        const timeoutId  = setTimeout(() => controller.abort(), 10000);
+
         const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
           method: 'POST',
           headers: {
@@ -216,33 +226,43 @@
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({ email, password }),
+          signal: controller.signal,
         });
 
+        clearTimeout(timeoutId);
         const data = await res.json();
 
         if (!res.ok || !data.access_token) {
           showError(data.error_description || data.msg || 'Login failed. Check credentials.');
-          loginBtn.disabled    = false;
-          loginBtn.textContent = 'Log in';
           return;
         }
 
         // Store token so content script can use it
         chrome.storage.local.set({
-          vanto_auth_token: data.access_token,
-          vanto_user_email: data.user?.email || email,
+          vanto_auth_token:   data.access_token,
+          vanto_refresh_token: data.refresh_token || '',
+          vanto_user_email:   data.user?.email || email,
         }, () => {
-          // Notify any open WhatsApp tabs to reload auth token
-          chrome.tabs.query({ url: 'https://web.whatsapp.com/*' }, (tabs) => {
-            tabs.forEach(tab => {
-              chrome.tabs.sendMessage(tab.id, { type: 'VANTO_TOKEN_UPDATED' }).catch(() => {});
+          // Notify any open WhatsApp tabs (best-effort, errors silently ignored)
+          try {
+            chrome.tabs.query({ url: 'https://web.whatsapp.com/*' }, (tabs) => {
+              tabs.forEach(tab => {
+                chrome.tabs.sendMessage(tab.id, { type: 'VANTO_TOKEN_UPDATED' }, () => {
+                  void chrome.runtime.lastError; // suppress unchecked error
+                });
+              });
             });
-          });
+          } catch (_) {}
           showLoggedIn(data.user?.email || email);
         });
 
       } catch (err) {
-        showError('Network error — check your connection.');
+        if (err.name === 'AbortError') {
+          showError('Request timed out — check your connection.');
+        } else {
+          showError('Network error — check your connection.');
+        }
+      } finally {
         loginBtn.disabled    = false;
         loginBtn.textContent = 'Log in';
       }
