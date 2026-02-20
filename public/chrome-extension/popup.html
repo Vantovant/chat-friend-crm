@@ -26,9 +26,9 @@
 
     .popup-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
 
-    /* Both views hidden by default — JS reveals the correct one */
+    /* Login visible by default; JS hides it if already logged in */
     #view-loggedin { display: none; flex-direction: column; gap: 10px; }
-    #view-login    { display: none; flex-direction: column; gap: 10px; }
+    #view-login    { display: flex; flex-direction: column; gap: 10px; }
 
     .user-badge {
       display: flex; align-items: center; gap: 8px;
