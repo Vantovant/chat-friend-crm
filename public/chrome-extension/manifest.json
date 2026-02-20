@@ -3,7 +3,7 @@
   "name": "Vanto CRM — WhatsApp Sidebar",
   "version": "1.1.0",
   "description": "Inject the Vanto CRM sidebar into WhatsApp Web for seamless lead management.",
-  "permissions": ["storage", "activeTab"],
+  "permissions": ["storage", "activeTab", "tabs"],
   "host_permissions": [
     "https://web.whatsapp.com/*",
     "https://nqyyvqcmcyggvlcswkio.supabase.co/*"
