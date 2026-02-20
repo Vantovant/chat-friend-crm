@@ -26,7 +26,7 @@
 
     .popup-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
 
-    /* Login visible by default; JS hides it if already logged in */
+    /* Login view is VISIBLE by default — JS hides it only if already logged in */
     #view-loggedin { display: none; flex-direction: column; gap: 10px; }
     #view-login    { display: flex; flex-direction: column; gap: 10px; }
 
@@ -72,22 +72,24 @@
     .error-msg.show { display: block; }
 
     .popup-btn {
-      display: block; width: 100%;
-      padding: 9px 14px; border-radius: 8px; border: none;
-      font-size: 12px; font-weight: 600; cursor: pointer;
-      text-align: center; text-decoration: none;
+      display: block;
+      width: 100%;
+      padding: 9px 14px;
+      border-radius: 8px;
+      border: none;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      text-decoration: none;
       background: hsl(172, 66%, 50%);
       color: hsl(222, 47%, 6%);
       transition: background 0.15s;
-      pointer-events: auto;
-      position: relative;
-      z-index: 10;
     }
     .popup-btn:hover { background: hsl(172, 66%, 42%); }
     .popup-btn:disabled {
       opacity: 0.6;
       cursor: not-allowed;
-      pointer-events: none;
     }
     .popup-btn-outline {
       background: transparent;
@@ -122,19 +124,19 @@
 
   <div class="popup-body">
 
-    <!-- Logged-in view -->
+    <!-- Logged-in view (hidden by default) -->
     <div id="view-loggedin">
       <div class="user-badge">
         <span class="status-dot"></span>
         <span>Logged in</span>
       </div>
       <p class="user-email" id="display-email">—</p>
-      <a class="popup-btn" href="https://web.whatsapp.com" target="_blank" style="pointer-events:auto;">Open WhatsApp Web</a>
-      <a class="popup-btn popup-btn-outline" href="https://chat-friend-crm.lovable.app" target="_blank" style="pointer-events:auto;">Open Dashboard</a>
-      <button type="button" class="popup-btn popup-btn-danger" id="btn-logout" style="pointer-events:auto;">Log out</button>
+      <a class="popup-btn" href="https://web.whatsapp.com" target="_blank">Open WhatsApp Web</a>
+      <a class="popup-btn popup-btn-outline" href="https://chat-friend-crm.lovable.app" target="_blank">Open Dashboard</a>
+      <button class="popup-btn popup-btn-danger" id="btn-logout">Log out</button>
     </div>
 
-    <!-- Login view -->
+    <!-- Login view (visible by default) -->
     <div id="view-login">
       <p style="font-size:12px;color:hsl(215,20%,60%);">Log in to save contacts to Vanto CRM.</p>
 
@@ -150,17 +152,17 @@
 
       <div class="error-msg" id="login-error"></div>
 
-      <button type="button" class="popup-btn" id="btn-login" style="pointer-events:auto; z-index:99; position:relative;">Log in</button>
-      <a class="popup-btn popup-btn-outline" href="https://chat-friend-crm.lovable.app" target="_blank" style="pointer-events:auto;">Open Dashboard</a>
+      <button class="popup-btn" id="btn-login">Log in</button>
+      <a class="popup-btn popup-btn-outline" href="https://chat-friend-crm.lovable.app" target="_blank">Open Dashboard</a>
     </div>
 
   </div>
 
-  <div class="popup-footer">Vanto CRM v1.1.0</div>
+  <div class="popup-footer">Vanto CRM v1.2.0</div>
 
   <script>
-    const SUPABASE_URL      = 'https://nqyyvqcmcyggvlcswkio.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5xeXl2cWNtY3lnZ3ZsY3N3a2lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1NDYxMjYsImV4cCI6MjA4NzEyMjEyNn0.oK04GkXogHo9pohYd4A7XAV0-Q-qSu-uUiGWaj4ClM8';
+    var SUPABASE_URL      = 'https://nqyyvqcmcyggvlcswkio.supabase.co';
+    var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5xeXl2cWNtY3lnZ3ZsY3N3a2lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1NDYxMjYsImV4cCI6MjA4NzEyMjEyNn0.oK04GkXogHo9pohYd4A7XAV0-Q-qSu-uUiGWaj4ClM8';
 
     var viewLogin    = document.getElementById('view-login');
     var viewLoggedin = document.getElementById('view-loggedin');
@@ -179,101 +181,127 @@
       errorEl.textContent = '';
       errorEl.style.display = 'none';
     }
-    function resetBtn() {
+    function resetLoginBtn() {
       loginBtn.disabled    = false;
       loginBtn.textContent = 'Log in';
-      loginBtn.style.pointerEvents = 'auto';
     }
     function showLoggedIn(email) {
       viewLogin.style.display    = 'none';
       viewLoggedin.style.display = 'flex';
       displayEmail.textContent   = email || '—';
     }
-    function showLoginForm() {
+    function showLoginView() {
       viewLoggedin.style.display = 'none';
       viewLogin.style.display    = 'flex';
-      resetBtn();
+      resetLoginBtn();
     }
 
-    // Check existing session — show correct view
-    chrome.storage.local.get(['vanto_auth_token', 'vanto_user_email'], function(result) {
-      if (result.vanto_auth_token) {
-        showLoggedIn(result.vanto_user_email);
-      } else {
-        showLoginForm();
+    // ── On load: check for stored session ────────────────────────────────
+    chrome.storage.local.get(['vanto_token', 'vanto_email'], function(result) {
+      console.log('[Vanto Popup] Storage check:', result.vanto_token ? 'token found' : 'no token');
+      if (result.vanto_token) {
+        showLoggedIn(result.vanto_email || '');
       }
+      // If no token, login view is already visible — do nothing
     });
 
-    // Login handler
+    // ── Login handler ─────────────────────────────────────────────────────
     function doLogin() {
+      console.log('[Vanto Popup] Login clicked');
       clearError();
-      var email    = emailInput.value.trim();
-      var password = passInput.value;
+
+      var email    = (emailInput.value || '').trim();
+      var password = passInput.value || '';
 
       if (!email || !password) {
         showError('Please enter email and password.');
         return;
       }
 
-      loginBtn.disabled            = true;
-      loginBtn.textContent         = 'Logging in…';
-      loginBtn.style.pointerEvents = 'none';
+      loginBtn.disabled    = true;
+      loginBtn.textContent = 'Logging in…';
+
+      var controller = new AbortController();
+      var timeout    = setTimeout(function() { controller.abort(); }, 12000);
 
       fetch(SUPABASE_URL + '/auth/v1/token?grant_type=password', {
-        method: 'POST',
+        method:  'POST',
+        signal:  controller.signal,
         headers: {
-          'apikey':       SUPABASE_ANON_KEY,
-          'Content-Type': 'application/json'
+          'apikey':        SUPABASE_ANON_KEY,
+          'Content-Type':  'application/json'
         },
         body: JSON.stringify({ email: email, password: password })
       })
-      .then(function(res) { return res.json().then(function(data) { return { ok: res.ok, data: data }; }); })
+      .then(function(res) {
+        clearTimeout(timeout);
+        return res.json().then(function(data) {
+          return { ok: res.ok, data: data };
+        });
+      })
       .then(function(r) {
         if (!r.ok || !r.data.access_token) {
-          showError(r.data.error_description || r.data.msg || 'Login failed. Check credentials.');
-          resetBtn();
+          var msg = (r.data && (r.data.error_description || r.data.msg)) || 'Login failed. Check credentials.';
+          console.log('[Vanto Popup] Login failed:', msg);
+          showError(msg);
+          resetLoginBtn();
           return;
         }
+
+        var token    = r.data.access_token;
+        var userEmail = (r.data.user && r.data.user.email) || email;
+
+        console.log('[Vanto Popup] Login success:', userEmail);
+
+        // Store token under key "vanto_token"
         chrome.storage.local.set({
-          vanto_auth_token:    r.data.access_token,
-          vanto_refresh_token: r.data.refresh_token || '',
-          vanto_user_email:    (r.data.user && r.data.user.email) || email
+          vanto_token: token,
+          vanto_email: userEmail
         }, function() {
-          // Notify WhatsApp tabs (best-effort)
+          // Notify any open WhatsApp tabs
           try {
             chrome.tabs.query({ url: 'https://web.whatsapp.com/*' }, function(tabs) {
-              if (tabs) tabs.forEach(function(tab) {
-                chrome.tabs.sendMessage(tab.id, { type: 'VANTO_TOKEN_UPDATED' }, function() {
-                  void chrome.runtime.lastError;
+              if (tabs && tabs.length) {
+                tabs.forEach(function(tab) {
+                  chrome.tabs.sendMessage(tab.id, { type: 'VANTO_TOKEN_UPDATED' }, function() {
+                    void chrome.runtime.lastError;
+                  });
                 });
-              });
+              }
             });
           } catch(e) {}
-          showLoggedIn((r.data.user && r.data.user.email) || email);
+
+          showLoggedIn(userEmail);
         });
       })
       .catch(function(err) {
-        showError('Network error — check your connection.');
-        resetBtn();
+        clearTimeout(timeout);
+        var msg = err.name === 'AbortError'
+          ? 'Request timed out — check your connection.'
+          : 'Network error — check your connection.';
+        console.log('[Vanto Popup] Login error:', err.message);
+        showError(msg);
+        resetLoginBtn();
       });
     }
 
-    // Attach click listener
+    // ── Event listeners ───────────────────────────────────────────────────
     loginBtn.addEventListener('click', function(e) {
       e.preventDefault();
-      e.stopPropagation();
       doLogin();
     });
 
-    // Enter key support
-    emailInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') doLogin(); });
-    passInput.addEventListener('keydown',  function(e) { if (e.key === 'Enter') doLogin(); });
+    emailInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') doLogin();
+    });
+    passInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') doLogin();
+    });
 
-    // Logout
     logoutBtn.addEventListener('click', function() {
-      chrome.storage.local.remove(['vanto_auth_token', 'vanto_refresh_token', 'vanto_user_email'], function() {
+      chrome.storage.local.remove(['vanto_token', 'vanto_email'], function() {
         passInput.value = '';
-        showLoginForm();
+        showLoginView();
       });
     });
   </script>
