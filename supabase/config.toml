@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.zazi-sync-push]
 verify_jwt = false
+
+[functions.crm-webhook]
+verify_jwt = false
