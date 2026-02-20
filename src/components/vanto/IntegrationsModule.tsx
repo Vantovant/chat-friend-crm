@@ -241,7 +241,7 @@ export function IntegrationsModule({ userId = '' }: { userId?: string }) {
           </div>
 
           <CopyField label="① Endpoint URL" value={WEBHOOK_URL} />
-          <CopyField label="② Webhook Secret (header: x-webhook-secret)" value="(stored securely on server — use the value you saved as WEBHOOK_SECRET)" />
+          <CopyField label="② Webhook Secret (header: x-webhook-secret)" value="••••••••••••••••••••••••••••••••" mono={true} />
           <CopyField label="③ Your User ID (use as user_id in payload body)" value={userId || 'Sign in to see your User ID'} />
 
           {/* Test result */}
