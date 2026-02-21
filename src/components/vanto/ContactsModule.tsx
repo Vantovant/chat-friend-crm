@@ -162,6 +162,29 @@ function AddContactModal({ onClose, onCreated }: { onClose: () => void; onCreate
 
     const phoneNorm = normalizePhone(form.phone_raw);
 
+    // ── Smart duplicate check before insert ──
+    if (phoneNorm) {
+      const { data: existing } = await supabase
+        .from('contacts')
+        .select('*')
+        .eq('created_by', user.id)
+        .eq('phone_normalized', phoneNorm)
+        .eq('is_deleted', false)
+        .maybeSingle();
+
+      if (existing) {
+        setSaving(false);
+        toast({
+          title: 'Duplicate contact found',
+          description: `"${existing.name}" already has this phone number. Use the merge tool to combine them.`,
+          variant: 'destructive',
+        });
+        onCreated(existing as Contact);
+        onClose();
+        return;
+      }
+    }
+
     const { data, error } = await supabase
       .from('contacts')
       .insert({
