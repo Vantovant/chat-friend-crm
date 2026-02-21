@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import type { Module } from '@/lib/vanto-data';
@@ -34,6 +34,18 @@ interface Props {
 
 export function AppSidebar({ activeModule, onModuleChange }: Props) {
   const [collapsed, setCollapsed] = useState(false);
+  const [userName, setUserName] = useState('');
+
+  useEffect(() => {
+    const loadUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data } = await supabase.from('profiles').select('full_name').eq('id', user.id).single();
+        if (data?.full_name) setUserName(data.full_name);
+      }
+    };
+    loadUser();
+  }, []);
 
   return (
     <div
@@ -94,11 +106,11 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
         </button>
         <div className={cn('flex items-center gap-2 px-3 py-2', collapsed && 'justify-center')}>
           <div className="w-7 h-7 rounded-full vanto-gradient flex items-center justify-center text-xs font-bold text-primary-foreground shrink-0">
-            A
+            {userName?.[0]?.toUpperCase() ?? '?'}
           </div>
           {!collapsed && (
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium text-foreground truncate">My Account</p>
+              <p className="text-xs font-medium text-foreground truncate">{userName || 'My Account'}</p>
               <p className="text-[10px] text-muted-foreground truncate">Logged in</p>
             </div>
           )}
