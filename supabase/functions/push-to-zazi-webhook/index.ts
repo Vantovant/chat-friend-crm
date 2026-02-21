@@ -30,12 +30,24 @@ Deno.serve(async (req) => {
   if (claimsError || !claimsData?.claims) return jsonRes({ error: 'Unauthorized' }, 401);
   const userId = claimsData.claims.sub as string;
 
-  // ── 2. Load Zazi credentials from server env (NEVER exposed to client) ─────
-  const zaziWebhookUrl = Deno.env.get('ZAZI_WEBHOOK_URL');
-  const zaziWebhookSecret = Deno.env.get('ZAZI_WEBHOOK_SECRET');
+  // ── 2. Load Zazi credentials — prefer DB settings, fallback to env ─────
+  const adminSupabase = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  );
+
+  const { data: settings } = await adminSupabase
+    .from('integration_settings')
+    .select('key, value')
+    .in('key', ['outbound_webhook_url', 'outbound_webhook_secret']);
+
+  const settingsMap = Object.fromEntries((settings || []).map(s => [s.key, s.value]));
+
+  const zaziWebhookUrl = settingsMap['outbound_webhook_url'] || Deno.env.get('ZAZI_WEBHOOK_URL');
+  const zaziWebhookSecret = settingsMap['outbound_webhook_secret'] || Deno.env.get('ZAZI_WEBHOOK_SECRET');
 
   if (!zaziWebhookUrl || !zaziWebhookSecret) {
-    return jsonRes({ error: 'Zazi webhook credentials not configured. Set ZAZI_WEBHOOK_URL and ZAZI_WEBHOOK_SECRET secrets.' }, 503);
+    return jsonRes({ error: 'Zazi webhook credentials not configured. Update them in Integrations settings or set ZAZI_WEBHOOK_URL and ZAZI_WEBHOOK_SECRET secrets.' }, 503);
   }
 
   // ── 3. Pull contacts from Vanto (user-scoped via RLS) ─────────────────────
