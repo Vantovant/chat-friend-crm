@@ -289,6 +289,74 @@ export function SettingsModule() {
           </div>
         )}
 
+        {/* Team */}
+        {activeSection === 'team' && (
+          <div>
+            {inviteSuccess && (
+              <div className="mb-4 flex items-center gap-2 p-3 rounded-lg bg-primary/10 border border-primary/30 text-sm text-primary">
+                <CheckCircle size={15} />
+                Invitation sent successfully!
+              </div>
+            )}
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-base font-bold text-foreground">Team Invitations</h3>
+              {isSuperAdmin && (
+                <button
+                  onClick={() => setShowInviteModal(true)}
+                  className="text-sm text-primary border border-primary/30 rounded-lg px-3 py-1.5 hover:bg-primary/10 transition-colors flex items-center gap-1.5"
+                >
+                  <Mail size={13} />
+                  Invite Member
+                </button>
+              )}
+            </div>
+
+            {!isSuperAdmin && (
+              <div className="vanto-card p-5 text-center text-muted-foreground text-sm">
+                Only Super Admins can manage invitations.
+              </div>
+            )}
+
+            {isSuperAdmin && (
+              <div className="vanto-card overflow-hidden">
+                {invitations.length === 0 ? (
+                  <div className="px-4 py-8 text-center">
+                    <Mail size={24} className="text-muted-foreground mx-auto mb-2" />
+                    <p className="text-sm text-muted-foreground">No invitations sent yet.</p>
+                    <p className="text-xs text-muted-foreground mt-1">Click "Invite Member" to get started.</p>
+                  </div>
+                ) : (
+                  invitations.map((inv, i) => (
+                    <div key={inv.id} className={cn('flex items-center justify-between px-4 py-3', i < invitations.length - 1 && 'border-b border-border/50')}>
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center text-sm font-bold text-muted-foreground">
+                          {inv.email[0].toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-foreground">{inv.email}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Invited {new Date(inv.created_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                      </div>
+                      <span className={cn(
+                        'text-xs font-medium px-2 py-0.5 rounded border',
+                        inv.status === 'accepted' ? 'bg-primary/10 text-primary border-primary/30' :
+                        inv.status === 'expired' ? 'bg-destructive/10 text-destructive-foreground border-destructive/30' :
+                        'bg-yellow-500/10 text-yellow-500 border-yellow-500/30'
+                      )}>
+                        {inv.status === 'pending' ? (
+                          <span className="flex items-center gap-1"><Clock size={10} /> Pending</span>
+                        ) : inv.status}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Notifications */}
         {activeSection === 'notifications' && (
           <div>
