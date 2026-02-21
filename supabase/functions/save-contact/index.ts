@@ -1,6 +1,7 @@
 /**
- * Vanto CRM — save-contact Edge Function v2.0
- * Validates user JWT → upserts contact with user_id ownership
+ * Vanto CRM — save-contact Edge Function v3.0
+ * Validates user JWT → finds by phone_normalized + created_by → update or insert.
+ * No onConflict — duplicate detection is application-layer only.
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -24,6 +25,31 @@ function mapTemperature(val: string): 'hot' | 'warm' | 'cold' {
   return 'cold';
 }
 
+/** Strip non-digits */
+function digitsOnly(raw: string): string {
+  return (raw || '').replace(/\D/g, '');
+}
+
+/** Normalize to SA E.164-ish digits */
+function normalizePhone(raw: string): string {
+  const d = digitsOnly(raw);
+  if (!d) return '';
+  if (d.startsWith('0') && (d.length === 10 || d.length === 11)) {
+    return '27' + d.slice(1);
+  }
+  if (d.startsWith('27') && (d.length === 11 || d.length === 12)) {
+    return d;
+  }
+  return d;
+}
+
+function jsonRes(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -35,13 +61,10 @@ Deno.serve(async (req) => {
 
   if (!token) {
     console.error('[save-contact] No Bearer token provided');
-    return new Response(JSON.stringify({ error: 'Unauthorized — no token' }), {
-      status: 401,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return jsonRes({ error: 'Unauthorized — no token' }, 401);
   }
 
-  // ── Verify JWT via anon client (respects RLS) ───────────────────────────
+  // ── Verify JWT ──────────────────────────────────────────────────────────
   const anonClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_ANON_KEY')!,
@@ -51,10 +74,7 @@ Deno.serve(async (req) => {
   const { data: userData, error: userError } = await anonClient.auth.getUser(token);
   if (userError || !userData?.user) {
     console.error('[save-contact] JWT validation failed', userError?.message);
-    return new Response(JSON.stringify({ error: 'Unauthorized — invalid token' }), {
-      status: 401,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return jsonRes({ error: 'Unauthorized — invalid token' }, 401);
   }
 
   const userId = userData.user.id;
@@ -65,63 +85,81 @@ Deno.serve(async (req) => {
   try {
     body = await req.json();
   } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
-      status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return jsonRes({ error: 'Invalid JSON' }, 400);
   }
 
   const { name, phone, email, lead_type, temperature, tags, notes } = body;
 
-  if (!phone) {
-    return new Response(JSON.stringify({ error: 'phone is required' }), {
-      status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
-  if (!name) {
-    return new Response(JSON.stringify({ error: 'name is required' }), {
-      status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
-  }
+  if (!phone) return jsonRes({ error: 'phone is required' }, 400);
+  if (!name) return jsonRes({ error: 'name is required' }, 400);
 
-  // ── Upsert using service role ───────────────────────────────────────────
+  const phoneRaw = String(phone).trim();
+  const phoneNorm = normalizePhone(phoneRaw);
+
+  if (!phoneNorm) return jsonRes({ error: 'phone could not be normalized' }, 400);
+
+  // ── Service role client ─────────────────────────────────────────────────
   const serviceClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
 
-  const payload = {
-    name:        String(name).trim(),
-    phone:       String(phone).trim(),
-    email:       email ? String(email).trim() : null,
-    lead_type:   mapLeadType(lead_type),
-    temperature: mapTemperature(temperature),
-    tags:        Array.isArray(tags) ? tags : [],
-    notes:       notes ? String(notes).trim() : null,
-    created_by:  userId,
-    updated_at:  new Date().toISOString(),
+  const fields = {
+    name:             String(name).trim(),
+    phone:            phoneNorm,
+    phone_raw:        phoneRaw,
+    phone_normalized: phoneNorm,
+    email:            email ? String(email).trim() : null,
+    lead_type:        mapLeadType(lead_type),
+    temperature:      mapTemperature(temperature),
+    tags:             Array.isArray(tags) ? tags : [],
+    notes:            notes ? String(notes).trim() : null,
+    updated_at:       new Date().toISOString(),
   };
 
-  console.log('[save-contact] Upserting', { phone: payload.phone, name: payload.name, userId });
+  console.log('[save-contact] Looking up by phone_normalized + created_by', { phoneNorm, userId });
 
-  const { data, error } = await serviceClient
+  // ── Find existing by phone_normalized + created_by ──────────────────────
+  const { data: existing } = await serviceClient
     .from('contacts')
-    .upsert(payload, { onConflict: 'phone' })
-    .select()
-    .single();
+    .select('id')
+    .eq('created_by', userId)
+    .eq('phone_normalized', phoneNorm)
+    .eq('is_deleted', false)
+    .limit(1)
+    .maybeSingle();
+
+  let data: any = null;
+  let error: any = null;
+
+  if (existing) {
+    // UPDATE existing contact
+    const res = await serviceClient
+      .from('contacts')
+      .update(fields)
+      .eq('id', existing.id)
+      .select()
+      .single();
+    data = res.data;
+    error = res.error;
+    console.log('[save-contact] Updated existing contact:', existing.id);
+  } else {
+    // INSERT new contact
+    const res = await serviceClient
+      .from('contacts')
+      .insert({ ...fields, created_by: userId, assigned_to: userId })
+      .select()
+      .single();
+    data = res.data;
+    error = res.error;
+    console.log('[save-contact] Inserted new contact');
+  }
 
   if (error) {
-    console.error('[save-contact] Upsert error', error);
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    console.error('[save-contact] DB error', error);
+    return jsonRes({ error: error.message }, 500);
   }
 
   console.log('[save-contact] Saved successfully', data?.id);
-  return new Response(JSON.stringify({ success: true, contact: data }), {
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
+  return jsonRes({ success: true, contact: data });
 });

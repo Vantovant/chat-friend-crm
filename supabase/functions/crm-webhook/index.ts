@@ -28,8 +28,23 @@ function mapInterest(val: string): 'high' | 'medium' | 'low' {
   if (v === 'low') return 'low';
   return 'medium';
 }
-function normalizePhone(phone: string): string {
-  return phone.replace(/\D/g, '');
+
+/** Strip non-digits */
+function digitsOnly(raw: string): string {
+  return (raw || '').replace(/\D/g, '');
+}
+
+/** Normalize to SA E.164-ish digits */
+function normalizePhone(raw: string): string {
+  const d = digitsOnly(raw);
+  if (!d) return '';
+  if (d.startsWith('0') && (d.length === 10 || d.length === 11)) {
+    return '27' + d.slice(1);
+  }
+  if (d.startsWith('27') && (d.length === 11 || d.length === 12)) {
+    return d;
+  }
+  return d;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -79,6 +94,18 @@ Deno.serve(async (req) => {
     await supabase.from('webhook_events').update({ status, ...(error ? { error } : {}) }).eq('id', eventId);
   };
 
+  // ── Helper: find contact by phone_normalized, scoped by created_by ─────────
+  async function findContactByPhone(phoneNorm: string, createdBy?: string) {
+    let query = supabase
+      .from('contacts')
+      .select('id')
+      .eq('phone_normalized', phoneNorm)
+      .eq('is_deleted', false);
+    if (createdBy) query = query.eq('created_by', createdBy);
+    const { data } = await query.limit(1).maybeSingle();
+    return data;
+  }
+
   // ─── action: sync_contacts ──────────────────────────────────────────────────
   if (action === 'sync_contacts') {
     if (!Array.isArray(contacts) || contacts.length === 0) {
@@ -93,11 +120,14 @@ Deno.serve(async (req) => {
     for (const c of contacts) {
       const rawPhone = c.phone_number || c.phone || '';
       if (!rawPhone) { skipped++; continue; }
-      const normalizedPhone = normalizePhone(rawPhone);
+      const phoneNorm = normalizePhone(rawPhone);
+      if (!phoneNorm) { skipped++; continue; }
 
       const mapped: any = {
         name: c.full_name || c.name || 'Unknown',
-        phone: normalizedPhone,
+        phone: phoneNorm,
+        phone_raw: String(rawPhone).trim(),
+        phone_normalized: phoneNorm,
         email: c.email || null,
         notes: c.notes || c.additional_notes || null,
         temperature: mapTemperature(c.lead_temperature || c.temperature || ''),
@@ -107,8 +137,7 @@ Deno.serve(async (req) => {
         ...(user_id ? { created_by: user_id, assigned_to: user_id } : {}),
       };
 
-      const { data: existing } = await supabase
-        .from('contacts').select('id').eq('phone', normalizedPhone).maybeSingle();
+      const existing = await findContactByPhone(phoneNorm, user_id || undefined);
 
       if (existing) {
         const { error } = await supabase.from('contacts')
@@ -143,11 +172,13 @@ Deno.serve(async (req) => {
       await markEvent('error', 'contact.phone_number is required');
       return jsonRes({ error: 'contact.phone_number is required' }, 400);
     }
-    const normalizedPhone = normalizePhone(rawPhone);
+    const phoneNorm = normalizePhone(rawPhone);
 
     const mapped: any = {
       name: contact.full_name || contact.name || 'Unknown',
-      phone: normalizedPhone,
+      phone: phoneNorm,
+      phone_raw: String(rawPhone).trim(),
+      phone_normalized: phoneNorm,
       email: contact.email || null,
       notes: contact.notes || contact.additional_notes || null,
       temperature: mapTemperature(contact.lead_temperature || contact.temperature || ''),
@@ -157,8 +188,7 @@ Deno.serve(async (req) => {
       ...(user_id ? { created_by: user_id, assigned_to: user_id } : {}),
     };
 
-    const { data: existing } = await supabase
-      .from('contacts').select('id').eq('phone', normalizedPhone).maybeSingle();
+    const existing = await findContactByPhone(phoneNorm, user_id || undefined);
 
     if (existing) {
       const { error } = await supabase.from('contacts')
@@ -170,7 +200,7 @@ Deno.serve(async (req) => {
     }
 
     await markEvent('success');
-    return jsonRes({ success: true, phone: normalizedPhone });
+    return jsonRes({ success: true, phone: phoneNorm });
   }
 
   // ─── action: log_chat ───────────────────────────────────────────────────────
@@ -179,18 +209,23 @@ Deno.serve(async (req) => {
       await markEvent('error', 'phone is required for log_chat');
       return jsonRes({ error: 'phone is required for log_chat' }, 400);
     }
-    const normalizedPhone = normalizePhone(phone);
+    const phoneNorm = normalizePhone(phone);
 
     let contactId: string;
-    const { data: existing } = await supabase
-      .from('contacts').select('id').eq('phone', normalizedPhone).maybeSingle();
+    const existing = await findContactByPhone(phoneNorm, user_id || undefined);
 
     if (existing) {
       contactId = existing.id;
     } else {
       const { data: newContact, error: insertErr } = await supabase
         .from('contacts')
-        .insert({ name: name || 'Unknown', phone: normalizedPhone, ...(user_id ? { created_by: user_id, assigned_to: user_id } : {}) })
+        .insert({
+          name: name || 'Unknown',
+          phone: phoneNorm,
+          phone_raw: String(phone).trim(),
+          phone_normalized: phoneNorm,
+          ...(user_id ? { created_by: user_id, assigned_to: user_id } : {}),
+        })
         .select('id').single();
       if (insertErr || !newContact) {
         await markEvent('error', insertErr?.message || 'Failed to create contact');
