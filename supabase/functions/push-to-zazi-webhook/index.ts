@@ -54,6 +54,7 @@ Deno.serve(async (req) => {
   const { data: contacts, error: fetchErr } = await localSupabase
     .from('contacts')
     .select('*')
+    .eq('is_deleted', false)
     .limit(500);
 
   if (fetchErr) return jsonRes({ error: 'Failed to fetch local contacts', details: fetchErr.message }, 500);
