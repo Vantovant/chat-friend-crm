@@ -27,4 +27,7 @@ verify_jwt = false
 [functions.zazi-sync-all]
 verify_jwt = false
 
+[functions.zazi-sync-bootstrap]
+verify_jwt = false
+
 
