@@ -133,16 +133,15 @@ Deno.serve(async (req) => {
   let error: any = null;
 
   if (existing) {
-    // UPDATE existing contact
-    const res = await serviceClient
+    // Return existing contact with duplicate flag — let frontend handle merge
+    const { data: full } = await serviceClient
       .from('contacts')
-      .update(fields)
+      .select('*')
       .eq('id', existing.id)
-      .select()
-      .single();
-    data = res.data;
-    error = res.error;
-    console.log('[save-contact] Updated existing contact:', existing.id);
+      .maybeSingle();
+
+    console.log('[save-contact] Duplicate found:', existing.id);
+    return jsonRes({ success: false, duplicate: true, contact: full });
   } else {
     // INSERT new contact
     const res = await serviceClient
@@ -161,5 +160,5 @@ Deno.serve(async (req) => {
   }
 
   console.log('[save-contact] Saved successfully', data?.id);
-  return jsonRes({ success: true, contact: data });
+  return jsonRes({ success: true, duplicate: false, contact: data });
 });
