@@ -5,7 +5,7 @@ import { temperatureBg, type LeadTemperature } from '@/lib/vanto-data';
 import { normalizePhone, digitsOnly } from '@/lib/phone-utils';
 import { Search, Plus, Filter, Phone, Mail, MoreVertical, UserCheck, Loader2, X, Save, Trash2, AlertTriangle, Sparkles, Merge, Archive, CircleCheck, CircleDot, CircleX, CircleMinus } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { MergeContactsModal } from './MergeContactsModal';
+import { MergeContactsModal, DuplicateMergeModal, type IncomingContact } from './MergeContactsModal';
 
 type Contact = {
   id: string;
@@ -141,7 +141,11 @@ function countDuplicateGroups(contacts: Contact[]): number {
 }
 
 // ── Add Contact Modal ──────────────────────────────────────────────────────────
-function AddContactModal({ onClose, onCreated }: { onClose: () => void; onCreated: (c: Contact) => void }) {
+function AddContactModal({ onClose, onCreated, onDuplicateFound }: {
+  onClose: () => void;
+  onCreated: (c: Contact) => void;
+  onDuplicateFound: (existing: Contact, incoming: IncomingContact) => void;
+}) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -174,12 +178,18 @@ function AddContactModal({ onClose, onCreated }: { onClose: () => void; onCreate
 
       if (existing) {
         setSaving(false);
-        toast({
-          title: 'Duplicate contact found',
-          description: `"${existing.name}" already has this phone number. Use the merge tool to combine them.`,
-          variant: 'destructive',
-        });
-        onCreated(existing as Contact);
+        const incomingPayload: IncomingContact = {
+          name: form.name.trim(),
+          phone: phoneNorm || digitsOnly(form.phone_raw),
+          phone_raw: form.phone_raw.trim(),
+          phone_normalized: phoneNorm,
+          email: form.email.trim().toLowerCase() || null,
+          temperature: form.temperature,
+          lead_type: form.lead_type,
+          tags: [],
+          notes: form.notes.trim() || null,
+        };
+        onDuplicateFound(existing as Contact, incomingPayload);
         onClose();
         return;
       }
@@ -485,6 +495,7 @@ export function ContactsModule() {
   const [showMerge, setShowMerge] = useState(false);
   const [cleaning, setCleaning] = useState(false);
   const [cleanSummary, setCleanSummary] = useState<string | null>(null);
+  const [dupMerge, setDupMerge] = useState<{ existing: Contact; incoming: IncomingContact } | null>(null);
 
   useEffect(() => { fetchContacts(); }, []);
 
@@ -761,7 +772,23 @@ export function ContactsModule() {
           onDeleted={handleContactDeleted}
         />
       )}
-      {showAddModal && <AddContactModal onClose={() => setShowAddModal(false)} onCreated={handleContactCreated} />}
+      {showAddModal && (
+        <AddContactModal
+          onClose={() => setShowAddModal(false)}
+          onCreated={handleContactCreated}
+          onDuplicateFound={(existing, incoming) => {
+            setDupMerge({ existing, incoming });
+          }}
+        />
+      )}
+      {dupMerge && (
+        <DuplicateMergeModal
+          existing={dupMerge.existing}
+          incoming={dupMerge.incoming}
+          onClose={() => setDupMerge(null)}
+          onMerged={() => { setDupMerge(null); fetchContacts(); }}
+        />
+      )}
       {showMerge && (
         <MergeContactsModal
           contacts={contacts.filter(c => selectedForMerge.has(c.id))}

@@ -1,7 +1,6 @@
 /**
- * Vanto CRM — save-contact Edge Function v3.0
- * Validates user JWT → finds by phone_normalized + created_by → update or insert.
- * No onConflict — duplicate detection is application-layer only.
+ * Vanto CRM — save-contact Edge Function v3.1
+ * Smart Save: finds by phone_normalized + created_by → returns duplicate payload for merge, or inserts new.
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -25,12 +24,10 @@ function mapTemperature(val: string): 'hot' | 'warm' | 'cold' {
   return 'cold';
 }
 
-/** Strip non-digits */
 function digitsOnly(raw: string): string {
   return (raw || '').replace(/\D/g, '');
 }
 
-/** Normalize to SA E.164-ish digits */
 function normalizePhone(raw: string): string {
   const d = digitsOnly(raw);
   if (!d) return '';
@@ -55,7 +52,6 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  // ── Extract Bearer token ────────────────────────────────────────────────
   const authHeader = req.headers.get('Authorization') || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
@@ -64,7 +60,6 @@ Deno.serve(async (req) => {
     return jsonRes({ error: 'Unauthorized — no token' }, 401);
   }
 
-  // ── Verify JWT ──────────────────────────────────────────────────────────
   const anonClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_ANON_KEY')!,
@@ -80,7 +75,6 @@ Deno.serve(async (req) => {
   const userId = userData.user.id;
   console.log('[save-contact] Authenticated user', userId);
 
-  // ── Parse body ──────────────────────────────────────────────────────────
   let body: any;
   try {
     body = await req.json();
@@ -98,13 +92,12 @@ Deno.serve(async (req) => {
 
   if (!phoneNorm) return jsonRes({ error: 'phone could not be normalized' }, 400);
 
-  // ── Service role client ─────────────────────────────────────────────────
   const serviceClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   );
 
-  const fields = {
+  const incoming = {
     name:             String(name).trim(),
     phone:            phoneNorm,
     phone_raw:        phoneRaw,
@@ -114,7 +107,6 @@ Deno.serve(async (req) => {
     temperature:      mapTemperature(temperature),
     tags:             Array.isArray(tags) ? tags : [],
     notes:            notes ? String(notes).trim() : null,
-    updated_at:       new Date().toISOString(),
   };
 
   console.log('[save-contact] Looking up by phone_normalized + created_by', { phoneNorm, userId });
@@ -122,43 +114,36 @@ Deno.serve(async (req) => {
   // ── Find existing by phone_normalized + created_by ──────────────────────
   const { data: existing } = await serviceClient
     .from('contacts')
-    .select('id')
+    .select('*')
     .eq('created_by', userId)
     .eq('phone_normalized', phoneNorm)
     .eq('is_deleted', false)
     .limit(1)
     .maybeSingle();
 
-  let data: any = null;
-  let error: any = null;
-
   if (existing) {
-    // Return existing contact with duplicate flag — let frontend handle merge
-    const { data: full } = await serviceClient
-      .from('contacts')
-      .select('*')
-      .eq('id', existing.id)
-      .maybeSingle();
-
+    // Return both records for frontend merge — do NOT update DB here
     console.log('[save-contact] Duplicate found:', existing.id);
-    return jsonRes({ success: false, duplicate: true, contact: full });
-  } else {
-    // INSERT new contact
-    const res = await serviceClient
-      .from('contacts')
-      .insert({ ...fields, created_by: userId, assigned_to: userId })
-      .select()
-      .single();
-    data = res.data;
-    error = res.error;
-    console.log('[save-contact] Inserted new contact');
+    return jsonRes({ success: false, duplicate: true, existing, incoming });
   }
+
+  // ── INSERT new contact ─────────────────────────────────────────────────
+  const { data, error } = await serviceClient
+    .from('contacts')
+    .insert({
+      ...incoming,
+      created_by: userId,
+      assigned_to: userId,
+      updated_at: new Date().toISOString(),
+    })
+    .select()
+    .single();
 
   if (error) {
     console.error('[save-contact] DB error', error);
     return jsonRes({ error: error.message }, 500);
   }
 
-  console.log('[save-contact] Saved successfully', data?.id);
+  console.log('[save-contact] Inserted new contact', data?.id);
   return jsonRes({ success: true, duplicate: false, contact: data });
 });
