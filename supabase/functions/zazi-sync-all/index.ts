@@ -70,9 +70,18 @@ Deno.serve(async (req) => {
 
       const syncRecord = { ...record, last_synced_at: new Date().toISOString() };
 
-      const { error } = await masterDb
+      // Try with last_synced_at first, fall back without if column doesn't exist on master
+      let { error } = await masterDb
         .from(table)
         .upsert(syncRecord, { onConflict: 'id' });
+
+      if (error && error.message.includes('last_synced_at')) {
+        const { last_synced_at: _, ...recordWithout } = syncRecord;
+        const retry = await masterDb
+          .from(table)
+          .upsert(recordWithout, { onConflict: 'id' });
+        error = retry.error;
+      }
 
       if (error) {
         console.error(`UPSERT error on ${table}:`, error);

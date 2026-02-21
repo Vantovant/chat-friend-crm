@@ -22,6 +22,7 @@ export type Database = {
           created_by: string | null
           id: string
           last_run_at: string | null
+          last_synced_at: string | null
           name: string
           run_count: number
           trigger_condition: string
@@ -34,6 +35,7 @@ export type Database = {
           created_by?: string | null
           id?: string
           last_run_at?: string | null
+          last_synced_at?: string | null
           name: string
           run_count?: number
           trigger_condition: string
@@ -46,6 +48,7 @@ export type Database = {
           created_by?: string | null
           id?: string
           last_run_at?: string | null
+          last_synced_at?: string | null
           name?: string
           run_count?: number
           trigger_condition?: string
@@ -72,6 +75,7 @@ export type Database = {
           id: string
           interest: Database["public"]["Enums"]["interest_level"]
           is_deleted: boolean
+          last_synced_at: string | null
           lead_type: Database["public"]["Enums"]["lead_type"]
           name: string
           notes: string | null
@@ -94,6 +98,7 @@ export type Database = {
           id?: string
           interest?: Database["public"]["Enums"]["interest_level"]
           is_deleted?: boolean
+          last_synced_at?: string | null
           lead_type?: Database["public"]["Enums"]["lead_type"]
           name: string
           notes?: string | null
@@ -116,6 +121,7 @@ export type Database = {
           id?: string
           interest?: Database["public"]["Enums"]["interest_level"]
           is_deleted?: boolean
+          last_synced_at?: string | null
           lead_type?: Database["public"]["Enums"]["lead_type"]
           name?: string
           notes?: string | null
@@ -159,6 +165,7 @@ export type Database = {
           id: string
           last_message: string | null
           last_message_at: string | null
+          last_synced_at: string | null
           status: Database["public"]["Enums"]["comm_status"]
           unread_count: number
           updated_at: string
@@ -169,6 +176,7 @@ export type Database = {
           id?: string
           last_message?: string | null
           last_message_at?: string | null
+          last_synced_at?: string | null
           status?: Database["public"]["Enums"]["comm_status"]
           unread_count?: number
           updated_at?: string
@@ -179,6 +187,7 @@ export type Database = {
           id?: string
           last_message?: string | null
           last_message_at?: string | null
+          last_synced_at?: string | null
           status?: Database["public"]["Enums"]["comm_status"]
           unread_count?: number
           updated_at?: string
@@ -197,6 +206,7 @@ export type Database = {
         Row: {
           id: string
           key: string
+          last_synced_at: string | null
           updated_at: string
           updated_by: string | null
           value: string
@@ -204,6 +214,7 @@ export type Database = {
         Insert: {
           id?: string
           key: string
+          last_synced_at?: string | null
           updated_at?: string
           updated_by?: string | null
           value?: string
@@ -211,6 +222,7 @@ export type Database = {
         Update: {
           id?: string
           key?: string
+          last_synced_at?: string | null
           updated_at?: string
           updated_by?: string | null
           value?: string
@@ -225,6 +237,7 @@ export type Database = {
           expires_at: string
           id: string
           invited_by: string
+          last_synced_at: string | null
           status: string
           token: string
         }
@@ -235,6 +248,7 @@ export type Database = {
           expires_at?: string
           id?: string
           invited_by: string
+          last_synced_at?: string | null
           status?: string
           token?: string
         }
@@ -245,6 +259,7 @@ export type Database = {
           expires_at?: string
           id?: string
           invited_by?: string
+          last_synced_at?: string | null
           status?: string
           token?: string
         }
@@ -257,6 +272,7 @@ export type Database = {
           created_at: string
           id: string
           is_outbound: boolean
+          last_synced_at: string | null
           message_type: Database["public"]["Enums"]["message_type"]
           sent_by: string | null
           status: Database["public"]["Enums"]["message_status"] | null
@@ -267,6 +283,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_outbound?: boolean
+          last_synced_at?: string | null
           message_type?: Database["public"]["Enums"]["message_type"]
           sent_by?: string | null
           status?: Database["public"]["Enums"]["message_status"] | null
@@ -277,6 +294,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_outbound?: boolean
+          last_synced_at?: string | null
           message_type?: Database["public"]["Enums"]["message_type"]
           sent_by?: string | null
           status?: Database["public"]["Enums"]["message_status"] | null
@@ -303,6 +321,7 @@ export type Database = {
           color: string | null
           created_at: string
           id: string
+          last_synced_at: string | null
           name: string
           stage_order: number
         }
@@ -310,6 +329,7 @@ export type Database = {
           color?: string | null
           created_at?: string
           id?: string
+          last_synced_at?: string | null
           name: string
           stage_order?: number
         }
@@ -317,6 +337,7 @@ export type Database = {
           color?: string | null
           created_at?: string
           id?: string
+          last_synced_at?: string | null
           name?: string
           stage_order?: number
         }
@@ -329,6 +350,7 @@ export type Database = {
           email: string | null
           full_name: string | null
           id: string
+          last_synced_at: string | null
           phone: string | null
           updated_at: string
         }
@@ -338,6 +360,7 @@ export type Database = {
           email?: string | null
           full_name?: string | null
           id: string
+          last_synced_at?: string | null
           phone?: string | null
           updated_at?: string
         }
@@ -347,6 +370,7 @@ export type Database = {
           email?: string | null
           full_name?: string | null
           id?: string
+          last_synced_at?: string | null
           phone?: string | null
           updated_at?: string
         }
@@ -357,6 +381,7 @@ export type Database = {
           errors: string[]
           finished_at: string | null
           id: string
+          last_synced_at: string | null
           skipped: number
           source: string
           started_at: string
@@ -368,6 +393,7 @@ export type Database = {
           errors?: string[]
           finished_at?: string | null
           id?: string
+          last_synced_at?: string | null
           skipped?: number
           source: string
           started_at?: string
@@ -379,6 +405,7 @@ export type Database = {
           errors?: string[]
           finished_at?: string | null
           id?: string
+          last_synced_at?: string | null
           skipped?: number
           source?: string
           started_at?: string
@@ -391,16 +418,19 @@ export type Database = {
       user_roles: {
         Row: {
           id: string
+          last_synced_at: string | null
           role: Database["public"]["Enums"]["user_role"]
           user_id: string
         }
         Insert: {
           id?: string
+          last_synced_at?: string | null
           role?: Database["public"]["Enums"]["user_role"]
           user_id: string
         }
         Update: {
           id?: string
+          last_synced_at?: string | null
           role?: Database["public"]["Enums"]["user_role"]
           user_id?: string
         }
@@ -412,6 +442,7 @@ export type Database = {
           created_at: string
           error: string | null
           id: string
+          last_synced_at: string | null
           payload: Json | null
           source: string
           status: string
@@ -421,6 +452,7 @@ export type Database = {
           created_at?: string
           error?: string | null
           id?: string
+          last_synced_at?: string | null
           payload?: Json | null
           source: string
           status?: string
@@ -430,6 +462,7 @@ export type Database = {
           created_at?: string
           error?: string | null
           id?: string
+          last_synced_at?: string | null
           payload?: Json | null
           source?: string
           status?: string
@@ -444,6 +477,7 @@ export type Database = {
           created_by: string | null
           description: string | null
           id: string
+          last_synced_at: string | null
           name: string
           steps: Json
           updated_at: string
@@ -455,6 +489,7 @@ export type Database = {
           created_by?: string | null
           description?: string | null
           id?: string
+          last_synced_at?: string | null
           name: string
           steps?: Json
           updated_at?: string
@@ -466,6 +501,7 @@ export type Database = {
           created_by?: string | null
           description?: string | null
           id?: string
+          last_synced_at?: string | null
           name?: string
           steps?: Json
           updated_at?: string
