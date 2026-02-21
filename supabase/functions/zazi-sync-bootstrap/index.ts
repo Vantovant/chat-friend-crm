@@ -66,11 +66,23 @@ Deno.serve(async (req) => {
 
       while (hasMore) {
         // Read batch from Cloud
-        const { data: rows, error: readError } = await cloudService
+        // Some tables don't have created_at, fall back to id ordering
+        let readResult = await cloudService
           .from(table)
           .select('*')
           .range(offset, offset + batchSize - 1)
           .order('created_at', { ascending: true });
+
+        // Retry with id ordering if created_at doesn't exist
+        if (readResult.error && readResult.error.message.includes('created_at')) {
+          readResult = await cloudService
+            .from(table)
+            .select('*')
+            .range(offset, offset + batchSize - 1)
+            .order('id', { ascending: true });
+        }
+
+        const { data: rows, error: readError } = readResult;
 
         if (readError) {
           tableResult.errors.push(`Read error: ${readError.message}`);
