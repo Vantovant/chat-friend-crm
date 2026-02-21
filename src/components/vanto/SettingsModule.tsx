@@ -127,6 +127,9 @@ export function SettingsModule() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState(false);
+  const [editingField, setEditingField] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState('');
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -166,7 +169,34 @@ export function SettingsModule() {
     setTimeout(() => setInviteSuccess(false), 3000);
   };
 
+  const startEdit = (field: string, currentValue: string) => {
+    setEditingField(field);
+    setEditValue(currentValue === '—' ? '' : currentValue);
+  };
+
+  const saveEdit = async () => {
+    if (!editingField) return;
+    setSaving(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const updateData: Record<string, string> = {};
+      updateData[editingField] = editValue.trim();
+      await supabase.from('profiles').update(updateData).eq('id', user.id);
+      await loadProfile();
+    }
+    setEditingField(null);
+    setEditValue('');
+    setSaving(false);
+  };
+
   const isSuperAdmin = userRole === 'super_admin';
+
+  const profileFields = [
+    { key: 'full_name', label: 'Full Name', value: profile?.full_name ?? '—' },
+    { key: 'email', label: 'Email', value: profile?.email ?? '—' },
+    { key: 'phone', label: 'Phone', value: profile?.phone ?? '—' },
+    { key: 'role', label: 'Role', value: userRole?.replace('_', ' ') ?? '—', editable: false },
+  ];
 
   return (
     <div className="flex h-full">
@@ -214,91 +244,48 @@ export function SettingsModule() {
                   <p className="text-sm text-muted-foreground capitalize">{userRole?.replace('_', ' ') ?? '—'} · {profile?.email ?? '—'}</p>
                 </div>
               </div>
-              {[
-                { label: 'Full Name', value: profile?.full_name ?? '—' },
-                { label: 'Email', value: profile?.email ?? '—' },
-                { label: 'Phone', value: profile?.phone ?? '—' },
-                { label: 'Role', value: userRole?.replace('_', ' ') ?? '—', editable: false },
-              ].map(item => (
-                <div key={item.label} className="flex items-center justify-between py-2.5 border-b border-border/50 last:border-0">
-                  <div>
+              {profileFields.map(item => (
+                <div key={item.key} className="flex items-center justify-between py-2.5 border-b border-border/50 last:border-0">
+                  <div className="flex-1">
                     <p className="text-sm font-medium text-foreground">{item.label}</p>
-                    <p className="text-xs text-muted-foreground capitalize">{item.value}</p>
+                    {editingField === item.key ? (
+                      <div className="flex items-center gap-2 mt-1">
+                        <input
+                          type={item.key === 'email' ? 'email' : 'text'}
+                          value={editValue}
+                          onChange={e => setEditValue(e.target.value)}
+                          className="bg-secondary/60 border border-border rounded px-2 py-1 text-sm text-foreground outline-none focus:border-primary/60 w-full max-w-xs"
+                          autoFocus
+                        />
+                        <button
+                          onClick={saveEdit}
+                          disabled={saving}
+                          className="text-xs text-primary-foreground bg-primary rounded px-2.5 py-1 hover:opacity-90 disabled:opacity-60"
+                        >
+                          {saving ? <Loader2 size={12} className="animate-spin" /> : 'Save'}
+                        </button>
+                        <button
+                          onClick={() => setEditingField(null)}
+                          className="text-xs text-muted-foreground hover:text-foreground"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground capitalize">{item.value}</p>
+                    )}
                   </div>
-                  {item.editable !== false && (
-                    <button className="text-xs text-primary border border-primary/30 rounded px-2.5 py-1 hover:bg-primary/10 transition-colors">Edit</button>
+                  {item.editable !== false && editingField !== item.key && (
+                    <button
+                      onClick={() => startEdit(item.key, item.value)}
+                      className="text-xs text-primary border border-primary/30 rounded px-2.5 py-1 hover:bg-primary/10 transition-colors"
+                    >
+                      Edit
+                    </button>
                   )}
                 </div>
               ))}
             </div>
-          </div>
-        )}
-
-        {/* Team */}
-        {activeSection === 'team' && (
-          <div>
-            {inviteSuccess && (
-              <div className="mb-4 flex items-center gap-2 p-3 rounded-lg bg-primary/10 border border-primary/30 text-sm text-primary">
-                <CheckCircle size={15} />
-                Invitation sent successfully!
-              </div>
-            )}
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-base font-bold text-foreground">Team Invitations</h3>
-              {isSuperAdmin && (
-                <button
-                  onClick={() => setShowInviteModal(true)}
-                  className="text-sm text-primary border border-primary/30 rounded-lg px-3 py-1.5 hover:bg-primary/10 transition-colors flex items-center gap-1.5"
-                >
-                  <Mail size={13} />
-                  Invite Member
-                </button>
-              )}
-            </div>
-
-            {!isSuperAdmin && (
-              <div className="vanto-card p-5 text-center text-muted-foreground text-sm">
-                Only Super Admins can manage invitations.
-              </div>
-            )}
-
-            {isSuperAdmin && (
-              <div className="vanto-card overflow-hidden">
-                {invitations.length === 0 ? (
-                  <div className="px-4 py-8 text-center">
-                    <Mail size={24} className="text-muted-foreground mx-auto mb-2" />
-                    <p className="text-sm text-muted-foreground">No invitations sent yet.</p>
-                    <p className="text-xs text-muted-foreground mt-1">Click "Invite Member" to get started.</p>
-                  </div>
-                ) : (
-                  invitations.map((inv, i) => (
-                    <div key={inv.id} className={cn('flex items-center justify-between px-4 py-3', i < invitations.length - 1 && 'border-b border-border/50')}>
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center text-sm font-bold text-muted-foreground">
-                          {inv.email[0].toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-foreground">{inv.email}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Invited {new Date(inv.created_at).toLocaleDateString()}
-                          </p>
-                        </div>
-                      </div>
-                      <span className={cn(
-                        'text-xs font-medium px-2 py-0.5 rounded border',
-                        inv.status === 'accepted' ? 'bg-primary/10 text-primary border-primary/30' :
-                        inv.status === 'expired' ? 'bg-destructive/10 text-destructive-foreground border-destructive/30' :
-                        'bg-yellow-500/10 text-yellow-500 border-yellow-500/30'
-                      )}>
-                        {inv.status === 'pending' ? (
-                          <span className="flex items-center gap-1"><Clock size={10} /> Pending</span>
-                        ) : inv.status}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
           </div>
         )}
 
