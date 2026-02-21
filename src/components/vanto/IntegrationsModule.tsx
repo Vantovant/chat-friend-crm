@@ -1,9 +1,10 @@
 import { cn } from '@/lib/utils';
-import { CheckCircle, XCircle, Chrome, Loader2, Copy, Check, Webhook, X, FlaskConical, Send, AlertTriangle, ExternalLink, Pencil, Save } from 'lucide-react';
+import { CheckCircle, XCircle, Chrome, Loader2, Copy, Check, Webhook, X, FlaskConical, Send, AlertTriangle, ExternalLink, Pencil, Save, ShieldAlert } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
+import { digitsOnly } from '@/lib/phone-utils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type SyncResult = { synced: number; skipped: number; total: number; message?: string; errors?: string[] };
@@ -100,6 +101,7 @@ export function IntegrationsModule({ userId = '' }: { userId?: string }) {
   const [zaziSecretMismatch, setZaziSecretMismatch] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [dataIssues, setDataIssues] = useState<string[] | null>(null);
 
   // ── Load settings ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -147,6 +149,36 @@ export function IntegrationsModule({ userId = '' }: { userId?: string }) {
   const formatTime = (d: Date | null) => d ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Never';
 
   const runPush = async () => {
+    // Pre-push data validation
+    setDataIssues(null);
+    const { data: contacts } = await supabase.from('contacts').select('id, phone_normalized, email, is_deleted').eq('is_deleted', false).limit(500);
+    if (contacts) {
+      const issues: string[] = [];
+      // Check duplicates by phone_normalized
+      const phoneMap = new Map<string, number>();
+      for (const c of contacts) {
+        if ((c as any).phone_normalized) {
+          const key = (c as any).phone_normalized;
+          phoneMap.set(key, (phoneMap.get(key) || 0) + 1);
+        }
+      }
+      const dupGroups = [...phoneMap.values()].filter(v => v > 1).length;
+      if (dupGroups > 0) issues.push(`${dupGroups} duplicate phone group(s) exist`);
+
+      // Missing identity
+      const missing = contacts.filter((c: any) => !c.phone_normalized && !c.email);
+      if (missing.length > 0) issues.push(`${missing.length} contact(s) missing both phone and email`);
+
+      // Short phone numbers
+      const shortPhones = contacts.filter((c: any) => c.phone_normalized && digitsOnly(c.phone_normalized).length < 10);
+      if (shortPhones.length > 0) issues.push(`${shortPhones.length} contact(s) with phone < 10 digits`);
+
+      if (issues.length > 0) {
+        setDataIssues(issues);
+        return;
+      }
+    }
+
     setPushing(true); setLastPushResult(null); setZaziSecretMismatch(false);
     try {
       const { data, error } = await supabase.functions.invoke('push-to-zazi-webhook');
@@ -326,11 +358,24 @@ export function IntegrationsModule({ userId = '' }: { userId?: string }) {
             </div>
           )}
 
+          {dataIssues && (
+            <div className="mb-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3 space-y-1.5">
+              <div className="flex items-center gap-2 mb-1">
+                <ShieldAlert size={14} className="text-destructive shrink-0" />
+                <p className="text-sm font-semibold text-destructive">Data integrity issues — resolve before pushing</p>
+              </div>
+              {dataIssues.map((issue, i) => (
+                <p key={i} className="text-xs text-muted-foreground pl-6">• {issue}</p>
+              ))}
+              <button onClick={() => setDataIssues(null)} className="text-[10px] text-muted-foreground hover:text-foreground underline pl-6 mt-1">Dismiss</button>
+            </div>
+          )}
+
           <button onClick={runPush} disabled={pushing} className={cn('w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all', pushing ? 'bg-primary/10 text-primary border border-primary/30 cursor-not-allowed' : 'vanto-gradient text-primary-foreground hover:opacity-90')}>
             {pushing ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
             {pushing ? 'Pushing to Zazi...' : 'Push Contacts to Zazi'}
           </button>
-          <p className="text-[10px] text-muted-foreground mt-2 text-center">Credentials read from settings above — update them anytime</p>
+          <p className="text-[10px] text-muted-foreground mt-2 text-center">Pre-push validation runs automatically · Credentials read from settings above</p>
         </div>
       </div>
 

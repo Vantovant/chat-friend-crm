@@ -67,9 +67,11 @@ export type Database = {
           avatar_url: string | null
           created_at: string
           created_by: string | null
+          deleted_at: string | null
           email: string | null
           id: string
           interest: Database["public"]["Enums"]["interest_level"]
+          is_deleted: boolean
           lead_type: Database["public"]["Enums"]["lead_type"]
           name: string
           notes: string | null
@@ -87,9 +89,11 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string
           created_by?: string | null
+          deleted_at?: string | null
           email?: string | null
           id?: string
           interest?: Database["public"]["Enums"]["interest_level"]
+          is_deleted?: boolean
           lead_type?: Database["public"]["Enums"]["lead_type"]
           name: string
           notes?: string | null
@@ -107,9 +111,11 @@ export type Database = {
           avatar_url?: string | null
           created_at?: string
           created_by?: string | null
+          deleted_at?: string | null
           email?: string | null
           id?: string
           interest?: Database["public"]["Enums"]["interest_level"]
+          is_deleted?: boolean
           lead_type?: Database["public"]["Enums"]["lead_type"]
           name?: string
           notes?: string | null
