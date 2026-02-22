@@ -136,29 +136,30 @@ Deno.serve(async (req) => {
 
   // ── Upsert logic with precedence ────────────────────────────────────────────
   let existingId: string | null = null;
+  let existingAssignedTo: string | null = null;
 
   // 1) Try find by phone_normalized + created_by
   if (phoneNorm) {
     const { data: found } = await serviceClient
       .from('contacts')
-      .select('id')
+      .select('id, assigned_to')
       .eq('created_by', userId)
       .eq('phone_normalized', phoneNorm)
       .limit(1)
       .maybeSingle();
-    if (found) existingId = found.id;
+    if (found) { existingId = found.id; existingAssignedTo = found.assigned_to; }
   }
 
   // 2) Fallback: find by whatsapp_id + created_by
   if (!existingId && waId) {
     const { data: found } = await serviceClient
       .from('contacts')
-      .select('id')
+      .select('id, assigned_to')
       .eq('created_by', userId)
       .eq('whatsapp_id', waId)
       .limit(1)
       .maybeSingle();
-    if (found) existingId = found.id;
+    if (found) { existingId = found.id; existingAssignedTo = found.assigned_to; }
   }
 
   let data: any = null;
@@ -168,11 +169,17 @@ Deno.serve(async (req) => {
     // UPDATE — never overwrite phone_normalized with waId
     const updatePayload: Record<string, any> = { ...fields };
     if (!phoneNorm) {
-      // If no user phone provided, don't touch phone_normalized
       delete updatePayload.phone_normalized;
       delete updatePayload.phone_raw;
       delete updatePayload.phone;
     }
+    // NEVER overwrite assigned_to if already set to another user
+    if (existingAssignedTo && existingAssignedTo !== userId) {
+      delete updatePayload.assigned_to;
+    }
+    // Don't set assigned_to on update — leave existing assignment
+    delete updatePayload.assigned_to;
+
     const res = await serviceClient
       .from('contacts')
       .update(updatePayload)
@@ -183,7 +190,7 @@ Deno.serve(async (req) => {
     error = res.error;
     console.log('[upsert-whatsapp-contact] Updated existing contact:', existingId);
   } else {
-    // INSERT new contact
+    // INSERT new contact — capturer owns for triage
     const insertPayload = {
       ...fields,
       created_by:  userId,

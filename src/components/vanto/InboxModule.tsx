@@ -3,6 +3,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { temperatureBg, type LeadTemperature } from '@/lib/vanto-data';
 import { Search, Phone, Video, MoreVertical, Send, Bot, Paperclip, Smile, Info, Loader2 } from 'lucide-react';
+import { useProfiles, profileLabel } from '@/hooks/use-profiles';
+import { useCurrentUser } from '@/hooks/use-current-user';
 
 type Contact = {
   id: string;
@@ -14,6 +16,7 @@ type Contact = {
   interest: string;
   tags: string[] | null;
   notes: string | null;
+  assigned_to: string | null;
 };
 
 type Conversation = {
@@ -35,7 +38,12 @@ type Message = {
   created_at: string;
 };
 
+type InboxFilter = 'accessible' | 'mine' | 'unassigned';
+
 export function InboxModule() {
+  const profiles = useProfiles();
+  const currentUser = useCurrentUser();
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
@@ -44,6 +52,7 @@ export function InboxModule() {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [msgLoading, setMsgLoading] = useState(false);
+  const [inboxFilter, setInboxFilter] = useState<InboxFilter>('accessible');
 
   useEffect(() => {
     fetchConversations();
@@ -93,10 +102,14 @@ export function InboxModule() {
     }
   };
 
-  const filtered = conversations.filter(c =>
-    c.contact?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    c.contact?.phone?.includes(searchQuery)
-  );
+  const filtered = conversations.filter(c => {
+    const matchSearch = c.contact?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      c.contact?.phone?.includes(searchQuery);
+    if (!matchSearch) return false;
+    if (inboxFilter === 'mine') return c.contact?.assigned_to === currentUser?.id;
+    if (inboxFilter === 'unassigned') return !c.contact?.assigned_to;
+    return true;
+  });
 
   const totalUnread = conversations.reduce((s, c) => s + c.unread_count, 0);
   const selected = conversations.find(c => c.id === selectedConvId);
@@ -132,6 +145,20 @@ export function InboxModule() {
               className="w-full bg-secondary/60 border border-border rounded-lg pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50 transition-colors"
             />
           </div>
+          <div className="flex gap-1 mt-2">
+            {(['accessible', 'mine', 'unassigned'] as const).map(f => (
+              <button
+                key={f}
+                onClick={() => setInboxFilter(f)}
+                className={cn(
+                  'px-2.5 py-1 rounded-lg text-[10px] font-semibold border transition-colors capitalize',
+                  inboxFilter === f ? 'bg-primary/15 text-primary border-primary/30' : 'text-muted-foreground border-border hover:text-foreground hover:bg-secondary/60'
+                )}
+              >
+                {f === 'accessible' ? 'All' : f === 'mine' ? 'My Leads' : 'Unassigned'}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -149,6 +176,7 @@ export function InboxModule() {
                 active={conv.id === selectedConvId}
                 onClick={() => setSelectedConvId(conv.id)}
                 formatTime={formatTime}
+                profiles={profiles}
               />
             ))
           )}
@@ -252,7 +280,8 @@ export function InboxModule() {
   );
 }
 
-function ConvListItem({ conv, active, onClick, formatTime }: { conv: Conversation; active: boolean; onClick: () => void; formatTime: (s: string | null) => string }) {
+function ConvListItem({ conv, active, onClick, formatTime, profiles }: { conv: Conversation; active: boolean; onClick: () => void; formatTime: (s: string | null) => string; profiles: { id: string; label: string }[] }) {
+  const assignedName = profileLabel(profiles, conv.contact?.assigned_to ?? null);
   return (
     <button
       onClick={onClick}
@@ -275,11 +304,16 @@ function ConvListItem({ conv, active, onClick, formatTime }: { conv: Conversatio
           <span className="text-[10px] text-muted-foreground shrink-0 ml-1">{formatTime(conv.last_message_at)}</span>
         </div>
         <p className="text-xs text-muted-foreground truncate">{conv.last_message || 'No messages yet'}</p>
-        {conv.contact?.temperature && (
-          <span className={cn('mt-1 inline-block px-1.5 py-0.5 rounded text-[9px] font-semibold border', temperatureBg[conv.contact.temperature as LeadTemperature])}>
-            {conv.contact.temperature.toUpperCase()}
+        <div className="flex items-center gap-1.5 mt-1">
+          {conv.contact?.temperature && (
+            <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold border', temperatureBg[conv.contact.temperature as LeadTemperature])}>
+              {conv.contact.temperature.toUpperCase()}
+            </span>
+          )}
+          <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-secondary border border-border text-muted-foreground truncate max-w-[100px]">
+            {assignedName}
           </span>
-        )}
+        </div>
       </div>
     </button>
   );
