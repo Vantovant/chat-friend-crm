@@ -6,6 +6,8 @@ import { normalizePhone, digitsOnly } from '@/lib/phone-utils';
 import { Search, Plus, Filter, Phone, Mail, MoreVertical, UserCheck, Loader2, X, Save, Trash2, AlertTriangle, Sparkles, Merge, Archive, CircleCheck, CircleDot, CircleX, CircleMinus } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { MergeContactsModal, DuplicateMergeModal, type IncomingContact } from './MergeContactsModal';
+import { useProfiles, profileLabel } from '@/hooks/use-profiles';
+import { useCurrentUser } from '@/hooks/use-current-user';
 
 type Contact = {
   id: string;
@@ -66,6 +68,7 @@ const statusConfig: Record<ContactStatus, { icon: typeof CircleCheck; color: str
 };
 
 type FilterMode = 'all' | 'clean' | 'duplicates' | 'archived' | 'missing_phone';
+type OwnerFilter = 'accessible' | 'mine' | 'unassigned' | 'all';
 
 // ── Duplicate detection ────────────────────────────────────────────────────────
 function findDuplicateIds(contacts: Contact[]): Set<string> {
@@ -347,6 +350,7 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted }: {
   onDeleted: (id: string) => void;
 }) {
   const { toast } = useToast();
+  const profiles = useProfiles();
   const [saving, setSaving] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [form, setForm] = useState({
@@ -357,6 +361,7 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted }: {
     temperature: contact.temperature,
     notes:       contact.notes || '',
     tags:        (contact.tags || []).join(', '),
+    assigned_to: contact.assigned_to || '',
   });
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
@@ -368,30 +373,35 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted }: {
     const phoneNorm = normalizePhone(form.phone_raw);
     const tagsArr = form.tags.split(',').map(t => t.trim()).filter(Boolean);
 
-    const { data, error } = await supabase
+    const updatePayload: Record<string, any> = {
+      name:             form.name.trim(),
+      phone_raw:        form.phone_raw.trim() || null,
+      phone_normalized: phoneNorm || null,
+      phone:            phoneNorm || contact.phone,
+      email:            form.email.trim().toLowerCase() || null,
+      lead_type:        form.lead_type as any,
+      temperature:      form.temperature as any,
+      notes:            form.notes.trim() || null,
+      tags:             tagsArr,
+      assigned_to:      form.assigned_to || null,
+      updated_at:       new Date().toISOString(),
+    };
+
+    const { data, error, count } = await supabase
       .from('contacts')
-      .update({
-        name:             form.name.trim(),
-        phone_raw:        form.phone_raw.trim() || null,
-        phone_normalized: phoneNorm || null,
-        phone:            phoneNorm || contact.phone,
-        email:            form.email.trim().toLowerCase() || null,
-        lead_type:        form.lead_type as any,
-        temperature:      form.temperature as any,
-        notes:            form.notes.trim() || null,
-        tags:             tagsArr,
-        updated_at:       new Date().toISOString(),
-      } as any)
+      .update(updatePayload as any)
       .eq('id', contact.id)
-      .select()
-      .single();
+      .select();
 
     setSaving(false);
     if (error) {
       toast({ title: 'Failed to update', description: error.message, variant: 'destructive' });
+    } else if (!data || data.length === 0) {
+      toast({ title: 'Permission denied', description: 'You cannot reassign this contact.', variant: 'destructive' });
+      onClose();
     } else {
       toast({ title: 'Updated', description: form.name });
-      onUpdated(data as Contact);
+      onUpdated(data[0] as Contact);
     }
   };
 
@@ -442,6 +452,13 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted }: {
             </div>
           </div>
           <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Assign To</label>
+            <select value={form.assigned_to} onChange={e => set('assigned_to', e.target.value)} className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50">
+              <option value="">Unassigned</option>
+              {profiles.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
+          </div>
+          <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1">Tags (comma separated)</label>
             <input type="text" value={form.tags} onChange={e => set('tags', e.target.value)} placeholder="e.g. mlm, vip, south-africa" className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 transition-colors" />
           </div>
@@ -484,11 +501,14 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted }: {
 // ── Main Module ────────────────────────────────────────────────────────────────
 export function ContactsModule() {
   const { toast } = useToast();
+  const currentUser = useCurrentUser();
+  const profiles = useProfiles();
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [tempFilter, setTempFilter] = useState<LeadTemperature | 'all'>('all');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
+  const [ownerFilter, setOwnerFilter] = useState<OwnerFilter>('accessible');
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedForMerge, setSelectedForMerge] = useState<Set<string>>(new Set());
@@ -496,6 +516,7 @@ export function ContactsModule() {
   const [cleaning, setCleaning] = useState(false);
   const [cleanSummary, setCleanSummary] = useState<string | null>(null);
   const [dupMerge, setDupMerge] = useState<{ existing: Contact; incoming: IncomingContact } | null>(null);
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
   useEffect(() => { fetchContacts(); }, []);
 
@@ -518,10 +539,14 @@ export function ContactsModule() {
       // Filter mode
       if (filterMode === 'archived' && !c.is_deleted) return false;
       if (filterMode !== 'archived' && filterMode !== 'all' && c.is_deleted) return false;
-      if (filterMode === 'all' && c.is_deleted) return false; // default hides archived
+      if (filterMode === 'all' && c.is_deleted) return false;
       if (filterMode === 'clean' && (dupIds.has(c.id) || (!c.phone_normalized && !c.email))) return false;
       if (filterMode === 'duplicates' && !dupIds.has(c.id)) return false;
       if (filterMode === 'missing_phone' && (c.phone_normalized || c.email)) return false;
+
+      // Owner filter
+      if (ownerFilter === 'mine' && c.assigned_to !== currentUser?.id) return false;
+      if (ownerFilter === 'unassigned' && c.assigned_to !== null) return false;
 
       // Search
       const matchSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -531,7 +556,7 @@ export function ContactsModule() {
       const matchTemp = tempFilter === 'all' || c.temperature === tempFilter;
       return matchSearch && matchTemp;
     });
-  }, [contacts, searchQuery, tempFilter, filterMode, dupIds]);
+  }, [contacts, searchQuery, tempFilter, filterMode, dupIds, ownerFilter, currentUser]);
 
   const activeContacts = contacts.filter(c => !c.is_deleted);
   const hot      = activeContacts.filter(c => c.temperature === 'hot').length;
@@ -669,6 +694,18 @@ export function ContactsModule() {
           <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search contacts..." className="w-full bg-secondary/60 border border-border rounded-lg pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50 transition-colors" />
         </div>
 
+        {/* Owner filter */}
+        <select
+          value={ownerFilter}
+          onChange={e => setOwnerFilter(e.target.value as OwnerFilter)}
+          className="bg-secondary/60 border border-border rounded-lg px-3 py-2 text-xs text-foreground outline-none focus:border-primary/50"
+        >
+          <option value="accessible">Accessible</option>
+          <option value="mine">👤 My Contacts</option>
+          <option value="unassigned">📥 Unassigned</option>
+          {isAdmin && <option value="all">👑 All Contacts</option>}
+        </select>
+
         {/* Status filter */}
         <select
           value={filterMode}
@@ -736,7 +773,7 @@ export function ContactsModule() {
                   <span title="Select for merge">☐</span>
                 </th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider w-8">Status</th>
-                {['Contact', 'Phone', 'Temperature', 'Type', 'Tags', 'Actions'].map(h => (
+                {['Contact', 'Phone', 'Assigned To', 'Temperature', 'Type', 'Tags', 'Actions'].map(h => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -750,6 +787,7 @@ export function ContactsModule() {
                   selected={selectedForMerge.has(contact.id)}
                   onToggleSelect={() => toggleMergeSelect(contact.id)}
                   onClick={() => setSelectedContact(contact)}
+                  profiles={profiles}
                 />
               ))}
             </tbody>
@@ -802,12 +840,13 @@ export function ContactsModule() {
 }
 
 // ── Contact Row ────────────────────────────────────────────────────────────────
-function ContactRow({ contact, status, selected, onToggleSelect, onClick }: {
-  contact: Contact; status: ContactStatus; selected: boolean; onToggleSelect: () => void; onClick: () => void;
+function ContactRow({ contact, status, selected, onToggleSelect, onClick, profiles }: {
+  contact: Contact; status: ContactStatus; selected: boolean; onToggleSelect: () => void; onClick: () => void; profiles: { id: string; label: string }[];
 }) {
   const ph = displayPhone(contact);
   const cfg = statusConfig[status];
   const StatusIcon = cfg.icon;
+  const assignedName = profileLabel(profiles, contact.assigned_to);
 
   return (
     <tr className={cn('border-b border-border/50 hover:bg-secondary/20 transition-colors group cursor-pointer', contact.is_deleted && 'opacity-50')} onClick={onClick}>
@@ -835,6 +874,11 @@ function ContactRow({ contact, status, selected, onToggleSelect, onClick }: {
             <span className="px-1 py-0.5 rounded text-[9px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">{ph.label}</span>
           )}
         </div>
+      </td>
+      <td className="px-4 py-3">
+        <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-medium border', contact.assigned_to ? 'bg-primary/10 text-primary border-primary/30' : 'bg-secondary text-muted-foreground border-border')}>
+          {assignedName}
+        </span>
       </td>
       <td className="px-4 py-3">
         <span className={cn('px-2 py-1 rounded-full text-xs font-semibold border', temperatureBg[contact.temperature])}>
