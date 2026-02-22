@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { User, Bell, Shield, Users, ChevronRight, Mail, Loader2, CheckCircle, X, Clock } from 'lucide-react';
+import { User, Bell, Shield, Users, ChevronRight, Mail, Loader2, CheckCircle, X, Clock, Edit2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -31,8 +31,11 @@ interface Profile {
   phone: string | null;
 }
 
-interface UserRole {
+interface TeamMember {
+  user_id: string;
   role: string;
+  full_name: string | null;
+  email: string | null;
 }
 
 function InviteModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
@@ -124,12 +127,15 @@ export function SettingsModule() {
   const [activeSection, setActiveSection] = useState('profile');
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState(false);
   const [editingField, setEditingField] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
+  const [editingRole, setEditingRole] = useState<string | null>(null);
+  const [savingRole, setSavingRole] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -139,6 +145,7 @@ export function SettingsModule() {
   useEffect(() => {
     if (activeSection === 'team' && userRole === 'super_admin') {
       loadInvitations();
+      loadTeamMembers();
     }
   }, [activeSection, userRole]);
 
@@ -150,7 +157,9 @@ export function SettingsModule() {
   };
 
   const loadRole = async () => {
-    const { data } = await supabase.from('user_roles').select('role').single();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data } = await supabase.from('user_roles').select('role').eq('user_id', user.id).single();
     if (data) setUserRole(data.role);
   };
 
@@ -161,6 +170,26 @@ export function SettingsModule() {
       .order('created_at', { ascending: false })
       .limit(20);
     if (data) setInvitations(data);
+  };
+
+  const loadTeamMembers = async () => {
+    const { data: roles } = await supabase.from('user_roles').select('user_id, role');
+    if (!roles) return;
+    const { data: profiles } = await supabase.from('profiles').select('id, full_name, email');
+    if (!profiles) return;
+    const members: TeamMember[] = roles.map(r => {
+      const p = profiles.find(p => p.id === r.user_id);
+      return { user_id: r.user_id, role: r.role, full_name: p?.full_name ?? null, email: p?.email ?? null };
+    });
+    setTeamMembers(members);
+  };
+
+  const updateMemberRole = async (userId: string, newRole: string) => {
+    setSavingRole(true);
+    await supabase.from('user_roles').update({ role: newRole as any }).eq('user_id', userId);
+    await loadTeamMembers();
+    setSavingRole(false);
+    setEditingRole(null);
   };
 
   const handleInviteSuccess = () => {
@@ -353,6 +382,59 @@ export function SettingsModule() {
                   ))
                 )}
               </div>
+            )}
+
+            {/* Team Members */}
+            {isSuperAdmin && teamMembers.length > 0 && (
+              <>
+                <h3 className="text-base font-bold text-foreground mt-6 mb-4">Team Members</h3>
+                <div className="vanto-card overflow-hidden">
+                  {teamMembers.map((member, i) => (
+                    <div key={member.user_id} className={cn('flex items-center justify-between px-4 py-3', i < teamMembers.length - 1 && 'border-b border-border/50')}>
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center text-sm font-bold text-muted-foreground">
+                          {(member.full_name?.[0] ?? member.email?.[0] ?? '?').toUpperCase()}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-foreground">{member.full_name ?? member.email}</p>
+                          <p className="text-xs text-muted-foreground">{member.email}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {editingRole === member.user_id ? (
+                          <div className="flex items-center gap-2">
+                            <select
+                              defaultValue={member.role}
+                              onChange={e => updateMemberRole(member.user_id, e.target.value)}
+                              disabled={savingRole}
+                              className="bg-secondary/60 border border-border rounded px-2 py-1 text-xs text-foreground outline-none focus:border-primary/60"
+                            >
+                              <option value="agent">Agent</option>
+                              <option value="admin">Admin</option>
+                              <option value="super_admin">Super Admin</option>
+                            </select>
+                            <button onClick={() => setEditingRole(null)} className="text-xs text-muted-foreground hover:text-foreground">
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <span className="text-xs font-medium px-2 py-0.5 rounded border bg-primary/10 text-primary border-primary/30 capitalize">
+                              {member.role.replace('_', ' ')}
+                            </span>
+                            <button
+                              onClick={() => setEditingRole(member.user_id)}
+                              className="text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              <Edit2 size={13} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
           </div>
         )}
