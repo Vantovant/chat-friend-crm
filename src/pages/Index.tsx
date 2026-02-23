@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { AppSidebar } from '@/components/vanto/AppSidebar';
+import { DashboardModule } from '@/components/vanto/DashboardModule';
 import { InboxModule } from '@/components/vanto/InboxModule';
 import { ContactsModule } from '@/components/vanto/ContactsModule';
 import { CRMModule } from '@/components/vanto/CRMModule';
@@ -18,7 +19,7 @@ import { Bot } from 'lucide-react';
 const Index = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeModule, setActiveModule] = useState<Module>('inbox');
+  const [activeModule, setActiveModule] = useState<Module>('dashboard');
 
   useEffect(() => {
     // Set up auth state listener BEFORE getSession
@@ -37,6 +38,7 @@ const Index = () => {
 
   const renderModule = () => {
     switch (activeModule) {
+      case 'dashboard': return <DashboardModule />;
       case 'inbox': return <InboxModule />;
       case 'contacts': return <ContactsModule />;
       case 'crm': return <CRMModule />;

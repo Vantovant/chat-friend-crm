@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import type { Module } from '@/lib/vanto-data';
 import logo from '@/assets/logo.jpg';
 import {
-  MessageSquare, Users, BarChart3, Zap, Bot, GitBranch,
+  LayoutDashboard, MessageSquare, Users, BarChart3, Zap, Bot, GitBranch,
   Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut
 } from 'lucide-react';
 
@@ -16,6 +16,7 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'inbox', label: 'Inbox', icon: MessageSquare, badge: 6 },
   { id: 'contacts', label: 'Contacts', icon: Users },
   { id: 'crm', label: 'CRM', icon: BarChart3 },

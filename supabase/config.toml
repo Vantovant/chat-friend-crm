@@ -39,4 +39,7 @@ verify_jwt = false
 [functions.twilio-whatsapp-status]
 verify_jwt = false
 
+[functions.ai-chat]
+verify_jwt = false
+
 
