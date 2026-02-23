@@ -201,6 +201,32 @@ async function handleSaveContact(payload) {
   }
 }
 
+// ── Load team members (profiles) ───────────────────────────────────────────────
+async function handleLoadTeamMembers() {
+  var session = await getSession();
+  session = await refreshTokenIfNeeded(session);
+
+  if (!session.token) return { success: false, error: 'not_logged_in' };
+
+  try {
+    var url = SUPABASE_URL + '/rest/v1/profiles?select=id,full_name,email&order=full_name.asc';
+    var res = await fetch(url, {
+      headers: {
+        'apikey':        SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + session.token,
+        'Content-Type':  'application/json',
+      },
+    });
+
+    if (!res.ok) return { success: false, error: 'Load failed [' + res.status + ']' };
+
+    var rows = await res.json();
+    return { success: true, members: rows || [] };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
 // ── Load contact by phone_normalized or whatsapp_id ────────────────────────────
 async function handleLoadContact(phone) {
   var session = await getSession();
@@ -299,6 +325,11 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
 
   if (msg.type === 'VANTO_LOAD_CONTACT') {
     handleLoadContact(msg.phone).then(sendResponse);
+    return true;
+  }
+
+  if (msg.type === 'VANTO_LOAD_TEAM') {
+    handleLoadTeamMembers().then(sendResponse);
     return true;
   }
 

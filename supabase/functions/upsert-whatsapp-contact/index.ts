@@ -90,13 +90,14 @@ Deno.serve(async (req) => {
 
   const {
     name,
-    phone,          // user-entered phone string (e.g. "+27 84 247 5415")
-    whatsapp_id,    // WA internal number (e.g. "130477532930136")
+    phone,
+    whatsapp_id,
     email,
     lead_type,
     temperature,
     tags,
     notes,
+    assigned_to,
   } = body;
 
   // ── Validate ────────────────────────────────────────────────────────────────
@@ -166,19 +167,19 @@ Deno.serve(async (req) => {
   let error: any = null;
 
   if (existingId) {
-    // UPDATE — never overwrite phone_normalized with waId
+    // UPDATE
     const updatePayload: Record<string, any> = { ...fields };
     if (!phoneNorm) {
       delete updatePayload.phone_normalized;
       delete updatePayload.phone_raw;
       delete updatePayload.phone;
     }
-    // NEVER overwrite assigned_to if already set to another user
-    if (existingAssignedTo && existingAssignedTo !== userId) {
+    // Handle assigned_to: if payload explicitly provides it, use it; otherwise leave existing
+    if (assigned_to !== undefined && assigned_to !== null) {
+      updatePayload.assigned_to = String(assigned_to).trim() || null;
+    } else {
       delete updatePayload.assigned_to;
     }
-    // Don't set assigned_to on update — leave existing assignment
-    delete updatePayload.assigned_to;
 
     const res = await serviceClient
       .from('contacts')
@@ -190,11 +191,11 @@ Deno.serve(async (req) => {
     error = res.error;
     console.log('[upsert-whatsapp-contact] Updated existing contact:', existingId);
   } else {
-    // INSERT new contact — capturer owns for triage
+    // INSERT new contact
     const insertPayload = {
       ...fields,
       created_by:  userId,
-      assigned_to: userId,
+      assigned_to: (assigned_to ? String(assigned_to).trim() : null) || userId,
     };
     const res = await serviceClient
       .from('contacts')
