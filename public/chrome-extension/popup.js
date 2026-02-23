@@ -1,5 +1,5 @@
 /**
- * Vanto CRM — Popup UI Script v2.0
+ * Vanto CRM — Popup UI Script v2.1
  * MV3 compliant: NO inline scripts. All logic here.
  * Auth is owned by background.js service worker.
  * Popup only handles UI and delegates actions via chrome.runtime.sendMessage.
@@ -10,12 +10,21 @@
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 var viewLogin    = document.getElementById('view-login');
 var viewLoggedin = document.getElementById('view-loggedin');
+var viewForgot   = document.getElementById('view-forgot');
 var emailInput   = document.getElementById('input-email');
 var passInput    = document.getElementById('input-password');
 var loginBtn     = document.getElementById('btn-login');
 var logoutBtn    = document.getElementById('btn-logout');
 var errorEl      = document.getElementById('login-error');
 var displayEmail = document.getElementById('display-email');
+
+// Forgot password refs
+var forgotBtn       = document.getElementById('btn-forgot');
+var backLoginBtn    = document.getElementById('btn-back-login');
+var forgotEmailInput = document.getElementById('input-forgot-email');
+var sendResetBtn    = document.getElementById('btn-send-reset');
+var forgotError     = document.getElementById('forgot-error');
+var forgotSuccess   = document.getElementById('forgot-success');
 
 // ── UI helpers ─────────────────────────────────────────────────────────────────
 function showError(msg) {
@@ -35,22 +44,35 @@ function setLoginBtnState(loading) {
 
 function showLoggedInView(email) {
   viewLogin.style.display    = 'none';
+  viewForgot.style.display   = 'none';
   viewLoggedin.style.display = 'flex';
   displayEmail.textContent   = email || '—';
 }
 
 function showLoginView() {
   viewLoggedin.style.display = 'none';
+  viewForgot.style.display   = 'none';
   viewLogin.style.display    = 'flex';
   setLoginBtnState(false);
   passInput.value = '';
+}
+
+function showForgotView() {
+  viewLogin.style.display    = 'none';
+  viewLoggedin.style.display = 'none';
+  viewForgot.style.display   = 'flex';
+  forgotError.style.display  = 'none';
+  forgotSuccess.style.display = 'none';
+  // Pre-fill email from login form
+  if (emailInput.value) {
+    forgotEmailInput.value = emailInput.value;
+  }
 }
 
 // ── On load: ask background for session state ──────────────────────────────────
 console.log('[Vanto Popup] Initialising');
 
 chrome.runtime.sendMessage({ type: 'VANTO_GET_SESSION' }, function(response) {
-  // Swallow connection errors (background may be sleeping on first open)
   if (chrome.runtime.lastError) {
     console.warn('[Vanto Popup] Background not ready:', chrome.runtime.lastError.message);
     return;
@@ -59,7 +81,6 @@ chrome.runtime.sendMessage({ type: 'VANTO_GET_SESSION' }, function(response) {
   if (response && response.token) {
     showLoggedInView(response.email);
   }
-  // else: login view is already visible by CSS default
 });
 
 // ── Login handler ──────────────────────────────────────────────────────────────
@@ -77,7 +98,6 @@ function doLogin() {
 
   setLoginBtnState(true);
 
-  // Delegate auth entirely to background service worker
   chrome.runtime.sendMessage(
     { type: 'VANTO_LOGIN', email: email, password: password },
     function(response) {
@@ -113,9 +133,47 @@ function doLogout() {
   });
 }
 
-// ── Event listeners (attached after DOM ready) ─────────────────────────────────
-document.addEventListener('DOMContentLoaded', function() {
+// ── Forgot password handler ────────────────────────────────────────────────────
+function doSendReset() {
+  var email = (forgotEmailInput.value || '').trim();
+  if (!email) {
+    forgotError.textContent   = 'Please enter your email.';
+    forgotError.style.display = 'block';
+    return;
+  }
+
+  forgotError.style.display   = 'none';
+  forgotSuccess.style.display = 'none';
+  sendResetBtn.disabled       = true;
+  sendResetBtn.textContent    = 'Sending…';
+
+  chrome.runtime.sendMessage(
+    { type: 'VANTO_RESET_PASSWORD', email: email },
+    function(response) {
+      sendResetBtn.disabled    = false;
+      sendResetBtn.textContent = 'Send Reset Link';
+
+      if (chrome.runtime.lastError) {
+        forgotError.textContent   = 'Extension error — try again.';
+        forgotError.style.display = 'block';
+        return;
+      }
+
+      if (response && response.success) {
+        forgotSuccess.style.display = 'block';
+        forgotError.style.display   = 'none';
+      } else {
+        forgotError.textContent   = (response && response.error) || 'Failed to send reset link.';
+        forgotError.style.display = 'block';
+      }
+    }
+  );
+}
+
+// ── Event listeners ────────────────────────────────────────────────────────────
+function attachListeners() {
   loginBtn.addEventListener('click', doLogin);
+  logoutBtn.addEventListener('click', doLogout);
 
   emailInput.addEventListener('keydown', function(e) {
     if (e.key === 'Enter') doLogin();
@@ -124,17 +182,15 @@ document.addEventListener('DOMContentLoaded', function() {
     if (e.key === 'Enter') doLogin();
   });
 
-  logoutBtn.addEventListener('click', doLogout);
-});
+  forgotBtn.addEventListener('click', showForgotView);
+  backLoginBtn.addEventListener('click', showLoginView);
+  sendResetBtn.addEventListener('click', doSendReset);
+  forgotEmailInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') doSendReset();
+  });
+}
 
-// Also attach immediately in case DOMContentLoaded already fired
+document.addEventListener('DOMContentLoaded', attachListeners);
 if (document.readyState !== 'loading') {
-  loginBtn.addEventListener('click', doLogin);
-  emailInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') doLogin();
-  });
-  passInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') doLogin();
-  });
-  logoutBtn.addEventListener('click', doLogout);
+  attachListeners();
 }

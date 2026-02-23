@@ -293,6 +293,31 @@ function notifyWhatsAppTabs(message) {
   }
 }
 
+// ── Password reset ─────────────────────────────────────────────────────────────
+async function handleResetPassword(email) {
+  console.log('[Vanto BG] Password reset for:', email);
+  try {
+    var res = await fetch(SUPABASE_URL + '/auth/v1/recover', {
+      method: 'POST',
+      headers: {
+        'apikey':       SUPABASE_ANON_KEY,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: email,
+        gotrue_meta_security: {},
+      }),
+    });
+    if (!res.ok) {
+      var data = await res.json();
+      return { success: false, error: data.msg || data.error_description || 'Reset failed' };
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
 // ── Message router ─────────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
   if (!msg || !msg.type) return false;
@@ -333,7 +358,12 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
     return true;
   }
 
+  if (msg.type === 'VANTO_RESET_PASSWORD') {
+    handleResetPassword(msg.email).then(sendResponse);
+    return true;
+  }
+
   return false;
 });
 
-console.log('[Vanto BG] Service worker started v3.0');
+console.log('[Vanto BG] Service worker started v3.1');
