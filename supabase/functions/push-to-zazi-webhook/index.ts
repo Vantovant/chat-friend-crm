@@ -26,9 +26,10 @@ Deno.serve(async (req) => {
   );
 
   const token = authHeader.replace('Bearer ', '');
-  const { data: claimsData, error: claimsError } = await localSupabase.auth.getClaims(token);
-  if (claimsError || !claimsData?.claims) return jsonRes({ error: 'Unauthorized' }, 401);
-  const userId = claimsData.claims.sub as string;
+  const { data: userData, error: userError } = await localSupabase.auth.getUser(token);
+  if (userError || !userData?.user) return jsonRes({ error: 'Unauthorized' }, 401);
+  const userId = userData.user.id;
+  const userEmail = userData.user.email;
 
   // ── 2. Load Zazi credentials — prefer DB settings, fallback to env ─────
   const adminSupabase = createClient(
@@ -88,6 +89,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         action: 'sync_contacts',
         user_id: userId,
+        email: userEmail,
         contacts: mapped,
       }),
     });
