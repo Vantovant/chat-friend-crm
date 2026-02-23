@@ -50,13 +50,25 @@ function digitsOnly(raw: string): string {
   return (raw || '').replace(/\D/g, '');
 }
 
-/** Normalize SA phone to E.164 digits */
-function normalizePhone(raw: string): string {
-  const d = digitsOnly(raw);
+/** Strip whatsapp: prefix, keep + */
+function stripWA(raw: string): string {
+  return (raw || '').replace(/^whatsapp:/i, '').trim();
+}
+
+/** Normalize to +E.164 */
+function toE164(raw: string): string {
+  const cleaned = stripWA(raw);
+  const d = digitsOnly(cleaned);
   if (!d) return '';
-  if (d.startsWith('0') && (d.length === 10 || d.length === 11)) return '27' + d.slice(1);
-  if (d.startsWith('27') && (d.length === 11 || d.length === 12)) return d;
-  return d;
+  if (d.startsWith('0') && (d.length === 10 || d.length === 11)) return '+27' + d.slice(1);
+  if (d.startsWith('27') && (d.length === 11 || d.length === 12)) return '+' + d;
+  return '+' + d;
+}
+
+/** Normalize to digits for DB matching */
+function normalizePhone(raw: string): string {
+  const e164 = toE164(raw);
+  return e164; // Store as +E.164
 }
 
 Deno.serve(async (req) => {
@@ -90,14 +102,17 @@ Deno.serve(async (req) => {
   const messageSid = params['MessageSid'] || '';
   const profileName = params['ProfileName'] || '';
 
-  // Extract phone from "whatsapp:+27841234567"
-  const phoneE164 = from.replace('whatsapp:', '').replace('+', '');
-  const phoneNorm = normalizePhone(phoneE164);
+  // Extract phone — strip whatsapp: and normalize to +E.164
+  const phoneE164 = toE164(from);
+  const phoneNorm = phoneE164; // Now stored as +E.164
 
   if (!phoneNorm) {
     console.error('[twilio-inbound] No phone in From:', from);
     return jsonRes({ error: 'No phone number' }, 400);
   }
+
+  // Also compute digits-only for legacy matching
+  const phoneDigits = digitsOnly(phoneE164);
 
   console.log('[twilio-inbound] Inbound from', phoneNorm, '| SID:', messageSid);
 
@@ -112,7 +127,7 @@ Deno.serve(async (req) => {
     .from('contacts')
     .select('id')
     .eq('is_deleted', false)
-    .or(`phone_normalized.eq.${phoneNorm},whatsapp_id.eq.${phoneE164}`)
+    .or(`phone_normalized.eq.${phoneNorm},phone_normalized.eq.${phoneDigits},whatsapp_id.eq.${phoneDigits}`)
     .limit(1)
     .maybeSingle();
 
@@ -122,11 +137,11 @@ Deno.serve(async (req) => {
     const { data: created, error: createErr } = await svc
       .from('contacts')
       .insert({
-        name: profileName || `+${phoneE164}`,
-        phone: phoneE164,
+        name: profileName || phoneE164,
+        phone: phoneDigits,
         phone_normalized: phoneNorm,
-        phone_raw: `+${phoneE164}`,
-        whatsapp_id: phoneE164,
+        phone_raw: phoneE164,
+        whatsapp_id: phoneDigits,
       })
       .select('id')
       .single();

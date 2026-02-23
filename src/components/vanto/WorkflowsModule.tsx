@@ -21,6 +21,11 @@ type Workflow = {
 
 const TRIGGER_TYPES = [
   { value: 'lead_type_changed', label: 'Lead Type Changed' },
+  { value: 'lead_type_to_prospect', label: 'Lead → Prospect' },
+  { value: 'lead_type_to_registered', label: 'Lead → Registered_Nopurchase' },
+  { value: 'lead_type_to_buyer', label: 'Lead → Purchase_Nostatus' },
+  { value: 'lead_type_to_vip', label: 'Lead → Purchase_Status' },
+  { value: 'lead_type_to_expired', label: 'Lead → Expired' },
   { value: 'stage_changed', label: 'Pipeline Stage Changed' },
   { value: 'inbound_message', label: 'Inbound Message Received' },
   { value: 'manual', label: 'Manual Trigger' },

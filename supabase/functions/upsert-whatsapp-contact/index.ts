@@ -23,30 +23,31 @@ function digitsOnly(raw: string): string {
   return (raw || '').replace(/\D/g, '');
 }
 
-/**
- * Normalize to SA E.164-ish digits:
- * - Leading 0 + 9 more digits (10 total)  → replace 0 with 27  (e.g. 0841234567 → 27841234567)
- * - Leading 0 + 10 more digits (11 total) → replace 0 with 27  (e.g. 08412345678 → 2784234567 — keep 11)
- * - Already starts with 27 and is 11-12 digits → keep
- * - Otherwise: keep digits as-is
- */
-function normalizePhone(raw: string): string {
-  const d = digitsOnly(raw);
-  if (!d) return '';
-  if (d.startsWith('0') && (d.length === 10 || d.length === 11)) {
-    return '27' + d.slice(1);
-  }
-  if (d.startsWith('27') && (d.length === 11 || d.length === 12)) {
-    return d;
-  }
-  return d;
+/** Strip whatsapp: prefix */
+function stripWA(raw: string): string {
+  return (raw || '').replace(/^whatsapp:/i, '').trim();
 }
 
-function mapLeadType(val: string): 'prospect' | 'registered' | 'buyer' | 'vip' {
+/** Normalize to +E.164 */
+function toE164(raw: string): string {
+  const cleaned = stripWA(raw);
+  const d = digitsOnly(cleaned);
+  if (!d) return '';
+  if (d.startsWith('0') && (d.length === 10 || d.length === 11)) return '+27' + d.slice(1);
+  if (d.startsWith('27') && (d.length === 11 || d.length === 12)) return '+' + d;
+  return '+' + d;
+}
+
+function normalizePhone(raw: string): string {
+  return toE164(raw);
+}
+
+function mapLeadType(val: string): 'prospect' | 'registered' | 'buyer' | 'vip' | 'expired' {
   const v = (val || '').toLowerCase();
-  if (v === 'registered') return 'registered';
-  if (v === 'buyer')      return 'buyer';
-  if (v === 'vip')        return 'vip';
+  if (v === 'registered' || v === 'registered_nopurchase') return 'registered';
+  if (v === 'buyer' || v === 'purchase_nostatus') return 'buyer';
+  if (v === 'vip' || v === 'purchase_status') return 'vip';
+  if (v === 'expired') return 'expired';
   return 'prospect';
 }
 

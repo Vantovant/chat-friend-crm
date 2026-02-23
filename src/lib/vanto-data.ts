@@ -3,15 +3,25 @@
 export type Module = 'dashboard' | 'inbox' | 'contacts' | 'crm' | 'automations' | 'ai-agent' | 'workflows' | 'integrations' | 'api-console' | 'settings';
 
 export type LeadTemperature = 'hot' | 'warm' | 'cold';
-export type LeadType = 'prospect' | 'registered' | 'buyer' | 'vip';
+export type LeadType = 'prospect' | 'registered' | 'buyer' | 'vip' | 'expired';
 export type InterestLevel = 'high' | 'medium' | 'low';
+
+/** Canonical 5 lead types with MLM labels */
+export const LEAD_TYPES: { value: LeadType; label: string }[] = [
+  { value: 'prospect', label: 'Prospect' },
+  { value: 'registered', label: 'Registered_Nopurchase' },
+  { value: 'buyer', label: 'Purchase_Nostatus' },
+  { value: 'vip', label: 'Purchase_Status' },
+  { value: 'expired', label: 'Expired' },
+];
 
 /** Display names mapping for lead types */
 export const leadTypeLabels: Record<LeadType, string> = {
   prospect: 'Prospect',
-  registered: 'Registered',
-  buyer: 'Buyer',
-  vip: 'VIP',
+  registered: 'Registered_Nopurchase',
+  buyer: 'Purchase_Nostatus',
+  vip: 'Purchase_Status',
+  expired: 'Expired',
 };
 
 export const leadTypeBg: Record<LeadType, string> = {
@@ -19,6 +29,7 @@ export const leadTypeBg: Record<LeadType, string> = {
   registered: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
   buyer: 'bg-primary/15 text-primary border-primary/30',
   vip: 'bg-violet-500/15 text-violet-400 border-violet-500/30',
+  expired: 'bg-red-500/15 text-red-400 border-red-500/30',
 };
 
 export const temperatureColors: Record<LeadTemperature, string> = {

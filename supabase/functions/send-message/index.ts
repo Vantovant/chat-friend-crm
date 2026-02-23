@@ -1,7 +1,8 @@
 /**
- * Vanto CRM — send-message Edge Function v2 (Phase 3)
+ * Vanto CRM — send-message Edge Function v3
  * Inserts outbound message + sends via Twilio WhatsApp API.
  * Enforces 24h customer care window. Updates conversation metadata.
+ * Returns structured errors from Twilio.
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -17,11 +18,21 @@ function jsonRes(body: unknown, status = 200) {
   });
 }
 
-function normalizeToE164(raw: string): string {
-  const d = (raw || '').replace(/\D/g, '');
+/** Strip whatsapp: prefix */
+function stripWA(raw: string): string {
+  return (raw || '').replace(/^whatsapp:/i, '').trim();
+}
+
+/** Normalize to +E.164 */
+function toE164(raw: string): string {
+  const cleaned = stripWA(raw);
+  const hasPlus = cleaned.startsWith('+');
+  const d = (cleaned || '').replace(/\D/g, '');
   if (!d) return '';
-  if (d.startsWith('0') && (d.length === 10 || d.length === 11)) return '27' + d.slice(1);
-  return d;
+  // SA normalization
+  if (d.startsWith('0') && (d.length === 10 || d.length === 11)) return '+27' + d.slice(1);
+  if (d.startsWith('27') && (d.length === 11 || d.length === 12)) return '+' + d;
+  return '+' + d;
 }
 
 Deno.serve(async (req) => {
@@ -32,7 +43,7 @@ Deno.serve(async (req) => {
   // ── Verify JWT ──
   const authHeader = req.headers.get('Authorization') || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-  if (!token) return jsonRes({ error: 'Unauthorized — no token' }, 401);
+  if (!token) return jsonRes({ ok: false, code: 401, message: 'Unauthorized — no token' }, 401);
 
   const anonClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
@@ -42,18 +53,18 @@ Deno.serve(async (req) => {
 
   const { data: userData, error: userError } = await anonClient.auth.getUser(token);
   if (userError || !userData?.user) {
-    return jsonRes({ error: 'Unauthorized — invalid token' }, 401);
+    return jsonRes({ ok: false, code: 401, message: 'Unauthorized — invalid token' }, 401);
   }
   const userId = userData.user.id;
 
   // ── Parse body ──
   let body: any;
   try { body = await req.json(); }
-  catch { return jsonRes({ error: 'Invalid JSON body' }, 400); }
+  catch { return jsonRes({ ok: false, code: 400, message: 'Invalid JSON body' }, 400); }
 
   const { conversation_id, content, message_type } = body;
-  if (!conversation_id) return jsonRes({ error: 'conversation_id is required' }, 400);
-  if (!content || !String(content).trim()) return jsonRes({ error: 'content is required' }, 400);
+  if (!conversation_id) return jsonRes({ ok: false, code: 400, message: 'conversation_id is required' }, 400);
+  if (!content || !String(content).trim()) return jsonRes({ ok: false, code: 400, message: 'content is required' }, 400);
 
   const serviceClient = createClient(
     Deno.env.get('SUPABASE_URL')!,
@@ -68,7 +79,7 @@ Deno.serve(async (req) => {
     .maybeSingle();
 
   if (convErr || !conv) {
-    return jsonRes({ error: 'Conversation not found' }, 404);
+    return jsonRes({ ok: false, code: 404, message: 'Conversation not found' }, 404);
   }
 
   // Load contact phone
@@ -79,13 +90,14 @@ Deno.serve(async (req) => {
     .maybeSingle();
 
   if (!contact) {
-    return jsonRes({ error: 'Contact not found' }, 404);
+    return jsonRes({ ok: false, code: 404, message: 'Contact not found' }, 404);
   }
 
-  // Determine E.164 phone for Twilio
-  const phoneE164 = contact.phone_normalized || normalizeToE164(contact.phone || contact.whatsapp_id || '');
+  // Determine E.164 phone for Twilio — always +E.164
+  const rawPhone = contact.phone_normalized || contact.phone || contact.whatsapp_id || '';
+  const phoneE164 = toE164(rawPhone);
   if (!phoneE164) {
-    return jsonRes({ error: 'Contact has no phone number' }, 400);
+    return jsonRes({ ok: false, code: 400, message: 'Contact has no valid phone number' }, 400);
   }
 
   // ── Check 24h window ──
@@ -96,6 +108,8 @@ Deno.serve(async (req) => {
 
   if (!withinWindow) {
     return jsonRes({
+      ok: false,
+      code: 422,
       error: 'template_required',
       message: '24-hour customer care window has expired. A pre-approved template message is required.',
     }, 422);
@@ -119,22 +133,28 @@ Deno.serve(async (req) => {
 
   if (msgErr) {
     console.error('[send-message] Insert error:', msgErr.message);
-    return jsonRes({ error: msgErr.message }, 500);
+    return jsonRes({ ok: false, code: 500, message: msgErr.message }, 500);
   }
 
   // ── Send via Twilio ──
   const twilioSid = Deno.env.get('TWILIO_ACCOUNT_SID')!;
   const twilioAuth = Deno.env.get('TWILIO_AUTH_TOKEN')!;
-  const twilioFrom = Deno.env.get('TWILIO_WHATSAPP_FROM')!;
+  const twilioFromRaw = Deno.env.get('TWILIO_WHATSAPP_FROM') || '+14155238886';
+  // Always format From as whatsapp:+E164
+  const twilioFrom = `whatsapp:${toE164(twilioFromRaw)}`;
+  const twilioTo = `whatsapp:${phoneE164}`;
+  
   const statusCallbackUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/twilio-whatsapp-status`;
 
   const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`;
   const twilioBody = new URLSearchParams({
-    From: `whatsapp:+${twilioFrom.replace(/\D/g, '')}`,
-    To: `whatsapp:+${phoneE164}`,
+    From: twilioFrom,
+    To: twilioTo,
     Body: trimmed,
     StatusCallback: statusCallbackUrl,
   });
+
+  console.log('[send-message] Sending:', { From: twilioFrom, To: twilioTo });
 
   try {
     const twilioRes = await fetch(twilioUrl, {
@@ -157,9 +177,10 @@ Deno.serve(async (req) => {
       }).eq('id', msg.id);
 
       return jsonRes({
-        success: false,
-        error: twilioData.message || 'Twilio send failed',
-        message: msg,
+        ok: false,
+        code: twilioData.code || twilioRes.status,
+        message: twilioData.message || 'Twilio send failed',
+        more_info: twilioData.more_info || null,
       }, 502);
     }
 
@@ -176,6 +197,12 @@ Deno.serve(async (req) => {
       status_raw: 'failed',
       error: e.message,
     }).eq('id', msg.id);
+
+    return jsonRes({
+      ok: false,
+      code: 503,
+      message: e.message || 'Network error reaching Twilio',
+    }, 503);
   }
 
   // ── Update conversation metadata ──
@@ -187,5 +214,5 @@ Deno.serve(async (req) => {
   }).eq('id', conversation_id);
 
   console.log('[send-message] Sent by', userId, 'in conv', conversation_id);
-  return jsonRes({ success: true, message: msg });
+  return jsonRes({ ok: true, success: true, message: msg });
 });

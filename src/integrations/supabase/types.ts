@@ -630,7 +630,7 @@ export type Database = {
       comm_status: "active" | "closed" | "pending"
       interest_level: "high" | "medium" | "low"
       lead_temperature: "hot" | "warm" | "cold"
-      lead_type: "prospect" | "registered" | "buyer" | "vip"
+      lead_type: "prospect" | "registered" | "buyer" | "vip" | "expired"
       message_status: "sent" | "delivered" | "read"
       message_type: "text" | "image" | "ai"
       user_role: "agent" | "admin" | "super_admin"
@@ -764,7 +764,7 @@ export const Constants = {
       comm_status: ["active", "closed", "pending"],
       interest_level: ["high", "medium", "low"],
       lead_temperature: ["hot", "warm", "cold"],
-      lead_type: ["prospect", "registered", "buyer", "vip"],
+      lead_type: ["prospect", "registered", "buyer", "vip", "expired"],
       message_status: ["sent", "delivered", "read"],
       message_type: ["text", "image", "ai"],
       user_role: ["agent", "admin", "super_admin"],
