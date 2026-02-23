@@ -64,6 +64,41 @@ export type Database = {
           },
         ]
       }
+      contact_activity: {
+        Row: {
+          contact_id: string
+          created_at: string
+          id: string
+          metadata: Json | null
+          performed_by: string
+          type: string
+        }
+        Insert: {
+          contact_id: string
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          performed_by: string
+          type: string
+        }
+        Update: {
+          contact_id?: string
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          performed_by?: string
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_activity_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contacts: {
         Row: {
           assigned_to: string | null
