@@ -4,12 +4,16 @@ import { cn } from '@/lib/utils';
 import { temperatureBg, type LeadTemperature } from '@/lib/vanto-data';
 import {
   Search, Phone, Video, MoreVertical, Send, Bot,
-  Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare,
+  Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare, AlertTriangle,
 } from 'lucide-react';
 import { useProfiles, profileLabel, type ProfileOption } from '@/hooks/use-profiles';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/hooks/use-toast';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 
 /* ── Types ── */
 type Contact = {
@@ -42,6 +46,8 @@ type Message = {
   is_outbound: boolean;
   message_type: string;
   status: string | null;
+  status_raw: string | null;
+  error: string | null;
   created_at: string;
   sent_by: string | null;
 };
@@ -66,6 +72,7 @@ export function InboxModule() {
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>('accessible');
   const [reassigning, setReassigning] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
+  const [templateModalOpen, setTemplateModalOpen] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -107,8 +114,17 @@ export function InboxModule() {
 
   /* ── Load messages on selection ── */
   useEffect(() => {
-    if (selectedConvId) fetchMessages(selectedConvId);
-    else setMessages([]);
+    if (selectedConvId) {
+      fetchMessages(selectedConvId);
+      // Reset unread count when opening a conversation
+      supabase.from('conversations').update({ unread_count: 0 }).eq('id', selectedConvId).then(() => {
+        setConversations(prev => prev.map(c =>
+          c.id === selectedConvId ? { ...c, unread_count: 0 } : c
+        ));
+      });
+    } else {
+      setMessages([]);
+    }
   }, [selectedConvId, fetchMessages]);
 
   /* ── Realtime: new messages ── */
@@ -120,15 +136,13 @@ export function InboxModule() {
         { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
           const newMsg = payload.new as Message;
-          // If it's the selected conversation, append the message
           if (newMsg.conversation_id === selectedConvId) {
             setMessages(prev => {
               if (prev.some(m => m.id === newMsg.id)) return prev;
-              return [...prev, newMsg];
+              return [...prev, { ...newMsg, status_raw: newMsg.status_raw ?? null, error: newMsg.error ?? null }];
             });
             setTimeout(scrollToBottom, 100);
           }
-          // Update conversation list preview
           setConversations(prev =>
             prev.map(c =>
               c.id === newMsg.conversation_id
@@ -151,9 +165,22 @@ export function InboxModule() {
       )
       .on(
         'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'messages' },
+        (payload) => {
+          const updated = payload.new as Message;
+          // Update message status in place (delivery receipts)
+          setMessages(prev =>
+            prev.map(m => m.id === updated.id
+              ? { ...m, status: updated.status, status_raw: updated.status_raw ?? null, error: updated.error ?? null }
+              : m
+            )
+          );
+        }
+      )
+      .on(
+        'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'conversations' },
         () => {
-          // New conversation created externally — refetch
           fetchConversations();
         }
       )
@@ -178,6 +205,8 @@ export function InboxModule() {
       is_outbound: true,
       message_type: 'text',
       status: 'sent',
+      status_raw: null,
+      error: null,
       created_at: new Date().toISOString(),
       sent_by: currentUser?.id ?? null,
     };
@@ -198,18 +227,22 @@ export function InboxModule() {
     });
 
     if (error || !data?.success) {
+      // Check for template_required (24h window expired)
+      if (data?.error === 'template_required') {
+        setTemplateModalOpen(true);
+      }
       // Rollback optimistic message
       setMessages(prev => prev.filter(m => m.id !== tempId));
       toast({
         title: 'Failed to send message',
-        description: error?.message || data?.error || 'Unknown error',
+        description: data?.message || error?.message || data?.error || 'Unknown error',
         variant: 'destructive',
       });
     } else {
       // Replace temp with real message (realtime might also push it)
       const real = data.message;
       setMessages(prev =>
-        prev.map(m => m.id === tempId ? { ...real } : m)
+        prev.map(m => m.id === tempId ? { ...real, status_raw: real.status_raw ?? null, error: real.error ?? null } : m)
           .filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i)
       );
     }
@@ -445,9 +478,19 @@ export function InboxModule() {
                           <span className="text-[10px] text-muted-foreground">
                             {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
-                          {msg.is_outbound && msg.status === 'read' && <span className="text-[10px] text-primary">✓✓</span>}
-                          {msg.is_outbound && msg.status === 'delivered' && <span className="text-[10px] text-muted-foreground">✓✓</span>}
-                          {msg.is_outbound && msg.status === 'sent' && <span className="text-[10px] text-muted-foreground">✓</span>}
+                          {msg.is_outbound && (msg.status_raw === 'failed' || msg.status_raw === 'undelivered') && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="flex items-center gap-0.5 text-[10px] text-destructive">
+                                  <AlertTriangle size={10} /> Not delivered
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent><p>{msg.error || 'Delivery failed'}</p></TooltipContent>
+                            </Tooltip>
+                          )}
+                          {msg.is_outbound && msg.status === 'read' && !(msg.status_raw === 'failed' || msg.status_raw === 'undelivered') && <span className="text-[10px] text-primary">✓✓</span>}
+                          {msg.is_outbound && msg.status === 'delivered' && !(msg.status_raw === 'failed' || msg.status_raw === 'undelivered') && <span className="text-[10px] text-muted-foreground">✓✓</span>}
+                          {msg.is_outbound && msg.status === 'sent' && !(msg.status_raw === 'failed' || msg.status_raw === 'undelivered') && <span className="text-[10px] text-muted-foreground">✓</span>}
                         </div>
                       </div>
                     </div>
@@ -514,6 +557,34 @@ export function InboxModule() {
             />
           </div>
         )}
+
+        {/* Template Required Modal */}
+        <Dialog open={templateModalOpen} onOpenChange={setTemplateModalOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertTriangle size={18} className="text-amber-500" />
+                24-Hour Window Expired
+              </DialogTitle>
+              <DialogDescription>
+                WhatsApp requires that freeform messages can only be sent within 24 hours of the customer's last message. 
+                To re-engage this contact, you must use a pre-approved message template.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="p-3 rounded-lg bg-secondary/60 border border-border text-sm text-muted-foreground">
+              <p className="font-medium text-foreground mb-1">How to proceed:</p>
+              <ol className="list-decimal list-inside space-y-1">
+                <li>Go to your Twilio Console → Messaging → Content Templates</li>
+                <li>Select or create an approved template</li>
+                <li>Send the template via Twilio Console or API</li>
+                <li>Once the customer replies, you can send freeform messages again</li>
+              </ol>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setTemplateModalOpen(false)}>Close</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </TooltipProvider>
   );

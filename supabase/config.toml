@@ -33,4 +33,10 @@ verify_jwt = false
 [functions.send-message]
 verify_jwt = false
 
+[functions.twilio-whatsapp-inbound]
+verify_jwt = false
+
+[functions.twilio-whatsapp-status]
+verify_jwt = false
+
 
