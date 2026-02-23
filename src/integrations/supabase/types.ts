@@ -474,6 +474,39 @@ export type Database = {
         }
         Relationships: []
       }
+      user_ai_settings: {
+        Row: {
+          api_key_encrypted: string | null
+          created_at: string
+          is_enabled: boolean
+          key_last4: string | null
+          model: string | null
+          provider: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          api_key_encrypted?: string | null
+          created_at?: string
+          is_enabled?: boolean
+          key_last4?: string | null
+          model?: string | null
+          provider?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          api_key_encrypted?: string | null
+          created_at?: string
+          is_enabled?: boolean
+          key_last4?: string | null
+          model?: string | null
+          provider?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string

@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
-import { Plus, Zap, Clock, BarChart2, ChevronRight, Loader2, Pause, Play } from 'lucide-react';
+import { Plus, Zap, Clock, BarChart2, ChevronRight, Loader2, Pause, Play, X, Trash2 } from 'lucide-react';
+import { toast } from '@/hooks/use-toast';
 
 type Automation = {
   id: string;
@@ -13,13 +14,39 @@ type Automation = {
   last_run_at: string | null;
 };
 
+const TRIGGER_OPTIONS = [
+  'New contact added',
+  'Lead type changed',
+  'Temperature set to hot',
+  'Inbound message received',
+  'Contact tagged',
+  'Pipeline stage changed',
+];
+
+const ACTION_OPTIONS = [
+  'Send WhatsApp message',
+  'Assign to team member',
+  'Add tag',
+  'Change lead type',
+  'Move to pipeline stage',
+  'Notify via email',
+  'AI auto-reply',
+];
+
+const TEMPLATES = [
+  { name: 'Welcome Series', trigger: 'New contact added', action: 'Send WhatsApp message' },
+  { name: 'Re-engagement', trigger: 'Temperature set to hot', action: 'Assign to team member' },
+  { name: 'Appointment Reminder', trigger: 'Pipeline stage changed', action: 'Send WhatsApp message' },
+  { name: 'Order Confirmation', trigger: 'Lead type changed', action: 'Send WhatsApp message' },
+];
+
 export function AutomationsModule() {
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
+  const [createDefaults, setCreateDefaults] = useState<{ name?: string; trigger?: string; action?: string }>({});
 
-  useEffect(() => {
-    fetchAutomations();
-  }, []);
+  useEffect(() => { fetchAutomations(); }, []);
 
   const fetchAutomations = async () => {
     setLoading(true);
@@ -36,7 +63,27 @@ export function AutomationsModule() {
       .from('automations')
       .update({ active: !auto.active })
       .eq('id', auto.id);
-    if (!error) setAutomations(prev => prev.map(a => a.id === auto.id ? { ...a, active: !a.active } : a));
+    if (error) {
+      toast({ title: 'Failed to update', description: error.message, variant: 'destructive' });
+    } else {
+      setAutomations(prev => prev.map(a => a.id === auto.id ? { ...a, active: !a.active } : a));
+      toast({ title: auto.active ? 'Automation paused' : 'Automation activated' });
+    }
+  };
+
+  const deleteAutomation = async (id: string) => {
+    const { error } = await supabase.from('automations').delete().eq('id', id);
+    if (error) {
+      toast({ title: 'Failed to delete', description: error.message, variant: 'destructive' });
+    } else {
+      setAutomations(prev => prev.filter(a => a.id !== id));
+      toast({ title: 'Automation deleted' });
+    }
+  };
+
+  const useTemplate = (tpl: typeof TEMPLATES[0]) => {
+    setCreateDefaults({ name: tpl.name, trigger: tpl.trigger, action: tpl.action });
+    setShowCreate(true);
   };
 
   const formatLastRun = (iso: string | null) => {
@@ -58,7 +105,7 @@ export function AutomationsModule() {
           <h2 className="text-lg font-bold text-foreground">Automations</h2>
           <p className="text-sm text-muted-foreground">Automate repetitive tasks and follow-ups</p>
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 rounded-lg vanto-gradient text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity">
+        <button onClick={() => { setCreateDefaults({}); setShowCreate(true); }} className="flex items-center gap-2 px-4 py-2 rounded-lg vanto-gradient text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity">
           <Plus size={16} />
           New Automation
         </button>
@@ -95,13 +142,10 @@ export function AutomationsModule() {
           </div>
         ) : (
           automations.map(auto => (
-            <div key={auto.id} className="vanto-card p-4 flex items-center gap-4 hover:border-primary/30 transition-colors cursor-pointer group">
+            <div key={auto.id} className="vanto-card p-4 flex items-center gap-4 hover:border-primary/30 transition-colors group">
               <button
                 onClick={() => toggleActive(auto)}
-                className={cn(
-                  'w-10 h-6 rounded-full flex items-center transition-colors shrink-0',
-                  auto.active ? 'bg-primary justify-end' : 'bg-secondary justify-start'
-                )}
+                className={cn('w-10 h-6 rounded-full flex items-center transition-colors shrink-0', auto.active ? 'bg-primary justify-end' : 'bg-secondary justify-start')}
               >
                 <div className="w-5 h-5 rounded-full bg-foreground m-0.5 shadow-sm"></div>
               </button>
@@ -130,11 +174,11 @@ export function AutomationsModule() {
               </div>
 
               <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  onClick={() => toggleActive(auto)}
-                  className={cn('p-2 rounded-lg transition-colors', auto.active ? 'text-amber-400 hover:bg-amber-500/15' : 'text-primary hover:bg-primary/15')}
-                >
+                <button onClick={() => toggleActive(auto)} className={cn('p-2 rounded-lg transition-colors', auto.active ? 'text-amber-400 hover:bg-amber-500/15' : 'text-primary hover:bg-primary/15')}>
                   {auto.active ? <Pause size={15} /> : <Play size={15} />}
+                </button>
+                <button onClick={() => deleteAutomation(auto.id)} className="p-2 rounded-lg text-destructive/60 hover:text-destructive hover:bg-destructive/10 transition-colors">
+                  <Trash2 size={15} />
                 </button>
               </div>
             </div>
@@ -142,24 +186,101 @@ export function AutomationsModule() {
         )}
 
         <div className="mt-6">
-          <p className="text-sm font-semibold text-muted-foreground mb-3">🧩 Suggested Templates</p>
+          <p className="text-sm font-semibold text-muted-foreground mb-3">🧩 Quick Templates</p>
           <div className="grid grid-cols-2 gap-3">
-            {[
-              { name: 'Welcome Series', desc: 'Onboard new leads automatically' },
-              { name: 'Re-engagement', desc: 'Win back inactive contacts' },
-              { name: 'Appointment Reminder', desc: 'Reduce no-shows' },
-              { name: 'Order Confirmation', desc: 'Auto-confirm orders via WhatsApp' },
-            ].map(tpl => (
-              <button key={tpl.name} className="vanto-card p-3 text-left hover:border-primary/30 transition-colors">
+            {TEMPLATES.map(tpl => (
+              <button key={tpl.name} onClick={() => useTemplate(tpl)} className="vanto-card p-3 text-left hover:border-primary/30 transition-colors">
                 <div className="flex items-center gap-2 mb-1">
                   <Zap size={14} className="text-primary" />
                   <p className="text-sm font-medium text-foreground">{tpl.name}</p>
                 </div>
-                <p className="text-xs text-muted-foreground">{tpl.desc}</p>
+                <p className="text-xs text-muted-foreground">{tpl.trigger} → {tpl.action}</p>
                 <span className="mt-2 text-xs text-primary font-medium">Use template →</span>
               </button>
             ))}
           </div>
+        </div>
+      </div>
+
+      {showCreate && (
+        <CreateAutomationDialog
+          defaults={createDefaults}
+          onClose={() => setShowCreate(false)}
+          onCreated={() => { setShowCreate(false); fetchAutomations(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// --- Create Automation Dialog ---
+function CreateAutomationDialog({ defaults, onClose, onCreated }: {
+  defaults: { name?: string; trigger?: string; action?: string };
+  onClose: () => void; onCreated: () => void;
+}) {
+  const [name, setName] = useState(defaults.name || '');
+  const [trigger, setTrigger] = useState(defaults.trigger || TRIGGER_OPTIONS[0]);
+  const [action, setAction] = useState(defaults.action || ACTION_OPTIONS[0]);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (!name.trim()) {
+      toast({ title: 'Name is required', variant: 'destructive' });
+      return;
+    }
+    setSaving(true);
+    const { data: { user } } = await supabase.auth.getUser();
+
+    const { error } = await supabase.from('automations').insert({
+      name: name.trim(),
+      trigger_condition: trigger,
+      action_description: action,
+      active: false,
+      created_by: user?.id || null,
+    });
+
+    setSaving(false);
+    if (error) {
+      toast({ title: 'Failed to create', description: error.message, variant: 'destructive' });
+    } else {
+      toast({ title: 'Automation created', description: `${name} saved — activate it when ready.` });
+      onCreated();
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="vanto-card w-full max-w-md p-6 space-y-4" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h3 className="text-base font-bold text-foreground">New Automation</h3>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X size={18} /></button>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Name *</label>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Hot Lead Alert" className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary" />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">When (Trigger)</label>
+            <select value={trigger} onChange={e => setTrigger(e.target.value)} className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary">
+              {TRIGGER_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">Then (Action)</label>
+            <select value={action} onChange={e => setAction(e.target.value)} className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary">
+              {ACTION_OPTIONS.map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-2">
+          <button onClick={onClose} className="px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:text-foreground transition-colors">Cancel</button>
+          <button onClick={handleSave} disabled={saving} className="px-4 py-2 rounded-lg vanto-gradient text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-2">
+            {saving && <Loader2 size={14} className="animate-spin" />}
+            Create Automation
+          </button>
         </div>
       </div>
     </div>
