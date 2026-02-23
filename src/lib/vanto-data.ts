@@ -6,6 +6,21 @@ export type LeadTemperature = 'hot' | 'warm' | 'cold';
 export type LeadType = 'prospect' | 'registered' | 'buyer' | 'vip';
 export type InterestLevel = 'high' | 'medium' | 'low';
 
+/** Display names mapping for lead types */
+export const leadTypeLabels: Record<LeadType, string> = {
+  prospect: 'Prospect',
+  registered: 'Registered',
+  buyer: 'Buyer',
+  vip: 'VIP',
+};
+
+export const leadTypeBg: Record<LeadType, string> = {
+  prospect: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+  registered: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+  buyer: 'bg-primary/15 text-primary border-primary/30',
+  vip: 'bg-violet-500/15 text-violet-400 border-violet-500/30',
+};
+
 export const temperatureColors: Record<LeadTemperature, string> = {
   hot: 'hsl(0, 84%, 60%)',
   warm: 'hsl(38, 96%, 56%)',
