@@ -152,7 +152,26 @@
       <div class="error-msg" id="login-error"></div>
 
       <button class="popup-btn" id="btn-login">Log in</button>
+      <button class="popup-btn popup-btn-outline" id="btn-forgot" style="font-size:11px;">Forgot password?</button>
       <a class="popup-btn popup-btn-outline" href="https://chat-friend-crm.lovable.app" target="_blank">Open Dashboard</a>
+    </div>
+
+    <!-- Forgot password view -->
+    <div id="view-forgot" style="display:none;flex-direction:column;gap:10px;">
+      <p style="font-size:12px;color:hsl(215,20%,60%);">Enter your email to receive a password reset link.</p>
+
+      <div>
+        <p class="form-label">Email</p>
+        <input class="form-input" type="email" id="input-forgot-email" placeholder="you@example.com" autocomplete="email" />
+      </div>
+
+      <div class="error-msg" id="forgot-error"></div>
+      <div id="forgot-success" style="display:none;font-size:11px;color:hsl(172,66%,50%);padding:7px 10px;background:hsl(172,66%,8%);border:1px solid hsl(172,66%,20%);border-radius:7px;">
+        Reset link sent! Check your email inbox.
+      </div>
+
+      <button class="popup-btn" id="btn-send-reset">Send Reset Link</button>
+      <button class="popup-btn popup-btn-outline" id="btn-back-login" style="font-size:11px;">← Back to login</button>
     </div>
 
   </div>
