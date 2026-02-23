@@ -165,17 +165,18 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ success: true, results }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
-  } catch (err) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
     console.error('Bootstrap error:', err);
     try {
       await cloudService.from('webhook_events').insert({
         source: 'zazi-sync-bootstrap',
         action: 'bootstrap',
         status: 'error',
-        error: err.message,
+        error: message,
       });
     } catch (_) { /* ignore */ }
-    return new Response(JSON.stringify({ error: err.message }), {
+    return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });

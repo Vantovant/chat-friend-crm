@@ -138,7 +138,8 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ success: true, table, action, id: record?.id }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
-  } catch (err) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
     console.error('zazi-sync-all error:', err);
     // Best-effort audit log
     try {
@@ -146,10 +147,10 @@ Deno.serve(async (req) => {
         source: 'zazi-sync-all',
         action: 'UNKNOWN',
         status: 'error',
-        error: err.message,
+        error: message,
       });
     } catch (_) { /* ignore */ }
-    return new Response(JSON.stringify({ error: err.message }), {
+    return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
