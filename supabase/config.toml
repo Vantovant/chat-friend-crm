@@ -30,4 +30,7 @@ verify_jwt = false
 [functions.zazi-sync-bootstrap]
 verify_jwt = false
 
+[functions.send-message]
+verify_jwt = false
+
 

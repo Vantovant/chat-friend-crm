@@ -1,13 +1,17 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { temperatureBg, type LeadTemperature } from '@/lib/vanto-data';
-import { Search, Phone, Video, MoreVertical, Send, Bot, Paperclip, Smile, Info, Loader2, UserCircle } from 'lucide-react';
+import {
+  Search, Phone, Video, MoreVertical, Send, Bot,
+  Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare,
+} from 'lucide-react';
 import { useProfiles, profileLabel, type ProfileOption } from '@/hooks/use-profiles';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from '@/hooks/use-toast';
 
+/* ── Types ── */
 type Contact = {
   id: string;
   name: string;
@@ -33,19 +37,23 @@ type Conversation = {
 
 type Message = {
   id: string;
+  conversation_id: string;
   content: string;
   is_outbound: boolean;
   message_type: string;
   status: string | null;
   created_at: string;
+  sent_by: string | null;
 };
 
 type InboxFilter = 'accessible' | 'mine' | 'unassigned';
 
+/* ── Main Component ── */
 export function InboxModule() {
   const profiles = useProfiles();
   const currentUser = useCurrentUser();
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
@@ -54,57 +62,160 @@ export function InboxModule() {
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [msgLoading, setMsgLoading] = useState(false);
+  const [sending, setSending] = useState(false);
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>('accessible');
   const [reassigning, setReassigning] = useState(false);
 
-  useEffect(() => {
-    fetchConversations();
-  }, []);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 
-  useEffect(() => {
-    if (selectedConvId) fetchMessages(selectedConvId);
-  }, [selectedConvId]);
-
-  const fetchConversations = async () => {
+  /* ── Fetch conversations ── */
+  const fetchConversations = useCallback(async () => {
     setLoading(true);
     const { data, error } = await supabase
       .from('conversations')
       .select('*, contact:contacts(*)')
-      .order('last_message_at', { ascending: false })
-      .limit(100);
+      .order('last_message_at', { ascending: false, nullsFirst: false })
+      .limit(200);
     if (!error && data) {
-      setConversations(data as unknown as Conversation[]);
-      if (data.length > 0 && !selectedConvId) setSelectedConvId(data[0].id);
+      const mapped = (data as unknown as Conversation[]).filter(c => c.contact);
+      setConversations(mapped);
+      if (mapped.length > 0 && !selectedConvId) {
+        setSelectedConvId(mapped[0].id);
+      }
     }
     setLoading(false);
-  };
+  }, [selectedConvId]);
 
-  const fetchMessages = async (convId: string) => {
+  /* ── Fetch messages ── */
+  const fetchMessages = useCallback(async (convId: string) => {
     setMsgLoading(true);
     const { data, error } = await supabase
       .from('messages')
       .select('*')
       .eq('conversation_id', convId)
       .order('created_at', { ascending: true })
-      .limit(100);
+      .limit(500);
     if (!error && data) setMessages(data as Message[]);
     setMsgLoading(false);
-  };
+    setTimeout(scrollToBottom, 100);
+  }, []);
 
+  /* ── Initial load ── */
+  useEffect(() => { fetchConversations(); }, []);
+
+  /* ── Load messages on selection ── */
+  useEffect(() => {
+    if (selectedConvId) fetchMessages(selectedConvId);
+    else setMessages([]);
+  }, [selectedConvId, fetchMessages]);
+
+  /* ── Realtime: new messages ── */
+  useEffect(() => {
+    const channel = supabase
+      .channel('inbox-messages')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'messages' },
+        (payload) => {
+          const newMsg = payload.new as Message;
+          // If it's the selected conversation, append the message
+          if (newMsg.conversation_id === selectedConvId) {
+            setMessages(prev => {
+              if (prev.some(m => m.id === newMsg.id)) return prev;
+              return [...prev, newMsg];
+            });
+            setTimeout(scrollToBottom, 100);
+          }
+          // Update conversation list preview
+          setConversations(prev =>
+            prev.map(c =>
+              c.id === newMsg.conversation_id
+                ? {
+                    ...c,
+                    last_message: newMsg.content?.slice(0, 200) || '',
+                    last_message_at: newMsg.created_at,
+                    unread_count: newMsg.conversation_id === selectedConvId
+                      ? c.unread_count
+                      : c.unread_count + 1,
+                  }
+                : c
+            ).sort((a, b) => {
+              const aT = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+              const bT = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+              return bT - aT;
+            })
+          );
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'conversations' },
+        () => {
+          // New conversation created externally — refetch
+          fetchConversations();
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [selectedConvId, fetchConversations]);
+
+  /* ── Send message via edge function ── */
   const sendMessage = async () => {
-    if (!inputText.trim() || !selectedConvId) return;
-    const { error } = await supabase.from('messages').insert({
+    if (!inputText.trim() || !selectedConvId || sending) return;
+    const content = inputText.trim();
+    setSending(true);
+    setInputText('');
+
+    // Optimistic: add message immediately
+    const tempId = `temp-${Date.now()}`;
+    const optimistic: Message = {
+      id: tempId,
       conversation_id: selectedConvId,
-      content: inputText.trim(),
+      content,
       is_outbound: true,
       message_type: 'text',
+      status: 'sent',
+      created_at: new Date().toISOString(),
+      sent_by: currentUser?.id ?? null,
+    };
+    setMessages(prev => [...prev, optimistic]);
+    setTimeout(scrollToBottom, 50);
+
+    // Update conversation list optimistically
+    setConversations(prev =>
+      prev.map(c =>
+        c.id === selectedConvId
+          ? { ...c, last_message: content.slice(0, 200), last_message_at: optimistic.created_at }
+          : c
+      )
+    );
+
+    const { data, error } = await supabase.functions.invoke('send-message', {
+      body: { conversation_id: selectedConvId, content, message_type: 'text' },
     });
-    if (!error) {
-      setInputText('');
-      fetchMessages(selectedConvId);
+
+    if (error || !data?.success) {
+      // Rollback optimistic message
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+      toast({
+        title: 'Failed to send message',
+        description: error?.message || data?.error || 'Unknown error',
+        variant: 'destructive',
+      });
+    } else {
+      // Replace temp with real message (realtime might also push it)
+      const real = data.message;
+      setMessages(prev =>
+        prev.map(m => m.id === tempId ? { ...real } : m)
+          .filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i)
+      );
     }
+    setSending(false);
   };
 
+  /* ── Reassign contact ── */
   const handleReassign = useCallback(async (contactId: string, newAssignedTo: string | null) => {
     if (!currentUser) return;
     const conv = conversations.find(c => c.contact_id === contactId);
@@ -112,7 +223,7 @@ export function InboxModule() {
     if (oldAssignedTo === newAssignedTo) return;
 
     setReassigning(true);
-    // Optimistic update
+    // Optimistic
     setConversations(prev => prev.map(c =>
       c.contact_id === contactId
         ? { ...c, contact: { ...c.contact, assigned_to: newAssignedTo } }
@@ -133,7 +244,6 @@ export function InboxModule() {
       ));
       toast({ title: 'Reassignment failed', description: error.message, variant: 'destructive' });
     } else {
-      // Log activity
       await supabase.from('contact_activity').insert({
         contact_id: contactId,
         type: 'conversation_reassigned',
@@ -145,6 +255,7 @@ export function InboxModule() {
     setReassigning(false);
   }, [currentUser, conversations, profiles]);
 
+  /* ── Filtering ── */
   const filtered = conversations.filter(c => {
     const matchSearch = c.contact?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       c.contact?.phone?.includes(searchQuery);
@@ -157,26 +268,16 @@ export function InboxModule() {
   const totalUnread = conversations.reduce((s, c) => s + c.unread_count, 0);
   const selected = conversations.find(c => c.id === selectedConvId);
 
-  const formatTime = (iso: string | null) => {
-    if (!iso) return '';
-    const d = new Date(iso);
-    const now = new Date();
-    const diff = now.getTime() - d.getTime();
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-    return `${Math.floor(diff / 86400000)}d ago`;
-  };
-
   return (
     <TooltipProvider>
       <div className="flex h-full">
-        {/* Chat List */}
+        {/* ── Conversation List ── */}
         <div className="w-80 shrink-0 border-r border-border flex flex-col bg-card/30">
           <div className="p-4 border-b border-border">
             <div className="flex items-center justify-between mb-3">
               <h2 className="font-semibold text-foreground">Inbox</h2>
               <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                <span className="w-2 h-2 rounded-full bg-primary animate-pulse inline-block"></span>
+                <span className="w-2 h-2 rounded-full bg-primary animate-pulse inline-block" />
                 <span>{totalUnread} unread</span>
               </div>
             </div>
@@ -196,7 +297,9 @@ export function InboxModule() {
                   onClick={() => setInboxFilter(f)}
                   className={cn(
                     'px-2.5 py-1 rounded-lg text-[10px] font-semibold border transition-colors capitalize',
-                    inboxFilter === f ? 'bg-primary/15 text-primary border-primary/30' : 'text-muted-foreground border-border hover:text-foreground hover:bg-secondary/60'
+                    inboxFilter === f
+                      ? 'bg-primary/15 text-primary border-primary/30'
+                      : 'text-muted-foreground border-border hover:text-foreground hover:bg-secondary/60'
                   )}
                 >
                   {f === 'accessible' ? 'All' : f === 'mine' ? 'My Leads' : 'Unassigned'}
@@ -204,14 +307,16 @@ export function InboxModule() {
               ))}
             </div>
           </div>
-
           <div className="flex-1 overflow-y-auto">
             {loading ? (
               <div className="flex items-center justify-center h-32 gap-2 text-muted-foreground text-sm">
                 <Loader2 size={14} className="animate-spin" /> Loading...
               </div>
             ) : filtered.length === 0 ? (
-              <div className="flex items-center justify-center h-32 text-muted-foreground text-sm">No conversations yet</div>
+              <div className="flex flex-col items-center justify-center h-32 gap-2 text-muted-foreground text-sm">
+                <MessageSquare size={20} />
+                <span>No conversations</span>
+              </div>
             ) : (
               filtered.map(conv => (
                 <ConvListItem
@@ -219,7 +324,6 @@ export function InboxModule() {
                   conv={conv}
                   active={conv.id === selectedConvId}
                   onClick={() => setSelectedConvId(conv.id)}
-                  formatTime={formatTime}
                   profiles={profiles}
                 />
               ))
@@ -227,10 +331,11 @@ export function InboxModule() {
           </div>
         </div>
 
-        {/* Chat Thread */}
+        {/* ── Chat Thread ── */}
         <div className="flex-1 flex flex-col min-w-0">
           {selected ? (
             <>
+              {/* Header */}
               <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/20">
                 <div className="flex items-center gap-3">
                   <ContactAvatar name={selected.contact?.name || '?'} />
@@ -239,37 +344,46 @@ export function InboxModule() {
                     <p className="text-xs text-muted-foreground">{selected.contact?.phone}</p>
                   </div>
                   {selected.contact?.temperature && (
-                    <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-semibold border', temperatureBg[selected.contact.temperature as LeadTemperature])}>
+                    <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-semibold border', temperatureBg[selected.contact.temperature])}>
                       {selected.contact.temperature.toUpperCase()}
                     </span>
                   )}
-                  {/* Assignment badge / dropdown in header */}
                   <AssignmentControl
                     assignedTo={selected.contact?.assigned_to ?? null}
                     profiles={profiles}
                     isAdmin={!!isAdmin}
                     disabled={reassigning}
-                    onChange={(val) => handleReassign(selected.contact_id, val)}
+                    onChange={val => handleReassign(selected.contact_id, val)}
                   />
                 </div>
                 <div className="flex items-center gap-2">
                   <ActionBtn icon={Phone} />
                   <ActionBtn icon={Video} />
                   <ActionBtn icon={Bot} label="AI Reply" primary />
-                  <button onClick={() => setShowInfo(!showInfo)} className={cn('p-2 rounded-lg transition-colors', showInfo ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60')}>
+                  <button
+                    onClick={() => setShowInfo(!showInfo)}
+                    className={cn(
+                      'p-2 rounded-lg transition-colors',
+                      showInfo ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
+                    )}
+                  >
                     <Info size={16} />
                   </button>
                   <ActionBtn icon={MoreVertical} />
                 </div>
               </div>
 
+              {/* Messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
                 {msgLoading ? (
                   <div className="flex items-center justify-center h-20 gap-2 text-muted-foreground text-sm">
                     <Loader2 size={14} className="animate-spin" /> Loading messages...
                   </div>
                 ) : messages.length === 0 ? (
-                  <div className="flex items-center justify-center h-20 text-muted-foreground text-sm">No messages yet</div>
+                  <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground text-sm">
+                    <MessageSquare size={24} className="opacity-40" />
+                    <span>No messages yet — start the conversation</span>
+                  </div>
                 ) : (
                   messages.map(msg => (
                     <div key={msg.id} className={cn('flex', msg.is_outbound ? 'justify-end' : 'justify-start')}>
@@ -280,17 +394,23 @@ export function InboxModule() {
                             <span className="text-[10px] text-primary font-semibold">AI Response</span>
                           </div>
                         )}
-                        <p className="text-foreground">{msg.content}</p>
+                        <p className="text-foreground whitespace-pre-wrap">{msg.content}</p>
                         <div className="flex items-center justify-end gap-1 mt-1">
-                          <span className="text-[10px] text-muted-foreground">{new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
                           {msg.is_outbound && msg.status === 'read' && <span className="text-[10px] text-primary">✓✓</span>}
+                          {msg.is_outbound && msg.status === 'delivered' && <span className="text-[10px] text-muted-foreground">✓✓</span>}
+                          {msg.is_outbound && msg.status === 'sent' && <span className="text-[10px] text-muted-foreground">✓</span>}
                         </div>
                       </div>
                     </div>
                   ))
                 )}
+                <div ref={messagesEndRef} />
               </div>
 
+              {/* Input */}
               <div className="p-4 border-t border-border bg-card/20">
                 <div className="flex items-end gap-2">
                   <button className="text-muted-foreground hover:text-foreground transition-colors p-2 shrink-0">
@@ -300,29 +420,43 @@ export function InboxModule() {
                     <textarea
                       value={inputText}
                       onChange={e => setInputText(e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          sendMessage();
+                        }
+                      }}
                       placeholder="Type a message..."
                       rows={1}
-                      className="w-full bg-secondary/60 border border-border rounded-xl px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50 transition-colors resize-none"
+                      disabled={sending}
+                      className="w-full bg-secondary/60 border border-border rounded-xl px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50 transition-colors resize-none disabled:opacity-50"
                     />
                   </div>
                   <button className="text-muted-foreground hover:text-foreground transition-colors p-2 shrink-0">
                     <Smile size={18} />
                   </button>
-                  <button onClick={sendMessage} className="p-2.5 rounded-xl vanto-gradient text-primary-foreground hover:opacity-90 transition-opacity shrink-0">
-                    <Send size={16} />
+                  <button
+                    onClick={sendMessage}
+                    disabled={sending || !inputText.trim()}
+                    className={cn(
+                      'p-2.5 rounded-xl vanto-gradient text-primary-foreground hover:opacity-90 transition-opacity shrink-0',
+                      (sending || !inputText.trim()) && 'opacity-50 cursor-not-allowed'
+                    )}
+                  >
+                    {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
                   </button>
                 </div>
               </div>
             </>
           ) : (
-            <div className="flex-1 flex items-center justify-center">
-              <p className="text-muted-foreground">Select a conversation</p>
+            <div className="flex-1 flex flex-col items-center justify-center gap-3">
+              <MessageSquare size={32} className="text-muted-foreground/40" />
+              <p className="text-muted-foreground text-sm">Select a conversation to start chatting</p>
             </div>
           )}
         </div>
 
-        {/* Contact Info Panel */}
+        {/* ── Contact Info Panel ── */}
         {selected?.contact && showInfo && (
           <div className="w-72 shrink-0 border-l border-border overflow-y-auto bg-card/30">
             <ContactInfoPanel
@@ -330,7 +464,7 @@ export function InboxModule() {
               profiles={profiles}
               isAdmin={!!isAdmin}
               reassigning={reassigning}
-              onReassign={(val) => handleReassign(selected.contact_id, val)}
+              onReassign={val => handleReassign(selected.contact_id, val)}
             />
           </div>
         )}
@@ -338,6 +472,10 @@ export function InboxModule() {
     </TooltipProvider>
   );
 }
+
+/* ────────────────────────────────────────────────────────────────────────────── */
+/* Sub-components                                                                */
+/* ────────────────────────────────────────────────────────────────────────────── */
 
 /* ── Assignment Control (dropdown for admin, badge for agent) ── */
 function AssignmentControl({
@@ -387,9 +525,9 @@ function AssignmentControl({
 }
 
 /* ── Conversation List Item ── */
-function ConvListItem({ conv, active, onClick, formatTime, profiles }: {
+function ConvListItem({ conv, active, onClick, profiles }: {
   conv: Conversation; active: boolean; onClick: () => void;
-  formatTime: (s: string | null) => string; profiles: ProfileOption[];
+  profiles: ProfileOption[];
 }) {
   const assignedName = profileLabel(profiles, conv.contact?.assigned_to ?? null);
   const assignedProfile = profiles.find(p => p.id === conv.contact?.assigned_to);
@@ -418,11 +556,10 @@ function ConvListItem({ conv, active, onClick, formatTime, profiles }: {
         <p className="text-xs text-muted-foreground truncate">{conv.last_message || 'No messages yet'}</p>
         <div className="flex items-center gap-1.5 mt-1">
           {conv.contact?.temperature && (
-            <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold border', temperatureBg[conv.contact.temperature as LeadTemperature])}>
+            <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold border', temperatureBg[conv.contact.temperature])}>
               {conv.contact.temperature.toUpperCase()}
             </span>
           )}
-          {/* Assigned avatar circle with tooltip */}
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-secondary border border-border text-muted-foreground truncate max-w-[100px]">
@@ -434,7 +571,9 @@ function ConvListItem({ conv, active, onClick, formatTime, profiles }: {
                 {assignedName}
               </span>
             </TooltipTrigger>
-            <TooltipContent side="right"><p>{assignedProfile ? `Assigned to ${assignedProfile.label}` : 'Unassigned'}</p></TooltipContent>
+            <TooltipContent side="right">
+              <p>{assignedProfile ? `Assigned to ${assignedProfile.label}` : 'Unassigned'}</p>
+            </TooltipContent>
           </Tooltip>
         </div>
       </div>
@@ -442,7 +581,7 @@ function ConvListItem({ conv, active, onClick, formatTime, profiles }: {
   );
 }
 
-/* ── Mini avatar circle for list items ── */
+/* ── Mini avatar circle ── */
 function MiniAvatar({ name }: { name: string }) {
   const colors = ['bg-primary', 'bg-blue-500', 'bg-violet-500', 'bg-amber-500'];
   const idx = name.charCodeAt(0) % colors.length;
@@ -478,7 +617,7 @@ function ActionBtn({ icon: Icon, label, primary }: { icon: React.ElementType; la
   );
 }
 
-/* ── Contact Info Panel (with assignment control) ── */
+/* ── Contact Info Panel ── */
 function ContactInfoPanel({ contact, profiles, isAdmin, reassigning, onReassign }: {
   contact: Contact; profiles: ProfileOption[]; isAdmin: boolean;
   reassigning: boolean; onReassign: (val: string | null) => void;
@@ -493,7 +632,7 @@ function ContactInfoPanel({ contact, profiles, isAdmin, reassigning, onReassign 
         <p className="text-xs text-muted-foreground">{contact.phone}</p>
         {contact.temperature && (
           <div className="flex justify-center gap-2 mt-2">
-            <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-semibold border', temperatureBg[contact.temperature as LeadTemperature])}>
+            <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-semibold border', temperatureBg[contact.temperature])}>
               {contact.temperature.toUpperCase()}
             </span>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-secondary border border-border text-muted-foreground capitalize">
@@ -539,6 +678,7 @@ function ContactInfoPanel({ contact, profiles, isAdmin, reassigning, onReassign 
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Contact Info</p>
         <InfoRow label="Email" value={contact.email || 'Not set'} />
         <InfoRow label="Interest" value={contact.interest} />
+        <InfoRow label="Lead Type" value={contact.lead_type} />
       </div>
 
       {contact.tags && contact.tags.length > 0 && (
@@ -555,7 +695,7 @@ function ContactInfoPanel({ contact, profiles, isAdmin, reassigning, onReassign 
       {contact.notes && (
         <div className="vanto-card p-3">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Notes</p>
-          <p className="text-xs text-muted-foreground">{contact.notes}</p>
+          <p className="text-xs text-muted-foreground whitespace-pre-wrap">{contact.notes}</p>
         </div>
       )}
     </div>
@@ -569,4 +709,15 @@ function InfoRow({ label, value }: { label: string; value: string }) {
       <span className="text-foreground font-medium capitalize">{value}</span>
     </div>
   );
+}
+
+/* ── Utility ── */
+function formatTime(iso: string | null) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const now = new Date();
+  const diff = now.getTime() - d.getTime();
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  return `${Math.floor(diff / 86400000)}d ago`;
 }
