@@ -21,6 +21,7 @@ var pollInterval    = null;
 var lastDetectedKey = '';
 var currentTags     = [];
 var isAuthenticated = false; // updated from background
+var teamMembers     = [];    // cached profiles list
 
 // ── Logging ────────────────────────────────────────────────────────────────────
 function log(msg, data) {
@@ -65,6 +66,7 @@ chrome.runtime.onMessage.addListener(function(msg) {
     isAuthenticated = true;
     log('Token updated — refreshing');
     updateAuthBanner();
+    loadTeamMembers();
     runDetection();
   }
   if (msg.type === 'VANTO_TOKEN_CLEARED') {
@@ -85,6 +87,30 @@ function saveContactViaBackground(payload, callback) {
 function loadContactViaBackground(phone, callback) {
   sendToBackground({ type: 'VANTO_LOAD_CONTACT', phone: phone }, function(response) {
     callback(response || { success: false, error: 'No response' });
+  });
+}
+
+// ── Load team members via background ──────────────────────────────────────────
+function loadTeamMembers() {
+  sendToBackground({ type: 'VANTO_LOAD_TEAM' }, function(response) {
+    if (response && response.success && response.members) {
+      teamMembers = response.members;
+      renderAssignToDropdown();
+    }
+  });
+}
+
+function renderAssignToDropdown() {
+  var sel = document.getElementById('vanto-f-assigned-to');
+  if (!sel) return;
+  var currentVal = sel.value || '';
+  sel.innerHTML = '<option value="">— Unassigned —</option>';
+  teamMembers.forEach(function(m) {
+    var opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.full_name || m.email || m.id.slice(0,8);
+    if (m.id === currentVal) opt.selected = true;
+    sel.appendChild(opt);
   });
 }
 
@@ -258,6 +284,11 @@ function populateForm(data) {
   setField('vanto-f-lead-type',   data.lead_type   || 'prospect');
   setField('vanto-f-temperature', data.temperature || 'cold');
   setField('vanto-f-notes',       data.notes       || '');
+
+  // Assign To
+  var assignSel = document.getElementById('vanto-f-assigned-to');
+  if (assignSel) assignSel.value = data.assigned_to || '';
+
   currentTags = Array.isArray(data.tags) ? data.tags.slice() : [];
   renderTags();
 }
@@ -361,15 +392,19 @@ function handleSave() {
     return;
   }
 
+  var assignEl = document.getElementById('vanto-f-assigned-to');
+  var assignedTo = (assignEl && assignEl.value) || null;
+
   var payload = {
     name:         name,
-    phone:        userPhone || null,        // user-entered (e.g. "+27 84 247 5415")
-    whatsapp_id:  waId      || null,        // WA internal (e.g. "130477532930136")
+    phone:        userPhone || null,
+    whatsapp_id:  waId      || null,
     email:        ((emailEl && emailEl.value) || '').trim() || null,
     lead_type:    (ltEl && ltEl.value)    || 'prospect',
     temperature:  (tempEl && tempEl.value) || 'cold',
     tags:         currentTags.slice(),
     notes:        ((notesEl && notesEl.value) || '').trim() || null,
+    assigned_to:  assignedTo,
   };
 
   log('Saving contact via background', payload);
@@ -479,6 +514,16 @@ function buildSidebarHTML() {
     '            <option value="hot">🔥 Hot</option>',
     '            <option value="warm">🌤 Warm</option>',
     '            <option value="cold">❄️ Cold</option>',
+    '          </select>',
+    '        </div>',
+    '      </div>',
+
+     '      <div class="vanto-section">',
+    '        <p class="vanto-section-title">Assignment</p>',
+    '        <div class="vanto-field">',
+    '          <label class="vanto-label" for="vanto-f-assigned-to">Assign To</label>',
+    '          <select class="vanto-select" id="vanto-f-assigned-to">',
+    '            <option value="">— Unassigned —</option>',
     '          </select>',
     '        </div>',
     '      </div>',
@@ -620,6 +665,7 @@ function injectSidebar() {
 
   // Check auth then trigger first detection
   checkAuthState(function() {
+    if (isAuthenticated) loadTeamMembers();
     setTimeout(runDetection, 1200);
   });
 
