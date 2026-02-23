@@ -5,6 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import { digitsOnly } from '@/lib/phone-utils';
+import { TwilioHealthPanel } from '@/components/vanto/TwilioHealthPanel';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type SyncResult = { synced: number; skipped: number; total: number; message?: string; errors?: string[] };
@@ -278,6 +279,11 @@ export function IntegrationsModule({ userId = '' }: { userId?: string }) {
           </div>
         </div>
       )}
+
+      {/* ── Twilio WhatsApp Health Panel ─────────────────────────────────── */}
+      <div className="px-6 py-4 border-b border-border shrink-0">
+        <TwilioHealthPanel />
+      </div>
 
       {/* ── Inbound Webhook — Zazi → Vanto (Editable) ──────────────────────── */}
       <div className="px-6 py-4 border-b border-border shrink-0">
