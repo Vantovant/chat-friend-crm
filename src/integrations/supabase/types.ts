@@ -198,8 +198,10 @@ export type Database = {
           contact_id: string
           created_at: string
           id: string
+          last_inbound_at: string | null
           last_message: string | null
           last_message_at: string | null
+          last_outbound_at: string | null
           last_synced_at: string | null
           status: Database["public"]["Enums"]["comm_status"]
           unread_count: number
@@ -209,8 +211,10 @@ export type Database = {
           contact_id: string
           created_at?: string
           id?: string
+          last_inbound_at?: string | null
           last_message?: string | null
           last_message_at?: string | null
+          last_outbound_at?: string | null
           last_synced_at?: string | null
           status?: Database["public"]["Enums"]["comm_status"]
           unread_count?: number
@@ -220,8 +224,10 @@ export type Database = {
           contact_id?: string
           created_at?: string
           id?: string
+          last_inbound_at?: string | null
           last_message?: string | null
           last_message_at?: string | null
+          last_outbound_at?: string | null
           last_synced_at?: string | null
           status?: Database["public"]["Enums"]["comm_status"]
           unread_count?: number
@@ -305,34 +311,52 @@ export type Database = {
           content: string
           conversation_id: string
           created_at: string
+          delivered_at: string | null
+          error: string | null
           id: string
           is_outbound: boolean
           last_synced_at: string | null
           message_type: Database["public"]["Enums"]["message_type"]
+          provider: string | null
+          provider_message_id: string | null
+          read_at: string | null
           sent_by: string | null
           status: Database["public"]["Enums"]["message_status"] | null
+          status_raw: string | null
         }
         Insert: {
           content: string
           conversation_id: string
           created_at?: string
+          delivered_at?: string | null
+          error?: string | null
           id?: string
           is_outbound?: boolean
           last_synced_at?: string | null
           message_type?: Database["public"]["Enums"]["message_type"]
+          provider?: string | null
+          provider_message_id?: string | null
+          read_at?: string | null
           sent_by?: string | null
           status?: Database["public"]["Enums"]["message_status"] | null
+          status_raw?: string | null
         }
         Update: {
           content?: string
           conversation_id?: string
           created_at?: string
+          delivered_at?: string | null
+          error?: string | null
           id?: string
           is_outbound?: boolean
           last_synced_at?: string | null
           message_type?: Database["public"]["Enums"]["message_type"]
+          provider?: string | null
+          provider_message_id?: string | null
+          read_at?: string | null
           sent_by?: string | null
           status?: Database["public"]["Enums"]["message_status"] | null
+          status_raw?: string | null
         }
         Relationships: [
           {
