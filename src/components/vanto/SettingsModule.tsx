@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
-import { User, Bell, Shield, Users, ChevronRight, Mail, Loader2, CheckCircle, X, Clock, Edit2 } from 'lucide-react';
+import { User, Bell, Shield, Users, ChevronRight, Mail, Loader2, CheckCircle, X, Clock, Edit2, Bot, Key } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from '@/hooks/use-toast';
 
 const settingSections = [
   { id: 'profile', icon: User, label: 'Profile', description: 'Your account details' },
   { id: 'team', icon: Users, label: 'Team', description: 'Manage team members' },
+  { id: 'ai-provider', icon: Bot, label: 'AI Provider', description: 'BYO API keys' },
   { id: 'notifications', icon: Bell, label: 'Notifications', description: 'Alert preferences' },
   { id: 'security', icon: Shield, label: 'Security', description: 'Password & 2FA' },
 ];
@@ -439,6 +441,9 @@ export function SettingsModule() {
           </div>
         )}
 
+        {/* AI Provider */}
+        {activeSection === 'ai-provider' && <AIProviderSection />}
+
         {/* Notifications */}
         {activeSection === 'notifications' && (
           <div>
@@ -468,6 +473,193 @@ export function SettingsModule() {
             </div>
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+const AI_PROVIDERS = [
+  { value: 'lovable', label: 'Lovable AI (Free)', needsKey: false },
+  { value: 'openai', label: 'OpenAI', needsKey: true },
+  { value: 'gemini', label: 'Google Gemini', needsKey: true },
+];
+
+const AI_MODELS: Record<string, { value: string; label: string }[]> = {
+  lovable: [{ value: 'google/gemini-3-flash-preview', label: 'Gemini 3 Flash (default)' }],
+  openai: [
+    { value: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+    { value: 'gpt-4o', label: 'GPT-4o' },
+    { value: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+  ],
+  gemini: [
+    { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+    { value: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
+    { value: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro' },
+  ],
+};
+
+function AIProviderSection() {
+  const [provider, setProvider] = useState('lovable');
+  const [model, setModel] = useState('google/gemini-3-flash-preview');
+  const [apiKey, setApiKey] = useState('');
+  const [isEnabled, setIsEnabled] = useState(true);
+  const [keyLast4, setKeyLast4] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  const loadSettings = async () => {
+    setLoading(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) { setLoading(false); return; }
+
+    const { data } = await supabase
+      .from('user_ai_settings')
+      .select('provider, model, key_last4, is_enabled')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (data) {
+      setProvider(data.provider || 'lovable');
+      setModel(data.model || 'google/gemini-3-flash-preview');
+      setKeyLast4(data.key_last4 || '');
+      setIsEnabled(data.is_enabled !== false);
+    }
+    setLoading(false);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    const { data: { session } } = await supabase.auth.getSession();
+
+    const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-settings-save`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session?.access_token}`,
+      },
+      body: JSON.stringify({
+        provider,
+        model,
+        api_key: apiKey || undefined,
+        is_enabled: isEnabled,
+      }),
+    });
+
+    const data = await res.json();
+    setSaving(false);
+
+    if (!res.ok || data.error) {
+      toast({ title: 'Failed to save', description: data.error || 'Unknown error', variant: 'destructive' });
+    } else {
+      toast({ title: 'AI settings saved' });
+      setApiKey('');
+      if (data.settings?.key_last4) setKeyLast4(data.settings.key_last4);
+    }
+  };
+
+  const selectedProvider = AI_PROVIDERS.find(p => p.value === provider);
+  const models = AI_MODELS[provider] || AI_MODELS.lovable;
+
+  if (loading) {
+    return <div className="flex items-center gap-2 text-muted-foreground text-sm"><Loader2 size={14} className="animate-spin" /> Loading AI settings...</div>;
+  }
+
+  return (
+    <div>
+      <h3 className="text-base font-bold text-foreground mb-2">AI Provider & Billing</h3>
+      <p className="text-xs text-muted-foreground mb-4">
+        Use Lovable AI for free, or bring your own OpenAI / Gemini API key to use your own billing.
+      </p>
+
+      <div className="vanto-card p-5 space-y-4">
+        {/* Enable toggle */}
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-foreground">AI Features Enabled</p>
+            <p className="text-xs text-muted-foreground">Turn off to disable all AI features</p>
+          </div>
+          <button
+            onClick={() => setIsEnabled(!isEnabled)}
+            className={cn('w-10 h-6 rounded-full flex items-center transition-colors', isEnabled ? 'bg-primary justify-end' : 'bg-secondary justify-start')}
+          >
+            <div className="w-5 h-5 rounded-full bg-foreground m-0.5 shadow-sm"></div>
+          </button>
+        </div>
+
+        {/* Provider */}
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Provider</label>
+          <select
+            value={provider}
+            onChange={e => {
+              setProvider(e.target.value);
+              const m = AI_MODELS[e.target.value];
+              if (m?.[0]) setModel(m[0].value);
+            }}
+            className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            {AI_PROVIDERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </select>
+        </div>
+
+        {/* Model */}
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-1 block">Model</label>
+          <select
+            value={model}
+            onChange={e => setModel(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+          >
+            {models.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+          </select>
+        </div>
+
+        {/* API Key */}
+        {selectedProvider?.needsKey && (
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1 block">
+              API Key {keyLast4 && <span className="text-primary ml-1">Connected ✅ (••••{keyLast4})</span>}
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="password"
+                value={apiKey}
+                onChange={e => setApiKey(e.target.value)}
+                placeholder={keyLast4 ? `Current key: ••••${keyLast4}` : 'sk-... or AIza...'}
+                className="flex-1 px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+              />
+              <Key size={16} className="text-muted-foreground shrink-0" />
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">Your key is stored encrypted and never shared with other users.</p>
+          </div>
+        )}
+
+        {provider === 'lovable' && (
+          <div className="rounded-lg bg-primary/5 border border-primary/20 p-3">
+            <p className="text-xs text-primary font-medium">🎉 Lovable AI is free and pre-configured!</p>
+            <p className="text-[10px] text-muted-foreground mt-1">No API key needed. Usage is included with your Lovable plan.</p>
+          </div>
+        )}
+
+        {selectedProvider?.needsKey && (
+          <div className="rounded-lg bg-amber-500/5 border border-amber-500/20 p-3">
+            <p className="text-xs text-amber-400 font-medium">💰 BYO Key Billing</p>
+            <p className="text-[10px] text-muted-foreground mt-1">When using your own key, token usage is billed to your {provider === 'openai' ? 'OpenAI' : 'Google'} account.</p>
+          </div>
+        )}
+
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="w-full py-2.5 rounded-lg vanto-gradient text-primary-foreground font-semibold text-sm hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2"
+        >
+          {saving && <Loader2 size={14} className="animate-spin" />}
+          Save AI Settings
+        </button>
       </div>
     </div>
   );
