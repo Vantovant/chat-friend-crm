@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
-import { temperatureBg, leadTypeBg, leadTypeLabels, type LeadTemperature, type LeadType } from '@/lib/vanto-data';
+import { temperatureBg, leadTypeBg, leadTypeLabels, LEAD_TYPES, type LeadTemperature, type LeadType } from '@/lib/vanto-data';
 import { Plus, TrendingUp, DollarSign, Users, Target, Loader2, X, GripVertical } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 
@@ -12,7 +12,7 @@ type ContactWithStage = {
   stage_id: string | null; notes: string | null;
 };
 
-const LEAD_TYPE_OPTIONS: LeadType[] = ['prospect', 'registered', 'buyer', 'vip'];
+const LEAD_TYPE_OPTIONS: LeadType[] = LEAD_TYPES.map(lt => lt.value);
 
 export function CRMModule() {
   const [stages, setStages] = useState<Stage[]>([]);

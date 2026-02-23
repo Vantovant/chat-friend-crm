@@ -42,12 +42,8 @@ type ActivityEntry = {
   created_at: string;
 };
 
-const LEAD_TYPES: { value: string; label: string }[] = [
-  { value: 'prospect', label: 'Prospect' },
-  { value: 'registered', label: 'Registered' },
-  { value: 'buyer', label: 'Buyer' },
-  { value: 'vip', label: 'VIP' },
-];
+import { LEAD_TYPES as LEAD_TYPE_DEFS } from '@/lib/vanto-data';
+const LEAD_TYPES = LEAD_TYPE_DEFS;
 
 function leadTypeLabel(value: string): string {
   return LEAD_TYPES.find(lt => lt.value === value)?.label ?? value;

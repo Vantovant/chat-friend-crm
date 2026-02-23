@@ -16,7 +16,11 @@ type Automation = {
 
 const TRIGGER_OPTIONS = [
   'New contact added',
-  'Lead type changed',
+  'Lead type changed to Prospect',
+  'Lead type changed to Registered_Nopurchase',
+  'Lead type changed to Purchase_Nostatus',
+  'Lead type changed to Purchase_Status',
+  'Lead type changed to Expired',
   'Temperature set to hot',
   'Inbound message received',
   'Contact tagged',
@@ -37,7 +41,8 @@ const TEMPLATES = [
   { name: 'Welcome Series', trigger: 'New contact added', action: 'Send WhatsApp message' },
   { name: 'Re-engagement', trigger: 'Temperature set to hot', action: 'Assign to team member' },
   { name: 'Appointment Reminder', trigger: 'Pipeline stage changed', action: 'Send WhatsApp message' },
-  { name: 'Order Confirmation', trigger: 'Lead type changed', action: 'Send WhatsApp message' },
+  { name: 'Purchase Follow-Up', trigger: 'Lead type changed to Purchase_Nostatus', action: 'Send WhatsApp message' },
+  { name: 'Expired Re-activation', trigger: 'Lead type changed to Expired', action: 'Send WhatsApp message' },
 ];
 
 export function AutomationsModule() {

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { leadTypeLabels, type LeadType } from '@/lib/vanto-data';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import {
@@ -30,6 +31,7 @@ const COLORS = [
   'hsl(160, 60%, 45%)', // chart-2
   'hsl(197, 71%, 52%)', // chart-3
   'hsl(43, 96%, 56%)',  // chart-4
+  'hsl(0, 84%, 60%)',   // chart-5 (expired/red)
 ];
 
 export function DashboardModule() {
@@ -103,7 +105,7 @@ export function DashboardModule() {
           time: new Date(a.created_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
         })),
         leadsByType: [...typeCount.entries()].map(([name, value]) => ({
-          name: name.charAt(0).toUpperCase() + name.slice(1),
+          name: leadTypeLabels[name as LeadType] || name.charAt(0).toUpperCase() + name.slice(1),
           value,
         })),
       });
