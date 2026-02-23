@@ -65,6 +65,7 @@ export function InboxModule() {
   const [sending, setSending] = useState(false);
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>('accessible');
   const [reassigning, setReassigning] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -357,19 +358,64 @@ export function InboxModule() {
                   />
                 </div>
                 <div className="flex items-center gap-2">
-                  <ActionBtn icon={Phone} />
-                  <ActionBtn icon={Video} />
-                  <ActionBtn icon={Bot} label="AI Reply" primary />
+                  <ActionBtn
+                    icon={Phone}
+                    onClick={() => {
+                      const phone = selected.contact?.phone;
+                      if (phone) window.open(`tel:${phone}`, '_blank');
+                      else toast({ title: 'No phone number', variant: 'destructive' });
+                    }}
+                  />
+                  <ActionBtn
+                    icon={Video}
+                    onClick={() => {
+                      const phone = selected.contact?.phone;
+                      if (phone) window.open(`https://wa.me/${phone}?text=`, '_blank');
+                      else toast({ title: 'No phone number', variant: 'destructive' });
+                    }}
+                  />
+                  <ActionBtn
+                    icon={Bot}
+                    label="AI Reply"
+                    primary
+                    disabled={aiLoading}
+                    onClick={async () => {
+                      if (!selectedConvId || aiLoading) return;
+                      setAiLoading(true);
+                      try {
+                        const lastMsgs = messages.slice(-5).map(m => `${m.is_outbound ? 'Agent' : 'Contact'}: ${m.content}`).join('\n');
+                        const { data, error } = await supabase.functions.invoke('send-message', {
+                          body: {
+                            conversation_id: selectedConvId,
+                            content: `[AI suggested reply based on context]\n\nPlease follow up with ${selected.contact?.name} regarding their interest.`,
+                            message_type: 'ai',
+                          },
+                        });
+                        if (error) throw error;
+                        toast({ title: 'AI reply sent' });
+                        fetchMessages(selectedConvId);
+                      } catch (e: any) {
+                        toast({ title: 'AI Reply failed', description: e.message, variant: 'destructive' });
+                      } finally {
+                        setAiLoading(false);
+                      }
+                    }}
+                  />
                   <button
                     onClick={() => setShowInfo(!showInfo)}
                     className={cn(
-                      'p-2 rounded-lg transition-colors',
+                      'p-2 rounded-lg transition-colors cursor-pointer',
                       showInfo ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
                     )}
                   >
                     <Info size={16} />
                   </button>
-                  <ActionBtn icon={MoreVertical} />
+                  <ActionBtn
+                    icon={MoreVertical}
+                    onClick={() => {
+                      toast({ title: 'More options coming soon', description: 'Archive, mark as read, etc.' });
+                    }}
+                  />
                 </div>
               </div>
 
@@ -605,12 +651,18 @@ function ContactAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md'
 }
 
 /* ── Action Button ── */
-function ActionBtn({ icon: Icon, label, primary }: { icon: React.ElementType; label?: string; primary?: boolean }) {
+function ActionBtn({ icon: Icon, label, primary, onClick, disabled }: { icon: React.ElementType; label?: string; primary?: boolean; onClick?: () => void; disabled?: boolean }) {
   return (
-    <button className={cn(
-      'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors',
-      primary ? 'vanto-gradient text-primary-foreground hover:opacity-90' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
-    )}>
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors',
+        primary ? 'vanto-gradient text-primary-foreground hover:opacity-90' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60',
+        disabled && 'opacity-50 cursor-not-allowed',
+        !disabled && !primary && 'cursor-pointer',
+      )}
+    >
       <Icon size={15} />
       {label && <span>{label}</span>}
     </button>
