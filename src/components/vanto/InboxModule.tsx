@@ -4,8 +4,9 @@ import { cn } from '@/lib/utils';
 import { temperatureBg, type LeadTemperature } from '@/lib/vanto-data';
 import {
   Search, Phone, Video, MoreVertical, Send, Bot,
-  Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare, AlertTriangle,
+  Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare, AlertTriangle, RotateCcw,
 } from 'lucide-react';
+import { displayPhone } from '@/lib/phone-utils';
 import { useProfiles, profileLabel, type ProfileOption } from '@/hooks/use-profiles';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -380,7 +381,7 @@ export function InboxModule() {
                   <ContactAvatar name={selected.contact?.name || '?'} />
                   <div>
                     <p className="font-semibold text-sm text-foreground">{selected.contact?.name}</p>
-                    <p className="text-xs text-muted-foreground">{selected.contact?.phone}</p>
+                    <p className="text-xs text-muted-foreground">{displayPhone(selected.contact?.phone || '')}</p>
                   </div>
                   {selected.contact?.temperature && (
                     <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-semibold border', temperatureBg[selected.contact.temperature])}>
@@ -469,7 +470,13 @@ export function InboxModule() {
                     <span>No messages yet — start the conversation</span>
                   </div>
                 ) : (
-                  messages.map(msg => (
+                  messages.map(msg => {
+                    const isFailed = msg.is_outbound && (msg.status_raw === 'failed' || msg.status_raw === 'undelivered');
+                    // Parse error code from stored error string like "[TWILIO_63007] ..."
+                    const errorCode = msg.error?.match(/\[([A-Z_0-9]+)\]/)?.[1] || '';
+                    const errorMessage = msg.error?.replace(/\[[A-Z_0-9]+\]\s*/, '') || msg.error || 'Delivery failed';
+
+                    return (
                     <div key={msg.id} className={cn('flex', msg.is_outbound ? 'justify-end' : 'justify-start')}>
                       <div className={cn('max-w-[70%] px-3.5 py-2.5 text-sm', msg.is_outbound ? 'message-bubble-out' : 'message-bubble-in')}>
                         {msg.message_type === 'ai' && (
@@ -483,24 +490,51 @@ export function InboxModule() {
                           <span className="text-[10px] text-muted-foreground">
                             {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </span>
-                          {msg.is_outbound && (msg.status_raw === 'failed' || msg.status_raw === 'undelivered') && (
+                          {isFailed && (
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <span className="flex items-center gap-0.5 text-[10px] text-destructive">
+                                <span className="flex items-center gap-0.5 text-[10px] text-destructive cursor-help">
                                   <AlertTriangle size={10} /> Not delivered
                                 </span>
                               </TooltipTrigger>
-                              <TooltipContent><p>{msg.error || 'Delivery failed'}</p></TooltipContent>
+                              <TooltipContent side="left" className="max-w-xs">
+                                <div className="space-y-1">
+                                  {errorCode && <p className="font-mono text-[10px] text-destructive">{errorCode}</p>}
+                                  <p className="text-xs">{errorMessage}</p>
+                                </div>
+                              </TooltipContent>
                             </Tooltip>
                           )}
-                          {msg.is_outbound && msg.status === 'read' && !(msg.status_raw === 'failed' || msg.status_raw === 'undelivered') && <span className="text-[10px] text-primary">✓✓</span>}
-                          {msg.is_outbound && msg.status === 'delivered' && !(msg.status_raw === 'failed' || msg.status_raw === 'undelivered') && <span className="text-[10px] text-muted-foreground">✓✓</span>}
-                          {msg.is_outbound && msg.status === 'sent' && !(msg.status_raw === 'failed' || msg.status_raw === 'undelivered') && <span className="text-[10px] text-muted-foreground">✓</span>}
+                          {!isFailed && msg.is_outbound && msg.status === 'read' && <span className="text-[10px] text-primary">✓✓</span>}
+                          {!isFailed && msg.is_outbound && msg.status === 'delivered' && <span className="text-[10px] text-muted-foreground">✓✓</span>}
+                          {!isFailed && msg.is_outbound && msg.status === 'sent' && <span className="text-[10px] text-muted-foreground">✓</span>}
                         </div>
+                        {isFailed && (
+                          <button
+                            onClick={async () => {
+                              setSending(true);
+                              const { data, error } = await supabase.functions.invoke('send-message', {
+                                body: { conversation_id: msg.conversation_id, content: msg.content, message_type: msg.message_type },
+                              });
+                              if (error || !data?.success) {
+                                toast({ title: 'Retry failed', description: data?.hint || data?.message || error?.message, variant: 'destructive' });
+                              } else {
+                                toast({ title: 'Message resent' });
+                                fetchMessages(msg.conversation_id);
+                              }
+                              setSending(false);
+                            }}
+                            disabled={sending}
+                            className="flex items-center gap-1 mt-1.5 text-[10px] text-primary hover:underline disabled:opacity-50"
+                          >
+                            <RotateCcw size={10} /> Retry
+                          </button>
+                        )}
                       </div>
                     </div>
-                  ))
-                )}
+                    );
+                  }))
+                }
                 <div ref={messagesEndRef} />
               </div>
 
@@ -757,7 +791,7 @@ function ContactInfoPanel({ contact, profiles, isAdmin, reassigning, onReassign 
           {contact.name[0]}
         </div>
         <h3 className="font-semibold text-foreground">{contact.name}</h3>
-        <p className="text-xs text-muted-foreground">{contact.phone}</p>
+        <p className="text-xs text-muted-foreground">{displayPhone(contact.phone)}</p>
         {contact.temperature && (
           <div className="flex justify-center gap-2 mt-2">
             <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-semibold border', temperatureBg[contact.temperature])}>
