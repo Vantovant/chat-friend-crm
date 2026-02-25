@@ -4,7 +4,7 @@
  * Creates contact/conversation if missing, inserts message, updates unread.
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import { encode as hexEncode } from 'https://deno.land/std@0.224.0/encoding/hex.ts';
+
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -205,10 +205,11 @@ Deno.serve(async (req) => {
   }).eq('id', convId);
 
   // Increment unread properly via raw update
-  await svc.rpc('increment_unread', { conv_id: convId }).catch(() => {
-    // If RPC doesn't exist, the update above set it to 1
+  try {
+    await svc.rpc('increment_unread', { conv_id: convId });
+  } catch {
     console.log('[twilio-inbound] increment_unread RPC not available, using fallback');
-  });
+  }
 
   console.log('[twilio-inbound] Stored inbound message in conv', convId);
 
