@@ -608,6 +608,51 @@ export type Database = {
           },
         ]
       }
+      zazi_sync_jobs: {
+        Row: {
+          attempts: number
+          created_at: string
+          entity_id: string | null
+          entity_type: string
+          error: string | null
+          finished_at: string | null
+          id: string
+          payload: Json | null
+          response_body_snippet: string | null
+          response_code: number | null
+          status: string
+          user_id: string | null
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          entity_id?: string | null
+          entity_type: string
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          payload?: Json | null
+          response_body_snippet?: string | null
+          response_code?: number | null
+          status?: string
+          user_id?: string | null
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          entity_id?: string | null
+          entity_type?: string
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          payload?: Json | null
+          response_body_snippet?: string | null
+          response_code?: number | null
+          status?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

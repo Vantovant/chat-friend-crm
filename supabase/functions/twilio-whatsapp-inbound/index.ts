@@ -1,10 +1,9 @@
 /**
- * Vanto CRM — twilio-whatsapp-inbound
+ * Vanto CRM — twilio-whatsapp-inbound (Phase 5 hardened)
  * Twilio webhook for inbound WhatsApp messages.
- * Creates contact/conversation if missing, inserts message, updates unread.
+ * Creates contact/conversation if missing, inserts message, triggers auto-reply.
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -25,13 +24,11 @@ async function verifyTwilioSignature(
   signature: string,
   authToken: string,
 ): Promise<boolean> {
-  // Build data string: URL + sorted param keys + values
   const keys = Object.keys(params).sort();
   let data = url;
   for (const key of keys) {
     data += key + params[key];
   }
-
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
     'raw',
@@ -45,17 +42,14 @@ async function verifyTwilioSignature(
   return expected === signature;
 }
 
-/** Strip non-digits */
 function digitsOnly(raw: string): string {
   return (raw || '').replace(/\D/g, '');
 }
 
-/** Strip whatsapp: prefix, keep + */
 function stripWA(raw: string): string {
   return (raw || '').replace(/^whatsapp:/i, '').trim();
 }
 
-/** Normalize to +E.164 */
 function toE164(raw: string): string {
   const cleaned = stripWA(raw);
   const d = digitsOnly(cleaned);
@@ -63,12 +57,6 @@ function toE164(raw: string): string {
   if (d.startsWith('0') && (d.length === 10 || d.length === 11)) return '+27' + d.slice(1);
   if (d.startsWith('27') && (d.length === 11 || d.length === 12)) return '+' + d;
   return '+' + d;
-}
-
-/** Normalize to digits for DB matching */
-function normalizePhone(raw: string): string {
-  const e164 = toE164(raw);
-  return e164; // Store as +E.164
 }
 
 Deno.serve(async (req) => {
@@ -93,33 +81,26 @@ Deno.serve(async (req) => {
   const valid = await verifyTwilioSignature(webhookUrl, params, twilioSig, authToken);
   if (!valid) {
     console.warn('[twilio-inbound] Invalid Twilio signature');
-    // In sandbox mode, Twilio may not sign correctly — log but continue
     // For production, uncomment: return jsonRes({ error: 'Invalid signature' }, 403);
   }
 
-  const from = params['From'] || '';       // whatsapp:+27...
+  const from = params['From'] || '';
   const body = params['Body'] || '';
   const messageSid = params['MessageSid'] || '';
   const profileName = params['ProfileName'] || '';
 
-  // Extract phone — strip whatsapp: and normalize to +E.164
   const phoneE164 = toE164(from);
-  const phoneNorm = phoneE164; // Now stored as +E.164
+  const phoneDigits = digitsOnly(phoneE164);
 
-  if (!phoneNorm) {
+  if (!phoneE164) {
     console.error('[twilio-inbound] No phone in From:', from);
     return jsonRes({ error: 'No phone number' }, 400);
   }
 
-  // Also compute digits-only for legacy matching
-  const phoneDigits = digitsOnly(phoneE164);
+  console.log('[twilio-inbound] Inbound from', phoneE164, '| SID:', messageSid);
 
-  console.log('[twilio-inbound] Inbound from', phoneNorm, '| SID:', messageSid);
-
-  const svc = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-  );
+  const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+  const svc = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
   // 1) Find or create contact
   let contactId: string;
@@ -127,7 +108,7 @@ Deno.serve(async (req) => {
     .from('contacts')
     .select('id')
     .eq('is_deleted', false)
-    .or(`phone_normalized.eq.${phoneNorm},phone_normalized.eq.${phoneDigits},whatsapp_id.eq.${phoneDigits}`)
+    .or(`phone_normalized.eq.${phoneE164},phone_normalized.eq.${phoneDigits},whatsapp_id.eq.${phoneDigits}`)
     .limit(1)
     .maybeSingle();
 
@@ -139,7 +120,7 @@ Deno.serve(async (req) => {
       .insert({
         name: profileName || phoneE164,
         phone: phoneDigits,
-        phone_normalized: phoneNorm,
+        phone_normalized: phoneE164,
         phone_raw: phoneE164,
         whatsapp_id: phoneDigits,
       })
@@ -155,6 +136,7 @@ Deno.serve(async (req) => {
 
   // 2) Find or create conversation
   let convId: string;
+  let isNewConversation = false;
   const { data: existingConv } = await svc
     .from('conversations')
     .select('id')
@@ -165,6 +147,7 @@ Deno.serve(async (req) => {
   if (existingConv) {
     convId = existingConv.id;
   } else {
+    isNewConversation = true;
     const { data: createdConv, error: convErr } = await svc
       .from('conversations')
       .insert({ contact_id: contactId, status: 'active' })
@@ -201,10 +184,10 @@ Deno.serve(async (req) => {
     last_message_at: new Date().toISOString(),
     last_inbound_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
-    unread_count: (existingConv ? 1 : 1), // Will be incremented by RPC ideally; set to 1 for new
+    unread_count: 1,
   }).eq('id', convId);
 
-  // Increment unread properly via raw update
+  // Increment unread properly
   try {
     await svc.rpc('increment_unread', { conv_id: convId });
   } catch {
@@ -212,6 +195,28 @@ Deno.serve(async (req) => {
   }
 
   console.log('[twilio-inbound] Stored inbound message in conv', convId);
+
+  // 5) Trigger auto-reply (fire-and-forget)
+  try {
+    const autoReplyUrl = `${SUPABASE_URL}/functions/v1/whatsapp-auto-reply`;
+    const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    fetch(autoReplyUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': anonKey,
+        'Authorization': `Bearer ${anonKey}`,
+      },
+      body: JSON.stringify({
+        conversation_id: convId,
+        contact_id: contactId,
+        inbound_content: body,
+        phone_e164: phoneE164,
+      }),
+    }).then(r => r.text()).catch(e => console.warn('[twilio-inbound] Auto-reply fire-and-forget error:', e?.message));
+  } catch (e: any) {
+    console.warn('[twilio-inbound] Auto-reply trigger error:', e?.message);
+  }
 
   // Return 200 quickly for Twilio
   return new Response('<Response></Response>', {

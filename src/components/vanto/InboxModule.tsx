@@ -228,14 +228,19 @@ export function InboxModule() {
 
     if (error || !data?.success) {
       // Check for template_required (24h window expired)
-      if (data?.error === 'template_required') {
+      if (data?.error === 'template_required' || data?.code === 'TEMPLATE_REQUIRED') {
         setTemplateModalOpen(true);
       }
       // Rollback optimistic message
       setMessages(prev => prev.filter(m => m.id !== tempId));
+
+      // Build descriptive error with hint if available
+      const errorTitle = data?.code ? `Send failed [${data.code}]` : 'Failed to send message';
+      const errorDesc = [data?.message, data?.hint].filter(Boolean).join(' — ') || error?.message || 'Unknown error';
+
       toast({
-        title: 'Failed to send message',
-        description: data?.message || error?.message || data?.error || 'Unknown error',
+        title: errorTitle,
+        description: errorDesc,
         variant: 'destructive',
       });
     } else {

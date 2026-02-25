@@ -45,4 +45,7 @@ verify_jwt = false
 [functions.ai-settings-save]
 verify_jwt = false
 
+[functions.whatsapp-auto-reply]
+verify_jwt = false
+
 
