@@ -56,6 +56,7 @@ export function TwilioHealthPanel() {
     { name: 'TWILIO_ACCOUNT_SID', description: 'Your Twilio Account SID' },
     { name: 'TWILIO_AUTH_TOKEN', description: 'Your Twilio Auth Token' },
     { name: 'TWILIO_WHATSAPP_FROM', description: 'Your Twilio WhatsApp number (digits only)' },
+    { name: 'TWILIO_MESSAGING_SERVICE_SID', description: 'MessagingServiceSid (MG…) — recommended primary sender' },
   ];
 
   return (
