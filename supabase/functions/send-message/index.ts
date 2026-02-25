@@ -26,9 +26,11 @@ function stripWA(raw: string): string {
   return (raw || "").replace(/^whatsapp:/i, "").trim();
 }
 
-/** Normalize to +E.164 — strict, no fallbacks */
-function toE164(raw: string): string {
-  const cleaned = stripWA(raw);
+/** Normalize to +E.164 — strict */
+function normalizePhoneToE164(raw: string): string {
+  let cleaned = stripWA(raw);
+  cleaned = cleaned.replace(/[\s\-()]/g, "");
+  if (cleaned.startsWith("00")) cleaned = "+" + cleaned.slice(2);
   const d = (cleaned || "").replace(/\D/g, "");
   if (!d) return "";
 
@@ -102,10 +104,27 @@ Deno.serve(async (req) => {
 
   if (contactErr || !contact) return jsonRes({ ok: false, code: "NOT_FOUND", message: "Contact not found" }, 404);
 
-  // Determine E.164 phone
+  // Determine E.164 phone — try all fields in precedence order
   const rawPhone = contact.phone_normalized || contact.phone || contact.whatsapp_id || contact.phone_raw || "";
-  const phoneE164 = toE164(rawPhone);
-  if (!phoneE164) return jsonRes({ ok: false, code: "BAD_PHONE", message: "Contact has no valid phone number" }, 400);
+  const phoneE164 = normalizePhoneToE164(rawPhone);
+  if (!phoneE164) {
+    return jsonRes({
+      ok: false,
+      code: "INVALID_PHONE",
+      message: "Contact has no valid phone number",
+      hint: "Fix contact number format (+27…)",
+    }, 400);
+  }
+
+  // Validate length for +27 numbers
+  if (phoneE164.startsWith("+27") && phoneE164.length < 12) {
+    return jsonRes({
+      ok: false,
+      code: "INVALID_PHONE",
+      message: `Phone ${phoneE164} is too short for a South African number`,
+      hint: "South African numbers should be +27 followed by 9 digits",
+    }, 400);
+  }
 
   // ── Enforce 24h customer care window ──
   const lastInbound = conv.last_inbound_at ? new Date(conv.last_inbound_at).getTime() : 0;
@@ -160,9 +179,9 @@ Deno.serve(async (req) => {
   }
 
   // ── Sender routing: MessagingServiceSid (primary) OR From (fallback) ──
-  const TWILIO_MESSAGING_SERVICE_SID = Deno.env.get("TWILIO_MESSAGING_SERVICE_SID"); // MG...
+  const TWILIO_MESSAGING_SERVICE_SID = Deno.env.get("TWILIO_MESSAGING_SERVICE_SID");
   const TWILIO_WHATSAPP_FROM_RAW = Deno.env.get("TWILIO_WHATSAPP_FROM");
-  const fromE164 = TWILIO_WHATSAPP_FROM_RAW ? toE164(TWILIO_WHATSAPP_FROM_RAW) : "";
+  const fromE164 = TWILIO_WHATSAPP_FROM_RAW ? normalizePhoneToE164(TWILIO_WHATSAPP_FROM_RAW) : "";
 
   // Must have at least one sender method
   if (!TWILIO_MESSAGING_SERVICE_SID && !fromE164) {
@@ -210,7 +229,6 @@ Deno.serve(async (req) => {
     if (!twilioRes.ok) {
       console.error("[send-message] Twilio error:", twilioData);
 
-      // Map Twilio error codes to structured errors
       const twilioCode = twilioData.code || twilioRes.status;
       let errorCode = `TWILIO_${twilioCode}`;
       let hint = "Check Twilio console for details.";
@@ -223,14 +241,17 @@ Deno.serve(async (req) => {
         hint = "Permission denied. Check your Twilio account permissions for WhatsApp.";
       } else if (twilioCode === 21610) {
         hint = "Contact has opted out of WhatsApp messages.";
+      } else if (twilioCode === 21211) {
+        hint = "Invalid 'To' phone number. Check the contact's phone format.";
       }
 
+      const errorStr = `[${errorCode}] ${twilioData.message || "Twilio send failed"}`;
       await serviceClient
         .from("messages")
         .update({
           status: "failed",
           status_raw: "failed",
-          error: `[${errorCode}] ${twilioData.message || "Twilio send failed"}`,
+          error: errorStr,
         })
         .eq("id", msg.id);
 

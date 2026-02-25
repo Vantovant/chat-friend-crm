@@ -1,6 +1,7 @@
 /**
  * Vanto CRM — twilio-whatsapp-inbound (Phase 5 hardened)
  * Twilio webhook for inbound WhatsApp messages.
+ * Uses formData() parsing to avoid URL-encoded artifacts in Body.
  * Creates contact/conversation if missing, inserts message, triggers auto-reply.
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -50,12 +51,20 @@ function stripWA(raw: string): string {
   return (raw || '').replace(/^whatsapp:/i, '').trim();
 }
 
-function toE164(raw: string): string {
-  const cleaned = stripWA(raw);
+function normalizePhoneToE164(raw: string): string {
+  let cleaned = stripWA(raw);
+  // Remove spaces, dashes
+  cleaned = cleaned.replace(/[\s\-()]/g, '');
+  // 00 international prefix
+  if (cleaned.startsWith('00')) cleaned = '+' + cleaned.slice(2);
   const d = digitsOnly(cleaned);
   if (!d) return '';
+  // SA: 0xx -> +27xx
   if (d.startsWith('0') && (d.length === 10 || d.length === 11)) return '+27' + d.slice(1);
+  // SA: 27xx missing +
   if (d.startsWith('27') && (d.length === 11 || d.length === 12)) return '+' + d;
+  // Already has +
+  if (cleaned.startsWith('+')) return cleaned;
   return '+' + d;
 }
 
@@ -66,12 +75,24 @@ Deno.serve(async (req) => {
 
   const authToken = Deno.env.get('TWILIO_AUTH_TOKEN')!;
 
-  // Parse form-urlencoded body
-  const bodyText = await req.text();
-  const params: Record<string, string> = {};
-  for (const pair of bodyText.split('&')) {
-    const [k, v] = pair.split('=');
-    if (k) params[decodeURIComponent(k)] = decodeURIComponent(v || '');
+  // ── Parse form data (Twilio sends application/x-www-form-urlencoded) ──
+  let params: Record<string, string> = {};
+  try {
+    const formData = await req.formData();
+    for (const [k, v] of formData.entries()) {
+      params[k] = String(v);
+    }
+  } catch (e: any) {
+    console.error('[twilio-inbound] formData parse error, falling back to text:', e?.message);
+    // Fallback: manually parse URL-encoded body
+    const bodyText = await req.text();
+    for (const pair of bodyText.split('&')) {
+      const eqIdx = pair.indexOf('=');
+      if (eqIdx === -1) continue;
+      const k = decodeURIComponent(pair.slice(0, eqIdx));
+      const v = decodeURIComponent(pair.slice(eqIdx + 1).replace(/\+/g, ' '));
+      params[k] = v;
+    }
   }
 
   // Verify Twilio signature
@@ -89,7 +110,7 @@ Deno.serve(async (req) => {
   const messageSid = params['MessageSid'] || '';
   const profileName = params['ProfileName'] || '';
 
-  const phoneE164 = toE164(from);
+  const phoneE164 = normalizePhoneToE164(from);
   const phoneDigits = digitsOnly(phoneE164);
 
   if (!phoneE164) {
@@ -97,7 +118,7 @@ Deno.serve(async (req) => {
     return jsonRes({ error: 'No phone number' }, 400);
   }
 
-  console.log('[twilio-inbound] Inbound from', phoneE164, '| SID:', messageSid);
+  console.log('[twilio-inbound] Inbound from', phoneE164, '| SID:', messageSid, '| Body length:', body.length);
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
   const svc = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -136,7 +157,6 @@ Deno.serve(async (req) => {
 
   // 2) Find or create conversation
   let convId: string;
-  let isNewConversation = false;
   const { data: existingConv } = await svc
     .from('conversations')
     .select('id')
@@ -147,7 +167,6 @@ Deno.serve(async (req) => {
   if (existingConv) {
     convId = existingConv.id;
   } else {
-    isNewConversation = true;
     const { data: createdConv, error: convErr } = await svc
       .from('conversations')
       .insert({ contact_id: contactId, status: 'active' })
@@ -161,7 +180,7 @@ Deno.serve(async (req) => {
     console.log('[twilio-inbound] Created conversation:', convId);
   }
 
-  // 3) Insert inbound message
+  // 3) Insert inbound message (body is already properly decoded via formData)
   const { error: msgErr } = await svc.from('messages').insert({
     conversation_id: convId,
     content: body,

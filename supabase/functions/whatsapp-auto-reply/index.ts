@@ -21,8 +21,14 @@ function jsonRes(body: unknown, status = 200) {
   });
 }
 
-function toE164(raw: string): string {
-  const cleaned = (raw || "").replace(/^whatsapp:/i, "").trim();
+function stripWA(raw: string): string {
+  return (raw || "").replace(/^whatsapp:/i, "").trim();
+}
+
+function normalizePhoneToE164(raw: string): string {
+  let cleaned = stripWA(raw);
+  cleaned = cleaned.replace(/[\s\-()]/g, "");
+  if (cleaned.startsWith("00")) cleaned = "+" + cleaned.slice(2);
   const d = cleaned.replace(/\D/g, "");
   if (!d) return "";
   if (d.startsWith("0") && (d.length === 10 || d.length === 11)) return "+27" + d.slice(1);
@@ -146,13 +152,13 @@ Deno.serve(async (req) => {
     return jsonRes({ ok: false, message: "Missing Twilio secrets" }, 500);
   }
 
-  const fromE164 = TWILIO_WHATSAPP_FROM_RAW ? toE164(TWILIO_WHATSAPP_FROM_RAW) : "";
+  const fromE164 = TWILIO_WHATSAPP_FROM_RAW ? normalizePhoneToE164(TWILIO_WHATSAPP_FROM_RAW) : "";
   if (!TWILIO_MESSAGING_SERVICE_SID && !fromE164) {
     console.error("[auto-reply] No sender configured");
     return jsonRes({ ok: false, message: "No sender configured" }, 500);
   }
 
-  const phoneNorm = toE164(phone_e164);
+  const phoneNorm = normalizePhoneToE164(phone_e164);
   const twilioTo = `whatsapp:${phoneNorm}`;
   const statusCallbackUrl = `${SUPABASE_URL}/functions/v1/twilio-whatsapp-status`;
   const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
