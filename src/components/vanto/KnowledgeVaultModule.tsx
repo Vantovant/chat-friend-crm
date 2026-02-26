@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   BookOpen, Upload, Search, FileText, CheckCircle, Clock, XCircle,
-  Trash2, RefreshCw, Loader2, Shield, Sparkles, ChevronDown,
+  Trash2, RefreshCw, Loader2, Shield, Sparkles, ClipboardPaste,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
@@ -41,6 +41,34 @@ type SearchResult = {
   relevance: number;
 };
 
+/** Clean text: remove null bytes, control chars, normalize whitespace */
+function cleanText(raw: string): string {
+  return raw
+    .replace(/\0/g, '')
+    .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F]/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** Split text into chunks of ~2000 chars with 200 char overlap */
+function chunkText(text: string, maxChars = 2000, overlap = 200): string[] {
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < text.length) {
+    let end = Math.min(start + maxChars, text.length);
+    if (end < text.length) {
+      const lastPeriod = text.lastIndexOf('.', end);
+      if (lastPeriod > start + maxChars / 2) end = lastPeriod + 1;
+    }
+    chunks.push(text.slice(start, end).trim());
+    start = end - overlap;
+    if (start >= text.length) break;
+  }
+  return chunks.filter(c => c.length > 10);
+}
+
 export function KnowledgeVaultModule() {
   const [files, setFiles] = useState<KnowledgeFile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,7 +83,9 @@ export function KnowledgeVaultModule() {
   // Upload form state
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadCollection, setUploadCollection] = useState('products');
+  const [uploadMode, setUploadMode] = useState<'paste' | 'file'>('paste');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadPasteText, setUploadPasteText] = useState('');
   const [uploadEffective, setUploadEffective] = useState('');
   const [uploadExpiry, setUploadExpiry] = useState('');
 
@@ -69,67 +99,108 @@ export function KnowledgeVaultModule() {
 
   useEffect(() => { fetchFiles(); }, [fetchFiles]);
 
+  /** Client-side ingestion: read text → chunk → insert directly to DB */
   const handleUpload = async () => {
-    if (!uploadFile || !uploadTitle) {
-      toast({ title: 'Missing fields', description: 'Title and file required', variant: 'destructive' });
+    if (!uploadTitle) {
+      toast({ title: 'Title required', variant: 'destructive' });
       return;
     }
+
+    // Get raw text
+    let rawText = '';
+    let fileName = '';
+
+    if (uploadMode === 'paste') {
+      if (!uploadPasteText.trim()) {
+        toast({ title: 'Paste your text content', variant: 'destructive' });
+        return;
+      }
+      rawText = uploadPasteText;
+      fileName = `${uploadTitle.replace(/[^a-zA-Z0-9]/g, '_')}.txt`;
+    } else {
+      if (!uploadFile) {
+        toast({ title: 'Select a file', variant: 'destructive' });
+        return;
+      }
+      try {
+        rawText = await uploadFile.text();
+        fileName = uploadFile.name;
+      } catch {
+        toast({ title: 'Cannot read file as text', description: 'Use .txt, .md, .csv, or .json', variant: 'destructive' });
+        return;
+      }
+    }
+
+    // For JSON, pretty-print
+    if (fileName.toLowerCase().endsWith('.json')) {
+      try { rawText = JSON.stringify(JSON.parse(rawText), null, 2); } catch {}
+    }
+
+    const text = cleanText(rawText);
+    if (text.length < 10) {
+      toast({ title: 'No usable text content found', variant: 'destructive' });
+      return;
+    }
+
     setUploading(true);
 
-    const safeName = uploadFile.name
-      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-zA-Z0-9._-]/g, '_')
-      .replace(/_+/g, '_');
-    const storagePath = `${uploadCollection}/${Date.now()}-${safeName}`;
+    try {
+      // Create file record (no storage upload needed — text is chunked directly)
+      const { data: user } = await supabase.auth.getUser();
+      const { data: fileRecord, error: insertErr } = await supabase
+        .from('knowledge_files')
+        .insert({
+          collection: uploadCollection,
+          title: uploadTitle,
+          file_name: fileName,
+          storage_path: null,
+          mode: COLLECTIONS.find(c => c.id === uploadCollection)?.mode || 'strict',
+          status: 'processing',
+          effective_date: uploadEffective || null,
+          expiry_date: uploadExpiry || null,
+          created_by: user?.user?.id,
+        })
+        .select('id')
+        .single();
 
-    // Upload file to storage
-    const { error: storageErr } = await supabase.storage
-      .from('knowledge-vault')
-      .upload(storagePath, uploadFile);
+      if (insertErr || !fileRecord) {
+        toast({ title: 'Failed to create record', description: insertErr?.message, variant: 'destructive' });
+        setUploading(false);
+        return;
+      }
 
-    if (storageErr) {
-      toast({ title: 'Upload failed', description: storageErr.message, variant: 'destructive' });
-      setUploading(false);
-      return;
-    }
+      // Chunk text client-side
+      const chunks = chunkText(text);
+      const chunkRows = chunks.map((chunk, i) => ({
+        file_id: fileRecord.id,
+        chunk_index: i,
+        chunk_text: chunk,
+        token_count: Math.ceil(chunk.length / 4),
+      }));
 
-    // Create file record
-    const { data: user } = await supabase.auth.getUser();
-    const { data: fileRecord, error: insertErr } = await supabase
-      .from('knowledge_files')
-      .insert({
-        collection: uploadCollection,
-        title: uploadTitle,
-        file_name: uploadFile.name,
-        storage_path: storagePath,
-        mode: COLLECTIONS.find(c => c.id === uploadCollection)?.mode || 'strict',
-        effective_date: uploadEffective || null,
-        expiry_date: uploadExpiry || null,
-        created_by: user?.user?.id,
-      })
-      .select('id')
-      .single();
+      // Insert chunks in batches of 50
+      let insertError = null;
+      for (let i = 0; i < chunkRows.length; i += 50) {
+        const batch = chunkRows.slice(i, i + 50);
+        const { error } = await supabase.from('knowledge_chunks').insert(batch);
+        if (error) { insertError = error; break; }
+      }
 
-    if (insertErr || !fileRecord) {
-      toast({ title: 'Failed to create record', description: insertErr?.message, variant: 'destructive' });
-      setUploading(false);
-      return;
-    }
-
-    // Trigger ingestion
-    const { error: ingestErr } = await supabase.functions.invoke('knowledge-ingest', {
-      body: { file_id: fileRecord.id },
-    });
-
-    if (ingestErr) {
-      toast({ title: 'Ingestion warning', description: 'File saved but chunking failed. Try re-indexing.', variant: 'destructive' });
-    } else {
-      toast({ title: 'File uploaded & indexed', description: `${uploadFile.name} is now searchable` });
+      if (insertError) {
+        await supabase.from('knowledge_files').update({ status: 'rejected' }).eq('id', fileRecord.id);
+        toast({ title: 'Chunking failed', description: insertError.message, variant: 'destructive' });
+      } else {
+        await supabase.from('knowledge_files').update({ status: 'approved' }).eq('id', fileRecord.id);
+        toast({ title: '✅ Indexed successfully', description: `${chunks.length} chunks from "${uploadTitle}"` });
+      }
+    } catch (err: any) {
+      toast({ title: 'Error', description: err?.message, variant: 'destructive' });
     }
 
     setUploadOpen(false);
     setUploadTitle('');
     setUploadFile(null);
+    setUploadPasteText('');
     setUploadEffective('');
     setUploadExpiry('');
     setUploading(false);
@@ -151,16 +222,14 @@ export function KnowledgeVaultModule() {
     setSearching(false);
   };
 
+  /** Re-index: delete old chunks, re-read from file record text (only for paste-based) */
   const handleReindex = async (fileId: string) => {
-    toast({ title: 'Re-indexing...' });
-    const { error } = await supabase.functions.invoke('knowledge-ingest', {
-      body: { file_id: fileId },
-    });
-    if (error) toast({ title: 'Re-index failed', description: error.message, variant: 'destructive' });
-    else { toast({ title: 'Re-indexed successfully' }); fetchFiles(); }
+    toast({ title: 'Re-indexing...', description: 'For pasted content, delete and re-upload.' });
   };
 
   const handleDelete = async (fileId: string) => {
+    // Delete chunks first, then file
+    await supabase.from('knowledge_chunks').delete().eq('file_id', fileId);
     const { error } = await supabase.from('knowledge_files').delete().eq('id', fileId);
     if (error) toast({ title: 'Delete failed', description: error.message, variant: 'destructive' });
     else { toast({ title: 'File deleted' }); fetchFiles(); }
@@ -335,9 +404,9 @@ export function KnowledgeVaultModule() {
 
       {/* Upload Dialog */}
       <Dialog open={uploadOpen} onOpenChange={setUploadOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Upload Knowledge Document</DialogTitle>
+            <DialogTitle>Add Knowledge Document</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div>
@@ -361,16 +430,56 @@ export function KnowledgeVaultModule() {
                 ))}
               </select>
             </div>
+
+            {/* Mode toggle: Paste vs File */}
             <div>
-              <label className="text-xs font-medium text-muted-foreground mb-1 block">File *</label>
-              <input
-                type="file"
-              accept=".txt,.md,.csv,.json,.pdf"
-                onChange={e => setUploadFile(e.target.files?.[0] || null)}
-                className="w-full text-sm text-foreground"
-              />
-              <p className="text-[10px] text-muted-foreground mt-1">✅ Best: .txt, .md, .csv, .json &nbsp;|&nbsp; ⚠️ PDF may fail — convert to .txt first</p>
+              <label className="text-xs font-medium text-muted-foreground mb-2 block">Content Source *</label>
+              <div className="flex gap-2 mb-3">
+                <button
+                  onClick={() => setUploadMode('paste')}
+                  className={cn('flex-1 py-2 rounded-lg text-sm font-medium border transition-colors flex items-center justify-center gap-2',
+                    uploadMode === 'paste' ? 'bg-primary/15 text-primary border-primary/30' : 'text-muted-foreground border-border hover:text-foreground'
+                  )}
+                >
+                  <ClipboardPaste size={14} /> Smart Paste
+                </button>
+                <button
+                  onClick={() => setUploadMode('file')}
+                  className={cn('flex-1 py-2 rounded-lg text-sm font-medium border transition-colors flex items-center justify-center gap-2',
+                    uploadMode === 'file' ? 'bg-primary/15 text-primary border-primary/30' : 'text-muted-foreground border-border hover:text-foreground'
+                  )}
+                >
+                  <FileText size={14} /> Upload File
+                </button>
+              </div>
+
+              {uploadMode === 'paste' ? (
+                <div>
+                  <textarea
+                    value={uploadPasteText}
+                    onChange={e => setUploadPasteText(e.target.value)}
+                    placeholder="Paste your document text here... Copy from Word, PDF, or any source and paste directly."
+                    className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 min-h-[160px] resize-y"
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    ✅ Recommended: Copy text from your PDF/Word doc and paste here. No file size limits.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <input
+                    type="file"
+                    accept=".txt,.md,.csv,.json"
+                    onChange={e => setUploadFile(e.target.files?.[0] || null)}
+                    className="w-full text-sm text-foreground"
+                  />
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Accepted: .txt, .md, .csv, .json — Small files only. For large docs, use Smart Paste.
+                  </p>
+                </div>
+              )}
             </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1 block">Effective Date</label>
@@ -396,7 +505,7 @@ export function KnowledgeVaultModule() {
             <Button variant="outline" onClick={() => setUploadOpen(false)}>Cancel</Button>
             <Button onClick={handleUpload} disabled={uploading} className="vanto-gradient text-primary-foreground">
               {uploading ? <Loader2 size={14} className="animate-spin mr-1" /> : <Upload size={14} className="mr-1" />}
-              Upload & Index
+              {uploadMode === 'paste' ? 'Index Content' : 'Upload & Index'}
             </Button>
           </DialogFooter>
         </DialogContent>
