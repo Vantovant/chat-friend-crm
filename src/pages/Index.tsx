@@ -14,6 +14,7 @@ import { IntegrationsModule } from '@/components/vanto/IntegrationsModule';
 import { APIConsoleModule } from '@/components/vanto/APIConsoleModule';
 import { SettingsModule } from '@/components/vanto/SettingsModule';
 import { AuthPage } from '@/components/vanto/AuthPage';
+import { PageHelpButton } from '@/components/vanto/PageHelpButton';
 import type { Module } from '@/lib/vanto-data';
 import type { Session } from '@supabase/supabase-js';
 import { Bot } from 'lucide-react';
@@ -76,7 +77,11 @@ const Index = () => {
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <AppSidebar activeModule={activeModule} onModuleChange={setActiveModule} />
-      <main className="flex-1 overflow-hidden">
+      <main className="flex-1 overflow-hidden relative">
+        {/* Page Help Button */}
+        <div className="absolute top-3 right-3 z-30">
+          <PageHelpButton page={activeModule} />
+        </div>
         {renderModule()}
       </main>
     </div>

@@ -57,4 +57,6 @@ verify_jwt = false
 [functions.zazi-copilot]
 verify_jwt = false
 
+[functions.page-help]
+verify_jwt = false
 
