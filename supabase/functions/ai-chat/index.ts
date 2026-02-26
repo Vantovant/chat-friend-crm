@@ -1,7 +1,6 @@
 /**
  * Vanto CRM — ai-chat Edge Function
- * Powers the AI Agent module with real AI responses.
- * Supports BYO API keys (OpenAI/Gemini) with Lovable AI fallback.
+ * Hybrid AI routing: Lovable AI primary → OpenAI fallback (from user settings).
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -40,6 +39,44 @@ function jsonRes(body: unknown, status = 200) {
   });
 }
 
+interface AIProvider {
+  url: string;
+  key: string;
+  model: string;
+  name: string;
+}
+
+async function callAI(provider: AIProvider, aiMessages: any[]): Promise<{ ok: true; reply: string } | { ok: false; error: string; status: number }> {
+  try {
+    const response = await fetch(provider.url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${provider.key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: provider.model,
+        messages: aiMessages,
+        max_tokens: 1000,
+        temperature: 0.7,
+      }),
+    });
+
+    if (!response.ok) {
+      const errData = await response.text();
+      console.error(`[ai-chat] ${provider.name} error:`, response.status, errData);
+      return { ok: false, error: errData, status: response.status };
+    }
+
+    const data = await response.json();
+    const reply = data.choices?.[0]?.message?.content || 'I could not generate a response.';
+    return { ok: true, reply };
+  } catch (err: any) {
+    console.error(`[ai-chat] ${provider.name} exception:`, err.message);
+    return { ok: false, error: err.message, status: 500 };
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
@@ -53,23 +90,26 @@ Deno.serve(async (req) => {
     return jsonRes({ error: 'messages array required' }, 400);
   }
 
-  // Try to resolve user's AI settings
-  let aiUrl = AI_GATEWAY_URL;
-  let aiKey = Deno.env.get('LOVABLE_API_KEY') || '';
-  let model = 'google/gemini-3-flash-preview';
-  let providerUsed = 'lovable';
+  // Build providers list: Lovable AI primary, then user's BYO key as fallback
+  const providers: AIProvider[] = [];
 
+  // 1) Always try Lovable AI first
+  const lovableKey = Deno.env.get('LOVABLE_API_KEY') || '';
+  if (lovableKey) {
+    providers.push({
+      url: AI_GATEWAY_URL,
+      key: lovableKey,
+      model: 'google/gemini-3-flash-preview',
+      name: 'lovable',
+    });
+  }
+
+  // 2) Try to load user's BYO key as fallback
   const authHeader = req.headers.get('Authorization') || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
   if (token) {
     try {
-      const serviceClient = createClient(
-        Deno.env.get('SUPABASE_URL')!,
-        Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-      );
-
-      // Get user ID from token
       const anonClient = createClient(
         Deno.env.get('SUPABASE_URL')!,
         Deno.env.get('SUPABASE_ANON_KEY')!,
@@ -78,36 +118,45 @@ Deno.serve(async (req) => {
       const { data: userData } = await anonClient.auth.getUser(token);
 
       if (userData?.user) {
+        const serviceClient = createClient(
+          Deno.env.get('SUPABASE_URL')!,
+          Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+        );
         const { data: settings } = await serviceClient
           .from('user_ai_settings')
           .select('*')
           .eq('user_id', userData.user.id)
           .maybeSingle();
 
-        if (settings && settings.is_enabled && settings.provider !== 'lovable' && settings.api_key_encrypted) {
+        if (settings?.is_enabled && settings.api_key_encrypted) {
           const decodedKey = atob(settings.api_key_encrypted);
           if (settings.provider === 'openai') {
-            aiUrl = OPENAI_URL;
-            aiKey = decodedKey;
-            model = settings.model || 'gpt-4o-mini';
-            providerUsed = 'openai';
+            providers.push({
+              url: OPENAI_URL,
+              key: decodedKey,
+              model: settings.model || 'gpt-4o-mini',
+              name: 'openai',
+            });
           } else if (settings.provider === 'gemini') {
-            aiUrl = GEMINI_URL;
-            aiKey = decodedKey;
-            model = settings.model || 'gemini-2.0-flash';
-            providerUsed = 'gemini';
+            providers.push({
+              url: GEMINI_URL,
+              key: decodedKey,
+              model: settings.model || 'gemini-2.0-flash',
+              name: 'gemini',
+            });
           }
         }
       }
     } catch (e) {
-      console.error('[ai-chat] Failed to load user AI settings, using fallback:', e);
+      console.error('[ai-chat] Failed to load user AI settings:', e);
     }
   }
 
-  if (!aiKey) {
-    return jsonRes({ error: 'No AI API key configured' }, 500);
+  if (providers.length === 0) {
+    return jsonRes({ error: 'No AI API key configured. Please add your OpenAI or Gemini key in Settings.' }, 500);
   }
 
+  // Build messages
   const systemContent = context
     ? `${SYSTEM_PROMPT}\n\nCurrent CRM Context:\n${context}`
     : SYSTEM_PROMPT;
@@ -117,44 +166,31 @@ Deno.serve(async (req) => {
     ...messages.map((m: any) => ({ role: m.role, content: m.content })),
   ];
 
-  try {
-    const response = await fetch(aiUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${aiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model,
-        messages: aiMessages,
-        max_tokens: 1000,
-        temperature: 0.7,
-      }),
-    });
+  // Try each provider in order (Lovable first, then BYO fallback)
+  let lastError = '';
+  let lastStatus = 500;
 
-    if (!response.ok) {
-      const errData = await response.text();
-      console.error(`[ai-chat] ${providerUsed} error:`, response.status, errData);
+  for (const provider of providers) {
+    console.log(`[ai-chat] Trying provider: ${provider.name}`);
+    const result = await callAI(provider, aiMessages);
 
-      if (response.status === 429) {
-        return jsonRes({ error: 'Rate limit exceeded. Please try again later.' }, 429);
-      }
-      if (response.status === 402) {
-        return jsonRes({ error: 'Payment required. Please add funds to your account.' }, 402);
-      }
-      if (response.status === 401) {
-        return jsonRes({ error: `Invalid ${providerUsed} API key. Please check your settings.` }, 401);
-      }
-
-      return jsonRes({ error: `AI error [${response.status}] from ${providerUsed}` }, 502);
+    if (result.ok) {
+      console.log(`[ai-chat] Success via ${provider.name}`);
+      return jsonRes({ reply: result.reply, provider: provider.name });
     }
 
-    const data = await response.json();
-    const reply = data.choices?.[0]?.message?.content || 'I could not generate a response.';
-
-    return jsonRes({ reply, provider: providerUsed });
-  } catch (err: any) {
-    console.error('[ai-chat] Error:', err.message);
-    return jsonRes({ error: err.message }, 500);
+    lastError = result.error;
+    lastStatus = result.status;
+    console.warn(`[ai-chat] ${provider.name} failed (${result.status}), trying next...`);
   }
+
+  // All providers failed
+  if (lastStatus === 429) {
+    return jsonRes({ error: 'Rate limit exceeded on all providers. Please try again later.' }, 429);
+  }
+  if (lastStatus === 402) {
+    return jsonRes({ error: 'Payment required. Please add funds or configure a fallback API key in Settings.' }, 402);
+  }
+
+  return jsonRes({ error: `All AI providers failed. Last error: ${lastError}` }, 502);
 });
