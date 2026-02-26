@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { User, Bell, Shield, Users, ChevronRight, Mail, Loader2, CheckCircle, X, Clock, Edit2, Bot, Key, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
@@ -128,6 +129,7 @@ function InviteModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
 
 export function SettingsModule() {
   const [activeSection, setActiveSection] = useState('profile');
+  const isMobile = useIsMobile();
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
@@ -231,36 +233,60 @@ export function SettingsModule() {
   ];
 
   return (
-    <div className="flex h-full">
+    <div className="flex flex-col md:flex-row h-full">
       {showInviteModal && (
         <InviteModal onClose={() => setShowInviteModal(false)} onSuccess={handleInviteSuccess} />
       )}
 
-      {/* Sidebar */}
-      <div className="w-56 border-r border-border p-4 space-y-1 shrink-0">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1 mb-2">Settings</p>
-        {settingSections.map(section => {
-          const Icon = section.icon;
-          return (
-            <button
-              key={section.id}
-              onClick={() => setActiveSection(section.id)}
-              className={cn(
-                'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors text-left',
-                activeSection === section.id
-                  ? 'bg-primary/10 text-primary border border-primary/25'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
-              )}
-            >
-              <Icon size={15} />
-              <span>{section.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      {/* Mobile: horizontal tabs instead of sidebar */}
+      {isMobile ? (
+        <div className="flex gap-1 overflow-x-auto px-3 py-2 border-b border-border shrink-0">
+          {settingSections.map(section => {
+            const Icon = section.icon;
+            return (
+              <button
+                key={section.id}
+                onClick={() => setActiveSection(section.id)}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-colors shrink-0',
+                  activeSection === section.id
+                    ? 'bg-primary/10 text-primary border border-primary/25'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
+                )}
+              >
+                <Icon size={14} />
+                <span>{section.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        /* Desktop sidebar */
+        <div className="w-56 border-r border-border p-4 space-y-1 shrink-0">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1 mb-2">Settings</p>
+          {settingSections.map(section => {
+            const Icon = section.icon;
+            return (
+              <button
+                key={section.id}
+                onClick={() => setActiveSection(section.id)}
+                className={cn(
+                  'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors text-left',
+                  activeSection === section.id
+                    ? 'bg-primary/10 text-primary border border-primary/25'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
+                )}
+              >
+                <Icon size={15} />
+                <span>{section.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
 
         {/* Profile */}
         {activeSection === 'profile' && (

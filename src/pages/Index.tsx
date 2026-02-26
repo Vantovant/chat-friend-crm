@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { AppSidebar } from '@/components/vanto/AppSidebar';
 import { DashboardModule } from '@/components/vanto/DashboardModule';
 import { InboxModule } from '@/components/vanto/InboxModule';
@@ -23,9 +24,9 @@ const Index = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeModule, setActiveModule] = useState<Module>('dashboard');
+  const isMobile = useIsMobile();
 
   useEffect(() => {
-    // Set up auth state listener BEFORE getSession
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setLoading(false);
@@ -74,11 +75,25 @@ const Index = () => {
     return <AuthPage onSuccess={() => setLoading(true)} />;
   }
 
+  if (isMobile) {
+    return (
+      <div className="flex flex-col h-screen overflow-hidden bg-background">
+        <AppSidebar activeModule={activeModule} onModuleChange={setActiveModule} />
+        {/* Main content with padding for top bar and bottom nav */}
+        <main className="flex-1 overflow-hidden pt-12 pb-16 relative">
+          <div className="absolute top-14 right-2 z-30">
+            <PageHelpButton page={activeModule} />
+          </div>
+          {renderModule()}
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen overflow-hidden bg-background">
       <AppSidebar activeModule={activeModule} onModuleChange={setActiveModule} />
       <main className="flex-1 overflow-hidden relative">
-        {/* Page Help Button */}
         <div className="absolute top-3 right-3 z-30">
           <PageHelpButton page={activeModule} />
         </div>

@@ -116,7 +116,7 @@ export function AutomationsModule() {
         </button>
       </div>
 
-      <div className="px-6 py-4 border-b border-border grid grid-cols-3 gap-4 shrink-0">
+      <div className="px-4 md:px-6 py-4 border-b border-border grid grid-cols-3 gap-2 md:gap-4 shrink-0">
         {[
           { label: 'Active', value: activeCount, icon: Zap, color: 'text-primary' },
           { label: 'Total Runs', value: totalRuns, icon: BarChart2, color: 'text-amber-400' },
@@ -192,7 +192,7 @@ export function AutomationsModule() {
 
         <div className="mt-6">
           <p className="text-sm font-semibold text-muted-foreground mb-3">🧩 Quick Templates</p>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {TEMPLATES.map(tpl => (
               <button key={tpl.name} onClick={() => useTemplate(tpl)} className="vanto-card p-3 text-left hover:border-primary/30 transition-colors">
                 <div className="flex items-center gap-2 mb-1">

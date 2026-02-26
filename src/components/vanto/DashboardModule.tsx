@@ -125,14 +125,14 @@ export function DashboardModule() {
   return (
     <div className="flex flex-col h-full overflow-y-auto">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-border shrink-0">
+      <div className="px-4 md:px-6 py-4 border-b border-border shrink-0">
         <h2 className="text-lg font-bold text-foreground">Dashboard</h2>
         <p className="text-sm text-muted-foreground">Vanto CRM overview & analytics</p>
       </div>
 
       {/* KPI Cards */}
-      <div className="px-6 pt-4">
-        <div className="grid grid-cols-4 gap-3">
+      <div className="px-4 md:px-6 pt-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <KPICard icon={Users} label="Total Contacts" value={stats.totalContacts} color="text-primary" />
           <KPICard icon={MessageSquare} label="Messages" value={stats.totalMessages} color="text-[hsl(197,71%,52%)]" />
           <KPICard icon={Activity} label="Active Chats" value={stats.activeConversations} color="text-[hsl(43,96%,56%)]" />
@@ -141,8 +141,8 @@ export function DashboardModule() {
       </div>
 
       {/* Temperature breakdown */}
-      <div className="px-6 pt-4">
-        <div className="grid grid-cols-3 gap-3">
+      <div className="px-4 md:px-6 pt-4">
+        <div className="grid grid-cols-3 gap-2 md:gap-3">
           <div className="vanto-card p-3 flex items-center gap-3">
             <div className="w-9 h-9 rounded-lg bg-red-500/15 flex items-center justify-center shrink-0">
               <Flame size={18} className="text-red-400" />
@@ -174,8 +174,8 @@ export function DashboardModule() {
       </div>
 
       {/* Charts Row */}
-      <div className="px-6 pt-4">
-        <div className="grid grid-cols-2 gap-4">
+      <div className="px-4 md:px-6 pt-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Messages by Day */}
           <div className="vanto-card p-4">
             <div className="flex items-center gap-2 mb-3">
@@ -251,7 +251,7 @@ export function DashboardModule() {
       </div>
 
       {/* Activity Feed */}
-      <div className="px-6 py-4">
+      <div className="px-4 md:px-6 py-4">
         <div className="vanto-card p-4">
           <div className="flex items-center gap-2 mb-3">
             <Activity size={14} className="text-primary" />
