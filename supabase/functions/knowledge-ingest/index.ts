@@ -1,7 +1,7 @@
 /**
  * Vanto CRM — knowledge-ingest Edge Function
  * Takes a file_id, reads the file from storage, chunks text, stores chunks.
- * Supports: .txt, .md, .csv, .json, .pdf
+ * Supports: .txt, .md, .csv, .json (recommended), .pdf (best-effort text extraction)
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -34,22 +34,15 @@ function chunkText(text: string, maxChars = 2000, overlap = 200): string[] {
   return chunks.filter(c => c.length > 10);
 }
 
-/** Extract text from a PDF using pdf-parse */
-async function extractPdfText(blob: Blob): Promise<string> {
-  try {
-    const pdfParse = (await import('https://esm.sh/pdf-parse@1.1.1')).default;
-    const buffer = await blob.arrayBuffer();
-    const result = await pdfParse(new Uint8Array(buffer));
-    return result.text || '';
-  } catch (e: any) {
-    console.error('[knowledge-ingest] PDF parse error:', e?.message);
-    // Fallback: try reading as text (some PDFs contain embedded text)
-    try {
-      return await blob.text();
-    } catch {
-      throw new Error('Failed to extract text from PDF: ' + (e?.message || 'unknown'));
-    }
-  }
+/** Clean extracted text: remove excessive whitespace, null bytes, control chars */
+function cleanText(raw: string): string {
+  return raw
+    .replace(/\0/g, '')                    // null bytes
+    .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F]/g, '') // control chars (keep \n \r \t)
+    .replace(/\r\n/g, '\n')               // normalize line endings
+    .replace(/[ \t]+/g, ' ')              // collapse horizontal whitespace
+    .replace(/\n{3,}/g, '\n\n')           // collapse excessive newlines
+    .trim();
 }
 
 Deno.serve(async (req) => {
@@ -91,25 +84,29 @@ Deno.serve(async (req) => {
       return jsonRes({ error: 'Could not download file: ' + (dlErr?.message || 'unknown') }, 500);
     }
 
-    // Extract text based on file type
+    // Extract text — all formats read as text (PDF included as best-effort)
     let text = '';
-    const fileName = file.file_name.toLowerCase();
-
-    if (fileName.endsWith('.pdf')) {
-      text = await extractPdfText(fileData);
-    } else if (fileName.endsWith('.txt') || fileName.endsWith('.md') || fileName.endsWith('.csv')) {
+    try {
       text = await fileData.text();
-    } else if (fileName.endsWith('.json')) {
-      const jsonContent = await fileData.text();
-      text = JSON.stringify(JSON.parse(jsonContent), null, 2);
-    } else {
-      // For other formats, try reading as text
-      text = await fileData.text();
+    } catch (e: any) {
+      await serviceClient.from('knowledge_files').update({ status: 'rejected' }).eq('id', file_id);
+      return jsonRes({ error: 'Could not read file as text: ' + (e?.message || 'unknown') }, 500);
     }
+
+    // For JSON files, pretty-print for better chunking
+    const fileName = file.file_name.toLowerCase();
+    if (fileName.endsWith('.json')) {
+      try {
+        text = JSON.stringify(JSON.parse(text), null, 2);
+      } catch { /* keep raw text */ }
+    }
+
+    // Clean the text
+    text = cleanText(text);
 
     if (!text || text.length < 10) {
       await serviceClient.from('knowledge_files').update({ status: 'rejected' }).eq('id', file_id);
-      return jsonRes({ error: 'File has no extractable text content' }, 400);
+      return jsonRes({ error: 'File has no extractable text content. For PDFs, please convert to .txt or .md first.' }, 400);
     }
 
     // Delete existing chunks for this file (re-ingest)
