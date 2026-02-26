@@ -1,6 +1,6 @@
 // Vanto Command Hub 2.0 — Types (no more mock data)
 
-export type Module = 'dashboard' | 'inbox' | 'contacts' | 'crm' | 'automations' | 'ai-agent' | 'knowledge' | 'workflows' | 'integrations' | 'api-console' | 'settings';
+export type Module = 'dashboard' | 'inbox' | 'contacts' | 'crm' | 'automations' | 'ai-agent' | 'knowledge' | 'playbooks' | 'workflows' | 'integrations' | 'api-console' | 'settings';
 
 export type LeadTemperature = 'hot' | 'warm' | 'cold';
 export type LeadType = 'prospect' | 'registered' | 'buyer' | 'vip' | 'expired';

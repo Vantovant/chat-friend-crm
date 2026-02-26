@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { User, Bell, Shield, Users, ChevronRight, Mail, Loader2, CheckCircle, X, Clock, Edit2, Bot, Key } from 'lucide-react';
+import { User, Bell, Shield, Users, ChevronRight, Mail, Loader2, CheckCircle, X, Clock, Edit2, Bot, Key, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
@@ -8,6 +8,7 @@ const settingSections = [
   { id: 'profile', icon: User, label: 'Profile', description: 'Your account details' },
   { id: 'team', icon: Users, label: 'Team', description: 'Manage team members' },
   { id: 'ai-provider', icon: Bot, label: 'AI Provider', description: 'BYO API keys' },
+  { id: 'auto-reply', icon: MessageSquare, label: 'Auto-Reply', description: 'WhatsApp auto-reply settings' },
   { id: 'notifications', icon: Bell, label: 'Notifications', description: 'Alert preferences' },
   { id: 'security', icon: Shield, label: 'Security', description: 'Password & 2FA' },
 ];
@@ -444,7 +445,9 @@ export function SettingsModule() {
         {/* AI Provider */}
         {activeSection === 'ai-provider' && <AIProviderSection />}
 
-        {/* Notifications */}
+        {/* Auto-Reply */}
+        {activeSection === 'auto-reply' && <AutoReplySection />}
+
         {activeSection === 'notifications' && (
           <div>
             <h3 className="text-base font-bold text-foreground mb-4">Notifications</h3>
@@ -661,6 +664,138 @@ function AIProviderSection() {
           Save AI Settings
         </button>
       </div>
+    </div>
+  );
+}
+
+const AUTO_REPLY_MODES = [
+  { value: 'off', label: 'Off', desc: 'No automatic replies sent' },
+  { value: 'safe_auto', label: 'Safe Auto (Recommended)', desc: 'Deterministic menu + knowledge search, rate limited' },
+  { value: 'full_auto', label: 'Full Auto (Admin only)', desc: 'Templates + AI replies with throttles' },
+];
+
+function AutoReplySection() {
+  const [mode, setMode] = useState('safe_auto');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [recentEvents, setRecentEvents] = useState<any[]>([]);
+
+  useEffect(() => {
+    loadSettings();
+    loadRecentEvents();
+  }, []);
+
+  const loadSettings = async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('integration_settings')
+      .select('value')
+      .eq('key', 'auto_reply_mode')
+      .maybeSingle();
+    if (data?.value) setMode(data.value);
+    setLoading(false);
+  };
+
+  const loadRecentEvents = async () => {
+    const { data } = await supabase
+      .from('auto_reply_events' as any)
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if (data) setRecentEvents(data);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    const { data: user } = await supabase.auth.getUser();
+    const { error } = await supabase
+      .from('integration_settings')
+      .upsert({ key: 'auto_reply_mode', value: mode, updated_by: user?.user?.id }, { onConflict: 'key' });
+    if (error) {
+      toast({ title: 'Failed to save', description: error.message, variant: 'destructive' });
+    } else {
+      toast({ title: 'Auto-reply settings saved' });
+    }
+    setSaving(false);
+  };
+
+  if (loading) {
+    return <div className="flex items-center gap-2 text-muted-foreground text-sm"><Loader2 size={14} className="animate-spin" /> Loading...</div>;
+  }
+
+  return (
+    <div>
+      <h3 className="text-base font-bold text-foreground mb-2">WhatsApp Auto-Reply</h3>
+      <p className="text-xs text-muted-foreground mb-4">
+        Control how Vanto auto-responds to inbound WhatsApp messages. SAFE AUTO sends a menu and routes to Knowledge Vault.
+      </p>
+
+      <div className="vanto-card p-5 space-y-4">
+        <div>
+          <label className="text-xs font-medium text-muted-foreground mb-2 block">Auto-Reply Mode</label>
+          <div className="space-y-2">
+            {AUTO_REPLY_MODES.map(m => (
+              <label key={m.value} className={cn(
+                'flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors',
+                mode === m.value ? 'bg-primary/10 border-primary/30' : 'border-border hover:bg-secondary/40'
+              )}>
+                <input
+                  type="radio"
+                  name="auto-reply-mode"
+                  value={m.value}
+                  checked={mode === m.value}
+                  onChange={() => setMode(m.value)}
+                  className="mt-0.5 accent-[hsl(var(--primary))]"
+                />
+                <div>
+                  <p className="text-sm font-medium text-foreground">{m.label}</p>
+                  <p className="text-[11px] text-muted-foreground">{m.desc}</p>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {mode === 'safe_auto' && (
+          <div className="rounded-lg bg-primary/5 border border-primary/20 p-3 space-y-2">
+            <p className="text-xs text-primary font-medium">🛡️ Safe Auto Rules</p>
+            <ul className="text-[11px] text-muted-foreground space-y-1 list-disc list-inside">
+              <li>Max 1 auto-reply per 10 minutes per conversation</li>
+              <li>Max 3 auto-replies per day per contact</li>
+              <li>24h window enforced — template only when expired</li>
+              <li>Menu options 1 & 2 search Knowledge Vault</li>
+              <li>Option 3 triggers human handover</li>
+            </ul>
+          </div>
+        )}
+
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="w-full py-2.5 rounded-lg vanto-gradient text-primary-foreground font-semibold text-sm hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2"
+        >
+          {saving && <Loader2 size={14} className="animate-spin" />}
+          Save Auto-Reply Settings
+        </button>
+      </div>
+
+      {/* Recent events log */}
+      {recentEvents.length > 0 && (
+        <div className="mt-6">
+          <h4 className="text-sm font-bold text-foreground mb-3">Recent Auto-Reply Events</h4>
+          <div className="vanto-card overflow-hidden">
+            {recentEvents.map((evt: any, i: number) => (
+              <div key={evt.id} className={cn('px-4 py-2.5 flex items-center justify-between', i < recentEvents.length - 1 && 'border-b border-border/50')}>
+                <div>
+                  <p className="text-xs font-medium text-foreground capitalize">{evt.action_taken?.replace(/_/g, ' ')}</p>
+                  <p className="text-[10px] text-muted-foreground">{evt.reason} {evt.menu_option ? `· Menu: ${evt.menu_option}` : ''}</p>
+                </div>
+                <span className="text-[10px] text-muted-foreground">{new Date(evt.created_at).toLocaleTimeString()}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
