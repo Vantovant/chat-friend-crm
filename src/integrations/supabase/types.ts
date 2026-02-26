@@ -14,6 +14,136 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_citations: {
+        Row: {
+          chunk_id: string | null
+          created_at: string
+          file_id: string | null
+          id: string
+          message_id: string | null
+          relevance_score: number | null
+          snippet: string
+          suggestion_id: string | null
+        }
+        Insert: {
+          chunk_id?: string | null
+          created_at?: string
+          file_id?: string | null
+          id?: string
+          message_id?: string | null
+          relevance_score?: number | null
+          snippet: string
+          suggestion_id?: string | null
+        }
+        Update: {
+          chunk_id?: string | null
+          created_at?: string
+          file_id?: string | null
+          id?: string
+          message_id?: string | null
+          relevance_score?: number | null
+          snippet?: string
+          suggestion_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_citations_chunk_id_fkey"
+            columns: ["chunk_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_chunks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_citations_file_id_fkey"
+            columns: ["file_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_files"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_feedback: {
+        Row: {
+          created_at: string
+          edited_text: string | null
+          id: string
+          outcome: string | null
+          rating: string
+          suggestion_id: string
+          used_as_is: boolean | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          edited_text?: string | null
+          id?: string
+          outcome?: string | null
+          rating: string
+          suggestion_id: string
+          used_as_is?: boolean | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          edited_text?: string | null
+          id?: string
+          outcome?: string | null
+          rating?: string
+          suggestion_id?: string
+          used_as_is?: boolean | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_feedback_suggestion_id_fkey"
+            columns: ["suggestion_id"]
+            isOneToOne: false
+            referencedRelation: "ai_suggestions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_suggestions: {
+        Row: {
+          confidence: number | null
+          content: Json
+          conversation_id: string
+          created_at: string
+          id: string
+          mode: string | null
+          status: string | null
+          suggestion_type: string
+        }
+        Insert: {
+          confidence?: number | null
+          content?: Json
+          conversation_id: string
+          created_at?: string
+          id?: string
+          mode?: string | null
+          status?: string | null
+          suggestion_type?: string
+        }
+        Update: {
+          confidence?: number | null
+          content?: Json
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          mode?: string | null
+          status?: string | null
+          suggestion_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_suggestions_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       automations: {
         Row: {
           action_description: string
@@ -303,6 +433,95 @@ export type Database = {
           last_synced_at?: string | null
           status?: string
           token?: string
+        }
+        Relationships: []
+      }
+      knowledge_chunks: {
+        Row: {
+          chunk_index: number
+          chunk_text: string
+          created_at: string
+          file_id: string
+          id: string
+          search_vector: unknown
+          token_count: number | null
+        }
+        Insert: {
+          chunk_index: number
+          chunk_text: string
+          created_at?: string
+          file_id: string
+          id?: string
+          search_vector?: unknown
+          token_count?: number | null
+        }
+        Update: {
+          chunk_index?: number
+          chunk_text?: string
+          created_at?: string
+          file_id?: string
+          id?: string
+          search_vector?: unknown
+          token_count?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "knowledge_chunks_file_id_fkey"
+            columns: ["file_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_files"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      knowledge_files: {
+        Row: {
+          collection: string
+          created_at: string
+          created_by: string | null
+          effective_date: string | null
+          expiry_date: string | null
+          file_name: string
+          id: string
+          mode: string
+          status: string
+          storage_path: string | null
+          tags: string[] | null
+          title: string
+          updated_at: string
+          version: number | null
+        }
+        Insert: {
+          collection: string
+          created_at?: string
+          created_by?: string | null
+          effective_date?: string | null
+          expiry_date?: string | null
+          file_name: string
+          id?: string
+          mode?: string
+          status?: string
+          storage_path?: string | null
+          tags?: string[] | null
+          title: string
+          updated_at?: string
+          version?: number | null
+        }
+        Update: {
+          collection?: string
+          created_at?: string
+          created_by?: string | null
+          effective_date?: string | null
+          expiry_date?: string | null
+          file_name?: string
+          id?: string
+          mode?: string
+          status?: string
+          storage_path?: string | null
+          tags?: string[] | null
+          title?: string
+          updated_at?: string
+          version?: number | null
         }
         Relationships: []
       }
@@ -670,6 +889,22 @@ export type Database = {
         Returns: boolean
       }
       is_admin_or_super_admin: { Args: never; Returns: boolean }
+      search_knowledge: {
+        Args: {
+          collection_filter?: string
+          max_results?: number
+          query_text: string
+        }
+        Returns: {
+          chunk_id: string
+          chunk_index: number
+          chunk_text: string
+          file_collection: string
+          file_id: string
+          file_title: string
+          relevance: number
+        }[]
+      }
     }
     Enums: {
       comm_status: "active" | "closed" | "pending"

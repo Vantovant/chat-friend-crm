@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { temperatureBg, type LeadTemperature } from '@/lib/vanto-data';
 import {
-  Search, Phone, Video, MoreVertical, Send, Bot,
+  Search, Phone, Video, MoreVertical, Send, Bot, Brain,
   Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare, AlertTriangle, RotateCcw,
 } from 'lucide-react';
 import { displayPhone } from '@/lib/phone-utils';
@@ -15,6 +15,8 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { CopilotSidebar } from './CopilotSidebar';
+
 
 /* ── Types ── */
 type Contact = {
@@ -74,6 +76,7 @@ export function InboxModule() {
   const [reassigning, setReassigning] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
+  const [showCopilot, setShowCopilot] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -441,7 +444,17 @@ export function InboxModule() {
                     }}
                   />
                   <button
-                    onClick={() => setShowInfo(!showInfo)}
+                    onClick={() => { setShowCopilot(!showCopilot); if (!showCopilot) setShowInfo(false); }}
+                    className={cn(
+                      'p-2 rounded-lg transition-colors cursor-pointer',
+                      showCopilot ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
+                    )}
+                    title="Zazi Copilot"
+                  >
+                    <Brain size={16} />
+                  </button>
+                  <button
+                    onClick={() => { setShowInfo(!showInfo); if (!showInfo) setShowCopilot(false); }}
                     className={cn(
                       'p-2 rounded-lg transition-colors cursor-pointer',
                       showInfo ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
@@ -597,7 +610,42 @@ export function InboxModule() {
           </div>
         )}
 
-        {/* Template Required Modal */}
+        {/* ── Zazi Copilot Panel ── */}
+        {selected && showCopilot && (
+          <div className="w-80 shrink-0 border-l border-border overflow-y-auto bg-card/30">
+            <CopilotSidebar
+              conversationId={selectedConvId}
+              contactName={selected.contact?.name || 'Contact'}
+              onInsertDraft={(text) => setInputText(text)}
+              onSendDraft={async (text) => {
+                if (!selectedConvId || sending) return;
+                setSending(true);
+                const tempId = `temp-${Date.now()}`;
+                const optimistic: Message = {
+                  id: tempId, conversation_id: selectedConvId, content: text,
+                  is_outbound: true, message_type: 'text', status: 'sent',
+                  status_raw: null, error: null, created_at: new Date().toISOString(),
+                  sent_by: currentUser?.id ?? null,
+                };
+                setMessages(prev => [...prev, optimistic]);
+                const { data, error } = await supabase.functions.invoke('send-message', {
+                  body: { conversation_id: selectedConvId, content: text, message_type: 'text' },
+                });
+                if (error || !data?.success) {
+                  setMessages(prev => prev.filter(m => m.id !== tempId));
+                  toast({ title: 'Send failed', description: data?.message || error?.message, variant: 'destructive' });
+                } else {
+                  const real = data.message;
+                  setMessages(prev => prev.map(m => m.id === tempId ? { ...real, status_raw: real.status_raw ?? null, error: real.error ?? null } : m)
+                    .filter((m, i, arr) => arr.findIndex(x => x.id === m.id) === i));
+                }
+                setSending(false);
+              }}
+            />
+          </div>
+        )}
+
+
         <Dialog open={templateModalOpen} onOpenChange={setTemplateModalOpen}>
           <DialogContent>
             <DialogHeader>
