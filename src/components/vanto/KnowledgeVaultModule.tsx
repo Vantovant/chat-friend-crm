@@ -365,11 +365,11 @@ export function KnowledgeVaultModule() {
               <label className="text-xs font-medium text-muted-foreground mb-1 block">File *</label>
               <input
                 type="file"
-                accept=".txt,.md,.csv,.json,.pdf"
+              accept=".txt,.md,.csv,.json,.pdf"
                 onChange={e => setUploadFile(e.target.files?.[0] || null)}
                 className="w-full text-sm text-foreground"
               />
-              <p className="text-[10px] text-muted-foreground mt-1">Supported: .pdf, .txt, .md, .csv, .json</p>
+              <p className="text-[10px] text-muted-foreground mt-1">✅ Best: .txt, .md, .csv, .json &nbsp;|&nbsp; ⚠️ PDF may fail — convert to .txt first</p>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
