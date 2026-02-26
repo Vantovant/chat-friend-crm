@@ -144,6 +144,53 @@ export type Database = {
           },
         ]
       }
+      auto_reply_events: {
+        Row: {
+          action_taken: string
+          conversation_id: string
+          created_at: string
+          id: string
+          inbound_message_id: string | null
+          knowledge_found: boolean | null
+          knowledge_query: string | null
+          menu_option: string | null
+          reason: string | null
+          template_used: string | null
+        }
+        Insert: {
+          action_taken: string
+          conversation_id: string
+          created_at?: string
+          id?: string
+          inbound_message_id?: string | null
+          knowledge_found?: boolean | null
+          knowledge_query?: string | null
+          menu_option?: string | null
+          reason?: string | null
+          template_used?: string | null
+        }
+        Update: {
+          action_taken?: string
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          inbound_message_id?: string | null
+          knowledge_found?: boolean | null
+          knowledge_query?: string | null
+          menu_option?: string | null
+          reason?: string | null
+          template_used?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "auto_reply_events_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       automations: {
         Row: {
           action_description: string
@@ -525,6 +572,66 @@ export type Database = {
         }
         Relationships: []
       }
+      learning_metrics: {
+        Row: {
+          agent_id: string | null
+          avg_response_time_minutes: number | null
+          calls_booked: number | null
+          created_at: string
+          follow_ups_completed: number | null
+          id: string
+          lead_type: string | null
+          recommendations: Json | null
+          sales_closed: number | null
+          source: string | null
+          stage_movements: number | null
+          suggestions_accepted: number | null
+          suggestions_rejected: number | null
+          total_conversations: number | null
+          total_messages_received: number | null
+          total_messages_sent: number | null
+          week_start: string
+        }
+        Insert: {
+          agent_id?: string | null
+          avg_response_time_minutes?: number | null
+          calls_booked?: number | null
+          created_at?: string
+          follow_ups_completed?: number | null
+          id?: string
+          lead_type?: string | null
+          recommendations?: Json | null
+          sales_closed?: number | null
+          source?: string | null
+          stage_movements?: number | null
+          suggestions_accepted?: number | null
+          suggestions_rejected?: number | null
+          total_conversations?: number | null
+          total_messages_received?: number | null
+          total_messages_sent?: number | null
+          week_start: string
+        }
+        Update: {
+          agent_id?: string | null
+          avg_response_time_minutes?: number | null
+          calls_booked?: number | null
+          created_at?: string
+          follow_ups_completed?: number | null
+          id?: string
+          lead_type?: string | null
+          recommendations?: Json | null
+          sales_closed?: number | null
+          source?: string | null
+          stage_movements?: number | null
+          suggestions_accepted?: number | null
+          suggestions_rejected?: number | null
+          total_conversations?: number | null
+          total_messages_received?: number | null
+          total_messages_sent?: number | null
+          week_start?: string
+        }
+        Relationships: []
+      }
       messages: {
         Row: {
           content: string
@@ -618,6 +725,48 @@ export type Database = {
           last_synced_at?: string | null
           name?: string
           stage_order?: number
+        }
+        Relationships: []
+      }
+      playbooks: {
+        Row: {
+          approved: boolean | null
+          category: string
+          content: string
+          conversion_count: number | null
+          created_at: string
+          created_by: string | null
+          id: string
+          title: string
+          updated_at: string
+          usage_count: number | null
+          version: number | null
+        }
+        Insert: {
+          approved?: boolean | null
+          category: string
+          content: string
+          conversion_count?: number | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          title: string
+          updated_at?: string
+          usage_count?: number | null
+          version?: number | null
+        }
+        Update: {
+          approved?: boolean | null
+          category?: string
+          content?: string
+          conversion_count?: number | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          title?: string
+          updated_at?: string
+          usage_count?: number | null
+          version?: number | null
         }
         Relationships: []
       }

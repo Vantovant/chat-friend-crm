@@ -5,7 +5,7 @@ import type { Module } from '@/lib/vanto-data';
 import logo from '@/assets/logo.jpg';
 import {
   LayoutDashboard, MessageSquare, Users, BarChart3, Zap, Bot, GitBranch,
-  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen
+  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText
 } from 'lucide-react';
 
 interface NavItem {
@@ -23,6 +23,7 @@ const navItems: NavItem[] = [
   { id: 'automations', label: 'Automations', icon: Zap },
   { id: 'ai-agent', label: 'AI Agent', icon: Bot },
   { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
+  { id: 'playbooks', label: 'Playbooks', icon: FileText },
   { id: 'workflows', label: 'Workflows', icon: GitBranch },
   { id: 'integrations', label: 'Integrations', icon: Puzzle },
   { id: 'api-console', label: 'API Console', icon: Terminal },
