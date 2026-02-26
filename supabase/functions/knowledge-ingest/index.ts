@@ -1,6 +1,7 @@
 /**
  * Vanto CRM — knowledge-ingest Edge Function
  * Takes a file_id, reads the file from storage, chunks text, stores chunks.
+ * Supports: .txt, .md, .csv, .json, .pdf
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -22,7 +23,6 @@ function chunkText(text: string, maxChars = 2000, overlap = 200): string[] {
   let start = 0;
   while (start < text.length) {
     let end = Math.min(start + maxChars, text.length);
-    // Try to break at sentence boundary
     if (end < text.length) {
       const lastPeriod = text.lastIndexOf('.', end);
       if (lastPeriod > start + maxChars / 2) end = lastPeriod + 1;
@@ -32,6 +32,24 @@ function chunkText(text: string, maxChars = 2000, overlap = 200): string[] {
     if (start >= text.length) break;
   }
   return chunks.filter(c => c.length > 10);
+}
+
+/** Extract text from a PDF using pdf-parse */
+async function extractPdfText(blob: Blob): Promise<string> {
+  try {
+    const pdfParse = (await import('https://esm.sh/pdf-parse@1.1.1')).default;
+    const buffer = await blob.arrayBuffer();
+    const result = await pdfParse(new Uint8Array(buffer));
+    return result.text || '';
+  } catch (e: any) {
+    console.error('[knowledge-ingest] PDF parse error:', e?.message);
+    // Fallback: try reading as text (some PDFs contain embedded text)
+    try {
+      return await blob.text();
+    } catch {
+      throw new Error('Failed to extract text from PDF: ' + (e?.message || 'unknown'));
+    }
+  }
 }
 
 Deno.serve(async (req) => {
@@ -73,11 +91,13 @@ Deno.serve(async (req) => {
       return jsonRes({ error: 'Could not download file: ' + (dlErr?.message || 'unknown') }, 500);
     }
 
-    // Extract text (support .txt, .md, .csv — for PDF we'd need a parser)
+    // Extract text based on file type
     let text = '';
     const fileName = file.file_name.toLowerCase();
-    
-    if (fileName.endsWith('.txt') || fileName.endsWith('.md') || fileName.endsWith('.csv')) {
+
+    if (fileName.endsWith('.pdf')) {
+      text = await extractPdfText(fileData);
+    } else if (fileName.endsWith('.txt') || fileName.endsWith('.md') || fileName.endsWith('.csv')) {
       text = await fileData.text();
     } else if (fileName.endsWith('.json')) {
       const jsonContent = await fileData.text();
@@ -101,7 +121,7 @@ Deno.serve(async (req) => {
       file_id: file_id,
       chunk_index: i,
       chunk_text: chunk,
-      token_count: Math.ceil(chunk.length / 4), // rough estimate
+      token_count: Math.ceil(chunk.length / 4),
     }));
 
     const { error: insertErr } = await serviceClient
@@ -116,12 +136,13 @@ Deno.serve(async (req) => {
     // Mark as approved
     await serviceClient.from('knowledge_files').update({ status: 'approved' }).eq('id', file_id);
 
-    return jsonRes({ 
-      success: true, 
+    return jsonRes({
+      success: true,
       chunks_created: chunks.length,
       total_chars: text.length,
     });
   } catch (err: any) {
+    console.error('[knowledge-ingest] Error:', err?.message);
     await serviceClient.from('knowledge_files').update({ status: 'rejected' }).eq('id', file_id);
     return jsonRes({ error: err.message }, 500);
   }
