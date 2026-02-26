@@ -91,11 +91,12 @@ export function AIAgentModule() {
       if (error) throw new Error(error.message);
       if (data?.error) throw new Error(data.error);
 
+      const providerLabel = data.provider === 'openai' ? ' (OpenAI)' : data.provider === 'gemini' ? ' (Gemini)' : '';
       const aiMsg: AIMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         content: data.reply || 'Sorry, I could not generate a response.',
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + providerLabel,
       };
       setMessages(prev => [...prev, aiMsg]);
     } catch (err: any) {
@@ -129,7 +130,7 @@ export function AIAgentModule() {
             <h2 className="text-lg font-bold text-foreground">AI Agent</h2>
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
-              <p className="text-xs text-muted-foreground">Powered by Lovable AI · Live</p>
+              <p className="text-xs text-muted-foreground">Lovable AI → OpenAI fallback · Live</p>
             </div>
           </div>
         </div>
@@ -231,7 +232,7 @@ export function AIAgentModule() {
       ) : (
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
           <AIConfigSection title="Model Settings">
-            <ConfigRow label="AI Model" value="Gemini 3 Flash (Lovable AI)" active />
+            <ConfigRow label="AI Routing" value="Lovable AI → OpenAI fallback" active />
             <ConfigRow label="Response Style" value="Professional & Friendly" />
             <ConfigRow label="Language" value="English (Auto-detect)" />
             <ConfigRow label="Max Response Length" value="1000 tokens" />
