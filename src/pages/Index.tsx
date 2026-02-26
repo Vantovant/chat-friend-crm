@@ -7,6 +7,7 @@ import { ContactsModule } from '@/components/vanto/ContactsModule';
 import { CRMModule } from '@/components/vanto/CRMModule';
 import { AutomationsModule } from '@/components/vanto/AutomationsModule';
 import { AIAgentModule } from '@/components/vanto/AIAgentModule';
+import { KnowledgeVaultModule } from '@/components/vanto/KnowledgeVaultModule';
 import { WorkflowsModule } from '@/components/vanto/WorkflowsModule';
 import { IntegrationsModule } from '@/components/vanto/IntegrationsModule';
 import { APIConsoleModule } from '@/components/vanto/APIConsoleModule';
@@ -44,6 +45,7 @@ const Index = () => {
       case 'crm': return <CRMModule />;
       case 'automations': return <AutomationsModule />;
       case 'ai-agent': return <AIAgentModule />;
+      case 'knowledge': return <KnowledgeVaultModule />;
       case 'workflows': return <WorkflowsModule />;
       case 'integrations': return <IntegrationsModule userId={session?.user?.id ?? ''} />;
       case 'api-console': return <APIConsoleModule />;

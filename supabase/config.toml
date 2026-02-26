@@ -48,4 +48,13 @@ verify_jwt = false
 [functions.whatsapp-auto-reply]
 verify_jwt = false
 
+[functions.knowledge-ingest]
+verify_jwt = false
+
+[functions.knowledge-search]
+verify_jwt = false
+
+[functions.zazi-copilot]
+verify_jwt = false
+
 
