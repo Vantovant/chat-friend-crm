@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 
 const COLLECTIONS = [
+  { id: 'general', label: 'General Knowledge & App Manual', icon: '📘', mode: 'assisted' },
   { id: 'opportunity', label: 'Business Opportunity', icon: '🚀', mode: 'strict' },
   { id: 'compensation', label: 'Compensation', icon: '💰', mode: 'strict' },
   { id: 'products', label: 'Product Prices & Benefits', icon: '🧴', mode: 'strict' },
