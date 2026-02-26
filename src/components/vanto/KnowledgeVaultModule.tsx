@@ -76,7 +76,11 @@ export function KnowledgeVaultModule() {
     }
     setUploading(true);
 
-    const storagePath = `${uploadCollection}/${Date.now()}-${uploadFile.name}`;
+    const safeName = uploadFile.name
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .replace(/_+/g, '_');
+    const storagePath = `${uploadCollection}/${Date.now()}-${safeName}`;
 
     // Upload file to storage
     const { error: storageErr } = await supabase.storage
