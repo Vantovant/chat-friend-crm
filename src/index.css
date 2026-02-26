@@ -81,4 +81,5 @@
 .vanto-card { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); }
 .message-bubble-in { background: hsl(var(--secondary)); border-radius: 0 12px 12px 12px; }
 .message-bubble-out { background: hsl(var(--primary) / 0.15); border-radius: 12px 0 12px 12px; border: 1px solid hsl(var(--primary) / 0.3); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
 

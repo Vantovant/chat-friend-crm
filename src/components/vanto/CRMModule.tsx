@@ -132,7 +132,7 @@ export function CRMModule() {
         </div>
 
         {/* Stats row */}
-        <div className="grid grid-cols-4 gap-3 mb-3">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 mb-3">
           {[
             { label: 'Total Contacts', value: totalDeals.toString(), icon: Target, color: 'text-primary' },
             { label: 'Pipeline Stages', value: stages.length.toString(), icon: DollarSign, color: 'text-amber-400' },

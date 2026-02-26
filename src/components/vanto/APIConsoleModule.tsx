@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { Terminal, Copy, CheckCircle, Loader2, Send, Webhook, Activity } from 'lucide-react';
@@ -46,6 +47,7 @@ type WebhookEvent = {
 };
 
 export function APIConsoleModule() {
+  const isMobile = useIsMobile();
   const [selected, setSelected] = useState(WEBHOOK_ENDPOINTS[0]);
   const [copied, setCopied] = useState(false);
   const [payload, setPayload] = useState(SAMPLE_PAYLOADS[WEBHOOK_ENDPOINTS[0].path] || '{}');
@@ -125,13 +127,32 @@ export function APIConsoleModule() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-6 py-4 border-b border-border shrink-0">
+      <div className="px-4 md:px-6 py-4 border-b border-border shrink-0">
         <h2 className="text-lg font-bold text-foreground">API Console</h2>
         <p className="text-sm text-muted-foreground">Test backend functions and view webhook activity</p>
       </div>
 
+      {/* Mobile: endpoint dropdown instead of sidebar */}
+      {isMobile && (
+        <div className="px-4 py-2 border-b border-border shrink-0">
+          <select
+            value={selected.path}
+            onChange={e => {
+              const ep = WEBHOOK_ENDPOINTS.find(x => x.path === e.target.value);
+              if (ep) selectEndpoint(ep);
+            }}
+            className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+          >
+            {WEBHOOK_ENDPOINTS.map(ep => (
+              <option key={ep.path} value={ep.path}>{ep.method} · {ep.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <div className="flex flex-1 overflow-hidden">
-        {/* Endpoint list */}
+        {/* Endpoint list (desktop only) */}
+        {!isMobile && (
         <div className="w-72 border-r border-border overflow-y-auto p-3 space-y-1 shrink-0">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1">Endpoints</p>
           {WEBHOOK_ENDPOINTS.map(ep => (
@@ -173,9 +194,10 @@ export function APIConsoleModule() {
             ))
           )}
         </div>
+        )}
 
         {/* Request/Response panel */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-4">
           {/* URL */}
           <div className="vanto-card p-4">
             <div className="flex items-center gap-3">

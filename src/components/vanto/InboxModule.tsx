@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { temperatureBg, type LeadTemperature } from '@/lib/vanto-data';
 import {
   Search, Phone, Video, MoreVertical, Send, Bot, Brain,
-  Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare, AlertTriangle, RotateCcw,
+  Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare, AlertTriangle, RotateCcw, ArrowLeft,
 } from 'lucide-react';
 import { displayPhone } from '@/lib/phone-utils';
 import { useProfiles, profileLabel, type ProfileOption } from '@/hooks/use-profiles';
@@ -61,6 +62,7 @@ type InboxFilter = 'accessible' | 'mine' | 'unassigned';
 export function InboxModule() {
   const profiles = useProfiles();
   const currentUser = useCurrentUser();
+  const isMobile = useIsMobile();
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -311,11 +313,14 @@ export function InboxModule() {
   const totalUnread = conversations.reduce((s, c) => s + c.unread_count, 0);
   const selected = conversations.find(c => c.id === selectedConvId);
 
+  // Mobile: show list or chat, not both
+  const showMobileChat = isMobile && selectedConvId;
+
   return (
     <TooltipProvider>
       <div className="flex h-full">
-        {/* ── Conversation List ── */}
-        <div className="w-80 shrink-0 border-r border-border flex flex-col bg-card/30">
+        {/* ── Conversation List (hidden on mobile when chat is open) ── */}
+        <div className={cn('w-full md:w-80 shrink-0 border-r border-border flex flex-col bg-card/30', showMobileChat && 'hidden')}>
           <div className="p-4 border-b border-border">
             <div className="flex items-center justify-between mb-3">
               <h2 className="font-semibold text-foreground">Inbox</h2>
@@ -374,13 +379,18 @@ export function InboxModule() {
           </div>
         </div>
 
-        {/* ── Chat Thread ── */}
-        <div className="flex-1 flex flex-col min-w-0">
+        {/* ── Chat Thread (hidden on mobile when list is showing) ── */}
+        <div className={cn('flex-1 flex flex-col min-w-0', isMobile && !showMobileChat && 'hidden')}>
           {selected ? (
             <>
               {/* Header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/20">
-                <div className="flex items-center gap-3">
+              <div className="flex items-center justify-between px-3 md:px-4 py-3 border-b border-border bg-card/20">
+                <div className="flex items-center gap-2 md:gap-3 min-w-0">
+                  {isMobile && (
+                    <button onClick={() => setSelectedConvId(null)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 shrink-0">
+                      <ArrowLeft size={18} />
+                    </button>
+                  )}
                   <ContactAvatar name={selected.contact?.name || '?'} />
                   <div>
                     <p className="font-semibold text-sm text-foreground">{selected.contact?.name}</p>
@@ -597,8 +607,8 @@ export function InboxModule() {
           )}
         </div>
 
-        {/* ── Contact Info Panel ── */}
-        {selected?.contact && showInfo && (
+        {/* ── Contact Info Panel (hidden on mobile) ── */}
+        {selected?.contact && showInfo && !isMobile && (
           <div className="w-72 shrink-0 border-l border-border overflow-y-auto bg-card/30">
             <ContactInfoPanel
               contact={selected.contact}
@@ -610,8 +620,8 @@ export function InboxModule() {
           </div>
         )}
 
-        {/* ── Zazi Copilot Panel ── */}
-        {selected && showCopilot && (
+        {/* ── Zazi Copilot Panel (hidden on mobile) ── */}
+        {selected && showCopilot && !isMobile && (
           <div className="w-80 shrink-0 border-l border-border overflow-y-auto bg-card/30">
             <CopilotSidebar
               conversationId={selectedConvId}
