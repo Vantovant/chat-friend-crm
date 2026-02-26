@@ -1060,7 +1060,7 @@ export type Database = {
       interest_level: "high" | "medium" | "low"
       lead_temperature: "hot" | "warm" | "cold"
       lead_type: "prospect" | "registered" | "buyer" | "vip" | "expired"
-      message_status: "sent" | "delivered" | "read"
+      message_status: "sent" | "delivered" | "read" | "queued" | "failed"
       message_type: "text" | "image" | "ai"
       user_role: "agent" | "admin" | "super_admin"
     }
@@ -1194,7 +1194,7 @@ export const Constants = {
       interest_level: ["high", "medium", "low"],
       lead_temperature: ["hot", "warm", "cold"],
       lead_type: ["prospect", "registered", "buyer", "vip", "expired"],
-      message_status: ["sent", "delivered", "read"],
+      message_status: ["sent", "delivered", "read", "queued", "failed"],
       message_type: ["text", "image", "ai"],
       user_role: ["agent", "admin", "super_admin"],
     },
