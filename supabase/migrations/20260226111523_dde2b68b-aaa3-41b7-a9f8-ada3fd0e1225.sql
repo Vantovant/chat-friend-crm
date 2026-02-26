@@ -1,0 +1,2 @@
+ALTER TABLE public.knowledge_files DROP CONSTRAINT knowledge_files_collection_check;
+ALTER TABLE public.knowledge_files ADD CONSTRAINT knowledge_files_collection_check CHECK (collection = ANY (ARRAY['general'::text, 'opportunity'::text, 'compensation'::text, 'products'::text, 'orders'::text, 'motivation'::text]));
