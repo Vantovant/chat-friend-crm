@@ -1,11 +1,13 @@
 /**
- * Vanto CRM — whatsapp-auto-reply Edge Function (Phase 6)
+ * Vanto CRM — whatsapp-auto-reply Edge Function (Phase 7)
  * SAFE AUTO mode with:
  * - Rate limiting (max 1 per 10 min, max 3/day per contact)
  * - 24h window enforcement (template-only outside window)
  * - Menu routing to Knowledge Vault search
  * - auto_reply_events logging
  * - Configurable mode via integration_settings (off / safe_auto / full_auto)
+ * - Uses MessagingServiceSid as primary sender (same as send-message)
+ * - Defensive logging of exact outbound payload
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -37,7 +39,7 @@ function basicAuthHeader(sid: string, token: string) {
 }
 
 const SILENCE_THRESHOLD_MS = 4 * 60 * 60 * 1000;
-const RATE_LIMIT_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+const RATE_LIMIT_INTERVAL_MS = 10 * 60 * 1000;
 const MAX_AUTO_REPLIES_PER_DAY = 3;
 
 const MENU_MESSAGE = `Hi 👋 Thanks for messaging Get Well Africa.
@@ -88,14 +90,15 @@ Deno.serve(async (req) => {
   if (!conv) return jsonRes({ ok: false, message: "Conversation not found" }, 404);
 
   // ── 24h window check ──
+  // Auto-reply is triggered immediately after inbound, so window should always be open.
+  // But we check defensively.
   const lastInboundAt = conv.last_inbound_at ? new Date(conv.last_inbound_at).getTime() : Date.now();
   const windowOpen = (Date.now() - lastInboundAt) < 24 * 60 * 60 * 1000;
 
   if (!windowOpen) {
-    // Log window_expired event
     await svc.from("auto_reply_events").insert({
       conversation_id,
-      inbound_message_id,
+      inbound_message_id: inbound_message_id || null,
       action_taken: "window_expired",
       reason: "24h window closed, template required",
     });
@@ -113,7 +116,7 @@ Deno.serve(async (req) => {
   if ((recentCount || 0) >= 1) {
     await svc.from("auto_reply_events").insert({
       conversation_id,
-      inbound_message_id,
+      inbound_message_id: inbound_message_id || null,
       action_taken: "rate_limited",
       reason: "Max 1 auto-reply per 10 minutes",
     });
@@ -132,7 +135,7 @@ Deno.serve(async (req) => {
   if ((dailyCount || 0) >= MAX_AUTO_REPLIES_PER_DAY) {
     await svc.from("auto_reply_events").insert({
       conversation_id,
-      inbound_message_id,
+      inbound_message_id: inbound_message_id || null,
       action_taken: "rate_limited",
       reason: `Max ${MAX_AUTO_REPLIES_PER_DAY} auto-replies per day`,
     });
@@ -167,7 +170,6 @@ Deno.serve(async (req) => {
   let knowledgeFound = false;
 
   if (trimmedInput === "1") {
-    // Route to Knowledge Vault: Products collection
     knowledgeQuery = "product prices packages";
     const { data: searchResults } = await svc.rpc("search_knowledge", {
       query_text: knowledgeQuery,
@@ -177,7 +179,7 @@ Deno.serve(async (req) => {
 
     if (searchResults && searchResults.length > 0) {
       knowledgeFound = true;
-      const snippets = searchResults.map((r: any, i: number) =>
+      const snippets = searchResults.map((r: any) =>
         `📌 *${r.file_title}*\n${r.chunk_text.slice(0, 300)}`
       ).join("\n\n");
       replyContent = `💰 *Product Prices & Info*\n\n${snippets}\n\nReply 3 to speak to a person.`;
@@ -188,7 +190,6 @@ Deno.serve(async (req) => {
       actionTaken = "human_handover";
     }
   } else if (trimmedInput === "2") {
-    // Route to Knowledge Vault: Products collection (benefits/usage)
     knowledgeQuery = "how to use benefits product";
     const { data: searchResults } = await svc.rpc("search_knowledge", {
       query_text: knowledgeQuery,
@@ -198,7 +199,7 @@ Deno.serve(async (req) => {
 
     if (searchResults && searchResults.length > 0) {
       knowledgeFound = true;
-      const snippets = searchResults.map((r: any, i: number) =>
+      const snippets = searchResults.map((r: any) =>
         `📌 *${r.file_title}*\n${r.chunk_text.slice(0, 300)}`
       ).join("\n\n");
       replyContent = `📋 *How to Use / Benefits*\n\n${snippets}\n\nReply 3 to speak to a person.`;
@@ -217,18 +218,20 @@ Deno.serve(async (req) => {
     actionTaken = "menu_sent";
   }
 
-  // ── Send via Twilio ──
+  // ── Send via Twilio (identical logic to send-message) ──
   const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID");
   const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN");
   const TWILIO_MESSAGING_SERVICE_SID = Deno.env.get("TWILIO_MESSAGING_SERVICE_SID");
   const TWILIO_WHATSAPP_FROM_RAW = Deno.env.get("TWILIO_WHATSAPP_FROM");
 
   if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
+    console.error("[auto-reply] FATAL: Missing TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN");
     return jsonRes({ ok: false, message: "Missing Twilio secrets" }, 500);
   }
 
   const fromE164 = TWILIO_WHATSAPP_FROM_RAW ? normalizePhoneToE164(TWILIO_WHATSAPP_FROM_RAW) : "";
   if (!TWILIO_MESSAGING_SERVICE_SID && !fromE164) {
+    console.error("[auto-reply] FATAL: No sender configured (no MessagingServiceSid, no From)");
     return jsonRes({ ok: false, message: "No sender configured" }, 500);
   }
 
@@ -238,13 +241,26 @@ Deno.serve(async (req) => {
   const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
 
   const twilioBody = new URLSearchParams({ To: twilioTo, Body: replyContent, StatusCallback: statusCallbackUrl });
+
+  // Use MessagingServiceSid as PRIMARY sender (same as send-message)
   if (TWILIO_MESSAGING_SERVICE_SID) {
     twilioBody.set("MessagingServiceSid", TWILIO_MESSAGING_SERVICE_SID);
+    console.log("[auto-reply] Using MessagingServiceSid:", TWILIO_MESSAGING_SERVICE_SID, "To:", twilioTo);
   } else {
     twilioBody.set("From", `whatsapp:${fromE164}`);
+    console.log("[auto-reply] Using From: whatsapp:" + fromE164, "To:", twilioTo);
   }
 
-  // Insert auto-reply message record
+  // Log full outbound payload (sans auth token)
+  console.log("[auto-reply] Twilio payload:", {
+    To: twilioTo,
+    Body: replyContent.slice(0, 80) + "...",
+    StatusCallback: statusCallbackUrl,
+    MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID || "(not set)",
+    From: TWILIO_MESSAGING_SERVICE_SID ? "(using MSid)" : `whatsapp:${fromE164}`,
+  });
+
+  // Insert auto-reply message record with status=queued (NOT sent)
   const { data: autoMsg } = await svc.from("messages").insert({
     conversation_id,
     content: replyContent,
@@ -268,21 +284,25 @@ Deno.serve(async (req) => {
     const twilioData = await twilioRes.json();
 
     if (!twilioRes.ok) {
-      console.error("[auto-reply] Twilio error:", twilioData);
+      console.error("[auto-reply] Twilio API error:", JSON.stringify(twilioData));
+      const errorCode = twilioData.code || twilioRes.status;
+      const errorStr = `[TWILIO_${errorCode}] ${twilioData.message || "Failed"}`;
+      
       if (autoMsg) {
         await svc.from("messages").update({
           status: "failed", status_raw: "failed",
-          error: `[TWILIO_${twilioData.code || twilioRes.status}] ${twilioData.message || "Failed"}`,
+          error: errorStr,
         }).eq("id", autoMsg.id);
       }
       await svc.from("auto_reply_events").insert({
-        conversation_id, inbound_message_id,
-        action_taken: "twilio_error", reason: twilioData.message,
+        conversation_id, inbound_message_id: inbound_message_id || null,
+        action_taken: "twilio_error", reason: errorStr,
         menu_option: menuOption,
       });
-      return jsonRes({ ok: false, code: `TWILIO_${twilioData.code}`, message: twilioData.message }, 502);
+      return jsonRes({ ok: false, code: `TWILIO_${errorCode}`, message: twilioData.message, error: errorStr }, 502);
     }
 
+    // Twilio accepted — update to sent (delivery receipts will update further)
     if (autoMsg) {
       await svc.from("messages").update({
         status: "sent", status_raw: twilioData.status || "queued",
@@ -300,7 +320,7 @@ Deno.serve(async (req) => {
     // ── Log auto_reply_event ──
     await svc.from("auto_reply_events").insert({
       conversation_id,
-      inbound_message_id,
+      inbound_message_id: inbound_message_id || null,
       action_taken: actionTaken,
       reason: isFirstMessage ? "first_message" : isNewConversation ? "new_conversation" : "silence_threshold",
       menu_option: menuOption,
@@ -319,11 +339,12 @@ Deno.serve(async (req) => {
           menu_option: menuOption,
           knowledge_found: knowledgeFound,
           assigned_human: shouldAssignHuman,
+          twilio_sid: twilioData.sid,
         },
       });
     }
 
-    console.log(`[auto-reply] Sent: ${twilioData.sid} | Action: ${actionTaken} | Menu: ${menuOption}`);
+    console.log(`[auto-reply] ✓ Sent: ${twilioData.sid} | Action: ${actionTaken} | Menu: ${menuOption} | Status: ${twilioData.status}`);
 
     return jsonRes({
       ok: true,
@@ -333,6 +354,7 @@ Deno.serve(async (req) => {
       assigned_human: shouldAssignHuman,
       knowledge_found: knowledgeFound,
       twilio_sid: twilioData.sid,
+      twilio_status: twilioData.status,
     });
   } catch (e: any) {
     console.error("[auto-reply] Network error:", e?.message);
