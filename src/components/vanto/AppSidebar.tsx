@@ -18,7 +18,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'inbox', label: 'Inbox', icon: MessageSquare, badge: 6 },
+  { id: 'inbox', label: 'Inbox', icon: MessageSquare },
   { id: 'contacts', label: 'Contacts', icon: Users },
   { id: 'crm', label: 'CRM', icon: BarChart3 },
   { id: 'automations', label: 'Automations', icon: Zap },
@@ -43,6 +43,7 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userName, setUserName] = useState('');
+  const [inboxUnread, setInboxUnread] = useState(0);
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -55,6 +56,31 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
     };
     loadUser();
   }, []);
+
+  // Fetch real unread count from conversations
+  useEffect(() => {
+    const fetchUnread = async () => {
+      const { data } = await supabase.from('conversations').select('unread_count');
+      if (data) {
+        setInboxUnread(data.reduce((s, c) => s + (c.unread_count || 0), 0));
+      }
+    };
+    fetchUnread();
+
+    const channel = supabase
+      .channel('sidebar-unread')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, () => {
+        fetchUnread();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  // Compute nav items with dynamic badge
+  const navItemsComputed = navItems.map(item =>
+    item.id === 'inbox' ? { ...item, badge: inboxUnread } : item
+  );
 
   const handleModuleChange = (m: Module) => {
     onModuleChange(m);
@@ -81,7 +107,7 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
         {/* Mobile bottom nav */}
         <div className="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-around border-t border-border bg-[hsl(var(--sidebar-background))] py-1 safe-bottom">
           {mobileBottomNav.map(id => {
-            const item = navItems.find(n => n.id === id)!;
+            const item = navItemsComputed.find(n => n.id === id)!;
             const Icon = item.icon;
             const active = activeModule === id;
             return (
@@ -126,7 +152,7 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
               </button>
             </div>
             <nav className="flex-1 overflow-y-auto p-3 space-y-1">
-              {navItems.map(item => {
+              {navItemsComputed.map(item => {
                 const Icon = item.icon;
                 const active = activeModule === item.id;
                 return (
@@ -194,7 +220,7 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
 
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto p-2 space-y-0.5">
-        {navItems.map((item) => {
+        {navItemsComputed.map((item) => {
           const Icon = item.icon;
           const active = activeModule === item.id;
           return (
