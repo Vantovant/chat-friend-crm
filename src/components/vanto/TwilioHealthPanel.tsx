@@ -1,15 +1,22 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
+import { useCurrentUser } from '@/hooks/use-current-user';
+import { Input } from '@/components/ui/input';
 import {
   CheckCircle, XCircle, Loader2, Copy, Check, Phone, Wifi,
-  ExternalLink, FlaskConical, AlertTriangle, Send,
+  FlaskConical, Send,
 } from 'lucide-react';
 
 function CopyField({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false);
-  const copy = () => { navigator.clipboard.writeText(value); setCopied(true); setTimeout(() => setCopied(false), 2000); };
+  const copy = () => {
+    navigator.clipboard.writeText(value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <div className="rounded-lg bg-background border border-border p-2.5">
       <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1">{label}</p>
@@ -25,30 +32,115 @@ function CopyField({ label, value }: { label: string; value: string }) {
 
 export function TwilioHealthPanel() {
   const { toast } = useToast();
+  const currentUser = useCurrentUser();
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [testingAutoReply, setTestingAutoReply] = useState(false);
   const [autoReplyResult, setAutoReplyResult] = useState<{ ok: boolean; message: string; sid?: string } | null>(null);
+
+  const [testToNumber, setTestToNumber] = useState('');
+  const [savingTestTo, setSavingTestTo] = useState(false);
+  const [sendingTestMessage, setSendingTestMessage] = useState(false);
+  const [sendTestResult, setSendTestResult] = useState<{ ok: boolean; message: string; sid?: string } | null>(null);
 
   const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID || 'nqyyvqcmcyggvlcswkio';
   const inboundUrl = `https://${projectId}.supabase.co/functions/v1/twilio-whatsapp-inbound`;
   const statusUrl = `https://${projectId}.supabase.co/functions/v1/twilio-whatsapp-status`;
   const sendUrl = `https://${projectId}.supabase.co/functions/v1/send-message`;
 
+  useEffect(() => {
+    const loadTestNumber = async () => {
+      const { data } = await supabase
+        .from('integration_settings')
+        .select('value')
+        .eq('key', 'whatsapp_test_to_number')
+        .maybeSingle();
+
+      if (data?.value) setTestToNumber(data.value);
+    };
+
+    loadTestNumber();
+  }, []);
+
+  const saveTestNumber = async () => {
+    if (!isAdmin) return;
+
+    setSavingTestTo(true);
+    const { data: auth } = await supabase.auth.getUser();
+    const userId = auth?.user?.id || null;
+
+    const { error } = await supabase
+      .from('integration_settings')
+      .upsert(
+        {
+          key: 'whatsapp_test_to_number',
+          value: testToNumber.trim(),
+          updated_by: userId,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'key' }
+      );
+
+    if (error) {
+      toast({ title: 'Save failed', description: error.message, variant: 'destructive' });
+    } else {
+      toast({ title: 'Saved', description: 'Test number updated' });
+    }
+
+    setSavingTestTo(false);
+  };
+
   const runTest = async () => {
     setTesting(true);
     setTestResult(null);
     try {
-      const { data, error } = await supabase.functions.invoke('twilio-whatsapp-inbound', {
+      await supabase.functions.invoke('twilio-whatsapp-inbound', {
         method: 'POST',
         body: null,
       });
       setTestResult({ ok: true, message: '✓ Twilio inbound webhook is deployed and reachable' });
       toast({ title: 'Webhook reachable', description: 'Twilio inbound function is deployed' });
-    } catch (err: any) {
+    } catch {
       setTestResult({ ok: true, message: '✓ Function endpoint exists (full test requires Twilio signature)' });
     } finally {
       setTesting(false);
+    }
+  };
+
+  const runSendTestMessage = async () => {
+    if (!isAdmin) return;
+
+    setSendingTestMessage(true);
+    setSendTestResult(null);
+
+    try {
+      const { data, error } = await supabase.functions.invoke('send-whatsapp-test', {
+        body: {},
+      });
+
+      if (error || !data?.ok) {
+        const msg = data?.message || data?.hint || error?.message || 'Send test failed';
+        setSendTestResult({ ok: false, message: `✗ ${msg}` });
+        toast({ title: 'Send test failed', description: msg, variant: 'destructive' });
+        return;
+      }
+
+      const sid = data?.twilio_sid || data?.provider_message_id || null;
+      const status = data?.status || data?.twilio_status || 'queued';
+      const okMessage = sid
+        ? `✓ Sent. SID: ${sid} | Status: ${status}`
+        : `✓ Dispatched. Status: ${status}`;
+
+      setSendTestResult({ ok: true, message: okMessage, sid: sid || undefined });
+      toast({ title: 'Send test passed', description: sid ? `Twilio SID: ${sid}` : 'Message queued' });
+    } catch (err: any) {
+      const msg = err?.message || 'Network error';
+      setSendTestResult({ ok: false, message: `✗ ${msg}` });
+      toast({ title: 'Send test failed', description: msg, variant: 'destructive' });
+    } finally {
+      setSendingTestMessage(false);
     }
   };
 
@@ -56,7 +148,6 @@ export function TwilioHealthPanel() {
     setTestingAutoReply(true);
     setAutoReplyResult(null);
     try {
-      // Find the latest inbound conversation
       const { data: convs, error: convErr } = await supabase
         .from('conversations')
         .select('id, contact_id, last_inbound_at, contact:contacts(phone_normalized, phone, whatsapp_id)')
@@ -77,14 +168,12 @@ export function TwilioHealthPanel() {
         return;
       }
 
-      // Check 24h window
       const lastInbound = conv.last_inbound_at ? new Date(conv.last_inbound_at).getTime() : 0;
       if (lastInbound > 0 && Date.now() - lastInbound > 24 * 60 * 60 * 1000) {
         setAutoReplyResult({ ok: false, message: '✗ 24h window expired for latest conversation. Need a fresh inbound message.' });
         return;
       }
 
-      // Call auto-reply function
       const { data, error } = await supabase.functions.invoke('whatsapp-auto-reply', {
         body: {
           conversation_id: conv.id,
@@ -126,8 +215,7 @@ export function TwilioHealthPanel() {
   const secrets = [
     { name: 'TWILIO_ACCOUNT_SID', description: 'Your Twilio Account SID' },
     { name: 'TWILIO_AUTH_TOKEN', description: 'Your Twilio Auth Token' },
-    { name: 'TWILIO_WHATSAPP_FROM', description: 'Your Twilio WhatsApp number (digits only)' },
-    { name: 'TWILIO_MESSAGING_SERVICE_SID', description: 'MessagingServiceSid (MG…) — primary sender' },
+    { name: 'TWILIO_MESSAGING_SERVICE_SID', description: 'MessagingServiceSid (MG…) — required sender routing' },
   ];
 
   return (
@@ -145,7 +233,6 @@ export function TwilioHealthPanel() {
         </span>
       </div>
 
-      {/* Webhook URLs */}
       <div className="space-y-2">
         <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Configure these in your Twilio Console</p>
         <CopyField label="① Inbound Webhook URL (When a message comes in)" value={inboundUrl} />
@@ -153,10 +240,9 @@ export function TwilioHealthPanel() {
         <CopyField label="③ Send Message Endpoint (Internal)" value={sendUrl} />
       </div>
 
-      {/* Required Secrets */}
       <div className="rounded-lg bg-background border border-border p-2.5 space-y-2">
         <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Required Secrets (configured ✓)</p>
-        {secrets.map(s => (
+        {secrets.map((s) => (
           <div key={s.name} className="flex items-center gap-2">
             <CheckCircle size={12} className="text-primary shrink-0" />
             <code className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded font-mono">{s.name}</code>
@@ -165,17 +251,16 @@ export function TwilioHealthPanel() {
         ))}
       </div>
 
-      {/* Features */}
       <div className="rounded-lg bg-background border border-border p-2.5 space-y-1.5">
         <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">Active Features</p>
         {[
           { label: 'Inbound messages', desc: 'Auto-creates contacts & conversations', active: true },
-          { label: 'Outbound replies', desc: 'Send from CRM Inbox via Twilio API', active: true },
+          { label: 'Outbound replies', desc: 'Unified send-message pipeline', active: true },
           { label: 'Delivery receipts', desc: 'Sent → Delivered → Read status tracking', active: true },
           { label: '24h window enforcement', desc: 'Templates required after window expires', active: true },
-          { label: 'Realtime updates', desc: 'Messages appear instantly via Supabase Realtime', active: true },
-          { label: 'Auto-reply (SAFE AUTO)', desc: 'Menu-driven auto-reply with Knowledge Vault', active: true },
-        ].map(f => (
+          { label: 'Realtime updates', desc: 'Messages appear instantly via Realtime', active: true },
+          { label: 'Auto-reply (SAFE AUTO)', desc: 'Static menu crawl-phase flow', active: true },
+        ].map((f) => (
           <div key={f.label} className="flex items-center gap-2">
             {f.active ? <CheckCircle size={11} className="text-primary shrink-0" /> : <XCircle size={11} className="text-muted-foreground shrink-0" />}
             <span className="text-[11px] text-foreground font-medium">{f.label}</span>
@@ -184,7 +269,33 @@ export function TwilioHealthPanel() {
         ))}
       </div>
 
-      {/* Test Buttons */}
+      {isAdmin && (
+        <div className="rounded-lg bg-background border border-border p-2.5 space-y-2">
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Admin Test Number</p>
+          <div className="flex items-center gap-2">
+            <Input
+              value={testToNumber}
+              onChange={(e) => setTestToNumber(e.target.value)}
+              placeholder="e.g. +27821234567"
+              className="h-8 text-xs font-mono"
+            />
+            <button
+              onClick={saveTestNumber}
+              disabled={savingTestTo || !testToNumber.trim()}
+              className={cn(
+                'px-3 h-8 rounded-lg text-xs font-medium border transition-colors',
+                savingTestTo || !testToNumber.trim()
+                  ? 'bg-secondary text-muted-foreground border-border cursor-not-allowed'
+                  : 'bg-background border-border text-foreground hover:bg-primary/5 hover:border-primary/30'
+              )}
+            >
+              {savingTestTo ? <Loader2 size={12} className="animate-spin" /> : 'Save'}
+            </button>
+          </div>
+          <p className="text-[10px] text-muted-foreground">Stored in integration settings as <code className="font-mono">whatsapp_test_to_number</code>.</p>
+        </div>
+      )}
+
       <div className="space-y-2">
         <div className="flex items-center gap-2 flex-wrap">
           <button
@@ -200,6 +311,23 @@ export function TwilioHealthPanel() {
             {testing ? <Loader2 size={12} className="animate-spin" /> : <FlaskConical size={12} />}
             Test Webhook
           </button>
+
+          {isAdmin && (
+            <button
+              onClick={runSendTestMessage}
+              disabled={sendingTestMessage}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all',
+                sendingTestMessage
+                  ? 'bg-primary/10 text-primary border-primary/30 cursor-not-allowed'
+                  : 'bg-primary/10 border-primary/30 text-primary hover:bg-primary/15'
+              )}
+            >
+              {sendingTestMessage ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+              Send Test Message
+            </button>
+          )}
+
           <button
             onClick={runAutoReplyTest}
             disabled={testingAutoReply}
@@ -207,18 +335,27 @@ export function TwilioHealthPanel() {
               'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all',
               testingAutoReply
                 ? 'bg-primary/10 text-primary border-primary/30 cursor-not-allowed'
-                : 'bg-primary/10 border-primary/30 text-primary hover:bg-primary/15'
+                : 'bg-background border-border text-foreground hover:bg-primary/5 hover:border-primary/30'
             )}
           >
             {testingAutoReply ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
             Test Auto Reply
           </button>
         </div>
+
         {testResult && (
           <p className={cn('text-[11px] font-mono', testResult.ok ? 'text-primary' : 'text-destructive')}>
             {testResult.message}
           </p>
         )}
+
+        {sendTestResult && (
+          <div className={cn('text-[11px] font-mono rounded-lg p-2 border', sendTestResult.ok ? 'text-primary bg-primary/5 border-primary/20' : 'text-destructive bg-destructive/5 border-destructive/20')}>
+            <p>{sendTestResult.message}</p>
+            {sendTestResult.sid && <p className="text-[10px] text-muted-foreground mt-1">SID: {sendTestResult.sid}</p>}
+          </div>
+        )}
+
         {autoReplyResult && (
           <div className={cn('text-[11px] font-mono rounded-lg p-2 border', autoReplyResult.ok ? 'text-primary bg-primary/5 border-primary/20' : 'text-destructive bg-destructive/5 border-destructive/20')}>
             <p>{autoReplyResult.message}</p>
@@ -229,16 +366,15 @@ export function TwilioHealthPanel() {
         )}
       </div>
 
-      {/* Setup Instructions */}
       <div className="rounded-lg bg-background border border-border p-2.5">
         <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">Twilio Console Setup</p>
         <ol className="space-y-1">
           {[
-            'Go to Twilio Console → Messaging → WhatsApp Sandbox (or your production sender)',
+            'Go to Twilio Console → Messaging → WhatsApp sender configuration',
             'Set "When a message comes in" to the Inbound Webhook URL above',
             'Set "Status callback URL" to the Status Callback URL above',
             'Use HTTP POST for both',
-            'Save and send a test message from your phone',
+            'Confirm Messaging Service SID is set to MG4a8d8ce3f9c2090eedc6126ede60b734',
           ].map((step, i) => (
             <li key={i} className="flex items-start gap-2">
               <span className="w-4 h-4 rounded-full bg-primary/15 text-primary text-[9px] font-bold flex items-center justify-center shrink-0 mt-0.5">{i + 1}</span>
