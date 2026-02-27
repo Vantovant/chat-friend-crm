@@ -703,19 +703,7 @@ function AssignmentControl({
 }) {
   const label = profileLabel(profiles, assignedTo);
 
-  if (!isAdmin) {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-secondary border border-border text-muted-foreground">
-            <UserCircle size={12} />
-            {label}
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="bottom"><p>Assigned to {label}</p></TooltipContent>
-      </Tooltip>
-    );
-  }
+  // All authenticated users can reassign (RLS handles permissions)
 
   return (
     <div className="relative">

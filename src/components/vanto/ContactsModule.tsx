@@ -288,7 +288,7 @@ function BulkActionsBar({ selectedIds, contacts, profiles, userId, isAdmin, onDo
     <div className="px-6 py-2 bg-primary/10 border-b border-primary/30 flex items-center gap-3 shrink-0">
       <span className="text-sm font-medium text-primary">{selectedIds.size} selected</span>
       <div className="flex items-center gap-2 ml-auto">
-        {isAdmin && (
+        {(
           <div className="relative">
             <button onClick={() => { setShowReassign(!showReassign); setShowTag(false); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-secondary border border-border text-foreground hover:bg-secondary/80 transition-colors">
               <ArrowRightLeft size={12} /> Reassign
@@ -376,7 +376,7 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
   const [showDelete, setShowDelete] = useState(false);
   const [activities, setActivities] = useState<ActivityEntry[]>([]);
   const [loadingActivity, setLoadingActivity] = useState(true);
-  const canReassign = isAdmin || contact.created_by === userId;
+  const canReassign = isAdmin || contact.created_by === userId || contact.assigned_to === userId || !contact.assigned_to;
 
   const [form, setForm] = useState({
     name: contact.name,
@@ -632,7 +632,7 @@ function ContactRow({ contact, status, selected, onToggleSelect, onClick, profil
   const ph = displayPhone(contact);
   const cfg = statusConfig[status];
   const StatusIcon = cfg.icon;
-  const canReassign = isAdmin || contact.created_by === userId;
+  const canReassign = isAdmin || contact.created_by === userId || contact.assigned_to === userId || !contact.assigned_to;
 
   const handleCall = (e: React.MouseEvent) => {
     e.stopPropagation();
