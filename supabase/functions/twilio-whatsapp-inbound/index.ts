@@ -1,8 +1,9 @@
 /**
- * Vanto CRM — twilio-whatsapp-inbound (Phase 5 hardened)
+ * Vanto CRM — twilio-whatsapp-inbound (Phase 7)
  * Twilio webhook for inbound WhatsApp messages.
  * Uses formData() parsing to avoid URL-encoded artifacts in Body.
  * Creates contact/conversation if missing, inserts message, triggers auto-reply.
+ * Now passes inbound_message_id to auto-reply for full traceability.
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -53,17 +54,12 @@ function stripWA(raw: string): string {
 
 function normalizePhoneToE164(raw: string): string {
   let cleaned = stripWA(raw);
-  // Remove spaces, dashes
   cleaned = cleaned.replace(/[\s\-()]/g, '');
-  // 00 international prefix
   if (cleaned.startsWith('00')) cleaned = '+' + cleaned.slice(2);
   const d = digitsOnly(cleaned);
   if (!d) return '';
-  // SA: 0xx -> +27xx
   if (d.startsWith('0') && (d.length === 10 || d.length === 11)) return '+27' + d.slice(1);
-  // SA: 27xx missing +
   if (d.startsWith('27') && (d.length === 11 || d.length === 12)) return '+' + d;
-  // Already has +
   if (cleaned.startsWith('+')) return cleaned;
   return '+' + d;
 }
@@ -84,7 +80,6 @@ Deno.serve(async (req) => {
     }
   } catch (e: any) {
     console.error('[twilio-inbound] formData parse error, falling back to text:', e?.message);
-    // Fallback: manually parse URL-encoded body
     const bodyText = await req.text();
     for (const pair of bodyText.split('&')) {
       const eqIdx = pair.indexOf('=');
@@ -102,7 +97,6 @@ Deno.serve(async (req) => {
   const valid = await verifyTwilioSignature(webhookUrl, params, twilioSig, authToken);
   if (!valid) {
     console.warn('[twilio-inbound] Invalid Twilio signature');
-    // For production, uncomment: return jsonRes({ error: 'Invalid signature' }, 403);
   }
 
   const from = params['From'] || '';
@@ -180,8 +174,8 @@ Deno.serve(async (req) => {
     console.log('[twilio-inbound] Created conversation:', convId);
   }
 
-  // 3) Insert inbound message (body is already properly decoded via formData)
-  const { error: msgErr } = await svc.from('messages').insert({
+  // 3) Insert inbound message — capture the ID for auto-reply traceability
+  const { data: inboundMsg, error: msgErr } = await svc.from('messages').insert({
     conversation_id: convId,
     content: body,
     is_outbound: false,
@@ -189,12 +183,14 @@ Deno.serve(async (req) => {
     status: 'delivered',
     provider: 'twilio',
     provider_message_id: messageSid,
-  });
+  }).select('id').single();
 
   if (msgErr) {
     console.error('[twilio-inbound] Message insert error:', msgErr.message);
     return jsonRes({ error: msgErr.message }, 500);
   }
+
+  const inboundMessageId = inboundMsg?.id || null;
 
   // 4) Update conversation metadata
   const preview = body.length > 200 ? body.slice(0, 200) + '…' : body;
@@ -213,9 +209,9 @@ Deno.serve(async (req) => {
     console.log('[twilio-inbound] increment_unread RPC not available, using fallback');
   }
 
-  console.log('[twilio-inbound] Stored inbound message in conv', convId);
+  console.log('[twilio-inbound] Stored inbound message', inboundMessageId, 'in conv', convId);
 
-  // 5) Trigger auto-reply (fire-and-forget)
+  // 5) Trigger auto-reply (fire-and-forget) — now passes inbound_message_id
   try {
     const autoReplyUrl = `${SUPABASE_URL}/functions/v1/whatsapp-auto-reply`;
     const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
@@ -231,6 +227,7 @@ Deno.serve(async (req) => {
         contact_id: contactId,
         inbound_content: body,
         phone_e164: phoneE164,
+        inbound_message_id: inboundMessageId,
       }),
     }).then(r => r.text()).catch(e => console.warn('[twilio-inbound] Auto-reply fire-and-forget error:', e?.message));
   } catch (e: any) {

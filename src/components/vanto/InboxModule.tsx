@@ -494,7 +494,8 @@ export function InboxModule() {
                   </div>
                 ) : (
                   messages.map(msg => {
-                    const isFailed = msg.is_outbound && (msg.status_raw === 'failed' || msg.status_raw === 'undelivered');
+                    const isFailed = msg.is_outbound && (msg.status === 'failed' || msg.status_raw === 'failed' || msg.status_raw === 'undelivered');
+                    const isQueued = msg.is_outbound && !isFailed && (msg.status === 'queued' || msg.status_raw === 'queued');
                     // Parse error code from stored error string like "[TWILIO_63007] ..."
                     const errorCode = msg.error?.match(/\[([A-Z_0-9]+)\]/)?.[1] || '';
                     const errorMessage = msg.error?.replace(/\[[A-Z_0-9]+\]\s*/, '') || msg.error || 'Delivery failed';
@@ -517,7 +518,7 @@ export function InboxModule() {
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <span className="flex items-center gap-0.5 text-[10px] text-destructive cursor-help">
-                                  <AlertTriangle size={10} /> Not delivered
+                                  <AlertTriangle size={10} /> {errorCode || 'Not delivered'}
                                 </span>
                               </TooltipTrigger>
                               <TooltipContent side="left" className="max-w-xs">
@@ -528,9 +529,10 @@ export function InboxModule() {
                               </TooltipContent>
                             </Tooltip>
                           )}
-                          {!isFailed && msg.is_outbound && msg.status === 'read' && <span className="text-[10px] text-primary">✓✓</span>}
-                          {!isFailed && msg.is_outbound && msg.status === 'delivered' && <span className="text-[10px] text-muted-foreground">✓✓</span>}
-                          {!isFailed && msg.is_outbound && msg.status === 'sent' && <span className="text-[10px] text-muted-foreground">✓</span>}
+                          {isQueued && <span className="text-[10px] text-muted-foreground"><Loader2 size={10} className="animate-spin inline" /></span>}
+                          {!isFailed && !isQueued && msg.is_outbound && msg.status === 'read' && <span className="text-[10px] text-primary">✓✓</span>}
+                          {!isFailed && !isQueued && msg.is_outbound && msg.status === 'delivered' && <span className="text-[10px] text-muted-foreground">✓✓</span>}
+                          {!isFailed && !isQueued && msg.is_outbound && msg.status === 'sent' && <span className="text-[10px] text-muted-foreground">✓</span>}
                         </div>
                         {isFailed && (
                           <button
