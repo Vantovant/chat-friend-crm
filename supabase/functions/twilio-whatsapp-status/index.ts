@@ -53,8 +53,11 @@ Deno.serve(async (req) => {
   const bodyText = await req.text();
   const params: Record<string, string> = {};
   for (const pair of bodyText.split('&')) {
-    const [k, v] = pair.split('=');
-    if (k) params[decodeURIComponent(k)] = decodeURIComponent(v || '');
+    const eqIdx = pair.indexOf('=');
+    if (eqIdx === -1) continue;
+    const k = decodeURIComponent(pair.slice(0, eqIdx));
+    const v = decodeURIComponent(pair.slice(eqIdx + 1).replace(/\+/g, ' '));
+    params[k] = v;
   }
 
   // Verify signature
@@ -113,8 +116,9 @@ Deno.serve(async (req) => {
     update.status = 'read';
     update.read_at = new Date().toISOString();
   } else if (messageStatus === 'failed' || messageStatus === 'undelivered') {
+    update.status = 'failed';
     update.status_raw = messageStatus;
-    update.error = errorMessage || `Twilio error ${errorCode || 'unknown'}`;
+    update.error = `[TWILIO_${errorCode || 'UNKNOWN'}] ${errorMessage || 'Delivery failed'}`;
   }
   // 'queued', 'sent' — keep current status
 

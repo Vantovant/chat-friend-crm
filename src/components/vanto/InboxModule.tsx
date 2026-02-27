@@ -210,8 +210,8 @@ export function InboxModule() {
       content,
       is_outbound: true,
       message_type: 'text',
-      status: 'sent',
-      status_raw: null,
+      status: 'queued',
+      status_raw: 'queued',
       error: null,
       created_at: new Date().toISOString(),
       sent_by: currentUser?.id ?? null,
@@ -635,8 +635,8 @@ export function InboxModule() {
                 const tempId = `temp-${Date.now()}`;
                 const optimistic: Message = {
                   id: tempId, conversation_id: selectedConvId, content: text,
-                  is_outbound: true, message_type: 'text', status: 'sent',
-                  status_raw: null, error: null, created_at: new Date().toISOString(),
+                  is_outbound: true, message_type: 'text', status: 'queued',
+                  status_raw: 'queued', error: null, created_at: new Date().toISOString(),
                   sent_by: currentUser?.id ?? null,
                 };
                 setMessages(prev => [...prev, optimistic]);

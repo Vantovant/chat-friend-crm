@@ -24,19 +24,6 @@ function jsonRes(body: unknown, status = 200) {
   });
 }
 
-function normalizePhoneToE164(raw: string): string {
-  let cleaned = (raw || "").replace(/^whatsapp:/i, "").replace(/[\s\-()]/g, "");
-  if (cleaned.startsWith("00")) cleaned = "+" + cleaned.slice(2);
-  const d = cleaned.replace(/\D/g, "");
-  if (!d) return "";
-  if (d.startsWith("0") && (d.length === 10 || d.length === 11)) return "+27" + d.slice(1);
-  if (d.startsWith("27") && (d.length === 11 || d.length === 12)) return "+" + d;
-  return cleaned.startsWith("+") ? cleaned : "+" + d;
-}
-
-function basicAuthHeader(sid: string, token: string) {
-  return "Basic " + btoa(`${sid}:${token}`);
-}
 
 const SILENCE_THRESHOLD_MS = 4 * 60 * 60 * 1000;
 const RATE_LIMIT_INTERVAL_MS = 10 * 60 * 1000;
@@ -218,104 +205,60 @@ Deno.serve(async (req) => {
     actionTaken = "menu_sent";
   }
 
-  // ── Send via Twilio (identical logic to send-message) ──
-  const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID");
-  const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN");
-  const TWILIO_MESSAGING_SERVICE_SID = Deno.env.get("TWILIO_MESSAGING_SERVICE_SID");
-  const TWILIO_WHATSAPP_FROM_RAW = Deno.env.get("TWILIO_WHATSAPP_FROM");
+  // ── Dispatch via unified send-message pipeline (no direct Twilio send here) ──
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+  const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
+  const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
-    console.error("[auto-reply] FATAL: Missing TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN");
-    return jsonRes({ ok: false, message: "Missing Twilio secrets" }, 500);
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
+    console.error("[auto-reply] Missing backend env vars for dispatch");
+    return jsonRes({ ok: false, message: "Missing backend env vars" }, 500);
   }
 
-  const fromE164 = TWILIO_WHATSAPP_FROM_RAW ? normalizePhoneToE164(TWILIO_WHATSAPP_FROM_RAW) : "";
-  if (!TWILIO_MESSAGING_SERVICE_SID && !fromE164) {
-    console.error("[auto-reply] FATAL: No sender configured (no MessagingServiceSid, no From)");
-    return jsonRes({ ok: false, message: "No sender configured" }, 500);
-  }
-
-  const phoneNorm = normalizePhoneToE164(phone_e164);
-  const twilioTo = `whatsapp:${phoneNorm}`;
-  const statusCallbackUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/twilio-whatsapp-status`;
-  const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-
-  const twilioBody = new URLSearchParams({ To: twilioTo, Body: replyContent, StatusCallback: statusCallbackUrl });
-
-  // Use MessagingServiceSid as PRIMARY sender (same as send-message)
-  if (TWILIO_MESSAGING_SERVICE_SID) {
-    twilioBody.set("MessagingServiceSid", TWILIO_MESSAGING_SERVICE_SID);
-    console.log("[auto-reply] Using MessagingServiceSid:", TWILIO_MESSAGING_SERVICE_SID, "To:", twilioTo);
-  } else {
-    twilioBody.set("From", `whatsapp:${fromE164}`);
-    console.log("[auto-reply] Using From: whatsapp:" + fromE164, "To:", twilioTo);
-  }
-
-  // Log full outbound payload (sans auth token)
-  console.log("[auto-reply] Twilio payload:", {
-    To: twilioTo,
-    Body: replyContent.slice(0, 80) + "...",
-    StatusCallback: statusCallbackUrl,
-    MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID || "(not set)",
-    From: TWILIO_MESSAGING_SERVICE_SID ? "(using MSid)" : `whatsapp:${fromE164}`,
-  });
-
-  // Insert auto-reply message record with status=queued (NOT sent)
-  const { data: autoMsg } = await svc.from("messages").insert({
-    conversation_id,
-    content: replyContent,
-    is_outbound: true,
-    message_type: "text",
-    status: "queued",
-    status_raw: "queued",
-    provider: "twilio",
-  }).select().single();
+  const sendMessageUrl = `${SUPABASE_URL}/functions/v1/send-message`;
+  console.log("[auto-reply] Dispatching via send-message", { conversation_id, actionTaken, menuOption });
 
   try {
-    const twilioRes = await fetch(twilioUrl, {
+    const sendRes = await fetch(sendMessageUrl, {
       method: "POST",
       headers: {
-        Authorization: basicAuthHeader(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN),
-        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Type": "application/json",
+        apikey: SUPABASE_ANON_KEY,
+        "x-vanto-internal-key": SUPABASE_SERVICE_ROLE_KEY,
       },
-      body: twilioBody.toString(),
+      body: JSON.stringify({
+        conversation_id,
+        content: replyContent,
+        message_type: "text",
+      }),
     });
 
-    const twilioData = await twilioRes.json();
+    const sendData = await sendRes.json();
 
-    if (!twilioRes.ok) {
-      console.error("[auto-reply] Twilio API error:", JSON.stringify(twilioData));
-      const errorCode = twilioData.code || twilioRes.status;
-      const errorStr = `[TWILIO_${errorCode}] ${twilioData.message || "Failed"}`;
-      
-      if (autoMsg) {
-        await svc.from("messages").update({
-          status: "failed", status_raw: "failed",
-          error: errorStr,
-        }).eq("id", autoMsg.id);
-      }
+    if (!sendRes.ok || !sendData?.ok) {
+      const code = sendData?.code || `HTTP_${sendRes.status}`;
+      const reason = sendData?.message || "send-message failed";
+
       await svc.from("auto_reply_events").insert({
-        conversation_id, inbound_message_id: inbound_message_id || null,
-        action_taken: "twilio_error", reason: errorStr,
+        conversation_id,
+        inbound_message_id: inbound_message_id || null,
+        action_taken: code === "TEMPLATE_REQUIRED" ? "template_required_blocked" : "dispatch_failed",
+        reason,
         menu_option: menuOption,
+        knowledge_query: knowledgeQuery || null,
+        knowledge_found: knowledgeFound,
       });
-      return jsonRes({ ok: false, code: `TWILIO_${errorCode}`, message: twilioData.message, error: errorStr }, 502);
+
+      return jsonRes({
+        ok: false,
+        auto_reply: false,
+        code,
+        message: reason,
+        hint: sendData?.hint || null,
+      }, sendRes.status >= 400 ? sendRes.status : 502);
     }
 
-    // Twilio accepted — update to sent (delivery receipts will update further)
-    if (autoMsg) {
-      await svc.from("messages").update({
-        status: "sent", status_raw: twilioData.status || "queued",
-        provider_message_id: twilioData.sid,
-      }).eq("id", autoMsg.id);
-    }
-
-    await svc.from("conversations").update({
-      last_message: replyContent.slice(0, 200),
-      last_message_at: new Date().toISOString(),
-      last_outbound_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }).eq("id", conversation_id);
+    const sentMessage = sendData?.message || null;
 
     // ── Log auto_reply_event ──
     await svc.from("auto_reply_events").insert({
@@ -339,12 +282,17 @@ Deno.serve(async (req) => {
           menu_option: menuOption,
           knowledge_found: knowledgeFound,
           assigned_human: shouldAssignHuman,
-          twilio_sid: twilioData.sid,
+          twilio_sid: sentMessage?.provider_message_id || null,
+          status: sentMessage?.status || "queued",
         },
       });
     }
 
-    console.log(`[auto-reply] ✓ Sent: ${twilioData.sid} | Action: ${actionTaken} | Menu: ${menuOption} | Status: ${twilioData.status}`);
+    console.log("[auto-reply] ✓ Dispatched via send-message", {
+      message_id: sentMessage?.id,
+      twilio_sid: sentMessage?.provider_message_id || null,
+      status: sentMessage?.status || "queued",
+    });
 
     return jsonRes({
       ok: true,
@@ -353,16 +301,23 @@ Deno.serve(async (req) => {
       menu_option: menuOption,
       assigned_human: shouldAssignHuman,
       knowledge_found: knowledgeFound,
-      twilio_sid: twilioData.sid,
-      twilio_status: twilioData.status,
+      twilio_sid: sentMessage?.provider_message_id || null,
+      twilio_status: sentMessage?.status_raw || sentMessage?.status || "queued",
+      message_id: sentMessage?.id || null,
     });
   } catch (e: any) {
-    console.error("[auto-reply] Network error:", e?.message);
-    if (autoMsg) {
-      await svc.from("messages").update({
-        status: "failed", status_raw: "failed", error: e?.message || "Network error",
-      }).eq("id", autoMsg.id);
-    }
-    return jsonRes({ ok: false, code: "NETWORK_ERROR", message: e?.message }, 503);
+    console.error("[auto-reply] Dispatch network error:", e?.message);
+
+    await svc.from("auto_reply_events").insert({
+      conversation_id,
+      inbound_message_id: inbound_message_id || null,
+      action_taken: "dispatch_failed",
+      reason: e?.message || "Network error calling send-message",
+      menu_option: menuOption,
+      knowledge_query: knowledgeQuery || null,
+      knowledge_found: knowledgeFound,
+    });
+
+    return jsonRes({ ok: false, code: "NETWORK_ERROR", message: e?.message || "Dispatch failed" }, 503);
   }
 });

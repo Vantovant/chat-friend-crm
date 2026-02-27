@@ -49,10 +49,9 @@ function basicAuthHeader(accountSid: string, authToken: string) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-  // ── Verify JWT ──
+  // ── Load env + auth mode (user JWT OR internal service call) ──
   const authHeader = req.headers.get("Authorization") || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
-  if (!token) return jsonRes({ ok: false, code: "UNAUTHORIZED", message: "No token provided" }, 401);
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
   const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
@@ -62,15 +61,28 @@ Deno.serve(async (req) => {
     return jsonRes({ ok: false, code: "MISSING_ENV", message: "Missing Supabase env vars" }, 500);
   }
 
-  const anonClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-  });
+  const internalKey = req.headers.get("x-vanto-internal-key") || "";
+  const internalAllowed = internalKey.length > 0 && internalKey === SUPABASE_SERVICE_ROLE_KEY;
 
-  const { data: userData, error: userError } = await anonClient.auth.getUser(token);
-  if (userError || !userData?.user) {
-    return jsonRes({ ok: false, code: "UNAUTHORIZED", message: "Invalid token" }, 401);
+  if (!token && !internalAllowed) {
+    return jsonRes({ ok: false, code: "UNAUTHORIZED", message: "No token provided" }, 401);
   }
-  const userId = userData.user.id;
+
+  let userId: string | null = null;
+
+  if (token) {
+    const anonClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+
+    const { data: userData, error: userError } = await anonClient.auth.getUser(token);
+    if (userError || !userData?.user) {
+      return jsonRes({ ok: false, code: "UNAUTHORIZED", message: "Invalid token" }, 401);
+    }
+    userId = userData.user.id;
+  } else {
+    console.log("[send-message] Internal dispatch call accepted");
+  }
 
   // ── Parse body ──
   let payload: any;
@@ -164,9 +176,11 @@ Deno.serve(async (req) => {
     return jsonRes({ ok: false, code: "DB_ERROR", message: msgErr?.message || "Insert failed" }, 500);
   }
 
-  // ── Twilio secrets — fail loudly, NO fallbacks ──
+  // ── Twilio secrets — MessagingServiceSid ONLY (no From fallback) ──
   const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID");
   const TWILIO_AUTH_TOKEN = Deno.env.get("TWILIO_AUTH_TOKEN");
+  const TWILIO_MESSAGING_SERVICE_SID = Deno.env.get("TWILIO_MESSAGING_SERVICE_SID");
+  const REQUIRED_MESSAGING_SERVICE_SID = "MG4a8d8ce3f9c2090eedc6126ede60b734";
 
   if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
     await serviceClient.from("messages").update({ status: "failed", status_raw: "failed", error: "Missing TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN" }).eq("id", msg.id);
@@ -178,23 +192,27 @@ Deno.serve(async (req) => {
     }, 500);
   }
 
-  // ── Sender routing: MessagingServiceSid (primary) OR From (fallback) ──
-  const TWILIO_MESSAGING_SERVICE_SID = Deno.env.get("TWILIO_MESSAGING_SERVICE_SID");
-  const TWILIO_WHATSAPP_FROM_RAW = Deno.env.get("TWILIO_WHATSAPP_FROM");
-  const fromE164 = TWILIO_WHATSAPP_FROM_RAW ? normalizePhoneToE164(TWILIO_WHATSAPP_FROM_RAW) : "";
-
-  // Must have at least one sender method
-  if (!TWILIO_MESSAGING_SERVICE_SID && !fromE164) {
-    await serviceClient.from("messages").update({ status: "failed", status_raw: "failed", error: "No sender configured" }).eq("id", msg.id);
+  if (!TWILIO_MESSAGING_SERVICE_SID) {
+    await serviceClient.from("messages").update({ status: "failed", status_raw: "failed", error: "Missing TWILIO_MESSAGING_SERVICE_SID" }).eq("id", msg.id);
     return jsonRes({
       ok: false,
       code: "MISSING_SENDER",
-      message: "Neither TWILIO_MESSAGING_SERVICE_SID nor TWILIO_WHATSAPP_FROM is configured.",
-      hint: "Set either TWILIO_MESSAGING_SERVICE_SID (recommended) or TWILIO_WHATSAPP_FROM in your backend secrets.",
+      message: "TWILIO_MESSAGING_SERVICE_SID is required.",
+      hint: "Set TWILIO_MESSAGING_SERVICE_SID to your approved WhatsApp Messaging Service SID.",
     }, 500);
   }
 
-  // Build Twilio To — exactly one whatsapp: prefix
+  if (TWILIO_MESSAGING_SERVICE_SID !== REQUIRED_MESSAGING_SERVICE_SID) {
+    await serviceClient.from("messages").update({ status: "failed", status_raw: "failed", error: `MessagingServiceSid mismatch: ${TWILIO_MESSAGING_SERVICE_SID}` }).eq("id", msg.id);
+    return jsonRes({
+      ok: false,
+      code: "MESSAGING_SERVICE_MISMATCH",
+      message: "Configured Messaging Service SID does not match the approved production sender.",
+      hint: `Expected ${REQUIRED_MESSAGING_SERVICE_SID}`,
+    }, 500);
+  }
+
+  // Build Twilio payload — exactly one whatsapp: prefix on To
   const twilioTo = `whatsapp:${phoneE164}`;
   const statusCallbackUrl = `${SUPABASE_URL}/functions/v1/twilio-whatsapp-status`;
   const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
@@ -203,16 +221,18 @@ Deno.serve(async (req) => {
     To: twilioTo,
     Body: trimmed,
     StatusCallback: statusCallbackUrl,
+    MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID,
   });
 
-  // Use MessagingServiceSid if present (preferred); else use From
-  if (TWILIO_MESSAGING_SERVICE_SID) {
-    twilioBody.set("MessagingServiceSid", TWILIO_MESSAGING_SERVICE_SID);
-    console.log("[send-message] Using MessagingServiceSid:", TWILIO_MESSAGING_SERVICE_SID, "To:", twilioTo);
-  } else {
-    twilioBody.set("From", `whatsapp:${fromE164}`);
-    console.log("[send-message] Using From: whatsapp:" + fromE164, "To:", twilioTo);
-  }
+  console.log("[send-message] Using MessagingServiceSid:", TWILIO_MESSAGING_SERVICE_SID, "To:", twilioTo);
+  console.log("[send-message] Twilio payload:", {
+    To: twilioTo,
+    Body: trimmed,
+    StatusCallback: statusCallbackUrl,
+    MessagingServiceSid: TWILIO_MESSAGING_SERVICE_SID,
+  });
+
+  let responseMessage: any = msg;
 
   try {
     const twilioRes = await fetch(twilioUrl, {
@@ -234,7 +254,7 @@ Deno.serve(async (req) => {
       let hint = "Check Twilio console for details.";
 
       if (twilioCode === 63007) {
-        hint = "Channel not found. Verify your Messaging Service is configured for WhatsApp, or check your From number.";
+        hint = "Channel not found. Verify your Messaging Service is configured for WhatsApp and linked to your approved sender.";
       } else if (twilioCode === 63016) {
         hint = "Message content too long or contains unsupported characters.";
       } else if (twilioCode === 21408) {
@@ -273,6 +293,13 @@ Deno.serve(async (req) => {
       })
       .eq("id", msg.id);
 
+    responseMessage = {
+      ...msg,
+      status: "sent",
+      status_raw: twilioData.status || "queued",
+      provider_message_id: twilioData.sid,
+    };
+
     console.log("[send-message] Twilio accepted:", twilioData.sid, "status:", twilioData.status);
   } catch (e: any) {
     console.error("[send-message] Twilio fetch error:", e?.message);
@@ -305,5 +332,5 @@ Deno.serve(async (req) => {
     })
     .eq("id", conversation_id);
 
-  return jsonRes({ ok: true, success: true, message: msg });
+  return jsonRes({ ok: true, success: true, message: responseMessage });
 });
