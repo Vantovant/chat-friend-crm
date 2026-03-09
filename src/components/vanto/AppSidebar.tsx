@@ -6,7 +6,7 @@ import type { Module } from '@/lib/vanto-data';
 import logo from '@/assets/logo.jpg';
 import {
   LayoutDashboard, MessageSquare, Users, BarChart3, Zap, Bot, GitBranch,
-  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X
+  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X, Megaphone
 } from 'lucide-react';
 
 interface NavItem {
@@ -26,6 +26,7 @@ const navItems: NavItem[] = [
   { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
   { id: 'playbooks', label: 'Playbooks', icon: FileText },
   { id: 'workflows', label: 'Workflows', icon: GitBranch },
+  { id: 'group-campaigns', label: 'Group Campaigns', icon: Megaphone },
   { id: 'integrations', label: 'Integrations', icon: Puzzle },
   { id: 'api-console', label: 'API Console', icon: Terminal },
   { id: 'settings', label: 'Settings', icon: Settings },
