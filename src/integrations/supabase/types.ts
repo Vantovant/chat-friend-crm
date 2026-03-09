@@ -803,6 +803,47 @@ export type Database = {
         }
         Relationships: []
       }
+      scheduled_group_posts: {
+        Row: {
+          created_at: string
+          id: string
+          image_url: string | null
+          message_content: string
+          scheduled_at: string
+          status: string
+          target_group_name: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          message_content: string
+          scheduled_at: string
+          status?: string
+          target_group_name: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          image_url?: string | null
+          message_content?: string
+          scheduled_at?: string
+          status?: string
+          target_group_name?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_group_posts_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sync_runs: {
         Row: {
           errors: string[]
@@ -928,6 +969,35 @@ export type Database = {
           status?: string
         }
         Relationships: []
+      }
+      whatsapp_groups: {
+        Row: {
+          created_at: string
+          group_name: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          group_name: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          group_name?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "whatsapp_groups_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       workflows: {
         Row: {
