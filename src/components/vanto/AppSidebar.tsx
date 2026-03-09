@@ -6,7 +6,7 @@ import type { Module } from '@/lib/vanto-data';
 import logo from '@/assets/logo.jpg';
 import {
   LayoutDashboard, MessageSquare, Users, BarChart3, Zap, Bot, GitBranch,
-  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X
+  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X, Megaphone
 } from 'lucide-react';
 
 interface NavItem {
