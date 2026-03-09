@@ -54,6 +54,7 @@ const Index = () => {
       case 'workflows': return <WorkflowsModule />;
       case 'integrations': return <IntegrationsModule userId={session?.user?.id ?? ''} />;
       case 'api-console': return <APIConsoleModule />;
+      case 'group-campaigns': return <GroupCampaignsModule />;
       case 'settings': return <SettingsModule />;
       default: return <InboxModule />;
     }

@@ -26,6 +26,7 @@ const navItems: NavItem[] = [
   { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
   { id: 'playbooks', label: 'Playbooks', icon: FileText },
   { id: 'workflows', label: 'Workflows', icon: GitBranch },
+  { id: 'group-campaigns', label: 'Group Campaigns', icon: Megaphone },
   { id: 'integrations', label: 'Integrations', icon: Puzzle },
   { id: 'api-console', label: 'API Console', icon: Terminal },
   { id: 'settings', label: 'Settings', icon: Settings },
