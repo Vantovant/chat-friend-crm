@@ -1,7 +1,7 @@
 /**
- * Vanto CRM — WhatsApp Web Content Script v4.0
+ * Vanto CRM — WhatsApp Web Content Script v5.0
  * MV3 compliant: ALL auth + API calls delegated to background.js via sendMessage.
- * This script only handles DOM detection and sidebar UI.
+ * This script handles DOM detection, sidebar UI, group capture, and auto-poster execution.
  */
 
 'use strict';
@@ -20,8 +20,9 @@ var headerObserver  = null;
 var pollInterval    = null;
 var lastDetectedKey = '';
 var currentTags     = [];
-var isAuthenticated = false; // updated from background
-var teamMembers     = [];    // cached profiles list
+var isAuthenticated = false;
+var teamMembers     = [];
+var isGroupChat     = false;
 
 // ── Logging ────────────────────────────────────────────────────────────────────
 function log(msg, data) {
@@ -59,9 +60,10 @@ function checkAuthState(callback) {
   });
 }
 
-// Listen for auth changes from background (login/logout in popup)
-chrome.runtime.onMessage.addListener(function(msg) {
+// Listen for auth changes and group post execution commands from background
+chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
   if (!msg || !msg.type) return;
+
   if (msg.type === 'VANTO_TOKEN_UPDATED') {
     isAuthenticated = true;
     log('Token updated — refreshing');
@@ -74,7 +76,150 @@ chrome.runtime.onMessage.addListener(function(msg) {
     log('Token cleared');
     updateAuthBanner();
   }
+
+  // ── Auto-poster execution engine ──────────────────────────────────────────
+  if (msg.type === 'VANTO_EXECUTE_GROUP_POST') {
+    log('Executing group post:', msg.groupName);
+    executeGroupPostInDOM(msg.groupName, msg.messageContent, function(result) {
+      sendResponse(result);
+    });
+    return true; // async response
+  }
 });
+
+// ── Execute group post in WhatsApp DOM ─────────────────────────────────────────
+function executeGroupPostInDOM(groupName, messageContent, callback) {
+  // Step A: Find and click the group in the chat list
+  var searchBox = document.querySelector('[data-testid="chat-list-search"]') ||
+                  document.querySelector('[contenteditable="true"][data-tab="3"]') ||
+                  document.querySelector('div[title="Search input textbox"]');
+
+  // Use the search to find the group
+  var searchInput = document.querySelector('[data-testid="chat-list-search-input"]') ||
+                    document.querySelector('div[contenteditable="true"][data-tab="3"]');
+
+  if (!searchInput) {
+    // Try clicking the search icon first
+    var searchIcon = document.querySelector('[data-testid="chat-list-search"]') ||
+                     document.querySelector('[data-icon="search"]');
+    if (searchIcon) {
+      searchIcon.click();
+    }
+  }
+
+  // Wait a moment for search to open, then type the group name
+  setTimeout(function() {
+    var input = document.querySelector('[data-testid="chat-list-search-input"]') ||
+                document.querySelector('div[contenteditable="true"][data-tab="3"]');
+
+    if (!input) {
+      log('Search input not found');
+      callback({ success: false, error: 'Search input not found' });
+      return;
+    }
+
+    // Clear and type group name
+    input.focus();
+    input.textContent = '';
+    document.execCommand('selectAll', false, null);
+    document.execCommand('insertText', false, groupName);
+
+    // Dispatch input event
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: groupName }));
+
+    // Wait for search results to appear
+    setTimeout(function() {
+      // Find the matching group in results
+      var chatItems = document.querySelectorAll('[data-testid="cell-frame-container"] span[title]');
+      var foundGroup = null;
+
+      for (var i = 0; i < chatItems.length; i++) {
+        var title = chatItems[i].getAttribute('title') || '';
+        if (title.toLowerCase() === groupName.toLowerCase()) {
+          foundGroup = chatItems[i];
+          break;
+        }
+      }
+
+      // Fallback: partial match
+      if (!foundGroup) {
+        for (var j = 0; j < chatItems.length; j++) {
+          var t = chatItems[j].getAttribute('title') || '';
+          if (t.toLowerCase().indexOf(groupName.toLowerCase()) !== -1) {
+            foundGroup = chatItems[j];
+            break;
+          }
+        }
+      }
+
+      if (!foundGroup) {
+        log('Group not found in chat list:', groupName);
+        // Clear search
+        var clearBtn = document.querySelector('[data-testid="x-alt"]') || document.querySelector('[data-icon="x-alt"]');
+        if (clearBtn) clearBtn.click();
+        callback({ success: false, error: 'Group not found: ' + groupName });
+        return;
+      }
+
+      // Click the group
+      var clickTarget = foundGroup.closest('[data-testid="cell-frame-container"]') || foundGroup;
+      clickTarget.click();
+
+      // Wait for group chat to open
+      setTimeout(function() {
+        // Clear search
+        var clearBtn2 = document.querySelector('[data-testid="x-alt"]') || document.querySelector('[data-icon="x-alt"]');
+        if (clearBtn2) clearBtn2.click();
+
+        // Step C: Find the message input box
+        var msgInput = document.querySelector('[data-testid="conversation-compose-box-input"]') ||
+                       document.querySelector('div[contenteditable="true"][data-tab="10"]') ||
+                       document.querySelector('#main footer div[contenteditable="true"]');
+
+        if (!msgInput) {
+          log('Message input not found');
+          callback({ success: false, error: 'Message input not found' });
+          return;
+        }
+
+        // Step D: Inject message content
+        msgInput.focus();
+        msgInput.textContent = '';
+
+        // Use execCommand to insert text (WhatsApp registers this)
+        document.execCommand('selectAll', false, null);
+        document.execCommand('insertText', false, messageContent);
+
+        // Also dispatch input event for good measure
+        msgInput.dispatchEvent(new InputEvent('input', {
+          bubbles: true,
+          inputType: 'insertText',
+          data: messageContent,
+        }));
+
+        // Step E: Wait briefly then click Send button
+        setTimeout(function() {
+          var sendBtn = document.querySelector('[data-testid="send"]') ||
+                        document.querySelector('button[aria-label="Send"]') ||
+                        document.querySelector('span[data-icon="send"]');
+
+          if (!sendBtn) {
+            log('Send button not found');
+            callback({ success: false, error: 'Send button not found' });
+            return;
+          }
+
+          // Click send (might need to click parent button if it's a span)
+          var btnToClick = sendBtn.closest('button') || sendBtn;
+          btnToClick.click();
+
+          log('Message sent to group:', groupName);
+          callback({ success: true });
+        }, 500);
+      }, 1500);
+    }, 1500);
+  }, 500);
+}
 
 // ── Save contact via background ────────────────────────────────────────────────
 function saveContactViaBackground(payload, callback) {
@@ -119,9 +264,6 @@ function sanitizePhone(raw) {
   return (raw || '').replace(/\D/g, '');
 }
 
-// ── Extract whatsapp_id from DOM (the internal WA number, NOT user-entered) ────
-// currentPhone is the WA-extracted digits (JID number). We keep it as whatsapp_id.
-// The phone INPUT field contains what the user typed — that becomes payload.phone.
 function getPhoneInputValue() {
   var el = document.getElementById('vanto-f-phone');
   return el ? (el.value || '').trim() : '';
@@ -132,6 +274,42 @@ function updateAuthBanner() {
   var banner = document.getElementById('vanto-auth-banner');
   if (!banner) return;
   banner.style.display = isAuthenticated ? 'none' : 'block';
+}
+
+// ── Detect if current chat is a group ──────────────────────────────────────────
+function detectIfGroupChat() {
+  // Groups typically show member count or "click here for group info"
+  var groupIndicators = [
+    '[data-testid="conversation-info-header"] span[data-testid="conversation-subtitle"]',
+    '#main header span[title*=","]', // group members listed with commas
+  ];
+
+  // Check for group data-id pattern (ends with @g.us)
+  var mainPanel = document.getElementById('main');
+  if (mainPanel) {
+    var dataId = mainPanel.getAttribute('data-id') || '';
+    if (dataId.indexOf('@g.us') !== -1) return true;
+  }
+
+  // Check URL hash
+  var hash = window.location.hash || '';
+  if (hash.indexOf('@g.us') !== -1) return true;
+
+  // Check for data-id in sub elements
+  var els = document.querySelectorAll('#main [data-id]');
+  for (var i = 0; i < els.length; i++) {
+    if ((els[i].getAttribute('data-id') || '').indexOf('@g.us') !== -1) return true;
+  }
+
+  // Check subtitle for member indicators (e.g., "You, Alice, Bob")
+  var subtitles = document.querySelectorAll('#main header span[dir="auto"]:not([title])');
+  for (var j = 0; j < subtitles.length; j++) {
+    var txt = (subtitles[j].textContent || '').trim();
+    // If it contains commas and names, likely a group
+    if (txt.indexOf(',') !== -1 && txt.length > 5 && !/^\+?\d/.test(txt)) return true;
+  }
+
+  return false;
 }
 
 // ── Chat detection ─────────────────────────────────────────────────────────────
@@ -209,6 +387,22 @@ function runDetection() {
   lastDetectedKey = key;
   currentPhone = info.phone;
   currentName  = info.name;
+
+  // Detect if this is a group chat
+  isGroupChat = detectIfGroupChat();
+
+  if (isGroupChat && info.name && isAuthenticated) {
+    // Capture the group name to Supabase
+    log('Group detected — capturing:', info.name);
+    sendToBackground({ type: 'VANTO_UPSERT_GROUP', groupName: info.name }, function(resp) {
+      if (resp && resp.success) {
+        log('Group captured successfully:', info.name);
+      } else {
+        log('Group capture failed:', resp && resp.error);
+      }
+    });
+  }
+
   refreshSidebar(info.name, info.phone);
 }
 
@@ -221,6 +415,22 @@ function refreshSidebar(name, phone) {
     showNoChatState();
     return;
   }
+
+  // For group chats, show a different message
+  if (isGroupChat) {
+    showFormBody();
+    var groupBanner = document.getElementById('vanto-group-banner');
+    var formFields = document.getElementById('vanto-form-fields');
+    if (groupBanner) groupBanner.style.display = 'block';
+    if (formFields) formFields.style.display = 'none';
+    return;
+  }
+
+  // Regular contact chat
+  var groupBanner2 = document.getElementById('vanto-group-banner');
+  var formFields2 = document.getElementById('vanto-form-fields');
+  if (groupBanner2) groupBanner2.style.display = 'none';
+  if (formFields2) formFields2.style.display = 'block';
 
   showFormBody();
 
@@ -264,7 +474,7 @@ function updateContactHeader(name, phone) {
   var phoneEl  = document.getElementById('vanto-hdr-phone');
   var avatarEl = document.getElementById('vanto-avatar');
   if (nameEl)   nameEl.textContent  = name  || 'Select a chat';
-  if (phoneEl)  phoneEl.textContent = phone ? '+' + phone : '—';
+  if (phoneEl)  phoneEl.textContent = isGroupChat ? '👥 Group' : (phone ? '+' + phone : '—');
   if (avatarEl) avatarEl.textContent = (name || '?')[0].toUpperCase();
 }
 
@@ -278,14 +488,12 @@ function populateForm(data) {
     el.readOnly = false;
   }
   setField('vanto-f-name',        data.name        || '');
-  // Prefer phone_raw (user-entered) if available, otherwise empty so user fills it
   setField('vanto-f-phone',       data.phone_raw   || data.phone_normalized || '');
   setField('vanto-f-email',       data.email       || '');
   setField('vanto-f-lead-type',   data.lead_type   || 'prospect');
   setField('vanto-f-temperature', data.temperature || 'cold');
   setField('vanto-f-notes',       data.notes       || '');
 
-  // Assign To
   var assignSel = document.getElementById('vanto-f-assigned-to');
   if (assignSel) assignSel.value = data.assigned_to || '';
 
@@ -374,10 +582,8 @@ function handleSave() {
   var tempEl  = document.getElementById('vanto-f-temperature');
   var notesEl = document.getElementById('vanto-f-notes');
 
-  // phone = what user typed in the Phone field (user-entered, human-readable)
   var userPhone = ((phoneEl && phoneEl.value) || '').trim();
-  // whatsapp_id = WA internal number extracted from DOM (may be a JID number)
-  var waId      = currentPhone || null; // currentPhone is always the DOM-extracted raw digits
+  var waId      = currentPhone || null;
 
   var name = ((nameEl && nameEl.value) || '').trim() || currentName || '';
 
@@ -416,7 +622,6 @@ function handleSave() {
   saveContactViaBackground(payload, function(response) {
     if (response && response.success) {
       currentContact = response.contact;
-      // Show the user-entered phone in the toast, not WA internal
       var displayPhone = (response.contact && response.contact.phone_raw) || userPhone || waId || '';
       showStatus('success', '✅ Saved: ' + name + ' • ' + displayPhone);
       if (saveBtn) saveBtn.textContent = '✅ Saved!';
@@ -480,6 +685,14 @@ function buildSidebarHTML() {
 
     '    <div id="vanto-form-body" style="display:none;">',
 
+    '      <div id="vanto-group-banner" style="display:none;padding:16px 12px;text-align:center;">',
+    '        <span style="font-size:32px;">👥</span>',
+    '        <p style="font-size:13px;font-weight:600;color:hsl(172,66%,50%);margin:8px 0 4px;">Group Chat Captured!</p>',
+    '        <p style="font-size:11px;color:hsl(215,20%,55%);">This group has been saved to your Group Campaigns. Schedule posts from the Vanto dashboard.</p>',
+    '        <a href="https://chat-friend-crm.lovable.app" target="_blank" style="display:inline-block;margin-top:10px;font-size:11px;color:hsl(172,66%,50%);text-decoration:underline;">Open Dashboard →</a>',
+    '      </div>',
+
+    '      <div id="vanto-form-fields">',
     '      <div class="vanto-section">',
     '        <p class="vanto-section-title">Contact Info</p>',
     '        <div class="vanto-field">',
@@ -545,6 +758,8 @@ function buildSidebarHTML() {
     '      <div class="vanto-section">',
     '        <button class="vanto-btn vanto-btn-primary" id="vanto-save-btn">💾 Save Contact</button>',
     '      </div>',
+
+    '      </div>', // end vanto-form-fields
 
     '    </div>',
     '  </div>',
@@ -669,7 +884,7 @@ function injectSidebar() {
     setTimeout(runDetection, 1200);
   });
 
-  log('Sidebar injected v4.0');
+  log('Sidebar injected v5.0 (with Group Campaigns)');
 }
 
 // ── Boot ───────────────────────────────────────────────────────────────────────
