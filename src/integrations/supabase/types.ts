@@ -805,9 +805,12 @@ export type Database = {
       }
       scheduled_group_posts: {
         Row: {
+          attempt_count: number
           created_at: string
+          failure_reason: string | null
           id: string
           image_url: string | null
+          last_attempt_at: string | null
           message_content: string
           scheduled_at: string
           status: string
@@ -815,9 +818,12 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          attempt_count?: number
           created_at?: string
+          failure_reason?: string | null
           id?: string
           image_url?: string | null
+          last_attempt_at?: string | null
           message_content: string
           scheduled_at: string
           status?: string
@@ -825,9 +831,12 @@ export type Database = {
           user_id: string
         }
         Update: {
+          attempt_count?: number
           created_at?: string
+          failure_reason?: string | null
           id?: string
           image_url?: string | null
+          last_attempt_at?: string | null
           message_content?: string
           scheduled_at?: string
           status?: string
@@ -973,18 +982,21 @@ export type Database = {
       whatsapp_groups: {
         Row: {
           created_at: string
+          group_jid: string | null
           group_name: string
           id: string
           user_id: string
         }
         Insert: {
           created_at?: string
+          group_jid?: string | null
           group_name: string
           id?: string
           user_id: string
         }
         Update: {
           created_at?: string
+          group_jid?: string | null
           group_name?: string
           id?: string
           user_id?: string
