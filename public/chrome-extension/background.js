@@ -403,27 +403,137 @@ async function pollDuePosts() {
     if (tabs.length === 0) {
       console.warn('[Vanto BG] No WhatsApp Web tab found — marking all as failed');
       for (var i = 0; i < posts.length; i++) {
-        await updatePostStatus(posts[i].id, 'failed', session.token, 'No WhatsApp Web tab open', 'poll');
+        await updatePostStatus(posts[i].id, 'failed', session.token, 'No WhatsApp Web tab open. Please open web.whatsapp.com and keep it active.', 'no_tab');
       }
       return;
     }
 
+    var bestTab = pickBestTab(tabs);
+    var targetTabId = bestTab.id;
+    console.log('[Vanto BG] Using tab:', targetTabId, 'active:', bestTab.active, 'discarded:', bestTab.discarded);
+
     for (var j = 0; j < posts.length; j++) {
-      await executeGroupPost(posts[j], session.token, tabs[0].id);
+      await executeGroupPost(posts[j], session.token, targetTabId);
     }
   } catch (err) {
     console.error('[Vanto BG] Poll error:', err.message);
   }
 }
 
+// ── Ping content script to verify it's alive ──────────────────────────────────
+function pingContentScript(tabId) {
+  return new Promise(function(resolve) {
+    var timeout = setTimeout(function() { resolve(false); }, 3000);
+    try {
+      chrome.tabs.sendMessage(tabId, { type: 'VANTO_PING' }, function(resp) {
+        clearTimeout(timeout);
+        if (chrome.runtime.lastError) {
+          console.log('[Vanto BG] Ping failed for tab', tabId, ':', chrome.runtime.lastError.message);
+          resolve(false);
+          return;
+        }
+        resolve(!!(resp && resp.pong));
+      });
+    } catch (e) {
+      clearTimeout(timeout);
+      resolve(false);
+    }
+  });
+}
+
+// ── Inject content script programmatically ─────────────────────────────────────
+async function injectContentScript(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      files: ['content.js'],
+    });
+    await chrome.scripting.insertCSS({
+      target: { tabId: tabId },
+      files: ['sidebar.css'],
+    });
+    console.log('[Vanto BG] Content script injected into tab', tabId);
+    // Wait for script to initialize
+    await new Promise(function(r) { setTimeout(r, 2000); });
+    return true;
+  } catch (err) {
+    console.error('[Vanto BG] Script injection failed:', err.message);
+    return false;
+  }
+}
+
+// ── Pick best WhatsApp tab (prefer active/focused) ─────────────────────────────
+function pickBestTab(tabs) {
+  if (!tabs || tabs.length === 0) return null;
+  // Prefer active tab
+  for (var i = 0; i < tabs.length; i++) {
+    if (tabs[i].active) return tabs[i];
+  }
+  // Prefer non-discarded
+  for (var j = 0; j < tabs.length; j++) {
+    if (!tabs[j].discarded) return tabs[j];
+  }
+  return tabs[0];
+}
+
 async function executeGroupPost(post, token, tabId) {
   console.log('[Vanto BG] Executing post to group:', post.target_group_name);
 
   try {
+    // Step 1: Ping content script to verify it's alive
+    var alive = await pingContentScript(tabId);
+    console.log('[Vanto BG] Content script ping result:', alive, 'tab:', tabId);
+
+    if (!alive) {
+      // Step 2: Try programmatic injection
+      console.log('[Vanto BG] Content script not responding — attempting injection');
+      var injected = await injectContentScript(tabId);
+      if (injected) {
+        alive = await pingContentScript(tabId);
+        console.log('[Vanto BG] Post-injection ping result:', alive);
+      }
+
+      if (!alive) {
+        // Step 3: Try other WhatsApp tabs
+        var allTabs = await new Promise(function(resolve) {
+          chrome.tabs.query({ url: 'https://web.whatsapp.com/*' }, function(t) { resolve(t || []); });
+        });
+        for (var t = 0; t < allTabs.length; t++) {
+          if (allTabs[t].id !== tabId) {
+            alive = await pingContentScript(allTabs[t].id);
+            if (alive) {
+              tabId = allTabs[t].id;
+              console.log('[Vanto BG] Switched to responsive tab:', tabId);
+              break;
+            }
+            // Try injecting into this tab too
+            var injected2 = await injectContentScript(allTabs[t].id);
+            if (injected2) {
+              alive = await pingContentScript(allTabs[t].id);
+              if (alive) {
+                tabId = allTabs[t].id;
+                console.log('[Vanto BG] Injected + switched to tab:', tabId);
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      if (!alive) {
+        var failReason = 'Content script unreachable on all ' + (allTabs ? allTabs.length : 1) + ' WhatsApp tab(s). ' +
+          'Ensure WhatsApp Web is fully loaded and not in a background/sleeping tab. ' +
+          'Try refreshing the WhatsApp Web page.';
+        await updatePostStatus(post.id, 'failed', token, failReason, 'content_unreachable');
+        return;
+      }
+    }
+
+    // Step 4: Send the actual execution command with generous timeout
     var response = await new Promise(function(resolve) {
       var timeoutId = setTimeout(function() {
-        resolve({ success: false, error: 'Content script timeout (30s)', stage: 'poll' });
-      }, 30000);
+        resolve({ success: false, error: 'Execution timeout (45s) — content script was alive but did not finish in time', stage: 'execution_timeout' });
+      }, 45000);
 
       chrome.tabs.sendMessage(tabId, {
         type: 'VANTO_EXECUTE_GROUP_POST',
@@ -433,10 +543,10 @@ async function executeGroupPost(post, token, tabId) {
       }, function(resp) {
         clearTimeout(timeoutId);
         if (chrome.runtime.lastError) {
-          console.warn('[Vanto BG] Content script error:', chrome.runtime.lastError.message);
-          resolve({ success: false, error: chrome.runtime.lastError.message, stage: 'poll' });
+          console.warn('[Vanto BG] Execute message error:', chrome.runtime.lastError.message);
+          resolve({ success: false, error: 'Tab communication error: ' + chrome.runtime.lastError.message, stage: 'messaging' });
         } else {
-          resolve(resp || { success: false, error: 'No response from content script', stage: 'poll' });
+          resolve(resp || { success: false, error: 'No response from content script after command', stage: 'no_response' });
         }
       });
     });

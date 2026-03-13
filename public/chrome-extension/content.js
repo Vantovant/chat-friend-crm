@@ -97,9 +97,18 @@ function checkAuthState(callback) {
   });
 }
 
-// Listen for auth changes and group post execution commands from background
+// Listen for auth changes, pings, and group post execution commands from background
 chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
-  if (!msg || !msg.type) return;
+  if (!msg || !msg.type) {
+    sendResponse({ error: 'no_type' });
+    return false;
+  }
+
+  // ── Ping/pong for liveness check ──────────────────────────────────────────
+  if (msg.type === 'VANTO_PING') {
+    sendResponse({ pong: true, ready: isWhatsAppDomReady(), timestamp: Date.now() });
+    return false;
+  }
 
   if (msg.type === 'VANTO_TOKEN_UPDATED') {
     isAuthenticated = true;
@@ -107,27 +116,46 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
     updateAuthBanner();
     loadTeamMembers();
     runDetection();
+    sendResponse({ ok: true });
+    return false;
   }
+
   if (msg.type === 'VANTO_TOKEN_CLEARED') {
     isAuthenticated = false;
     log('Token cleared');
     updateAuthBanner();
+    sendResponse({ ok: true });
+    return false;
   }
 
   // ── Auto-poster execution engine ──────────────────────────────────────────
   if (msg.type === 'VANTO_EXECUTE_GROUP_POST') {
     log('Executing group post:', msg.groupName);
     // Check if WhatsApp main pane is ready
-    var mainApp = document.getElementById('app') || document.getElementById('main');
-    if (!mainApp) {
-      sendResponse({ success: false, error: 'WhatsApp Web not fully loaded', stage: 'poll' });
-      return true;
+    var appEl = document.getElementById('app');
+    if (!appEl) {
+      sendResponse({ success: false, error: 'WhatsApp Web DOM not ready (#app missing)', stage: 'dom_not_ready' });
+      return false;
     }
-    executeGroupPostInDOM(msg.groupName, msg.messageContent, function(result) {
-      sendResponse(result);
-    });
-    return true; // async response
+    try {
+      executeGroupPostInDOM(msg.groupName, msg.messageContent, function(result) {
+        try {
+          sendResponse(result);
+        } catch (e) {
+          log('sendResponse failed (channel closed):', e.message);
+        }
+      });
+    } catch (err) {
+      log('executeGroupPostInDOM threw:', err.message);
+      sendResponse({ success: false, error: 'Execution exception: ' + err.message, stage: 'exception' });
+      return false;
+    }
+    return true; // keep channel open for async response
   }
+
+  // Default: respond to avoid dangling channels
+  sendResponse({ ok: false, error: 'unknown_type' });
+  return false;
 });
 
 // ── Normalize group name for comparison (light clean, preserves meaningful symbols) ──
