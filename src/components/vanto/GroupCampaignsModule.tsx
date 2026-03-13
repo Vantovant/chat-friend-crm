@@ -101,7 +101,7 @@ export function GroupCampaignsModule() {
   useEffect(() => {
     fetchData();
     checkExtensionHealth();
-    const interval = setInterval(checkExtensionHealth, 30000);
+    const interval = setInterval(checkExtensionHealth, 15000); // Check every 15s
     return () => clearInterval(interval);
   }, []);
 
