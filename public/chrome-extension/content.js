@@ -140,7 +140,7 @@ function executeGroupPostInDOM(groupName, messageContent, callback) {
 
     if (!input) {
       sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Search input not found after clicking search icon' });
-      callback({ success: false, error: 'DOM element missing: search input not found' });
+      callback({ success: false, error: 'Search input not found after clicking search icon', stage: 'find_group' });
       return;
     }
 
