@@ -52,6 +52,41 @@ function sendToBackground(message, callback) {
   }
 }
 
+// ── Live heartbeat from WhatsApp tab ───────────────────────────────────────────
+function isWhatsAppDomReady() {
+  return !!(document.getElementById('app') && document.getElementById('main'));
+}
+
+function sendLiveHeartbeat(source) {
+  sendToBackground({
+    type: 'VANTO_HEARTBEAT_PING',
+    whatsappReady: isWhatsAppDomReady(),
+    source: source || 'content_script',
+  }, function(response) {
+    if (response && response.success) return;
+    log('Heartbeat ping failed', response && response.error ? response.error : 'no_response');
+  });
+}
+
+function startHeartbeatLoop() {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+
+  sendLiveHeartbeat('content_init');
+  heartbeatTimer = setInterval(function() {
+    sendLiveHeartbeat('content_interval');
+  }, 30000);
+
+  if (!heartbeatHooksBound) {
+    heartbeatHooksBound = true;
+    document.addEventListener('visibilitychange', function() {
+      if (!document.hidden) sendLiveHeartbeat('content_visible');
+    });
+    window.addEventListener('focus', function() {
+      sendLiveHeartbeat('content_focus');
+    });
+  }
+}
+
 // ── Auth state ─────────────────────────────────────────────────────────────────
 function checkAuthState(callback) {
   sendToBackground({ type: 'VANTO_GET_SESSION' }, function(response) {
