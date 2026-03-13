@@ -364,9 +364,6 @@ async function pollDuePosts() {
     chrome.tabs.query({ url: 'https://web.whatsapp.com/*' }, function(t) { resolve(t || []); });
   });
 
-  // Send heartbeat with WhatsApp readiness
-  await sendHeartbeat(tabs.length > 0);
-
   try {
     var now = new Date().toISOString();
     var url = SUPABASE_URL + '/rest/v1/scheduled_group_posts?status=eq.pending&scheduled_at=lte.' + encodeURIComponent(now) + '&order=scheduled_at.asc&limit=5';
