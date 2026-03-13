@@ -403,13 +403,17 @@ async function pollDuePosts() {
     if (tabs.length === 0) {
       console.warn('[Vanto BG] No WhatsApp Web tab found — marking all as failed');
       for (var i = 0; i < posts.length; i++) {
-        await updatePostStatus(posts[i].id, 'failed', session.token, 'No WhatsApp Web tab open', 'poll');
+        await updatePostStatus(posts[i].id, 'failed', session.token, 'No WhatsApp Web tab open. Please open web.whatsapp.com and keep it active.', 'no_tab');
       }
       return;
     }
 
+    var bestTab = pickBestTab(tabs);
+    var targetTabId = bestTab.id;
+    console.log('[Vanto BG] Using tab:', targetTabId, 'active:', bestTab.active, 'discarded:', bestTab.discarded);
+
     for (var j = 0; j < posts.length; j++) {
-      await executeGroupPost(posts[j], session.token, tabs[0].id);
+      await executeGroupPost(posts[j], session.token, targetTabId);
     }
   } catch (err) {
     console.error('[Vanto BG] Poll error:', err.message);
