@@ -635,6 +635,26 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
     return true;
   }
 
+  if (msg.type === 'VANTO_HEARTBEAT_PING') {
+    var senderUrl = sender && sender.tab && sender.tab.url ? sender.tab.url : '';
+    var isWhatsAppSender = senderUrl.indexOf('https://web.whatsapp.com/') === 0;
+
+    if (!isWhatsAppSender) {
+      sendResponse({ success: false, error: 'invalid_sender' });
+      return false;
+    }
+
+    sendHeartbeat({
+      whatsappReady: !!msg.whatsappReady,
+      source: msg.source || 'content_script',
+      tabCount: 1,
+      contentScriptActive: true,
+    }).then(function(result) {
+      sendResponse({ success: !!(result && result.success), error: result && result.error ? result.error : null });
+    });
+    return true;
+  }
+
   if (msg.type === 'VANTO_POST_RESULT') {
     sendResponse({ ok: true });
     return false;
