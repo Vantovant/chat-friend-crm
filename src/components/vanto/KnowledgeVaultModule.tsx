@@ -340,6 +340,16 @@ export function KnowledgeVaultModule() {
                       </p>
                     </div>
                     <div className="flex gap-1 shrink-0">
+                      {(f.status === 'processing' || f.status === 'pending') && 
+                        (Date.now() - new Date(f.created_at).getTime() > 5 * 60 * 1000) && (
+                        <button
+                          onClick={() => handleForceRetry(f.id)}
+                          className="px-2 py-1 rounded-lg text-xs font-medium bg-amber-500/15 text-amber-500 border border-amber-500/30 hover:bg-amber-500/25 transition-colors"
+                          title="Force retry — file appears stuck"
+                        >
+                          Force Retry
+                        </button>
+                      )}
                       <button onClick={() => handleReindex(f.id)} className="p-2 rounded-lg hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors" title="Re-index">
                         <RefreshCw size={14} />
                       </button>
