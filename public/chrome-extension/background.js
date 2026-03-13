@@ -317,35 +317,50 @@ async function handleUpsertGroup(groupName, groupJid) {
 }
 
 // ── Heartbeat: report extension health ─────────────────────────────────────────
-async function sendHeartbeat(whatsappReady) {
+async function sendHeartbeat(options) {
+  var opts = options || {};
   var session = await getSession();
   session = await refreshTokenIfNeeded(session);
 
-  if (!session.token) return;
+  if (!session.token) {
+    return { success: false, error: 'not_authenticated' };
+  }
 
   try {
     var heartbeatData = JSON.stringify({
       last_seen: new Date().toISOString(),
-      whatsapp_ready: !!whatsappReady,
+      whatsapp_ready: !!opts.whatsappReady,
+      source: opts.source || 'background',
+      tab_count: typeof opts.tabCount === 'number' ? opts.tabCount : null,
+      content_script_active: !!opts.contentScriptActive,
     });
 
-    // Upsert into integration_settings
-    var url = SUPABASE_URL + '/rest/v1/integration_settings';
-    await fetch(url, {
+    // Upsert into integration_settings (explicit conflict target is required)
+    var url = SUPABASE_URL + '/rest/v1/integration_settings?on_conflict=key';
+    var res = await fetch(url, {
       method: 'POST',
       headers: {
         'apikey':        SUPABASE_ANON_KEY,
         'Authorization': 'Bearer ' + session.token,
         'Content-Type':  'application/json',
-        'Prefer':        'resolution=merge-duplicates',
+        'Prefer':        'resolution=merge-duplicates,return=minimal',
       },
       body: JSON.stringify({
         key: 'chrome_extension_heartbeat',
         value: heartbeatData,
       }),
     });
+
+    if (!res.ok) {
+      var errText = await res.text();
+      console.warn('[Vanto BG] Heartbeat upsert failed:', res.status, errText);
+      return { success: false, error: 'upsert_failed_' + res.status };
+    }
+
+    return { success: true };
   } catch (err) {
     console.warn('[Vanto BG] Heartbeat error:', err.message);
+    return { success: false, error: err.message };
   }
 }
 
@@ -473,38 +488,60 @@ async function updatePostStatus(postId, status, token, failureReason, failureSta
 }
 
 // ── Chrome Alarms: poll every 1 minute, heartbeat every 1 minute ───────────────
-chrome.alarms.create('vanto-group-poll', { periodInMinutes: 1 });
-chrome.alarms.create('vanto-heartbeat', { periodInMinutes: 1 });
+function ensureBackgroundAlarms() {
+  chrome.alarms.create('vanto-group-poll', { periodInMinutes: 1 });
+  chrome.alarms.create('vanto-heartbeat', { periodInMinutes: 1 });
+}
+
+ensureBackgroundAlarms();
+
+chrome.runtime.onInstalled.addListener(function() {
+  ensureBackgroundAlarms();
+  sendIndependentHeartbeat('on_installed');
+});
+
+chrome.runtime.onStartup.addListener(function() {
+  ensureBackgroundAlarms();
+  sendIndependentHeartbeat('on_startup');
+});
+
+chrome.tabs.onUpdated.addListener(function(tabId, changeInfo, tab) {
+  if (changeInfo.status !== 'complete') return;
+  if (!tab || !tab.url || tab.url.indexOf('https://web.whatsapp.com/') !== 0) return;
+  sendIndependentHeartbeat('tab_updated');
+});
 
 // Send initial heartbeat on startup
-sendIndependentHeartbeat();
+sendIndependentHeartbeat('service_worker_boot');
 
 chrome.alarms.onAlarm.addListener(function(alarm) {
   if (alarm.name === 'vanto-group-poll') {
     pollDuePosts();
   }
   if (alarm.name === 'vanto-heartbeat') {
-    sendIndependentHeartbeat();
+    sendIndependentHeartbeat('alarm');
   }
 });
 
 // ── Independent heartbeat (decoupled from polling) ─────────────────────────────
-async function sendIndependentHeartbeat() {
-  var session = await getSession();
-  session = await refreshTokenIfNeeded(session);
-
-  if (!session.token) {
-    console.log('[Vanto BG] Heartbeat skipped — not authenticated');
-    return;
-  }
-
+async function sendIndependentHeartbeat(source) {
   // Check if WhatsApp Web tab exists
   var tabs = await new Promise(function(resolve) {
     chrome.tabs.query({ url: 'https://web.whatsapp.com/*' }, function(t) { resolve(t || []); });
   });
 
-  await sendHeartbeat(tabs.length > 0);
-  console.log('[Vanto BG] Heartbeat sent (WhatsApp tabs:', tabs.length, ')');
+  var result = await sendHeartbeat({
+    whatsappReady: tabs.length > 0,
+    source: source || 'background',
+    tabCount: tabs.length,
+    contentScriptActive: false,
+  });
+
+  if (result && result.success) {
+    console.log('[Vanto BG] Heartbeat sent (source:', source || 'background', 'tabs:', tabs.length, ')');
+  } else {
+    console.log('[Vanto BG] Heartbeat skipped/failed (source:', source || 'background', 'reason:', result && result.error, ')');
+  }
 }
 
 // ── Notify WhatsApp tabs ────────────────────────────────────────────────────────
@@ -595,6 +632,26 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
 
   if (msg.type === 'VANTO_UPSERT_GROUP') {
     handleUpsertGroup(msg.groupName, msg.groupJid || null).then(sendResponse);
+    return true;
+  }
+
+  if (msg.type === 'VANTO_HEARTBEAT_PING') {
+    var senderUrl = sender && sender.tab && sender.tab.url ? sender.tab.url : '';
+    var isWhatsAppSender = senderUrl.indexOf('https://web.whatsapp.com/') === 0;
+
+    if (!isWhatsAppSender) {
+      sendResponse({ success: false, error: 'invalid_sender' });
+      return false;
+    }
+
+    sendHeartbeat({
+      whatsappReady: !!msg.whatsappReady,
+      source: msg.source || 'content_script',
+      tabCount: 1,
+      contentScriptActive: true,
+    }).then(function(result) {
+      sendResponse({ success: !!(result && result.success), error: result && result.error ? result.error : null });
+    });
     return true;
   }
 

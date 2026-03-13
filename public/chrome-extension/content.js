@@ -18,6 +18,8 @@ var sidebarVisible  = true;
 var detectionTimer  = null;
 var headerObserver  = null;
 var pollInterval    = null;
+var heartbeatTimer  = null;
+var heartbeatHooksBound = false;
 var lastDetectedKey = '';
 var currentTags     = [];
 var isAuthenticated = false;
@@ -47,6 +49,41 @@ function sendToBackground(message, callback) {
   } catch (e) {
     log('sendToBackground failed', e.message);
     if (callback) callback(null);
+  }
+}
+
+// ── Live heartbeat from WhatsApp tab ───────────────────────────────────────────
+function isWhatsAppDomReady() {
+  return !!(document.getElementById('app') && document.getElementById('main'));
+}
+
+function sendLiveHeartbeat(source) {
+  sendToBackground({
+    type: 'VANTO_HEARTBEAT_PING',
+    whatsappReady: isWhatsAppDomReady(),
+    source: source || 'content_script',
+  }, function(response) {
+    if (response && response.success) return;
+    log('Heartbeat ping failed', response && response.error ? response.error : 'no_response');
+  });
+}
+
+function startHeartbeatLoop() {
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+
+  sendLiveHeartbeat('content_init');
+  heartbeatTimer = setInterval(function() {
+    sendLiveHeartbeat('content_interval');
+  }, 30000);
+
+  if (!heartbeatHooksBound) {
+    heartbeatHooksBound = true;
+    document.addEventListener('visibilitychange', function() {
+      if (!document.hidden) sendLiveHeartbeat('content_visible');
+    });
+    window.addEventListener('focus', function() {
+      sendLiveHeartbeat('content_focus');
+    });
   }
 }
 
@@ -932,11 +969,12 @@ function injectSidebar() {
 
   // Check auth then trigger first detection
   checkAuthState(function() {
+    startHeartbeatLoop();
     if (isAuthenticated) loadTeamMembers();
     setTimeout(runDetection, 1200);
   });
 
-  log('Sidebar injected v5.0 (with Group Campaigns)');
+  log('Sidebar injected v5.1 (with live heartbeat)');
 }
 
 // ── Boot ───────────────────────────────────────────────────────────────────────
