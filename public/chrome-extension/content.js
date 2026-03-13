@@ -130,31 +130,49 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
   }
 });
 
-// ── Normalize group name for search and comparison ─────────────────────────────
+// ── Normalize group name for comparison (light clean, preserves meaningful symbols) ──
 function normalizeGroupName(name) {
   if (!name) return '';
   return name
     .toLowerCase()
     .replace(/[\u200B-\u200D\uFEFF]/g, '')   // zero-width chars
-    .replace(/[|•·—–\-_~]+/g, ' ')            // common separators → space
-    .replace(/[^\w\s]/g, '')                   // strip remaining symbols
     .replace(/\s+/g, ' ')                      // collapse whitespace
     .trim();
 }
 
-// Build a safe search query: take longest word-run to avoid WhatsApp search choking on symbols
-function buildSearchQuery(name) {
+// Heavy normalize: strips ALL symbols for fuzzy fallback only
+function heavyNormalize(name) {
   if (!name) return '';
-  // Remove symbols WhatsApp search can't handle, keep spaces
-  var cleaned = name
+  return name
+    .toLowerCase()
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .replace(/[|•·—–\-_~]+/g, ' ')
+    .replace(/[|•·—–\-_~&]+/g, ' ')
+    .replace(/[^\w\s]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  // If still reasonable length, use it; otherwise take first 3 words
-  var words = cleaned.split(' ').filter(function(w) { return w.length > 0; });
-  if (words.length <= 4) return cleaned;
-  return words.slice(0, 3).join(' ');
+}
+
+// Build search queries in priority order: raw first, then cleaned
+function buildSearchQueries(rawName) {
+  if (!rawName) return [];
+  var queries = [];
+  // Stage A: exact raw (trimmed)
+  var raw = rawName.replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\s+/g, ' ').trim();
+  if (raw) queries.push(raw);
+  // Stage B: first significant word (4+ chars) for broader search
+  var words = raw.split(/[\s|•·—–\-_~&]+/).filter(function(w) { return w.length >= 4; });
+  if (words.length > 0 && words[0] !== raw) queries.push(words[0]);
+  // Stage C: heavy cleaned
+  var heavy = heavyNormalize(rawName);
+  if (heavy && queries.indexOf(heavy) === -1) {
+    var heavyWords = heavy.split(' ').filter(function(w) { return w.length > 0; });
+    if (heavyWords.length <= 4) {
+      queries.push(heavy);
+    } else {
+      queries.push(heavyWords.slice(0, 3).join(' '));
+    }
+  }
+  return queries;
 }
 
 // ── Execute group post in WhatsApp DOM ─────────────────────────────────────────
