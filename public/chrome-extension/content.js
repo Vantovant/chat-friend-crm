@@ -179,225 +179,233 @@ function buildSearchQueries(rawName) {
 function executeGroupPostInDOM(groupName, messageContent, callback) {
   log('executeGroupPostInDOM started for group:', groupName);
 
-  var searchQuery = buildSearchQuery(groupName);
+  var searchQueries = buildSearchQueries(groupName);
   var normalizedTarget = normalizeGroupName(groupName);
-  log('Search query:', searchQuery, '| Normalized target:', normalizedTarget);
+  var heavyTarget = heavyNormalize(groupName);
+  log('Search queries:', JSON.stringify(searchQueries), '| Normalized:', normalizedTarget);
 
-  // Helper: try multiple selectors and return first match
   function findElement(selectors, label) {
     for (var i = 0; i < selectors.length; i++) {
       var el = document.querySelector(selectors[i]);
       if (el) return el;
     }
-    console.log('[Vanto CRM] DOM element missing: ' + label + ' — tried selectors:', selectors.join(', '));
     return null;
   }
 
-  // Match helper: compare normalized names, with exact then substring
+  // Match: exact light-normalized, then partial, then heavy fuzzy
   function matchGroupTitle(title) {
     var norm = normalizeGroupName(title);
     if (norm === normalizedTarget) return 'exact';
     if (norm.indexOf(normalizedTarget) !== -1 || normalizedTarget.indexOf(norm) !== -1) return 'partial';
+    // Heavy fuzzy: all significant words present
+    var targetWords = heavyTarget.split(' ').filter(function(w) { return w.length > 2; });
+    if (targetWords.length > 0) {
+      var heavyCandidate = heavyNormalize(title);
+      var allFound = true;
+      for (var w = 0; w < targetWords.length; w++) {
+        if (heavyCandidate.indexOf(targetWords[w]) === -1) { allFound = false; break; }
+      }
+      if (allFound) return 'fuzzy';
+    }
     return null;
   }
 
-  // Step A: Open search
-  var searchInput = findElement([
-    '[data-testid="chat-list-search-input"]',
-    'div[contenteditable="true"][data-tab="3"]',
-    'div[contenteditable="true"][role="textbox"][title="Search input textbox"]',
-  ], 'search-input');
-
-  if (!searchInput) {
-    var searchIcon = findElement([
-      '[data-testid="chat-list-search"]',
-      '[data-icon="search"]',
-      'button[aria-label="Search"]',
-      'header button span[data-icon="search"]',
-    ], 'search-icon');
-    if (searchIcon) {
-      (searchIcon.closest('button') || searchIcon).click();
-    } else {
-      log('DOM element missing: search-icon — cannot open search');
-      sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Search icon not found in DOM' });
-      callback({ success: false, error: 'Search icon not found in DOM — WhatsApp UI may not be fully loaded', stage: 'find_group' });
-      return;
+  // Gather visible search result titles
+  function gatherCandidates() {
+    var allSelectors = [
+      '[data-testid="cell-frame-container"] span[title]',
+      '[role="listitem"] span[title]',
+      '[data-testid="chat-list"] span[title]',
+      'div[aria-label="Search results"] span[title]',
+    ];
+    var seen = [];
+    var candidates = [];
+    for (var s = 0; s < allSelectors.length; s++) {
+      var nodes = document.querySelectorAll(allSelectors[s]);
+      for (var n = 0; n < nodes.length; n++) {
+        if (seen.indexOf(nodes[n]) === -1) {
+          seen.push(nodes[n]);
+          candidates.push(nodes[n]);
+        }
+      }
     }
+    return candidates;
   }
 
-  setTimeout(function() {
+  function findMatchInCandidates(candidates) {
+    // Pass 1: exact
+    for (var i = 0; i < candidates.length; i++) {
+      var title = candidates[i].getAttribute('title') || '';
+      if (matchGroupTitle(title) === 'exact') return { el: candidates[i], type: 'exact', title: title };
+    }
+    // Pass 2: partial
+    for (var j = 0; j < candidates.length; j++) {
+      var t = candidates[j].getAttribute('title') || '';
+      if (matchGroupTitle(t) === 'partial') return { el: candidates[j], type: 'partial', title: t };
+    }
+    // Pass 3: fuzzy
+    for (var k = 0; k < candidates.length; k++) {
+      var t2 = candidates[k].getAttribute('title') || '';
+      if (matchGroupTitle(t2) === 'fuzzy') return { el: candidates[k], type: 'fuzzy', title: t2 };
+    }
+    return null;
+  }
+
+  function clearSearch() {
+    var clearBtn = findElement([
+      '[data-testid="x-alt"]', '[data-icon="x-alt"]',
+      '[data-testid="search-close"]', 'button[aria-label="Cancel search"]',
+    ], 'search-clear');
+    if (clearBtn) (clearBtn.closest('button') || clearBtn).click();
+  }
+
+  function typeInSearch(query, cb) {
     var input = findElement([
       '[data-testid="chat-list-search-input"]',
       'div[contenteditable="true"][data-tab="3"]',
       'div[contenteditable="true"][role="textbox"][title="Search input textbox"]',
-    ], 'search-input-after-click');
-
-    if (!input) {
-      sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Search input not found after clicking search icon' });
-      callback({ success: false, error: 'Search input not found after clicking search icon', stage: 'find_group' });
-      return;
-    }
-
+    ], 'search-input');
+    if (!input) { cb(null); return; }
     input.focus();
     input.textContent = '';
     document.execCommand('selectAll', false, null);
-    document.execCommand('insertText', false, searchQuery);
-    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: searchQuery }));
-    log('Typed search query into input:', searchQuery);
+    document.execCommand('insertText', false, query);
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: query }));
+    log('Typed search query:', query);
+    cb(input);
+  }
+
+  // Wait for results with retry
+  function waitForResults(retries, delay, onDone) {
+    var attempt = 0;
+    function check() {
+      var candidates = gatherCandidates();
+      var match = findMatchInCandidates(candidates);
+      if (match) { onDone(match, candidates); return; }
+      attempt++;
+      if (attempt >= retries) { onDone(null, candidates); return; }
+      setTimeout(check, delay);
+    }
+    setTimeout(check, delay); // initial delay for results to render
+  }
+
+  // Step 1: Open search panel
+  var searchInput = findElement([
+    '[data-testid="chat-list-search-input"]',
+    'div[contenteditable="true"][data-tab="3"]',
+  ], 'search-input');
+
+  if (!searchInput) {
+    var searchIcon = findElement([
+      '[data-testid="chat-list-search"]', '[data-icon="search"]',
+      'button[aria-label="Search"]', 'header button span[data-icon="search"]',
+    ], 'search-icon');
+    if (searchIcon) {
+      (searchIcon.closest('button') || searchIcon).click();
+    } else {
+      callback({ success: false, error: 'Search icon not found in DOM', stage: 'find_group' });
+      return;
+    }
+  }
+
+  // Step 2: Try each search query in sequence
+  var queryIndex = 0;
+  var allTriedQueries = [];
+  var allCandidateTitles = [];
+
+  function tryNextQuery() {
+    if (queryIndex >= searchQueries.length) {
+      // All queries exhausted — build diagnostic
+      clearSearch();
+      var errorDetail = '[find_group] Group "' + groupName + '" not found after ' + searchQueries.length + ' search attempts. ' +
+        'Queries tried: ' + JSON.stringify(allTriedQueries) + '. ' +
+        'Normalized target: "' + normalizedTarget + '". ' +
+        'Heavy normalized: "' + heavyTarget + '". ' +
+        'Visible results: [' + allCandidateTitles.join(' | ') + ']';
+      log(errorDetail);
+      sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: errorDetail });
+      callback({ success: false, error: errorDetail, stage: 'find_group' });
+      return;
+    }
+
+    var query = searchQueries[queryIndex];
+    allTriedQueries.push(query);
+    queryIndex++;
 
     setTimeout(function() {
-      // Gather all visible chat titles from search results
-      var allSelectors = [
-        '[data-testid="cell-frame-container"] span[title]',
-        '[role="listitem"] span[title]',
-        '[data-testid="chat-list"] span[title]',
-        'div[aria-label="Search results"] span[title]',
-      ];
-
-      var allCandidates = [];
-      for (var s = 0; s < allSelectors.length; s++) {
-        var nodes = document.querySelectorAll(allSelectors[s]);
-        for (var n = 0; n < nodes.length; n++) {
-          allCandidates.push(nodes[n]);
-        }
-      }
-
-      // Deduplicate by element reference
-      var seen = [];
-      var candidates = [];
-      for (var d = 0; d < allCandidates.length; d++) {
-        if (seen.indexOf(allCandidates[d]) === -1) {
-          seen.push(allCandidates[d]);
-          candidates.push(allCandidates[d]);
-        }
-      }
-
-      log('Found ' + candidates.length + ' search result candidates');
-
-      var foundGroup = null;
-      var matchType = null;
-
-      // Pass 1: exact normalized match
-      for (var i = 0; i < candidates.length; i++) {
-        var title = candidates[i].getAttribute('title') || '';
-        var m = matchGroupTitle(title);
-        if (m === 'exact') {
-          foundGroup = candidates[i];
-          matchType = 'exact';
-          log('Exact match found:', title);
-          break;
-        }
-      }
-
-      // Pass 2: partial/substring normalized match
-      if (!foundGroup) {
-        for (var j = 0; j < candidates.length; j++) {
-          var t = candidates[j].getAttribute('title') || '';
-          var m2 = matchGroupTitle(t);
-          if (m2 === 'partial') {
-            foundGroup = candidates[j];
-            matchType = 'partial';
-            log('Partial match found:', t);
-            break;
-          }
-        }
-      }
-
-      // Pass 3: fuzzy — check if all significant words of target appear in candidate
-      if (!foundGroup && normalizedTarget.length > 2) {
-        var targetWords = normalizedTarget.split(' ').filter(function(w) { return w.length > 2; });
-        for (var k = 0; k < candidates.length; k++) {
-          var ct = normalizeGroupName(candidates[k].getAttribute('title') || '');
-          var allFound = true;
-          for (var w = 0; w < targetWords.length; w++) {
-            if (ct.indexOf(targetWords[w]) === -1) { allFound = false; break; }
-          }
-          if (allFound && targetWords.length > 0) {
-            foundGroup = candidates[k];
-            matchType = 'fuzzy';
-            log('Fuzzy match found:', candidates[k].getAttribute('title'));
-            break;
-          }
-        }
-      }
-
-      if (!foundGroup) {
-        var candidateTitles = [];
-        for (var c = 0; c < Math.min(candidates.length, 5); c++) {
-          candidateTitles.push(candidates[c].getAttribute('title') || '(no title)');
-        }
-        var errorDetail = 'Group "' + groupName + '" not found. Searched: "' + searchQuery + '". ' +
-          candidates.length + ' results visible: [' + candidateTitles.join(', ') + ']';
-        log(errorDetail);
-        var clearBtn = findElement([
-          '[data-testid="x-alt"]', '[data-icon="x-alt"]',
-          '[data-testid="search-close"]', 'button[aria-label="Cancel search"]',
-        ], 'search-clear');
-        if (clearBtn) (clearBtn.closest('button') || clearBtn).click();
-        sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: errorDetail });
-        callback({ success: false, error: errorDetail, stage: 'find_group' });
-        return;
-      }
-
-      var clickTarget = foundGroup.closest('[data-testid="cell-frame-container"]') || foundGroup.closest('[role="listitem"]') || foundGroup;
-      clickTarget.click();
-
-      setTimeout(function() {
-        var clearBtn2 = findElement([
-          '[data-testid="x-alt"]', '[data-icon="x-alt"]',
-          '[data-testid="search-close"]', 'button[aria-label="Cancel search"]',
-        ], 'search-clear-after-select');
-        if (clearBtn2) (clearBtn2.closest('button') || clearBtn2).click();
-
-        // Step C: Find message input
-        var msgInput = findElement([
-          '[data-testid="conversation-compose-box-input"]',
-          'div[contenteditable="true"][data-tab="10"]',
-          '#main footer div[contenteditable="true"]',
-          'div[contenteditable="true"][role="textbox"][title="Type a message"]',
-          '#main div[contenteditable="true"][role="textbox"]',
-        ], 'message-input');
-
-        if (!msgInput) {
-          sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Chat input box not found' });
-          callback({ success: false, error: 'Chat input box not found after opening group', stage: 'find_input' });
+      typeInSearch(query, function(input) {
+        if (!input) {
+          callback({ success: false, error: 'Search input not found', stage: 'find_group' });
           return;
         }
 
-        msgInput.focus();
-        msgInput.textContent = '';
-        document.execCommand('selectAll', false, null);
-        document.execCommand('insertText', false, messageContent);
-        msgInput.dispatchEvent(new InputEvent('input', {
-          bubbles: true,
-          inputType: 'insertText',
-          data: messageContent,
-        }));
-
-        setTimeout(function() {
-          var sendBtn = findElement([
-            '[data-testid="send"]',
-            'button[aria-label="Send"]',
-            'span[data-icon="send"]',
-            '[data-testid="compose-btn-send"]',
-            'footer button[aria-label="Send"]',
-          ], 'send-button');
-
-          if (!sendBtn) {
-            sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Send button not found' });
-            callback({ success: false, error: 'Send button not found after injecting message', stage: 'click_send' });
-            return;
+        // Wait with retries: 4 attempts x 800ms
+        waitForResults(4, 800, function(match, candidates) {
+          // Collect candidate titles for diagnostics
+          for (var c = 0; c < Math.min(candidates.length, 8); c++) {
+            var ct = candidates[c].getAttribute('title') || '(no title)';
+            if (allCandidateTitles.indexOf(ct) === -1) allCandidateTitles.push(ct);
           }
 
-          var btnToClick = sendBtn.closest('button') || sendBtn;
-          btnToClick.click();
+          if (match) {
+            log('Match found (' + match.type + ') with query "' + query + '":', match.title);
+            proceedWithMatch(match);
+          } else {
+            log('No match with query "' + query + '", ' + candidates.length + ' candidates. Trying next…');
+            clearSearch();
+            setTimeout(tryNextQuery, 300);
+          }
+        });
+      });
+    }, 400);
+  }
 
-          log('Message sent to group:', groupName);
-          callback({ success: true });
-        }, 500);
-      }, 1500);
+  function proceedWithMatch(match) {
+    var clickTarget = match.el.closest('[data-testid="cell-frame-container"]') || match.el.closest('[role="listitem"]') || match.el;
+    clickTarget.click();
+
+    setTimeout(function() {
+      clearSearch();
+
+      var msgInput = findElement([
+        '[data-testid="conversation-compose-box-input"]',
+        'div[contenteditable="true"][data-tab="10"]',
+        '#main footer div[contenteditable="true"]',
+        'div[contenteditable="true"][role="textbox"][title="Type a message"]',
+        '#main div[contenteditable="true"][role="textbox"]',
+      ], 'message-input');
+
+      if (!msgInput) {
+        callback({ success: false, error: 'Chat input box not found after opening group', stage: 'find_input' });
+        return;
+      }
+
+      msgInput.focus();
+      msgInput.textContent = '';
+      document.execCommand('selectAll', false, null);
+      document.execCommand('insertText', false, messageContent);
+      msgInput.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: messageContent }));
+
+      setTimeout(function() {
+        var sendBtn = findElement([
+          '[data-testid="send"]', 'button[aria-label="Send"]',
+          'span[data-icon="send"]', '[data-testid="compose-btn-send"]',
+        ], 'send-button');
+
+        if (!sendBtn) {
+          callback({ success: false, error: 'Send button not found', stage: 'click_send' });
+          return;
+        }
+
+        (sendBtn.closest('button') || sendBtn).click();
+        log('Message sent to group:', groupName);
+        callback({ success: true });
+      }, 500);
     }, 1500);
-  }, 500);
+  }
+
+  // Kick off
+  setTimeout(tryNextQuery, 500);
 }
 
 // ── Save contact via background ────────────────────────────────────────────────
