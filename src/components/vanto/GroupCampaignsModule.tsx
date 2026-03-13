@@ -487,7 +487,6 @@ export function GroupCampaignsModule() {
                                 </div>
                               </div>
                             </div>
-                            )}
                           )}
                         </div>
                       </TableCell>
