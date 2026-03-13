@@ -130,9 +130,40 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
   }
 });
 
+// ── Normalize group name for search and comparison ─────────────────────────────
+function normalizeGroupName(name) {
+  if (!name) return '';
+  return name
+    .toLowerCase()
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')   // zero-width chars
+    .replace(/[|•·—–\-_~]+/g, ' ')            // common separators → space
+    .replace(/[^\w\s]/g, '')                   // strip remaining symbols
+    .replace(/\s+/g, ' ')                      // collapse whitespace
+    .trim();
+}
+
+// Build a safe search query: take longest word-run to avoid WhatsApp search choking on symbols
+function buildSearchQuery(name) {
+  if (!name) return '';
+  // Remove symbols WhatsApp search can't handle, keep spaces
+  var cleaned = name
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/[|•·—–\-_~]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // If still reasonable length, use it; otherwise take first 3 words
+  var words = cleaned.split(' ').filter(function(w) { return w.length > 0; });
+  if (words.length <= 4) return cleaned;
+  return words.slice(0, 3).join(' ');
+}
+
 // ── Execute group post in WhatsApp DOM ─────────────────────────────────────────
 function executeGroupPostInDOM(groupName, messageContent, callback) {
   log('executeGroupPostInDOM started for group:', groupName);
+
+  var searchQuery = buildSearchQuery(groupName);
+  var normalizedTarget = normalizeGroupName(groupName);
+  log('Search query:', searchQuery, '| Normalized target:', normalizedTarget);
 
   // Helper: try multiple selectors and return first match
   function findElement(selectors, label) {
@@ -141,6 +172,14 @@ function executeGroupPostInDOM(groupName, messageContent, callback) {
       if (el) return el;
     }
     console.log('[Vanto CRM] DOM element missing: ' + label + ' — tried selectors:', selectors.join(', '));
+    return null;
+  }
+
+  // Match helper: compare normalized names, with exact then substring
+  function matchGroupTitle(title) {
+    var norm = normalizeGroupName(title);
+    if (norm === normalizedTarget) return 'exact';
+    if (norm.indexOf(normalizedTarget) !== -1 || normalizedTarget.indexOf(norm) !== -1) return 'partial';
     return null;
   }
 
@@ -163,7 +202,7 @@ function executeGroupPostInDOM(groupName, messageContent, callback) {
     } else {
       log('DOM element missing: search-icon — cannot open search');
       sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Search icon not found in DOM' });
-      callback({ success: false, error: 'Search icon not found in DOM', stage: 'find_group' });
+      callback({ success: false, error: 'Search icon not found in DOM — WhatsApp UI may not be fully loaded', stage: 'find_group' });
       return;
     }
   }
@@ -184,54 +223,101 @@ function executeGroupPostInDOM(groupName, messageContent, callback) {
     input.focus();
     input.textContent = '';
     document.execCommand('selectAll', false, null);
-    document.execCommand('insertText', false, groupName);
-    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: groupName }));
+    document.execCommand('insertText', false, searchQuery);
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: searchQuery }));
+    log('Typed search query into input:', searchQuery);
 
     setTimeout(function() {
-      var chatItems = document.querySelectorAll('[data-testid="cell-frame-container"] span[title]');
-      var foundGroup = null;
+      // Gather all visible chat titles from search results
+      var allSelectors = [
+        '[data-testid="cell-frame-container"] span[title]',
+        '[role="listitem"] span[title]',
+        '[data-testid="chat-list"] span[title]',
+        'div[aria-label="Search results"] span[title]',
+      ];
 
-      // Exact match first
-      for (var i = 0; i < chatItems.length; i++) {
-        var title = chatItems[i].getAttribute('title') || '';
-        if (title.toLowerCase() === groupName.toLowerCase()) {
-          foundGroup = chatItems[i];
+      var allCandidates = [];
+      for (var s = 0; s < allSelectors.length; s++) {
+        var nodes = document.querySelectorAll(allSelectors[s]);
+        for (var n = 0; n < nodes.length; n++) {
+          allCandidates.push(nodes[n]);
+        }
+      }
+
+      // Deduplicate by element reference
+      var seen = [];
+      var candidates = [];
+      for (var d = 0; d < allCandidates.length; d++) {
+        if (seen.indexOf(allCandidates[d]) === -1) {
+          seen.push(allCandidates[d]);
+          candidates.push(allCandidates[d]);
+        }
+      }
+
+      log('Found ' + candidates.length + ' search result candidates');
+
+      var foundGroup = null;
+      var matchType = null;
+
+      // Pass 1: exact normalized match
+      for (var i = 0; i < candidates.length; i++) {
+        var title = candidates[i].getAttribute('title') || '';
+        var m = matchGroupTitle(title);
+        if (m === 'exact') {
+          foundGroup = candidates[i];
+          matchType = 'exact';
+          log('Exact match found:', title);
           break;
         }
       }
 
-      // Partial match fallback
+      // Pass 2: partial/substring normalized match
       if (!foundGroup) {
-        for (var j = 0; j < chatItems.length; j++) {
-          var t = chatItems[j].getAttribute('title') || '';
-          if (t.toLowerCase().indexOf(groupName.toLowerCase()) !== -1) {
-            foundGroup = chatItems[j];
+        for (var j = 0; j < candidates.length; j++) {
+          var t = candidates[j].getAttribute('title') || '';
+          var m2 = matchGroupTitle(t);
+          if (m2 === 'partial') {
+            foundGroup = candidates[j];
+            matchType = 'partial';
+            log('Partial match found:', t);
             break;
           }
         }
       }
 
-      // Additional fallback: listitem role
-      if (!foundGroup) {
-        var listItems = document.querySelectorAll('[role="listitem"] span[title]');
-        for (var k = 0; k < listItems.length; k++) {
-          var lt = listItems[k].getAttribute('title') || '';
-          if (lt.toLowerCase().indexOf(groupName.toLowerCase()) !== -1) {
-            foundGroup = listItems[k];
+      // Pass 3: fuzzy — check if all significant words of target appear in candidate
+      if (!foundGroup && normalizedTarget.length > 2) {
+        var targetWords = normalizedTarget.split(' ').filter(function(w) { return w.length > 2; });
+        for (var k = 0; k < candidates.length; k++) {
+          var ct = normalizeGroupName(candidates[k].getAttribute('title') || '');
+          var allFound = true;
+          for (var w = 0; w < targetWords.length; w++) {
+            if (ct.indexOf(targetWords[w]) === -1) { allFound = false; break; }
+          }
+          if (allFound && targetWords.length > 0) {
+            foundGroup = candidates[k];
+            matchType = 'fuzzy';
+            log('Fuzzy match found:', candidates[k].getAttribute('title'));
             break;
           }
         }
       }
 
       if (!foundGroup) {
-        log('DOM element missing: group chat item for "' + groupName + '"');
+        var candidateTitles = [];
+        for (var c = 0; c < Math.min(candidates.length, 5); c++) {
+          candidateTitles.push(candidates[c].getAttribute('title') || '(no title)');
+        }
+        var errorDetail = 'Group "' + groupName + '" not found. Searched: "' + searchQuery + '". ' +
+          candidates.length + ' results visible: [' + candidateTitles.join(', ') + ']';
+        log(errorDetail);
         var clearBtn = findElement([
           '[data-testid="x-alt"]', '[data-icon="x-alt"]',
           '[data-testid="search-close"]', 'button[aria-label="Cancel search"]',
         ], 'search-clear');
         if (clearBtn) (clearBtn.closest('button') || clearBtn).click();
-        sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Group not found: ' + groupName });
-        callback({ success: false, error: 'Group not found in search results: ' + groupName, stage: 'find_group' });
+        sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: errorDetail });
+        callback({ success: false, error: errorDetail, stage: 'find_group' });
         return;
       }
 

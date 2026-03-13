@@ -475,25 +475,18 @@ export function GroupCampaignsModule() {
                         <div className="space-y-1">
                           {statusBadge(post.status)}
                           {post.status === 'failed' && post.failure_reason && (
-                            <TooltipProvider>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <div className="flex items-center gap-1 text-xs text-red-400 cursor-help">
-                                    <AlertTriangle size={10} />
-                                    <span className="truncate max-w-[120px]">{post.failure_reason}</span>
-                                  </div>
-                                </TooltipTrigger>
-                                <TooltipContent side="top" className="max-w-[300px]">
-                                  <p className="text-xs">
-                                    <strong>Failure reason:</strong> {post.failure_reason}
-                                    {post.attempt_count ? ` (${post.attempt_count} attempt${post.attempt_count > 1 ? 's' : ''})` : ''}
-                                    {post.last_attempt_at && (
-                                      <><br />Last attempt: {format(new Date(post.last_attempt_at), 'MMM d, HH:mm')}</>
-                                    )}
+                            <div className="mt-1 p-2 rounded bg-red-950/30 border border-red-900/40">
+                              <div className="flex items-start gap-1.5 text-xs text-red-400">
+                                <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                                <div className="space-y-0.5">
+                                  <p className="break-words whitespace-pre-wrap">{post.failure_reason}</p>
+                                  <p className="text-red-500/70">
+                                    {post.attempt_count ? `${post.attempt_count} attempt${post.attempt_count > 1 ? 's' : ''}` : ''}
+                                    {post.last_attempt_at && ` · Last: ${format(new Date(post.last_attempt_at), 'MMM d, HH:mm')}`}
                                   </p>
-                                </TooltipContent>
-                              </Tooltip>
-                            </TooltipProvider>
+                                </div>
+                              </div>
+                            </div>
                           )}
                         </div>
                       </TableCell>
