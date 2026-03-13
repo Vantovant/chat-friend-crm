@@ -430,9 +430,23 @@ function runDetection() {
   isGroupChat = detectIfGroupChat();
 
   if (isGroupChat && info.name && isAuthenticated) {
-    // Capture the group name to Supabase
-    log('Group detected — capturing:', info.name);
-    sendToBackground({ type: 'VANTO_UPSERT_GROUP', groupName: info.name }, function(resp) {
+    // Extract group JID if available
+    var groupJid = null;
+    var mainPanel = document.getElementById('main');
+    if (mainPanel) {
+      var dataId = mainPanel.getAttribute('data-id') || '';
+      if (dataId.indexOf('@g.us') !== -1) groupJid = dataId;
+    }
+    if (!groupJid) {
+      var els = document.querySelectorAll('#main [data-id]');
+      for (var gi = 0; gi < els.length; gi++) {
+        var gid = els[gi].getAttribute('data-id') || '';
+        if (gid.indexOf('@g.us') !== -1) { groupJid = gid; break; }
+      }
+    }
+
+    log('Group detected — capturing:', info.name, groupJid ? '(JID: ' + groupJid + ')' : '');
+    sendToBackground({ type: 'VANTO_UPSERT_GROUP', groupName: info.name, groupJid: groupJid }, function(resp) {
       if (resp && resp.success) {
         log('Group captured successfully:', info.name);
       } else {
