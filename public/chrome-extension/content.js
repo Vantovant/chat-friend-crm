@@ -219,7 +219,7 @@ function executeGroupPostInDOM(groupName, messageContent, callback) {
 
         if (!msgInput) {
           sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Chat input box not found' });
-          callback({ success: false, error: 'DOM element missing: chat input box not found' });
+          callback({ success: false, error: 'Chat input box not found after opening group', stage: 'find_input' });
           return;
         }
 
