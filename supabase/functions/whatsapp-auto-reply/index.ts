@@ -1,13 +1,6 @@
 /**
- * Vanto CRM — whatsapp-auto-reply Edge Function (Phase 7 + AI Q&A)
- * SAFE AUTO mode with:
- * - Rate limiting (max 1 per 10 min, max 3/day per contact)
- * - 24h window enforcement (template-only outside window)
- * - Menu routing to Knowledge Vault search
- * - Dynamic Q&A: non-menu messages searched in Knowledge Vault → AI-generated answer
- * - auto_reply_events logging
- * - Configurable mode via integration_settings (off / safe_auto / full_auto)
- * - Uses MessagingServiceSid as primary sender (same as send-message)
+ * Vanto CRM — whatsapp-auto-reply Edge Function
+ * Menu "Prompt Translation" + AI Knowledge Vault Q&A
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -37,7 +30,11 @@ Reply:
 
 const HUMAN_HANDOVER = `🙋 A team member has been notified and will respond shortly. Please hold tight!`;
 
-const FALLBACK_NO_KNOWLEDGE = `Thanks for your question! Let me connect you with a team member who can help with the details.\n\nReply 3 to speak to someone now.`;
+// ── Prompt Translation Map ──
+const MENU_QUERY_MAP: Record<string, string> = {
+  "1": "What are the prices, product information, and GO-Status pricing?",
+  "2": "How do I use the products and what are the health benefits?",
+};
 
 /** Call Lovable AI Gateway for knowledge-grounded answer */
 async function generateAIAnswer(question: string, chunks: { chunk_text: string; file_title: string }[]): Promise<string | null> {
@@ -49,8 +46,8 @@ async function generateAIAnswer(question: string, chunks: { chunk_text: string; 
 
   const contextSnippets = chunks.map((c, i) => `[Source ${i + 1}: ${c.file_title}]\n${c.chunk_text.slice(0, 600)}`).join("\n\n");
 
-  const systemPrompt = `You are Vanto CRM AI, a helpful assistant for Get Well Africa customers.
-Answer the user's question using ONLY the provided knowledge chunks below.
+  const systemPrompt = `You are a helpful Vanto CRM assistant for Get Well Africa customers.
+Answer the user's query using strictly the provided context chunks. Be warm and professional.
 If the answer is not in the chunks, say: "I don't have that information right now. Reply 3 to speak with a team member who can help."
 Keep answers concise, friendly, and under 300 words. Use WhatsApp-friendly formatting (bold with *text*, bullet points with •).
 
@@ -192,7 +189,7 @@ Deno.serve(async (req) => {
     return jsonRes({ ok: true, auto_reply: false, reason: "Active conversation, no trigger" });
   }
 
-  // ── Determine reply content ──
+  // ── Prompt Translation + Reply Logic ──
   const trimmedInput = (inbound_content || "").trim();
   let replyContent: string;
   let shouldAssignHuman = false;
@@ -201,68 +198,27 @@ Deno.serve(async (req) => {
   let knowledgeQuery = "";
   let knowledgeFound = false;
 
-  if (trimmedInput === "1") {
-    // Menu option 1: Product prices
-    knowledgeQuery = "product prices packages";
-    const { data: searchResults } = await svc.rpc("search_knowledge", {
-      query_text: knowledgeQuery,
-      collection_filter: "products",
-      max_results: 3,
-    });
-
-    if (searchResults && searchResults.length > 0) {
-      knowledgeFound = true;
-      const snippets = searchResults.map((r: any) =>
-        `📌 *${r.file_title}*\n${r.chunk_text.slice(0, 300)}`
-      ).join("\n\n");
-      replyContent = `💰 *Product Prices & Info*\n\n${snippets}\n\nReply 3 to speak to a person.`;
-      actionTaken = "knowledge_reply";
-    } else {
-      replyContent = FALLBACK_NO_KNOWLEDGE;
-      shouldAssignHuman = true;
-      actionTaken = "human_handover";
-    }
-  } else if (trimmedInput === "2") {
-    // Menu option 2: How to use
-    knowledgeQuery = "how to use benefits product";
-    const { data: searchResults } = await svc.rpc("search_knowledge", {
-      query_text: knowledgeQuery,
-      collection_filter: "products",
-      max_results: 3,
-    });
-
-    if (searchResults && searchResults.length > 0) {
-      knowledgeFound = true;
-      const snippets = searchResults.map((r: any) =>
-        `📌 *${r.file_title}*\n${r.chunk_text.slice(0, 300)}`
-      ).join("\n\n");
-      replyContent = `📋 *How to Use / Benefits*\n\n${snippets}\n\nReply 3 to speak to a person.`;
-      actionTaken = "knowledge_reply";
-    } else {
-      replyContent = FALLBACK_NO_KNOWLEDGE;
-      shouldAssignHuman = true;
-      actionTaken = "human_handover";
-    }
-  } else if (trimmedInput === "3") {
-    // Menu option 3: Human handover
+  if (trimmedInput === "3") {
+    // ── Menu 3: Human handover (bypass AI entirely) ──
     replyContent = HUMAN_HANDOVER;
     shouldAssignHuman = true;
     actionTaken = "human_handover";
-  } else if (trimmedInput.length > 2) {
-    // ── Dynamic Q&A: search knowledge vault with the user's message ──
-    knowledgeQuery = trimmedInput;
-    menuOption = "freeform_qa";
+    menuOption = "3";
+  } else if (MENU_QUERY_MAP[trimmedInput]) {
+    // ── Menu 1 or 2: Translate to semantic query → AI pipeline ──
+    knowledgeQuery = MENU_QUERY_MAP[trimmedInput];
+    menuOption = trimmedInput;
 
+    const collectionHint = trimmedInput === "1" ? "products" : "products";
     const { data: searchResults } = await svc.rpc("search_knowledge", {
       query_text: knowledgeQuery,
+      collection_filter: collectionHint,
       max_results: 3,
     });
 
     if (searchResults && searchResults.length > 0) {
       knowledgeFound = true;
-
-      // Pass chunks to AI for a grounded answer
-      const aiAnswer = await generateAIAnswer(trimmedInput, searchResults);
+      const aiAnswer = await generateAIAnswer(knowledgeQuery, searchResults);
 
       if (aiAnswer) {
         replyContent = aiAnswer + "\n\nReply 3 to speak to a person.";
@@ -276,17 +232,46 @@ Deno.serve(async (req) => {
         actionTaken = "knowledge_reply";
       }
     } else {
-      // No knowledge found, show menu
+      replyContent = `I couldn't find specific information about that right now. A team member can help!\n\nReply 3 to speak to a person.`;
+      shouldAssignHuman = false;
+      actionTaken = "knowledge_reply";
+      knowledgeFound = false;
+    }
+  } else if (trimmedInput.length > 2) {
+    // ── Freeform Q&A: use original text as search query ──
+    knowledgeQuery = trimmedInput;
+    menuOption = "freeform_qa";
+
+    const { data: searchResults } = await svc.rpc("search_knowledge", {
+      query_text: knowledgeQuery,
+      max_results: 3,
+    });
+
+    if (searchResults && searchResults.length > 0) {
+      knowledgeFound = true;
+      const aiAnswer = await generateAIAnswer(trimmedInput, searchResults);
+
+      if (aiAnswer) {
+        replyContent = aiAnswer + "\n\nReply 3 to speak to a person.";
+        actionTaken = "ai_knowledge_reply";
+      } else {
+        const snippets = searchResults.map((r: any) =>
+          `📌 *${r.file_title}*\n${r.chunk_text.slice(0, 300)}`
+        ).join("\n\n");
+        replyContent = `Here's what I found:\n\n${snippets}\n\nReply 3 to speak to a person.`;
+        actionTaken = "knowledge_reply";
+      }
+    } else {
       replyContent = `I couldn't find specific information about that. Here are some options:\n\n${MENU_MESSAGE}`;
       actionTaken = "menu_sent";
     }
   } else {
-    // Short/empty input → show menu
+    // ── Short/empty input → show menu ──
     replyContent = MENU_MESSAGE;
     actionTaken = "menu_sent";
   }
 
-  // ── Dispatch via unified send-message pipeline ──
+  // ── Dispatch via send-message ──
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
   const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
   const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -297,7 +282,7 @@ Deno.serve(async (req) => {
   }
 
   const sendMessageUrl = `${SUPABASE_URL}/functions/v1/send-message`;
-  console.log("[auto-reply] Dispatching via send-message", { conversation_id, actionTaken, menuOption });
+  console.log("[auto-reply] Dispatching via send-message", { conversation_id, actionTaken, menuOption, knowledgeQuery: knowledgeQuery.slice(0, 60) });
 
   try {
     const sendRes = await fetch(sendMessageUrl, {
@@ -330,13 +315,7 @@ Deno.serve(async (req) => {
         knowledge_found: knowledgeFound,
       });
 
-      return jsonRes({
-        ok: false,
-        auto_reply: false,
-        code,
-        message: reason,
-        hint: sendData?.hint || null,
-      }, sendRes.status >= 400 ? sendRes.status : 502);
+      return jsonRes({ ok: false, auto_reply: false, code, message: reason, hint: sendData?.hint || null }, sendRes.status >= 400 ? sendRes.status : 502);
     }
 
     const sentMessage = sendData?.message || null;
@@ -369,11 +348,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    console.log("[auto-reply] ✓ Dispatched via send-message", {
-      message_id: sentMessage?.id,
-      twilio_sid: sentMessage?.provider_message_id || null,
-      status: sentMessage?.status || "queued",
-    });
+    console.log("[auto-reply] ✓ Dispatched", { message_id: sentMessage?.id, action: actionTaken, knowledge_found: knowledgeFound });
 
     return jsonRes({
       ok: true,
