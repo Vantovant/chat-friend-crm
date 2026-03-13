@@ -89,50 +89,66 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
 
 // ── Execute group post in WhatsApp DOM ─────────────────────────────────────────
 function executeGroupPostInDOM(groupName, messageContent, callback) {
-  // Step A: Find and click the group in the chat list
-  var searchBox = document.querySelector('[data-testid="chat-list-search"]') ||
-                  document.querySelector('[contenteditable="true"][data-tab="3"]') ||
-                  document.querySelector('div[title="Search input textbox"]');
+  log('executeGroupPostInDOM started for group:', groupName);
 
-  // Use the search to find the group
-  var searchInput = document.querySelector('[data-testid="chat-list-search-input"]') ||
-                    document.querySelector('div[contenteditable="true"][data-tab="3"]');
+  // Helper: try multiple selectors and return first match
+  function findElement(selectors, label) {
+    for (var i = 0; i < selectors.length; i++) {
+      var el = document.querySelector(selectors[i]);
+      if (el) return el;
+    }
+    console.log('[Vanto CRM] DOM element missing: ' + label + ' — tried selectors:', selectors.join(', '));
+    return null;
+  }
+
+  // Step A: Open search
+  var searchInput = findElement([
+    '[data-testid="chat-list-search-input"]',
+    'div[contenteditable="true"][data-tab="3"]',
+    'div[contenteditable="true"][role="textbox"][title="Search input textbox"]',
+  ], 'search-input');
 
   if (!searchInput) {
-    // Try clicking the search icon first
-    var searchIcon = document.querySelector('[data-testid="chat-list-search"]') ||
-                     document.querySelector('[data-icon="search"]');
+    var searchIcon = findElement([
+      '[data-testid="chat-list-search"]',
+      '[data-icon="search"]',
+      'button[aria-label="Search"]',
+      'header button span[data-icon="search"]',
+    ], 'search-icon');
     if (searchIcon) {
-      searchIcon.click();
+      (searchIcon.closest('button') || searchIcon).click();
+    } else {
+      log('DOM element missing: search-icon — cannot open search');
+      sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Search icon not found in DOM' });
+      callback({ success: false, error: 'DOM element missing: search icon not found' });
+      return;
     }
   }
 
-  // Wait a moment for search to open, then type the group name
   setTimeout(function() {
-    var input = document.querySelector('[data-testid="chat-list-search-input"]') ||
-                document.querySelector('div[contenteditable="true"][data-tab="3"]');
+    var input = findElement([
+      '[data-testid="chat-list-search-input"]',
+      'div[contenteditable="true"][data-tab="3"]',
+      'div[contenteditable="true"][role="textbox"][title="Search input textbox"]',
+    ], 'search-input-after-click');
 
     if (!input) {
-      log('Search input not found');
-      callback({ success: false, error: 'Search input not found' });
+      sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Search input not found after clicking search icon' });
+      callback({ success: false, error: 'DOM element missing: search input not found' });
       return;
     }
 
-    // Clear and type group name
     input.focus();
     input.textContent = '';
     document.execCommand('selectAll', false, null);
     document.execCommand('insertText', false, groupName);
-
-    // Dispatch input event
     input.dispatchEvent(new InputEvent('input', { bubbles: true, data: groupName }));
 
-    // Wait for search results to appear
     setTimeout(function() {
-      // Find the matching group in results
       var chatItems = document.querySelectorAll('[data-testid="cell-frame-container"] span[title]');
       var foundGroup = null;
 
+      // Exact match first
       for (var i = 0; i < chatItems.length; i++) {
         var title = chatItems[i].getAttribute('title') || '';
         if (title.toLowerCase() === groupName.toLowerCase()) {
@@ -141,7 +157,7 @@ function executeGroupPostInDOM(groupName, messageContent, callback) {
         }
       }
 
-      // Fallback: partial match
+      // Partial match fallback
       if (!foundGroup) {
         for (var j = 0; j < chatItems.length; j++) {
           var t = chatItems[j].getAttribute('title') || '';
@@ -152,64 +168,80 @@ function executeGroupPostInDOM(groupName, messageContent, callback) {
         }
       }
 
+      // Additional fallback: listitem role
       if (!foundGroup) {
-        log('Group not found in chat list:', groupName);
-        // Clear search
-        var clearBtn = document.querySelector('[data-testid="x-alt"]') || document.querySelector('[data-icon="x-alt"]');
-        if (clearBtn) clearBtn.click();
+        var listItems = document.querySelectorAll('[role="listitem"] span[title]');
+        for (var k = 0; k < listItems.length; k++) {
+          var lt = listItems[k].getAttribute('title') || '';
+          if (lt.toLowerCase().indexOf(groupName.toLowerCase()) !== -1) {
+            foundGroup = listItems[k];
+            break;
+          }
+        }
+      }
+
+      if (!foundGroup) {
+        log('DOM element missing: group chat item for "' + groupName + '"');
+        var clearBtn = findElement([
+          '[data-testid="x-alt"]', '[data-icon="x-alt"]',
+          '[data-testid="search-close"]', 'button[aria-label="Cancel search"]',
+        ], 'search-clear');
+        if (clearBtn) (clearBtn.closest('button') || clearBtn).click();
+        sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Group not found: ' + groupName });
         callback({ success: false, error: 'Group not found: ' + groupName });
         return;
       }
 
-      // Click the group
-      var clickTarget = foundGroup.closest('[data-testid="cell-frame-container"]') || foundGroup;
+      var clickTarget = foundGroup.closest('[data-testid="cell-frame-container"]') || foundGroup.closest('[role="listitem"]') || foundGroup;
       clickTarget.click();
 
-      // Wait for group chat to open
       setTimeout(function() {
-        // Clear search
-        var clearBtn2 = document.querySelector('[data-testid="x-alt"]') || document.querySelector('[data-icon="x-alt"]');
-        if (clearBtn2) clearBtn2.click();
+        var clearBtn2 = findElement([
+          '[data-testid="x-alt"]', '[data-icon="x-alt"]',
+          '[data-testid="search-close"]', 'button[aria-label="Cancel search"]',
+        ], 'search-clear-after-select');
+        if (clearBtn2) (clearBtn2.closest('button') || clearBtn2).click();
 
-        // Step C: Find the message input box
-        var msgInput = document.querySelector('[data-testid="conversation-compose-box-input"]') ||
-                       document.querySelector('div[contenteditable="true"][data-tab="10"]') ||
-                       document.querySelector('#main footer div[contenteditable="true"]');
+        // Step C: Find message input
+        var msgInput = findElement([
+          '[data-testid="conversation-compose-box-input"]',
+          'div[contenteditable="true"][data-tab="10"]',
+          '#main footer div[contenteditable="true"]',
+          'div[contenteditable="true"][role="textbox"][title="Type a message"]',
+          '#main div[contenteditable="true"][role="textbox"]',
+        ], 'message-input');
 
         if (!msgInput) {
-          log('Message input not found');
-          callback({ success: false, error: 'Message input not found' });
+          sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Chat input box not found' });
+          callback({ success: false, error: 'DOM element missing: chat input box not found' });
           return;
         }
 
-        // Step D: Inject message content
         msgInput.focus();
         msgInput.textContent = '';
-
-        // Use execCommand to insert text (WhatsApp registers this)
         document.execCommand('selectAll', false, null);
         document.execCommand('insertText', false, messageContent);
-
-        // Also dispatch input event for good measure
         msgInput.dispatchEvent(new InputEvent('input', {
           bubbles: true,
           inputType: 'insertText',
           data: messageContent,
         }));
 
-        // Step E: Wait briefly then click Send button
         setTimeout(function() {
-          var sendBtn = document.querySelector('[data-testid="send"]') ||
-                        document.querySelector('button[aria-label="Send"]') ||
-                        document.querySelector('span[data-icon="send"]');
+          var sendBtn = findElement([
+            '[data-testid="send"]',
+            'button[aria-label="Send"]',
+            'span[data-icon="send"]',
+            '[data-testid="compose-btn-send"]',
+            'footer button[aria-label="Send"]',
+          ], 'send-button');
 
           if (!sendBtn) {
-            log('Send button not found');
-            callback({ success: false, error: 'Send button not found' });
+            sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Send button not found' });
+            callback({ success: false, error: 'DOM element missing: Send button not found' });
             return;
           }
 
-          // Click send (might need to click parent button if it's a span)
           var btnToClick = sendBtn.closest('button') || sendBtn;
           btnToClick.click();
 
