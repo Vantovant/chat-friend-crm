@@ -126,7 +126,7 @@ function executeGroupPostInDOM(groupName, messageContent, callback) {
     } else {
       log('DOM element missing: search-icon — cannot open search');
       sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Search icon not found in DOM' });
-      callback({ success: false, error: 'DOM element missing: search icon not found' });
+      callback({ success: false, error: 'Search icon not found in DOM', stage: 'find_group' });
       return;
     }
   }
