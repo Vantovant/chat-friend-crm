@@ -194,7 +194,7 @@ function executeGroupPostInDOM(groupName, messageContent, callback) {
         ], 'search-clear');
         if (clearBtn) (clearBtn.closest('button') || clearBtn).click();
         sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Group not found: ' + groupName });
-        callback({ success: false, error: 'Group not found: ' + groupName });
+        callback({ success: false, error: 'Group not found in search results: ' + groupName, stage: 'find_group' });
         return;
       }
 
