@@ -80,6 +80,12 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
   // ── Auto-poster execution engine ──────────────────────────────────────────
   if (msg.type === 'VANTO_EXECUTE_GROUP_POST') {
     log('Executing group post:', msg.groupName);
+    // Check if WhatsApp main pane is ready
+    var mainApp = document.getElementById('app') || document.getElementById('main');
+    if (!mainApp) {
+      sendResponse({ success: false, error: 'WhatsApp Web not fully loaded', stage: 'poll' });
+      return true;
+    }
     executeGroupPostInDOM(msg.groupName, msg.messageContent, function(result) {
       sendResponse(result);
     });
