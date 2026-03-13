@@ -488,38 +488,60 @@ async function updatePostStatus(postId, status, token, failureReason, failureSta
 }
 
 // ── Chrome Alarms: poll every 1 minute, heartbeat every 1 minute ───────────────
-chrome.alarms.create('vanto-group-poll', { periodInMinutes: 1 });
-chrome.alarms.create('vanto-heartbeat', { periodInMinutes: 1 });
+function ensureBackgroundAlarms() {
+  chrome.alarms.create('vanto-group-poll', { periodInMinutes: 1 });
+  chrome.alarms.create('vanto-heartbeat', { periodInMinutes: 1 });
+}
+
+ensureBackgroundAlarms();
+
+chrome.runtime.onInstalled.addListener(function() {
+  ensureBackgroundAlarms();
+  sendIndependentHeartbeat('on_installed');
+});
+
+chrome.runtime.onStartup.addListener(function() {
+  ensureBackgroundAlarms();
+  sendIndependentHeartbeat('on_startup');
+});
+
+chrome.tabs.onUpdated.addListener(function(tabId, changeInfo, tab) {
+  if (changeInfo.status !== 'complete') return;
+  if (!tab || !tab.url || tab.url.indexOf('https://web.whatsapp.com/') !== 0) return;
+  sendIndependentHeartbeat('tab_updated');
+});
 
 // Send initial heartbeat on startup
-sendIndependentHeartbeat();
+sendIndependentHeartbeat('service_worker_boot');
 
 chrome.alarms.onAlarm.addListener(function(alarm) {
   if (alarm.name === 'vanto-group-poll') {
     pollDuePosts();
   }
   if (alarm.name === 'vanto-heartbeat') {
-    sendIndependentHeartbeat();
+    sendIndependentHeartbeat('alarm');
   }
 });
 
 // ── Independent heartbeat (decoupled from polling) ─────────────────────────────
-async function sendIndependentHeartbeat() {
-  var session = await getSession();
-  session = await refreshTokenIfNeeded(session);
-
-  if (!session.token) {
-    console.log('[Vanto BG] Heartbeat skipped — not authenticated');
-    return;
-  }
-
+async function sendIndependentHeartbeat(source) {
   // Check if WhatsApp Web tab exists
   var tabs = await new Promise(function(resolve) {
     chrome.tabs.query({ url: 'https://web.whatsapp.com/*' }, function(t) { resolve(t || []); });
   });
 
-  await sendHeartbeat(tabs.length > 0);
-  console.log('[Vanto BG] Heartbeat sent (WhatsApp tabs:', tabs.length, ')');
+  var result = await sendHeartbeat({
+    whatsappReady: tabs.length > 0,
+    source: source || 'background',
+    tabCount: tabs.length,
+    contentScriptActive: false,
+  });
+
+  if (result && result.success) {
+    console.log('[Vanto BG] Heartbeat sent (source:', source || 'background', 'tabs:', tabs.length, ')');
+  } else {
+    console.log('[Vanto BG] Heartbeat skipped/failed (source:', source || 'background', 'reason:', result && result.error, ')');
+  }
 }
 
 // ── Notify WhatsApp tabs ────────────────────────────────────────────────────────
