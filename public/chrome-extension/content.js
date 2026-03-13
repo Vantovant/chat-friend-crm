@@ -80,6 +80,12 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
   // ── Auto-poster execution engine ──────────────────────────────────────────
   if (msg.type === 'VANTO_EXECUTE_GROUP_POST') {
     log('Executing group post:', msg.groupName);
+    // Check if WhatsApp main pane is ready
+    var mainApp = document.getElementById('app') || document.getElementById('main');
+    if (!mainApp) {
+      sendResponse({ success: false, error: 'WhatsApp Web not fully loaded', stage: 'poll' });
+      return true;
+    }
     executeGroupPostInDOM(msg.groupName, msg.messageContent, function(result) {
       sendResponse(result);
     });
@@ -120,7 +126,7 @@ function executeGroupPostInDOM(groupName, messageContent, callback) {
     } else {
       log('DOM element missing: search-icon — cannot open search');
       sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Search icon not found in DOM' });
-      callback({ success: false, error: 'DOM element missing: search icon not found' });
+      callback({ success: false, error: 'Search icon not found in DOM', stage: 'find_group' });
       return;
     }
   }
@@ -134,7 +140,7 @@ function executeGroupPostInDOM(groupName, messageContent, callback) {
 
     if (!input) {
       sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Search input not found after clicking search icon' });
-      callback({ success: false, error: 'DOM element missing: search input not found' });
+      callback({ success: false, error: 'Search input not found after clicking search icon', stage: 'find_group' });
       return;
     }
 
@@ -188,7 +194,7 @@ function executeGroupPostInDOM(groupName, messageContent, callback) {
         ], 'search-clear');
         if (clearBtn) (clearBtn.closest('button') || clearBtn).click();
         sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Group not found: ' + groupName });
-        callback({ success: false, error: 'Group not found: ' + groupName });
+        callback({ success: false, error: 'Group not found in search results: ' + groupName, stage: 'find_group' });
         return;
       }
 
@@ -213,7 +219,7 @@ function executeGroupPostInDOM(groupName, messageContent, callback) {
 
         if (!msgInput) {
           sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Chat input box not found' });
-          callback({ success: false, error: 'DOM element missing: chat input box not found' });
+          callback({ success: false, error: 'Chat input box not found after opening group', stage: 'find_input' });
           return;
         }
 
@@ -238,7 +244,7 @@ function executeGroupPostInDOM(groupName, messageContent, callback) {
 
           if (!sendBtn) {
             sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Send button not found' });
-            callback({ success: false, error: 'DOM element missing: Send button not found' });
+            callback({ success: false, error: 'Send button not found after injecting message', stage: 'click_send' });
             return;
           }
 
@@ -424,9 +430,23 @@ function runDetection() {
   isGroupChat = detectIfGroupChat();
 
   if (isGroupChat && info.name && isAuthenticated) {
-    // Capture the group name to Supabase
-    log('Group detected — capturing:', info.name);
-    sendToBackground({ type: 'VANTO_UPSERT_GROUP', groupName: info.name }, function(resp) {
+    // Extract group JID if available
+    var groupJid = null;
+    var mainPanel = document.getElementById('main');
+    if (mainPanel) {
+      var dataId = mainPanel.getAttribute('data-id') || '';
+      if (dataId.indexOf('@g.us') !== -1) groupJid = dataId;
+    }
+    if (!groupJid) {
+      var els = document.querySelectorAll('#main [data-id]');
+      for (var gi = 0; gi < els.length; gi++) {
+        var gid = els[gi].getAttribute('data-id') || '';
+        if (gid.indexOf('@g.us') !== -1) { groupJid = gid; break; }
+      }
+    }
+
+    log('Group detected — capturing:', info.name, groupJid ? '(JID: ' + groupJid + ')' : '');
+    sendToBackground({ type: 'VANTO_UPSERT_GROUP', groupName: info.name, groupJid: groupJid }, function(resp) {
       if (resp && resp.success) {
         log('Group captured successfully:', info.name);
       } else {

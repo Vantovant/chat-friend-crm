@@ -1,6 +1,6 @@
 /**
- * Vanto CRM — whatsapp-auto-reply Edge Function
- * Menu "Prompt Translation" + AI Knowledge Vault Q&A
+ * Vanto CRM — whatsapp-auto-reply Edge Function v3.0
+ * Intent-Driven Auto-Reply with Knowledge Vault RAG + Prompt Translation
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -17,6 +17,7 @@ function jsonRes(body: unknown, status = 200) {
   });
 }
 
+// ── Constants ──────────────────────────────────────────────────────────────────
 const SILENCE_THRESHOLD_MS = 4 * 60 * 60 * 1000;
 const RATE_LIMIT_INTERVAL_MS = 10 * 60 * 1000;
 const MAX_AUTO_REPLIES_PER_DAY = 3;
@@ -28,28 +29,103 @@ Reply:
 2️⃣ How to use / Benefits
 3️⃣ Speak to a person`;
 
-const HUMAN_HANDOVER = `🙋 A team member has been notified and will respond shortly. Please hold tight!`;
+const HUMAN_HANDOVER = `Thank you. A team member will assist you shortly.`;
 
-// ── Prompt Translation Map ──
-const MENU_QUERY_MAP: Record<string, string> = {
-  "1": "What are the prices, product information, and GO-Status pricing?",
-  "2": "How do I use the products and what are the health benefits?",
+const NO_ANSWER_FALLBACK = `I want to make sure I give you the right answer. Let me connect you with a team member.`;
+
+// ── Prompt Translation Map ──────────────────────────────────────────────────────
+const MENU_QUERY_MAP: Record<string, { query: string; collections: string[] }> = {
+  "1": {
+    query: "prices product information membership joining cost aplgo products GO-Status pricing",
+    collections: ["products", "opportunity"],
+  },
+  "2": {
+    query: "how to use benefits product usage wellness health benefits dosage drops",
+    collections: ["products", "general"],
+  },
 };
 
-/** Call Lovable AI Gateway for knowledge-grounded answer */
-async function generateAIAnswer(question: string, chunks: { chunk_text: string; file_title: string }[]): Promise<string | null> {
+// ── Intent Detection ────────────────────────────────────────────────────────────
+const BUSINESS_INTENT_KEYWORDS = [
+  "distributor", "join", "membership", "register", "business", "opportunity",
+  "sign up", "signup", "enroll", "become a", "how do i start", "start selling",
+];
+
+const PRODUCT_INTENT_KEYWORDS = [
+  "price", "prices", "how much", "cost", "benefits", "use", "dosage", "drops",
+  "product", "ingredients", "what is", "supplement",
+];
+
+const GREETING_PATTERNS = [
+  "hi", "hello", "hey", "good day", "good morning", "good afternoon",
+  "good evening", "sawubona", "howzit", "heita", "molo",
+];
+
+// ── Strict collections (no paraphrasing beyond chunks) ──────────────────────────
+const STRICT_COLLECTIONS = new Set(["products", "compensation", "orders"]);
+
+type IntentResult = {
+  intent: "menu_1" | "menu_2" | "menu_3" | "business" | "product" | "greeting" | "freeform";
+  query: string;
+  collections: string[];
+  mode: "strict" | "assisted";
+};
+
+function detectIntent(normalized: string): IntentResult {
+  // Exact menu numbers
+  if (normalized === "1") return { intent: "menu_1", ...MENU_QUERY_MAP["1"], mode: "strict" };
+  if (normalized === "2") return { intent: "menu_2", ...MENU_QUERY_MAP["2"], mode: "strict" };
+  if (normalized === "3") return { intent: "menu_3", query: "", collections: [], mode: "assisted" };
+
+  // Business intent
+  for (const kw of BUSINESS_INTENT_KEYWORDS) {
+    if (normalized.includes(kw)) {
+      return { intent: "business", query: normalized, collections: ["opportunity", "general"], mode: "assisted" };
+    }
+  }
+
+  // Product intent
+  for (const kw of PRODUCT_INTENT_KEYWORDS) {
+    if (normalized.includes(kw)) {
+      return { intent: "product", query: normalized, collections: ["products"], mode: "strict" };
+    }
+  }
+
+  // Greeting
+  for (const g of GREETING_PATTERNS) {
+    if (normalized === g || normalized.startsWith(g + " ")) {
+      return { intent: "greeting", query: "", collections: [], mode: "assisted" };
+    }
+  }
+
+  // Freeform
+  return { intent: "freeform", query: normalized, collections: [], mode: "assisted" };
+}
+
+// ── AI Answer Generation ────────────────────────────────────────────────────────
+async function generateAIAnswer(
+  question: string,
+  chunks: { chunk_text: string; file_title: string; file_collection: string }[],
+  mode: "strict" | "assisted",
+): Promise<string | null> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) {
-    console.error("[auto-reply] LOVABLE_API_KEY not set, skipping AI answer");
+    console.error("[auto-reply] LOVABLE_API_KEY not set");
     return null;
   }
 
-  const contextSnippets = chunks.map((c, i) => `[Source ${i + 1}: ${c.file_title}]\n${c.chunk_text.slice(0, 600)}`).join("\n\n");
+  const contextSnippets = chunks
+    .map((c, i) => `[Source ${i + 1}: ${c.file_title} (${c.file_collection})]\n${c.chunk_text.slice(0, 800)}`)
+    .join("\n\n");
+
+  const strictInstruction = mode === "strict"
+    ? "Answer ONLY from the provided chunks. Do NOT invent prices, benefits, compensation details, or any facts not explicitly stated in the chunks."
+    : "You may paraphrase and combine information from the chunks naturally.";
 
   const systemPrompt = `You are a helpful Vanto CRM assistant for Get Well Africa customers.
-Answer the user's query using strictly the provided context chunks. Be warm and professional.
-If the answer is not in the chunks, say: "I don't have that information right now. Reply 3 to speak with a team member who can help."
-Keep answers concise, friendly, and under 300 words. Use WhatsApp-friendly formatting (bold with *text*, bullet points with •).
+${strictInstruction}
+If the answer is not in the chunks, say: "I want to make sure I give you the right answer. Let me connect you with a team member."
+Be warm, professional, concise (under 250 words). Use WhatsApp-friendly formatting (*bold*, • bullets).
 
 KNOWLEDGE CONTEXT:
 ${contextSnippets}`;
@@ -84,6 +160,32 @@ ${contextSnippets}`;
   }
 }
 
+// ── Search Knowledge with collection priority ─────────────────────────────────
+async function searchKnowledge(
+  svc: any,
+  query: string,
+  collections: string[],
+  maxResults = 5,
+): Promise<{ chunk_text: string; file_title: string; file_collection: string; relevance: number }[]> {
+  // Try priority collections first
+  for (const col of collections) {
+    const { data } = await svc.rpc("search_knowledge", {
+      query_text: query,
+      collection_filter: col,
+      max_results: maxResults,
+    });
+    if (data && data.length > 0) return data;
+  }
+
+  // Fallback: search all collections
+  const { data } = await svc.rpc("search_knowledge", {
+    query_text: query,
+    max_results: maxResults,
+  });
+  return data || [];
+}
+
+// ── Main Handler ────────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -158,7 +260,7 @@ Deno.serve(async (req) => {
     .from("auto_reply_events")
     .select("id", { count: "exact", head: true })
     .eq("conversation_id", conversation_id)
-    .in("action_taken", ["menu_sent", "knowledge_reply", "ai_knowledge_reply", "template_sent"])
+    .in("action_taken", ["menu_sent", "knowledge_strict", "knowledge_assisted", "ai_knowledge_reply", "knowledge_reply", "template_sent", "human_handover"])
     .gte("created_at", todayStart.toISOString());
 
   if ((dailyCount || 0) >= MAX_AUTO_REPLIES_PER_DAY) {
@@ -189,86 +291,79 @@ Deno.serve(async (req) => {
     return jsonRes({ ok: true, auto_reply: false, reason: "Active conversation, no trigger" });
   }
 
-  // ── Prompt Translation + Reply Logic ──
-  const trimmedInput = (inbound_content || "").trim();
+  // ── Normalize inbound text ──
+  const rawInput = (inbound_content || "").trim();
+  const normalized = rawInput.toLowerCase().replace(/\s+/g, " ").trim();
+
+  // ── Intent Detection ──
+  const intent = detectIntent(normalized);
+
+  console.log("[auto-reply] Intent detected:", JSON.stringify({
+    inbound_text: rawInput.slice(0, 100),
+    normalized_text: normalized.slice(0, 100),
+    detected_intent: intent.intent,
+    selected_collections: intent.collections,
+    mode: intent.mode,
+  }));
+
   let replyContent: string;
   let shouldAssignHuman = false;
-  let actionTaken = "menu_sent";
-  let menuOption = trimmedInput || "initial";
-  let knowledgeQuery = "";
+  let actionTaken: string;
   let knowledgeFound = false;
+  let chunksCount = 0;
+  const triggerReason = isFirstMessage ? "first_message" : isNewConversation ? "new_conversation" : "silence_threshold";
 
-  if (trimmedInput === "3") {
-    // ── Menu 3: Human handover (bypass AI entirely) ──
+  // ── Route by intent ──
+  if (intent.intent === "menu_3") {
+    // Human handover — immediate response, no AI
     replyContent = HUMAN_HANDOVER;
     shouldAssignHuman = true;
     actionTaken = "human_handover";
-    menuOption = "3";
-  } else if (MENU_QUERY_MAP[trimmedInput]) {
-    // ── Menu 1 or 2: Translate to semantic query → AI pipeline ──
-    knowledgeQuery = MENU_QUERY_MAP[trimmedInput];
-    menuOption = trimmedInput;
-
-    const collectionHint = trimmedInput === "1" ? "products" : "products";
-    const { data: searchResults } = await svc.rpc("search_knowledge", {
-      query_text: knowledgeQuery,
-      collection_filter: collectionHint,
-      max_results: 3,
-    });
-
-    if (searchResults && searchResults.length > 0) {
-      knowledgeFound = true;
-      const aiAnswer = await generateAIAnswer(knowledgeQuery, searchResults);
-
-      if (aiAnswer) {
-        replyContent = aiAnswer + "\n\nReply 3 to speak to a person.";
-        actionTaken = "ai_knowledge_reply";
-      } else {
-        // AI failed, fall back to raw snippets
-        const snippets = searchResults.map((r: any) =>
-          `📌 *${r.file_title}*\n${r.chunk_text.slice(0, 300)}`
-        ).join("\n\n");
-        replyContent = `Here's what I found:\n\n${snippets}\n\nReply 3 to speak to a person.`;
-        actionTaken = "knowledge_reply";
-      }
-    } else {
-      replyContent = `I couldn't find specific information about that right now. A team member can help!\n\nReply 3 to speak to a person.`;
-      shouldAssignHuman = false;
-      actionTaken = "knowledge_reply";
-      knowledgeFound = false;
-    }
-  } else if (trimmedInput.length > 2) {
-    // ── Freeform Q&A: use original text as search query ──
-    knowledgeQuery = trimmedInput;
-    menuOption = "freeform_qa";
-
-    const { data: searchResults } = await svc.rpc("search_knowledge", {
-      query_text: knowledgeQuery,
-      max_results: 3,
-    });
-
-    if (searchResults && searchResults.length > 0) {
-      knowledgeFound = true;
-      const aiAnswer = await generateAIAnswer(trimmedInput, searchResults);
-
-      if (aiAnswer) {
-        replyContent = aiAnswer + "\n\nReply 3 to speak to a person.";
-        actionTaken = "ai_knowledge_reply";
-      } else {
-        const snippets = searchResults.map((r: any) =>
-          `📌 *${r.file_title}*\n${r.chunk_text.slice(0, 300)}`
-        ).join("\n\n");
-        replyContent = `Here's what I found:\n\n${snippets}\n\nReply 3 to speak to a person.`;
-        actionTaken = "knowledge_reply";
-      }
-    } else {
-      replyContent = `I couldn't find specific information about that. Here are some options:\n\n${MENU_MESSAGE}`;
-      actionTaken = "menu_sent";
-    }
-  } else {
-    // ── Short/empty input → show menu ──
+  } else if (intent.intent === "greeting") {
+    // Greeting — send menu
     replyContent = MENU_MESSAGE;
     actionTaken = "menu_sent";
+  } else {
+    // Knowledge-driven intents: menu_1, menu_2, business, product, freeform
+    const searchQuery = intent.query;
+
+    if (!searchQuery || searchQuery.length < 2) {
+      // Too short for meaningful search — send menu
+      replyContent = MENU_MESSAGE;
+      actionTaken = "menu_sent";
+    } else {
+      const chunks = await searchKnowledge(svc, searchQuery, intent.collections, 5);
+      chunksCount = chunks.length;
+
+      if (chunks.length > 0) {
+        knowledgeFound = true;
+
+        // Determine mode from matched collection
+        const matchedCollection = chunks[0]?.file_collection || "";
+        const effectiveMode = STRICT_COLLECTIONS.has(matchedCollection) ? "strict" : intent.mode;
+
+        const aiAnswer = await generateAIAnswer(searchQuery, chunks, effectiveMode);
+
+        if (aiAnswer) {
+          replyContent = aiAnswer + "\n\nReply 3 to speak to a person.";
+          actionTaken = effectiveMode === "strict" ? "knowledge_strict" : "knowledge_assisted";
+        } else {
+          // AI failed — use raw snippets
+          const snippets = chunks
+            .slice(0, 3)
+            .map((r: any) => `📌 *${r.file_title}*\n${r.chunk_text.slice(0, 300)}`)
+            .join("\n\n");
+          replyContent = `Here's what I found:\n\n${snippets}\n\nReply 3 to speak to a person.`;
+          actionTaken = "knowledge_reply";
+        }
+      } else {
+        // No chunks found — human handoff (NEVER stay silent)
+        replyContent = NO_ANSWER_FALLBACK;
+        shouldAssignHuman = true;
+        actionTaken = "human_handover";
+        knowledgeFound = false;
+      }
+    }
   }
 
   // ── Dispatch via send-message ──
@@ -282,7 +377,13 @@ Deno.serve(async (req) => {
   }
 
   const sendMessageUrl = `${SUPABASE_URL}/functions/v1/send-message`;
-  console.log("[auto-reply] Dispatching via send-message", { conversation_id, actionTaken, menuOption, knowledgeQuery: knowledgeQuery.slice(0, 60) });
+  console.log("[auto-reply] Dispatching:", {
+    conversation_id,
+    actionTaken,
+    intent: intent.intent,
+    chunksCount,
+    knowledgeFound,
+  });
 
   try {
     const sendRes = await fetch(sendMessageUrl, {
@@ -310,8 +411,8 @@ Deno.serve(async (req) => {
         inbound_message_id: inbound_message_id || null,
         action_taken: code === "TEMPLATE_REQUIRED" ? "template_required_blocked" : "dispatch_failed",
         reason,
-        menu_option: menuOption,
-        knowledge_query: knowledgeQuery || null,
+        menu_option: intent.intent,
+        knowledge_query: intent.query?.slice(0, 200) || null,
         knowledge_found: knowledgeFound,
       });
 
@@ -325,9 +426,9 @@ Deno.serve(async (req) => {
       conversation_id,
       inbound_message_id: inbound_message_id || null,
       action_taken: actionTaken,
-      reason: isFirstMessage ? "first_message" : isNewConversation ? "new_conversation" : "silence_threshold",
-      menu_option: menuOption,
-      knowledge_query: knowledgeQuery || null,
+      reason: triggerReason,
+      menu_option: intent.intent,
+      knowledge_query: intent.query?.slice(0, 200) || null,
       knowledge_found: knowledgeFound,
     });
 
@@ -335,11 +436,13 @@ Deno.serve(async (req) => {
     if (contact_id) {
       await svc.from("contact_activity").insert({
         contact_id,
-        type: "auto_reply",
+        type: shouldAssignHuman ? "human_handover" : "auto_reply",
         performed_by: "00000000-0000-0000-0000-000000000000",
         metadata: {
           action: actionTaken,
-          menu_option: menuOption,
+          intent: intent.intent,
+          normalized_text: normalized.slice(0, 100),
+          chunks_found: chunksCount,
           knowledge_found: knowledgeFound,
           assigned_human: shouldAssignHuman,
           twilio_sid: sentMessage?.provider_message_id || null,
@@ -348,15 +451,21 @@ Deno.serve(async (req) => {
       });
     }
 
-    console.log("[auto-reply] ✓ Dispatched", { message_id: sentMessage?.id, action: actionTaken, knowledge_found: knowledgeFound });
+    console.log("[auto-reply] ✓ Dispatched", {
+      message_id: sentMessage?.id,
+      action: actionTaken,
+      intent: intent.intent,
+      chunks: chunksCount,
+    });
 
     return jsonRes({
       ok: true,
       auto_reply: true,
       action: actionTaken,
-      menu_option: menuOption,
+      intent: intent.intent,
       assigned_human: shouldAssignHuman,
       knowledge_found: knowledgeFound,
+      chunks_found: chunksCount,
       twilio_sid: sentMessage?.provider_message_id || null,
       twilio_status: sentMessage?.status_raw || sentMessage?.status || "queued",
       message_id: sentMessage?.id || null,
@@ -369,8 +478,8 @@ Deno.serve(async (req) => {
       inbound_message_id: inbound_message_id || null,
       action_taken: "dispatch_failed",
       reason: e?.message || "Network error calling send-message",
-      menu_option: menuOption,
-      knowledge_query: knowledgeQuery || null,
+      menu_option: intent.intent,
+      knowledge_query: intent.query?.slice(0, 200) || null,
       knowledge_found: knowledgeFound,
     });
 

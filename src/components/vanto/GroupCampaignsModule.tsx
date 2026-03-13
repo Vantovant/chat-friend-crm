@@ -11,12 +11,13 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
-import { format, eachDayOfInterval, setHours, setMinutes } from 'date-fns';
-import { Plus, Trash2, Users, CalendarClock, Send, RefreshCw, CalendarIcon, RotateCcw } from 'lucide-react';
+import { format, eachDayOfInterval, setHours, setMinutes, formatDistanceToNow } from 'date-fns';
+import { Plus, Trash2, Users, CalendarClock, Send, RefreshCw, CalendarIcon, RotateCcw, AlertTriangle, Wifi, WifiOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-type WhatsAppGroup = { id: string; group_name: string; created_at: string };
+type WhatsAppGroup = { id: string; group_name: string; group_jid?: string | null; created_at: string };
 type ScheduledPost = {
   id: string;
   target_group_name: string;
@@ -25,6 +26,9 @@ type ScheduledPost = {
   scheduled_at: string;
   status: string;
   created_at: string;
+  failure_reason?: string | null;
+  last_attempt_at?: string | null;
+  attempt_count?: number;
 };
 
 const TIME_SLOTS = [
@@ -52,6 +56,13 @@ export function GroupCampaignsModule() {
   const [bulkDateRange, setBulkDateRange] = useState<{ from: Date | undefined; to: Date | undefined }>({ from: undefined, to: undefined });
   const [selectedTimeSlots, setSelectedTimeSlots] = useState<string[]>(['morning']);
 
+  // Extension health
+  const [extensionHealth, setExtensionHealth] = useState<{
+    connected: boolean;
+    lastSeen: string | null;
+    whatsappReady: boolean;
+  }>({ connected: false, lastSeen: null, whatsappReady: false });
+
   const fetchData = async () => {
     setLoading(true);
     const [groupsRes, postsRes] = await Promise.all([
@@ -63,7 +74,36 @@ export function GroupCampaignsModule() {
     setLoading(false);
   };
 
-  useEffect(() => { fetchData(); }, []);
+  // Check extension health via integration_settings
+  const checkExtensionHealth = async () => {
+    const { data } = await supabase
+      .from('integration_settings')
+      .select('value')
+      .eq('key', 'chrome_extension_heartbeat')
+      .maybeSingle();
+
+    if (data?.value) {
+      try {
+        const hb = JSON.parse(data.value);
+        const lastSeen = hb.last_seen ? new Date(hb.last_seen) : null;
+        const isRecent = lastSeen && (Date.now() - lastSeen.getTime()) < 5 * 60 * 1000; // 5 min
+        setExtensionHealth({
+          connected: !!isRecent,
+          lastSeen: hb.last_seen || null,
+          whatsappReady: !!hb.whatsapp_ready,
+        });
+      } catch {
+        setExtensionHealth({ connected: false, lastSeen: null, whatsappReady: false });
+      }
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+    checkExtensionHealth();
+    const interval = setInterval(checkExtensionHealth, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const channel = supabase
@@ -88,7 +128,6 @@ export function GroupCampaignsModule() {
 
     try {
       if (isBulk) {
-        // Bulk campaign
         if (!bulkDateRange.from || !bulkDateRange.to) {
           toast.error('Select a date range for bulk campaign.');
           setSaving(false);
@@ -109,7 +148,7 @@ export function GroupCampaignsModule() {
             const slot = TIME_SLOTS.find(s => s.id === slotId);
             if (!slot) continue;
             const scheduledDate = setMinutes(setHours(day, slot.hour), slot.minute);
-            if (scheduledDate <= now) continue; // skip past times
+            if (scheduledDate <= now) continue;
             rows.push({
               user_id: user.id,
               target_group_name: selectedGroup,
@@ -138,7 +177,6 @@ export function GroupCampaignsModule() {
           fetchData();
         }
       } else {
-        // Single post
         if (!singleDate) {
           toast.error('Pick a date.');
           setSaving(false);
@@ -183,7 +221,14 @@ export function GroupCampaignsModule() {
   };
 
   const handleRetry = async (id: string) => {
-    const { error } = await supabase.from('scheduled_group_posts').update({ status: 'pending' }).eq('id', id);
+    const { error } = await supabase
+      .from('scheduled_group_posts')
+      .update({
+        status: 'pending',
+        failure_reason: null,
+        last_attempt_at: null,
+      } as any)
+      .eq('id', id);
     if (error) toast.error('Retry failed: ' + error.message);
     else { toast.success('Post queued for retry'); fetchData(); }
   };
@@ -222,6 +267,42 @@ export function GroupCampaignsModule() {
           Refresh
         </Button>
       </div>
+
+      {/* Extension Health Status */}
+      <Card className={cn(
+        "border",
+        extensionHealth.connected ? "border-emerald-500/30 bg-emerald-500/5" : "border-amber-500/30 bg-amber-500/5"
+      )}>
+        <CardContent className="py-3 px-4">
+          <div className="flex items-center gap-3 text-sm">
+            {extensionHealth.connected ? (
+              <Wifi size={16} className="text-emerald-400" />
+            ) : (
+              <WifiOff size={16} className="text-amber-400" />
+            )}
+            <div className="flex-1">
+              <span className={extensionHealth.connected ? "text-emerald-400 font-medium" : "text-amber-400 font-medium"}>
+                {extensionHealth.connected ? 'Chrome Extension Connected' : 'Chrome Extension Not Detected'}
+              </span>
+              {extensionHealth.lastSeen && (
+                <span className="text-muted-foreground ml-2">
+                  · Last seen {formatDistanceToNow(new Date(extensionHealth.lastSeen), { addSuffix: true })}
+                </span>
+              )}
+              {extensionHealth.connected && (
+                <span className={cn("ml-2", extensionHealth.whatsappReady ? "text-emerald-400" : "text-amber-400")}>
+                  · WhatsApp Web {extensionHealth.whatsappReady ? 'Ready' : 'Not Ready'}
+                </span>
+              )}
+            </div>
+            {!extensionHealth.connected && (
+              <p className="text-xs text-muted-foreground">
+                Open WhatsApp Web with the extension active to enable campaigns.
+              </p>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Scheduler Form */}
       <Card className="border-border">
@@ -266,7 +347,6 @@ export function GroupCampaignsModule() {
               </div>
 
               {!isBulk ? (
-                /* Single post: Calendar popover + time */
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-foreground">Date</label>
@@ -295,7 +375,6 @@ export function GroupCampaignsModule() {
                   </div>
                 </div>
               ) : (
-                /* Bulk campaign: date range + time slots */
                 <div className="space-y-4">
                   <div className="space-y-1.5">
                     <label className="text-sm font-medium text-foreground">Date Range</label>
@@ -381,7 +460,7 @@ export function GroupCampaignsModule() {
                     <TableHead>Message</TableHead>
                     <TableHead>Scheduled</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="w-[80px]"></TableHead>
+                    <TableHead className="w-[100px]"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -392,7 +471,32 @@ export function GroupCampaignsModule() {
                       <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                         {format(new Date(post.scheduled_at), 'MMM d, HH:mm')}
                       </TableCell>
-                      <TableCell>{statusBadge(post.status)}</TableCell>
+                      <TableCell>
+                        <div className="space-y-1">
+                          {statusBadge(post.status)}
+                          {post.status === 'failed' && post.failure_reason && (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <div className="flex items-center gap-1 text-xs text-red-400 cursor-help">
+                                    <AlertTriangle size={10} />
+                                    <span className="truncate max-w-[120px]">{post.failure_reason}</span>
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent side="top" className="max-w-[300px]">
+                                  <p className="text-xs">
+                                    <strong>Failure reason:</strong> {post.failure_reason}
+                                    {post.attempt_count ? ` (${post.attempt_count} attempt${post.attempt_count > 1 ? 's' : ''})` : ''}
+                                    {post.last_attempt_at && (
+                                      <><br />Last attempt: {format(new Date(post.last_attempt_at), 'MMM d, HH:mm')}</>
+                                    )}
+                                  </p>
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
+                        </div>
+                      </TableCell>
                       <TableCell>
                         <div className="flex gap-1">
                           {post.status === 'failed' && (

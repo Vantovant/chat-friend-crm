@@ -1,7 +1,7 @@
 /**
- * Vanto CRM — Background Service Worker v4.0
+ * Vanto CRM — Background Service Worker v5.0
  * MV3 compliant service worker.
- * OWNS: session storage, auth calls, Edge Function calls, group polling engine.
+ * OWNS: session storage, auth calls, Edge Function calls, group polling engine, heartbeat.
  */
 
 'use strict';
@@ -273,17 +273,22 @@ async function handleLoadContact(phone) {
   }
 }
 
-// ── Upsert WhatsApp Group ─────────────────────────────────────────────────────
-async function handleUpsertGroup(groupName) {
+// ── Upsert WhatsApp Group (with group_jid) ────────────────────────────────────
+async function handleUpsertGroup(groupName, groupJid) {
   var session = await getSession();
   session = await refreshTokenIfNeeded(session);
 
   if (!session.token) return { success: false, error: 'not_logged_in' };
 
   try {
-    // Get user id from token (decode JWT payload)
     var payload = JSON.parse(atob(session.token.split('.')[1]));
     var userId = payload.sub;
+
+    var body = {
+      user_id: userId,
+      group_name: groupName,
+    };
+    if (groupJid) body.group_jid = groupJid;
 
     var url = SUPABASE_URL + '/rest/v1/whatsapp_groups';
     var res = await fetch(url, {
@@ -294,10 +299,7 @@ async function handleUpsertGroup(groupName) {
         'Content-Type':  'application/json',
         'Prefer':        'resolution=merge-duplicates',
       },
-      body: JSON.stringify({
-        user_id: userId,
-        group_name: groupName,
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!res.ok) {
@@ -306,11 +308,44 @@ async function handleUpsertGroup(groupName) {
       return { success: false, error: errText };
     }
 
-    console.log('[Vanto BG] Group upserted:', groupName);
+    console.log('[Vanto BG] Group upserted:', groupName, groupJid ? '(JID: ' + groupJid + ')' : '');
     return { success: true };
   } catch (err) {
     console.error('[Vanto BG] Group upsert error:', err.message);
     return { success: false, error: err.message };
+  }
+}
+
+// ── Heartbeat: report extension health ─────────────────────────────────────────
+async function sendHeartbeat(whatsappReady) {
+  var session = await getSession();
+  session = await refreshTokenIfNeeded(session);
+
+  if (!session.token) return;
+
+  try {
+    var heartbeatData = JSON.stringify({
+      last_seen: new Date().toISOString(),
+      whatsapp_ready: !!whatsappReady,
+    });
+
+    // Upsert into integration_settings
+    var url = SUPABASE_URL + '/rest/v1/integration_settings';
+    await fetch(url, {
+      method: 'POST',
+      headers: {
+        'apikey':        SUPABASE_ANON_KEY,
+        'Authorization': 'Bearer ' + session.token,
+        'Content-Type':  'application/json',
+        'Prefer':        'resolution=merge-duplicates',
+      },
+      body: JSON.stringify({
+        key: 'chrome_extension_heartbeat',
+        value: heartbeatData,
+      }),
+    });
+  } catch (err) {
+    console.warn('[Vanto BG] Heartbeat error:', err.message);
   }
 }
 
@@ -323,6 +358,14 @@ async function pollDuePosts() {
     console.log('[Vanto BG] Poll skipped — not authenticated');
     return;
   }
+
+  // Check if WhatsApp Web tab exists
+  var tabs = await new Promise(function(resolve) {
+    chrome.tabs.query({ url: 'https://web.whatsapp.com/*' }, function(t) { resolve(t || []); });
+  });
+
+  // Send heartbeat with WhatsApp readiness
+  await sendHeartbeat(tabs.length > 0);
 
   try {
     var now = new Date().toISOString();
@@ -345,63 +388,78 @@ async function pollDuePosts() {
 
     console.log('[Vanto BG] Due posts found:', posts.length);
 
-    // Send each post to content.js for execution
-    for (var i = 0; i < posts.length; i++) {
-      await executeGroupPost(posts[i], session.token);
+    if (tabs.length === 0) {
+      console.warn('[Vanto BG] No WhatsApp Web tab found — marking all as failed');
+      for (var i = 0; i < posts.length; i++) {
+        await updatePostStatus(posts[i].id, 'failed', session.token, 'No WhatsApp Web tab open', 'poll');
+      }
+      return;
+    }
+
+    for (var j = 0; j < posts.length; j++) {
+      await executeGroupPost(posts[j], session.token, tabs[0].id);
     }
   } catch (err) {
     console.error('[Vanto BG] Poll error:', err.message);
   }
 }
 
-async function executeGroupPost(post, token) {
+async function executeGroupPost(post, token, tabId) {
   console.log('[Vanto BG] Executing post to group:', post.target_group_name);
 
   try {
-    // Find a WhatsApp Web tab
-    var tabs = await new Promise(function(resolve) {
-      chrome.tabs.query({ url: 'https://web.whatsapp.com/*' }, function(t) { resolve(t || []); });
-    });
-
-    if (tabs.length === 0) {
-      console.warn('[Vanto BG] No WhatsApp Web tab found — marking failed');
-      await updatePostStatus(post.id, 'failed', token);
-      return;
-    }
-
-    // Send execute command to content script
     var response = await new Promise(function(resolve) {
-      chrome.tabs.sendMessage(tabs[0].id, {
+      var timeoutId = setTimeout(function() {
+        resolve({ success: false, error: 'Content script timeout (30s)', stage: 'poll' });
+      }, 30000);
+
+      chrome.tabs.sendMessage(tabId, {
         type: 'VANTO_EXECUTE_GROUP_POST',
         groupName: post.target_group_name,
         messageContent: post.message_content,
         postId: post.id,
       }, function(resp) {
+        clearTimeout(timeoutId);
         if (chrome.runtime.lastError) {
           console.warn('[Vanto BG] Content script error:', chrome.runtime.lastError.message);
-          resolve({ success: false, error: chrome.runtime.lastError.message });
+          resolve({ success: false, error: chrome.runtime.lastError.message, stage: 'poll' });
         } else {
-          resolve(resp || { success: false, error: 'No response' });
+          resolve(resp || { success: false, error: 'No response from content script', stage: 'poll' });
         }
       });
     });
 
     if (response && response.success) {
       console.log('[Vanto BG] Post sent successfully:', post.id);
-      await updatePostStatus(post.id, 'sent', token);
+      await updatePostStatus(post.id, 'sent', token, null, null);
     } else {
-      console.warn('[Vanto BG] Post execution failed:', response && response.error);
-      await updatePostStatus(post.id, 'failed', token);
+      var reason = (response && response.error) || 'Unknown execution error';
+      var stage = (response && response.stage) || 'unknown';
+      console.warn('[Vanto BG] Post execution failed:', reason, 'stage:', stage);
+      await updatePostStatus(post.id, 'failed', token, reason, stage);
     }
   } catch (err) {
     console.error('[Vanto BG] Execute error:', err.message);
-    await updatePostStatus(post.id, 'failed', token);
+    await updatePostStatus(post.id, 'failed', token, err.message, 'poll');
   }
 }
 
-async function updatePostStatus(postId, status, token) {
+async function updatePostStatus(postId, status, token, failureReason, failureStage) {
   try {
     var url = SUPABASE_URL + '/rest/v1/scheduled_group_posts?id=eq.' + postId;
+    var body = { status: status };
+
+    if (status === 'failed') {
+      var fullReason = failureStage ? '[' + failureStage + '] ' + (failureReason || 'Unknown') : (failureReason || 'Unknown');
+      body.failure_reason = fullReason;
+      body.last_attempt_at = new Date().toISOString();
+      // Increment attempt_count via a read-then-write (simple approach)
+    }
+
+    if (status === 'sent') {
+      body.failure_reason = null;
+    }
+
     await fetch(url, {
       method: 'PATCH',
       headers: {
@@ -409,9 +467,9 @@ async function updatePostStatus(postId, status, token) {
         'Authorization': 'Bearer ' + token,
         'Content-Type':  'application/json',
       },
-      body: JSON.stringify({ status: status }),
+      body: JSON.stringify(body),
     });
-    console.log('[Vanto BG] Post status updated:', postId, '->', status);
+    console.log('[Vanto BG] Post status updated:', postId, '->', status, failureReason ? '(' + failureReason + ')' : '');
   } catch (err) {
     console.error('[Vanto BG] Status update error:', err.message);
   }
@@ -513,12 +571,11 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
   }
 
   if (msg.type === 'VANTO_UPSERT_GROUP') {
-    handleUpsertGroup(msg.groupName).then(sendResponse);
+    handleUpsertGroup(msg.groupName, msg.groupJid || null).then(sendResponse);
     return true;
   }
 
   if (msg.type === 'VANTO_POST_RESULT') {
-    // Content script reports execution result — handled inline in executeGroupPost
     sendResponse({ ok: true });
     return false;
   }
@@ -526,4 +583,4 @@ chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
   return false;
 });
 
-console.log('[Vanto BG] Service worker started v4.0 (with Group Campaigns)');
+console.log('[Vanto BG] Service worker started v5.0 (with diagnostics + heartbeat)');
