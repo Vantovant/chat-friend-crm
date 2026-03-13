@@ -969,11 +969,12 @@ function injectSidebar() {
 
   // Check auth then trigger first detection
   checkAuthState(function() {
+    startHeartbeatLoop();
     if (isAuthenticated) loadTeamMembers();
     setTimeout(runDetection, 1200);
   });
 
-  log('Sidebar injected v5.0 (with Group Campaigns)');
+  log('Sidebar injected v5.1 (with live heartbeat)');
 }
 
 // ── Boot ───────────────────────────────────────────────────────────────────────
