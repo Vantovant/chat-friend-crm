@@ -244,7 +244,7 @@ function executeGroupPostInDOM(groupName, messageContent, callback) {
 
           if (!sendBtn) {
             sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: 'Send button not found' });
-            callback({ success: false, error: 'DOM element missing: Send button not found' });
+            callback({ success: false, error: 'Send button not found after injecting message', stage: 'click_send' });
             return;
           }
 
