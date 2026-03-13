@@ -487,7 +487,7 @@ export function GroupCampaignsModule() {
                                 </div>
                               </div>
                             </div>
-                            </TooltipProvider>
+                            )}
                           )}
                         </div>
                       </TableCell>
