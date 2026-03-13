@@ -317,35 +317,50 @@ async function handleUpsertGroup(groupName, groupJid) {
 }
 
 // ── Heartbeat: report extension health ─────────────────────────────────────────
-async function sendHeartbeat(whatsappReady) {
+async function sendHeartbeat(options) {
+  var opts = options || {};
   var session = await getSession();
   session = await refreshTokenIfNeeded(session);
 
-  if (!session.token) return;
+  if (!session.token) {
+    return { success: false, error: 'not_authenticated' };
+  }
 
   try {
     var heartbeatData = JSON.stringify({
       last_seen: new Date().toISOString(),
-      whatsapp_ready: !!whatsappReady,
+      whatsapp_ready: !!opts.whatsappReady,
+      source: opts.source || 'background',
+      tab_count: typeof opts.tabCount === 'number' ? opts.tabCount : null,
+      content_script_active: !!opts.contentScriptActive,
     });
 
-    // Upsert into integration_settings
-    var url = SUPABASE_URL + '/rest/v1/integration_settings';
-    await fetch(url, {
+    // Upsert into integration_settings (explicit conflict target is required)
+    var url = SUPABASE_URL + '/rest/v1/integration_settings?on_conflict=key';
+    var res = await fetch(url, {
       method: 'POST',
       headers: {
         'apikey':        SUPABASE_ANON_KEY,
         'Authorization': 'Bearer ' + session.token,
         'Content-Type':  'application/json',
-        'Prefer':        'resolution=merge-duplicates',
+        'Prefer':        'resolution=merge-duplicates,return=minimal',
       },
       body: JSON.stringify({
         key: 'chrome_extension_heartbeat',
         value: heartbeatData,
       }),
     });
+
+    if (!res.ok) {
+      var errText = await res.text();
+      console.warn('[Vanto BG] Heartbeat upsert failed:', res.status, errText);
+      return { success: false, error: 'upsert_failed_' + res.status };
+    }
+
+    return { success: true };
   } catch (err) {
     console.warn('[Vanto BG] Heartbeat error:', err.message);
+    return { success: false, error: err.message };
   }
 }
 
