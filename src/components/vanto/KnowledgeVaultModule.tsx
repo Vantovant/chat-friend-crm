@@ -227,6 +227,17 @@ export function KnowledgeVaultModule() {
     toast({ title: 'Re-indexing...', description: 'For pasted content, delete and re-upload.' });
   };
 
+  /** Force retry: reset stuck file to error, delete old chunks, re-trigger ingestion prompt */
+  const handleForceRetry = async (fileId: string) => {
+    toast({ title: 'Force retrying…' });
+    // Delete existing chunks
+    await supabase.from('knowledge_chunks').delete().eq('file_id', fileId);
+    // Set status to error so user knows it needs re-upload
+    await supabase.from('knowledge_files').update({ status: 'error' }).eq('id', fileId);
+    toast({ title: '⚠️ File reset', description: 'Old chunks cleared. Please re-upload/re-paste the content to re-index.' });
+    fetchFiles();
+  };
+
   const handleDelete = async (fileId: string) => {
     // Delete chunks first, then file
     await supabase.from('knowledge_chunks').delete().eq('file_id', fileId);
