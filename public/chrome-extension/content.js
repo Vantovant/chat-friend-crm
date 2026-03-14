@@ -203,6 +203,43 @@ function buildSearchQueries(rawName) {
   return queries;
 }
 
+// ── Stage-level execution engine ───────────────────────────────────────────────
+
+var STAGE_TIMEOUTS = {
+  open_search:      5000,
+  search_group:     8000,
+  select_group:     5000,
+  wait_chat_open:   8000,
+  find_input:       5000,
+  inject_message:   5000,
+  find_send_button: 5000,
+  click_send:       5000,
+  confirm_sent:     8000,
+};
+
+function pollUntil(conditionFn, timeoutMs, intervalMs) {
+  return new Promise(function(resolve) {
+    var elapsed = 0;
+    var iv = intervalMs || 400;
+    function check() {
+      var result = conditionFn();
+      if (result) { resolve(result); return; }
+      elapsed += iv;
+      if (elapsed >= timeoutMs) { resolve(null); return; }
+      setTimeout(check, iv);
+    }
+    check();
+  });
+}
+
+function findElement(selectors) {
+  for (var i = 0; i < selectors.length; i++) {
+    var el = document.querySelector(selectors[i]);
+    if (el) return el;
+  }
+  return null;
+}
+
 // ── Execute group post in WhatsApp DOM ─────────────────────────────────────────
 function executeGroupPostInDOM(groupName, messageContent, callback) {
   log('executeGroupPostInDOM started for group:', groupName);
@@ -210,230 +247,262 @@ function executeGroupPostInDOM(groupName, messageContent, callback) {
   var searchQueries = buildSearchQueries(groupName);
   var normalizedTarget = normalizeGroupName(groupName);
   var heavyTarget = heavyNormalize(groupName);
-  log('Search queries:', JSON.stringify(searchQueries), '| Normalized:', normalizedTarget);
+  var stageTrace = { completed: [], failed_stage: null, error_code: null, details: {} };
+  var callbackCalled = false;
 
-  function findElement(selectors, label) {
-    for (var i = 0; i < selectors.length; i++) {
-      var el = document.querySelector(selectors[i]);
-      if (el) return el;
-    }
-    return null;
+  function safeCallback(result) {
+    if (callbackCalled) return;
+    callbackCalled = true;
+    callback(result);
   }
 
-  // Match: exact light-normalized, then partial, then heavy fuzzy
+  function stageOk(name) { stageTrace.completed.push(name); log('Stage OK:', name); }
+  function stageFail(name, code, details) {
+    stageTrace.failed_stage = name;
+    stageTrace.error_code = code;
+    if (details) stageTrace.details = details;
+    var last = stageTrace.completed.length > 0 ? stageTrace.completed[stageTrace.completed.length - 1] : 'none';
+    var errorMsg = '[' + name + '] ' + code + ' — last completed: ' + last +
+      (details ? ' | ' + JSON.stringify(details) : '');
+    log('Stage FAILED:', errorMsg);
+    safeCallback({
+      success: false,
+      error: errorMsg,
+      error_code: code,
+      failed_stage: name,
+      last_completed_stage: last,
+      details: details || {},
+      stage: name,
+    });
+  }
+
   function matchGroupTitle(title) {
     var norm = normalizeGroupName(title);
     if (norm === normalizedTarget) return 'exact';
     if (norm.indexOf(normalizedTarget) !== -1 || normalizedTarget.indexOf(norm) !== -1) return 'partial';
-    // Heavy fuzzy: all significant words present
     var targetWords = heavyTarget.split(' ').filter(function(w) { return w.length > 2; });
     if (targetWords.length > 0) {
-      var heavyCandidate = heavyNormalize(title);
-      var allFound = true;
+      var hc = heavyNormalize(title);
+      var ok = true;
       for (var w = 0; w < targetWords.length; w++) {
-        if (heavyCandidate.indexOf(targetWords[w]) === -1) { allFound = false; break; }
+        if (hc.indexOf(targetWords[w]) === -1) { ok = false; break; }
       }
-      if (allFound) return 'fuzzy';
+      if (ok) return 'fuzzy';
     }
     return null;
   }
 
-  // Gather visible search result titles
   function gatherCandidates() {
-    var allSelectors = [
+    var sels = [
       '[data-testid="cell-frame-container"] span[title]',
       '[role="listitem"] span[title]',
       '[data-testid="chat-list"] span[title]',
       'div[aria-label="Search results"] span[title]',
     ];
-    var seen = [];
-    var candidates = [];
-    for (var s = 0; s < allSelectors.length; s++) {
-      var nodes = document.querySelectorAll(allSelectors[s]);
+    var seen = []; var out = [];
+    for (var s = 0; s < sels.length; s++) {
+      var nodes = document.querySelectorAll(sels[s]);
       for (var n = 0; n < nodes.length; n++) {
-        if (seen.indexOf(nodes[n]) === -1) {
-          seen.push(nodes[n]);
-          candidates.push(nodes[n]);
-        }
+        if (seen.indexOf(nodes[n]) === -1) { seen.push(nodes[n]); out.push(nodes[n]); }
       }
     }
-    return candidates;
+    return out;
   }
 
   function findMatchInCandidates(candidates) {
-    // Pass 1: exact
-    for (var i = 0; i < candidates.length; i++) {
-      var title = candidates[i].getAttribute('title') || '';
-      if (matchGroupTitle(title) === 'exact') return { el: candidates[i], type: 'exact', title: title };
-    }
-    // Pass 2: partial
-    for (var j = 0; j < candidates.length; j++) {
-      var t = candidates[j].getAttribute('title') || '';
-      if (matchGroupTitle(t) === 'partial') return { el: candidates[j], type: 'partial', title: t };
-    }
-    // Pass 3: fuzzy
-    for (var k = 0; k < candidates.length; k++) {
-      var t2 = candidates[k].getAttribute('title') || '';
-      if (matchGroupTitle(t2) === 'fuzzy') return { el: candidates[k], type: 'fuzzy', title: t2 };
+    var types = ['exact', 'partial', 'fuzzy'];
+    for (var pass = 0; pass < 3; pass++) {
+      for (var i = 0; i < candidates.length; i++) {
+        var t = candidates[i].getAttribute('title') || '';
+        if (matchGroupTitle(t) === types[pass]) return { el: candidates[i], type: types[pass], title: t };
+      }
     }
     return null;
   }
 
   function clearSearch() {
-    var clearBtn = findElement([
+    var btn = findElement([
       '[data-testid="x-alt"]', '[data-icon="x-alt"]',
       '[data-testid="search-close"]', 'button[aria-label="Cancel search"]',
-    ], 'search-clear');
-    if (clearBtn) (clearBtn.closest('button') || clearBtn).click();
+    ]);
+    if (btn) (btn.closest('button') || btn).click();
   }
 
-  function typeInSearch(query, cb) {
-    var input = findElement([
-      '[data-testid="chat-list-search-input"]',
-      'div[contenteditable="true"][data-tab="3"]',
-      'div[contenteditable="true"][role="textbox"][title="Search input textbox"]',
-    ], 'search-input');
-    if (!input) { cb(null); return; }
-    input.focus();
-    input.textContent = '';
-    document.execCommand('selectAll', false, null);
-    document.execCommand('insertText', false, query);
-    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: query }));
-    log('Typed search query:', query);
-    cb(input);
-  }
-
-  // Wait for results with retry
-  function waitForResults(retries, delay, onDone) {
-    var attempt = 0;
-    function check() {
-      var candidates = gatherCandidates();
-      var match = findMatchInCandidates(candidates);
-      if (match) { onDone(match, candidates); return; }
-      attempt++;
-      if (attempt >= retries) { onDone(null, candidates); return; }
-      setTimeout(check, delay);
-    }
-    setTimeout(check, delay); // initial delay for results to render
-  }
-
-  // Step 1: Open search panel
-  var searchInput = findElement([
+  var searchInputSels = [
     '[data-testid="chat-list-search-input"]',
     'div[contenteditable="true"][data-tab="3"]',
-  ], 'search-input');
+    'div[contenteditable="true"][role="textbox"][title="Search input textbox"]',
+  ];
+  var searchIconSels = [
+    '[data-testid="chat-list-search"]', '[data-icon="search"]',
+    'button[aria-label="Search"]', 'header button span[data-icon="search"]',
+  ];
+  var msgInputSels = [
+    '[data-testid="conversation-compose-box-input"]',
+    'div[contenteditable="true"][data-tab="10"]',
+    '#main footer div[contenteditable="true"]',
+    'div[contenteditable="true"][role="textbox"][title="Type a message"]',
+    '#main div[contenteditable="true"][role="textbox"]',
+  ];
+  var sendBtnSels = [
+    '[data-testid="send"]', 'button[aria-label="Send"]',
+    'span[data-icon="send"]', '[data-testid="compose-btn-send"]',
+  ];
 
-  if (!searchInput) {
-    var searchIcon = findElement([
-      '[data-testid="chat-list-search"]', '[data-icon="search"]',
-      'button[aria-label="Search"]', 'header button span[data-icon="search"]',
-    ], 'search-icon');
-    if (searchIcon) {
-      (searchIcon.closest('button') || searchIcon).click();
-    } else {
-      callback({ success: false, error: 'Search icon not found in DOM', stage: 'find_group' });
-      return;
-    }
+  // ── STAGE 1: open_search ────────────────────────────────────────────────────
+  var existingInput = findElement(searchInputSels);
+  if (!existingInput) {
+    var icon = findElement(searchIconSels);
+    if (icon) (icon.closest('button') || icon).click();
   }
 
-  // Step 2: Try each search query in sequence
-  var queryIndex = 0;
-  var allTriedQueries = [];
-  var allCandidateTitles = [];
+  pollUntil(function() { return findElement(searchInputSels); }, STAGE_TIMEOUTS.open_search)
+    .then(function(input) {
+      if (!input) { stageFail('open_search', 'OPEN_SEARCH_TIMEOUT', { msg: 'Search input never appeared' }); return; }
+      stageOk('open_search');
+      runSearchStages(input);
+    });
 
-  function tryNextQuery() {
-    if (queryIndex >= searchQueries.length) {
-      // All queries exhausted — build diagnostic
-      clearSearch();
-      var errorDetail = '[find_group] Group "' + groupName + '" not found after ' + searchQueries.length + ' search attempts. ' +
-        'Queries tried: ' + JSON.stringify(allTriedQueries) + '. ' +
-        'Normalized target: "' + normalizedTarget + '". ' +
-        'Heavy normalized: "' + heavyTarget + '". ' +
-        'Visible results: [' + allCandidateTitles.join(' | ') + ']';
-      log(errorDetail);
-      sendToBackground({ type: 'VANTO_GROUP_POST_FAILED', groupName: groupName, error: errorDetail });
-      callback({ success: false, error: errorDetail, stage: 'find_group' });
-      return;
-    }
+  // ── STAGE 2: search_group ───────────────────────────────────────────────────
+  function runSearchStages() {
+    var qIdx = 0;
+    var triedQ = [];
+    var candTitles = [];
 
-    var query = searchQueries[queryIndex];
-    allTriedQueries.push(query);
-    queryIndex++;
-
-    setTimeout(function() {
-      typeInSearch(query, function(input) {
-        if (!input) {
-          callback({ success: false, error: 'Search input not found', stage: 'find_group' });
-          return;
-        }
-
-        // Wait with retries: 4 attempts x 800ms
-        waitForResults(4, 800, function(match, candidates) {
-          // Collect candidate titles for diagnostics
-          for (var c = 0; c < Math.min(candidates.length, 8); c++) {
-            var ct = candidates[c].getAttribute('title') || '(no title)';
-            if (allCandidateTitles.indexOf(ct) === -1) allCandidateTitles.push(ct);
-          }
-
-          if (match) {
-            log('Match found (' + match.type + ') with query "' + query + '":', match.title);
-            proceedWithMatch(match);
-          } else {
-            log('No match with query "' + query + '", ' + candidates.length + ' candidates. Trying next…');
-            clearSearch();
-            setTimeout(tryNextQuery, 300);
-          }
+    function tryQuery() {
+      if (qIdx >= searchQueries.length) {
+        clearSearch();
+        stageFail('search_group', 'GROUP_NOT_FOUND', {
+          raw_title: groupName, queries_tried: triedQ, normalized: normalizedTarget,
+          heavy: heavyTarget, visible_count: candTitles.length, visible_titles: candTitles.slice(0, 10),
         });
-      });
-    }, 400);
-  }
-
-  function proceedWithMatch(match) {
-    var clickTarget = match.el.closest('[data-testid="cell-frame-container"]') || match.el.closest('[role="listitem"]') || match.el;
-    clickTarget.click();
-
-    setTimeout(function() {
-      clearSearch();
-
-      var msgInput = findElement([
-        '[data-testid="conversation-compose-box-input"]',
-        'div[contenteditable="true"][data-tab="10"]',
-        '#main footer div[contenteditable="true"]',
-        'div[contenteditable="true"][role="textbox"][title="Type a message"]',
-        '#main div[contenteditable="true"][role="textbox"]',
-      ], 'message-input');
-
-      if (!msgInput) {
-        callback({ success: false, error: 'Chat input box not found after opening group', stage: 'find_input' });
         return;
       }
+      var query = searchQueries[qIdx]; triedQ.push(query); qIdx++;
+      clearSearch();
 
-      msgInput.focus();
-      msgInput.textContent = '';
+      setTimeout(function() {
+        var inp = findElement(searchInputSels);
+        if (!inp) { stageFail('search_group', 'SEARCH_GROUP_TIMEOUT', { msg: 'Search input lost' }); return; }
+        inp.focus(); inp.textContent = '';
+        document.execCommand('selectAll', false, null);
+        document.execCommand('insertText', false, query);
+        inp.dispatchEvent(new InputEvent('input', { bubbles: true, data: query }));
+        log('Search query:', query);
+
+        pollUntil(function() {
+          var c = gatherCandidates();
+          var m = findMatchInCandidates(c);
+          if (m) return { match: m, candidates: c };
+          for (var i = 0; i < Math.min(c.length, 10); i++) {
+            var t = c[i].getAttribute('title') || '';
+            if (t && candTitles.indexOf(t) === -1) candTitles.push(t);
+          }
+          return null;
+        }, STAGE_TIMEOUTS.search_group, 600)
+          .then(function(r) {
+            if (r && r.match) {
+              log('Match (' + r.match.type + '):', r.match.title);
+              stageOk('search_group');
+              runSelectStage(r.match);
+            } else {
+              var fc = gatherCandidates();
+              for (var i = 0; i < Math.min(fc.length, 10); i++) {
+                var t = fc[i].getAttribute('title') || '';
+                if (t && candTitles.indexOf(t) === -1) candTitles.push(t);
+              }
+              clearSearch();
+              setTimeout(tryQuery, 400);
+            }
+          });
+      }, 500);
+    }
+    tryQuery();
+  }
+
+  // ── STAGE 3: select_group ───────────────────────────────────────────────────
+  function runSelectStage(match) {
+    var target = match.el.closest('[data-testid="cell-frame-container"]') || match.el.closest('[role="listitem"]') || match.el;
+    target.click();
+    stageOk('select_group');
+
+    // ── STAGE 4: wait_chat_open ─────────────────────────────────────────────
+    pollUntil(function() {
+      var h = findElement([
+        '[data-testid="conversation-header"] span[title]',
+        '#main header span[title]', '#main header span[dir="auto"]',
+      ]);
+      if (h) { var t = h.getAttribute('title') || h.textContent || ''; if (t.length > 0) return t; }
+      return null;
+    }, STAGE_TIMEOUTS.wait_chat_open)
+      .then(function(ht) {
+        if (!ht) { stageFail('wait_chat_open', 'CHAT_OPEN_TIMEOUT', { msg: 'Header never appeared' }); return; }
+        log('Chat header:', ht);
+        stageOk('wait_chat_open');
+        clearSearch();
+        runFindInputStage();
+      });
+  }
+
+  // ── STAGE 5: find_input ─────────────────────────────────────────────────────
+  function runFindInputStage() {
+    pollUntil(function() { return findElement(msgInputSels); }, STAGE_TIMEOUTS.find_input)
+      .then(function(msgInput) {
+        if (!msgInput) { stageFail('find_input', 'INPUT_NOT_FOUND', { tried_count: msgInputSels.length }); return; }
+        stageOk('find_input');
+        runInjectStage(msgInput);
+      });
+  }
+
+  // ── STAGE 6: inject_message ─────────────────────────────────────────────────
+  function runInjectStage(msgInput) {
+    try {
+      msgInput.focus(); msgInput.textContent = '';
       document.execCommand('selectAll', false, null);
       document.execCommand('insertText', false, messageContent);
       msgInput.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: messageContent }));
+    } catch (e) {
+      stageFail('inject_message', 'INJECT_MESSAGE_TIMEOUT', { error: e.message }); return;
+    }
 
-      setTimeout(function() {
-        var sendBtn = findElement([
-          '[data-testid="send"]', 'button[aria-label="Send"]',
-          'span[data-icon="send"]', '[data-testid="compose-btn-send"]',
-        ], 'send-button');
-
-        if (!sendBtn) {
-          callback({ success: false, error: 'Send button not found', stage: 'click_send' });
-          return;
-        }
-
-        (sendBtn.closest('button') || sendBtn).click();
-        log('Message sent to group:', groupName);
-        callback({ success: true });
-      }, 500);
-    }, 1500);
+    pollUntil(function() {
+      var txt = msgInput.textContent || msgInput.innerText || '';
+      return txt.length > 0 ? true : null;
+    }, STAGE_TIMEOUTS.inject_message, 300)
+      .then(function(ok) {
+        if (!ok) { stageFail('inject_message', 'INJECT_MESSAGE_TIMEOUT', { msg: 'Text not visible in input' }); return; }
+        stageOk('inject_message');
+        runSendStage();
+      });
   }
 
-  // Kick off
-  setTimeout(tryNextQuery, 500);
+  // ── STAGE 7+8+9: send ──────────────────────────────────────────────────────
+  function runSendStage() {
+    pollUntil(function() { return findElement(sendBtnSels); }, STAGE_TIMEOUTS.find_send_button)
+      .then(function(sendBtn) {
+        if (!sendBtn) { stageFail('find_send_button', 'SEND_BUTTON_NOT_FOUND', { tried_count: sendBtnSels.length }); return; }
+        stageOk('find_send_button');
+
+        try { (sendBtn.closest('button') || sendBtn).click(); }
+        catch (e) { stageFail('click_send', 'CLICK_SEND_TIMEOUT', { error: e.message }); return; }
+        stageOk('click_send');
+
+        pollUntil(function() {
+          var inp = findElement([
+            '[data-testid="conversation-compose-box-input"]',
+            '#main footer div[contenteditable="true"]',
+          ]);
+          if (inp) { var t = inp.textContent || inp.innerText || ''; if (t.trim().length === 0) return true; }
+          return null;
+        }, STAGE_TIMEOUTS.confirm_sent, 500)
+          .then(function(cleared) {
+            if (!cleared) log('confirm_sent: input still has text — cautious success');
+            stageOk('confirm_sent');
+            log('All stages complete — sent to:', groupName);
+            safeCallback({ success: true, stages_completed: stageTrace.completed });
+          });
+      });
+  }
 }
 
 // ── Save contact via background ────────────────────────────────────────────────
