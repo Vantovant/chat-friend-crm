@@ -552,12 +552,14 @@ async function executeGroupPost(post, token, tabId) {
     });
 
     if (response && response.success) {
-      console.log('[Vanto BG] Post sent successfully:', post.id);
+      console.log('[Vanto BG] Post sent successfully:', post.id, 'stages:', JSON.stringify(response.stages_completed || []));
       await updatePostStatus(post.id, 'sent', token, null, null);
     } else {
       var reason = (response && response.error) || 'Unknown execution error';
-      var stage = (response && response.stage) || 'unknown';
-      console.warn('[Vanto BG] Post execution failed:', reason, 'stage:', stage);
+      var stage = (response && response.failed_stage) || (response && response.stage) || 'unknown';
+      var errorCode = (response && response.error_code) || '';
+      var lastCompleted = (response && response.last_completed_stage) || '';
+      console.warn('[Vanto BG] Post failed at stage:', stage, 'code:', errorCode, 'last_ok:', lastCompleted, 'reason:', reason);
       await updatePostStatus(post.id, 'failed', token, reason, stage);
     }
   } catch (err) {
