@@ -1,6 +1,6 @@
 # Vanto CRM — Chrome Extension Technical Specification
 
-> **Version:** 5.0 · **Manifest:** V3 · **Last Updated:** 2026-03-13
+> **Version:** 6.2.2 · **Manifest:** V3 · **Last Updated:** 2026-03-16
 
 ---
 
@@ -17,6 +17,8 @@ The Vanto CRM Chrome Extension injects a CRM sidebar directly into **WhatsApp We
 | **MV3 Compliance** | No inline scripts; all JS externalized; service worker for background tasks |
 | **Auth Delegation** | All authentication handled by `background.js` service worker; content script never touches credentials |
 | **Single Pipeline** | All database writes routed through the `upsert-whatsapp-contact` Edge Function |
+| **Self-Healing Injection** | Background performs pre-flight ping + programmatic `chrome.scripting.executeScript` fallback |
+| **Stage-Level Tracing** | Auto-poster breaks execution into 9 named stages with individual timeouts and structured error codes |
 
 ---
 
@@ -24,13 +26,15 @@ The Vanto CRM Chrome Extension injects a CRM sidebar directly into **WhatsApp We
 
 | File | Lines | Purpose |
 |------|-------|---------|
-| `manifest.json` | 29 | Extension manifest (Manifest V3) — permissions, content scripts, service worker |
-| `background.js` | 529 | Service worker — auth, session storage, API calls, group polling engine |
-| `content.js` | 937 | Injected into WhatsApp Web — sidebar UI, DOM detection, group capture, auto-poster |
-| `popup.html` | 184 | Extension toolbar popup — login/logout/forgot-password UI |
-| `popup.js` | 196 | Popup logic — delegates all auth to background via `chrome.runtime.sendMessage` |
-| `sidebar.css` | 386 | Sidebar styles — dark theme, overlay positioning, form components |
-| `icon128.png` | — | Chrome Web Store / toolbar icon (128×128) |
+| `manifest.json` | 33 | Extension manifest (Manifest V3) — permissions, content scripts, service worker |
+| `background.js` | 734 | Service worker — auth, session storage, API calls, group polling engine, heartbeat, content script injection |
+| `content.js` | 1240 | Injected into WhatsApp Web — sidebar UI, DOM detection, group capture, 9-stage auto-poster engine |
+| `popup.html` | 253 | Extension toolbar popup — login/logout/forgot-password UI |
+| `popup.js` | 149 | Popup logic — delegates all auth to background via `chrome.runtime.sendMessage` |
+| `sidebar.css` | — | Sidebar styles — dark theme, overlay positioning, form components |
+| `icon16.png` | — | Toolbar icon (16×16) |
+| `icon48.png` | — | Extension icon (48×48) |
+| `icon128.png` | — | Chrome Web Store icon (128×128) |
 
 ---
 
@@ -47,7 +51,7 @@ The Vanto CRM Chrome Extension injects a CRM sidebar directly into **WhatsApp We
 │  │  MutationObserver│    │  • Contact detection          │     │
 │  │  + polling (1.5s)├───►│  • Form population            │     │
 │  │                  │    │  • Group chat capture          │     │
-│  └──────────────────┘    │  • Auto-poster execution      │     │
+│  └──────────────────┘    │  • 9-stage auto-poster engine │     │
 │                          └──────────┬────────────────────┘     │
 │                                     │ chrome.runtime           │
 │                                     │ .sendMessage()           │
@@ -61,15 +65,26 @@ The Vanto CRM Chrome Extension injects a CRM sidebar directly into **WhatsApp We
 │  │              │  │              │  │ (chrome.alarms 1min) │ │
 │  │ • login      │  │ • save       │  │                      │ │
 │  │ • logout     │  │ • load       │  │ • fetch due posts    │ │
-│  │ • refresh    │  │ • upsert     │  │ • send to content.js │ │
-│  │ • reset pwd  │  │ • load team  │  │ • update status      │ │
-│  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘ │
-│         │                 │                      │              │
-└─────────┼─────────────────┼──────────────────────┼──────────────┘
+│  │ • refresh    │  │ • upsert     │  │ • ensureContentScript│ │
+│  │ • reset pwd  │  │ • load team  │  │ • send to content.js │ │
+│  └──────┬───────┘  └──────┬───────┘  │ • update status      │ │
+│         │                 │          └──────────┬───────────┘ │
+│  ┌──────┴─────────────────┴──────────┐          │              │
+│  │  Heartbeat Engine (1min alarm)    │          │              │
+│  │  • update integration_settings    │          │              │
+│  │  • ping content scripts           │          │              │
+│  └───────────────────────────────────┘          │              │
+│  ┌──────────────────────────────────────────────┘              │
+│  │  Content Script Injection Helper                            │
+│  │  • Pre-flight VANTO_PING                                    │
+│  │  • Programmatic injection fallback                          │
+│  │  • Post-injection verification                              │
+│  └─────────────────────────────────────────────────────────────│
+└────────────────────────────────────────────────────────────────┘
           │                 │                      │
           ▼                 ▼                      ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                    Supabase Backend                              │
+│                    Supabase Backend (Lovable Cloud)              │
 │                                                                  │
 │  Auth API (/auth/v1)     Edge Functions           REST API       │
 │  • token?grant_type=     • upsert-whatsapp-       • contacts     │
@@ -78,6 +93,8 @@ The Vanto CRM Chrome Extension injects a CRM sidebar directly into **WhatsApp We
 │    refresh_token                                     groups       │
 │  • recover                                         • scheduled_   │
 │                                                      group_posts  │
+│                                                    • integration_ │
+│                                                      settings     │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -88,9 +105,9 @@ The Vanto CRM Chrome Extension injects a CRM sidebar directly into **WhatsApp We
 ```json
 {
   "manifest_version": 3,
-  "name": "Vanto CRM — WhatsApp Sidebar",
-  "version": "3.0.0",
-  "permissions": ["storage", "activeTab", "tabs", "alarms"],
+  "name": "Vanto CRM — WhatsApp Sidebar (Lovable)",
+  "version": "6.2.2",
+  "permissions": ["storage", "activeTab", "tabs", "alarms", "scripting"],
   "host_permissions": [
     "https://web.whatsapp.com/*",
     "https://nqyyvqcmcyggvlcswkio.supabase.co/*"
@@ -112,7 +129,8 @@ The Vanto CRM Chrome Extension injects a CRM sidebar directly into **WhatsApp We
 | `storage` | Persist auth session (`chrome.storage.local`) |
 | `activeTab` | Access current tab for content script messaging |
 | `tabs` | Query WhatsApp tabs for auto-poster execution |
-| `alarms` | Schedule 1-minute polling for due group posts |
+| `alarms` | Schedule 1-minute polling for due group posts + heartbeat |
+| `scripting` | Programmatic content script injection fallback |
 
 ---
 
@@ -154,15 +172,51 @@ All communication uses `chrome.runtime.onMessage`. Every handler returns `true` 
 
 ```
 chrome.alarms.create('vanto-group-poll', { periodInMinutes: 1 })
+chrome.alarms.create('vanto-heartbeat', { periodInMinutes: 1 })
 ```
 
 **Poll Cycle (`pollDuePosts`):**
 1. Refresh token if needed
 2. Query `scheduled_group_posts` where `status = 'pending'` AND `scheduled_at <= now()`
 3. For each due post → call `executeGroupPost(post, token)`
-4. Find a WhatsApp Web tab via `chrome.tabs.query`
-5. Send `VANTO_EXECUTE_GROUP_POST` message to content script
-6. On success → PATCH status to `sent`; on failure → PATCH to `failed`
+4. Find WhatsApp Web tab with retry logic (3 attempts, 2s delay between retries)
+5. Ensure content script via `ensureContentScriptInjected()` (pre-flight ping + injection fallback)
+6. Send `VANTO_EXECUTE_GROUP_POST` message to content script with 90s race timeout
+7. On success → PATCH status to `sent`; on failure → PATCH to `failed` with `failure_reason`
+
+### 5.4 Heartbeat Engine
+
+```
+chrome.alarms.create('vanto-heartbeat', { periodInMinutes: 1 })
+```
+
+- Queries for active WhatsApp Web tabs
+- Upserts heartbeat data to `integration_settings` table (key: `chrome_extension_heartbeat`)
+- Heartbeat payload: `{ last_seen: ISO string, whatsapp_ready: boolean }`
+- Pings content scripts on all WhatsApp tabs
+
+### 5.5 Content Script Injection Helper
+
+`ensureContentScriptInjected(tabId)` provides a self-healing communication layer:
+
+1. **Pre-flight ping**: `chrome.tabs.sendMessage(tabId, { type: 'VANTO_PING' })`
+2. If pong received and initialized → content script already active
+3. If pong received but not initialized → send `VANTO_INIT` message
+4. If no response → programmatic injection:
+   - `chrome.scripting.insertCSS({ files: ['sidebar.css'] })`
+   - `chrome.scripting.executeScript({ files: ['content.js'] })`
+   - Wait 2s for initialization
+   - Verify with `VANTO_INIT` + final ping
+
+### 5.6 Proactive Tab Injection
+
+```javascript
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'complete' && tab.url.includes('web.whatsapp.com')) {
+    await ensureContentScriptInjected(tabId);
+  }
+});
+```
 
 ---
 
@@ -171,16 +225,16 @@ chrome.alarms.create('vanto-group-poll', { periodInMinutes: 1 })
 ### 6.1 Initialization Flow
 
 ```
-document.readyState === 'complete'
+document.readyState check
     │
     ▼
-waitForWhatsApp() — polls for #app element (500ms intervals, 60 retries)
+init() — waits for #app + #pane-side (500ms × 30 attempts = 15s max)
     │
     ▼
-injectSidebar() — appends sidebar HTML + toggle button to document.body
+createSidebar() — appends sidebar HTML + toggle button to document.body
     │
     ▼
-wireEvents() — attaches click/keydown handlers
+wireEvents() — attaches click/keydown handlers (with stopPropagation)
     │
     ▼
 checkAuthState() — queries background for session
@@ -221,7 +275,7 @@ Detection uses a **multi-selector priority cascade** with debouncing (600ms):
 **Group Chat Detection:**
 - Check `data-id` for `@g.us` suffix (WhatsApp group identifier)
 - Check URL hash for `@g.us`
-- Check subtitle for comma-separated member names
+- Check DOM for `[data-id*="@g.us"]` indicator
 - On detection → auto-upsert group name to `whatsapp_groups` table
 
 ### 6.3 Change Detection Mechanisms
@@ -230,35 +284,43 @@ Detection uses a **multi-selector priority cascade** with debouncing (600ms):
 |-----------|--------|---------|
 | `setInterval` (1.5s) | — | Fallback polling for missed changes |
 | `MutationObserver` | `<title>` | WhatsApp updates title with chat name |
-| `MutationObserver` | `document.body` | Detect new panels/modals |
-| `MutationObserver` | `#main header` | Detect conversation switches |
+| `MutationObserver` | `document.body` | Detect `#main` and data-id attribute changes |
 
 All triggers feed into `scheduleDetection()` → debounced `runDetection()`.
 
-### 6.4 Auto-Poster Execution Engine
+### 6.4 Auto-Poster Execution Engine (9-Stage Pipeline)
 
-When background sends `VANTO_EXECUTE_GROUP_POST`, the content script:
+When background sends `VANTO_EXECUTE_GROUP_POST`, the content script executes a **9-stage pipeline** with individual timeouts and structured logging:
 
+| # | Stage | Timeout | What It Does |
+|---|-------|---------|-------------|
+| 1 | `open_search` | 10s | Finds search input; clicks search icon if needed |
+| 2 | `search_group` | 15s | Clears input, types group name via `document.execCommand('insertText')`, waits 1.5s for results |
+| 3 | `select_group` | 8s | Matches group: exact title → partial match → first result fallback |
+| 4 | `wait_chat_open` | 12s | Polls for `#main header` to confirm chat loaded |
+| 5 | `find_input` | 10s | Locates message compose box via selector cascade |
+| 6 | `inject_message` | 8s | Focuses input, clears content, injects text via `execCommand` + `InputEvent` dispatch |
+| 7 | `find_send_button` | 10s | Locates send button via selector cascade |
+| 8 | `click_send` | 8s | Clicks send button |
+| 9 | `confirm_sent` | 12s | Verifies input cleared (message left the compose box) |
+
+**Total execution timeout:** 90 seconds (safety net over all stages)
+
+**Stage-Level Logging:**
 ```
-Step A: Open Search
-  └─ findElement(['[data-testid="chat-list-search-input"]', ...])
-  └─ If not found → click search icon → wait 500ms → retry
-
-Step B: Search for Group (1500ms delay)
-  └─ Type group name via document.execCommand('insertText')
-  └─ Wait 1500ms for results
-  └─ Match: exact → partial → listitem fallback
-  └─ Click matched result
-
-Step C: Type Message (1500ms delay)
-  └─ findElement(['[data-testid="conversation-compose-box-input"]', ...])
-  └─ Insert text via execCommand + InputEvent dispatch
-
-Step D: Send (500ms delay)
-  └─ findElement(['[data-testid="send"]', 'button[aria-label="Send"]', ...])
-  └─ Click send button
-  └─ Report success/failure to background
+[EXEC 1] Stage: open_search - START
+[EXEC 1] Stage: open_search - SUCCESS
+[EXEC 1] Stage: search_group - START
+[EXEC 1] Stage: search_group - SUCCESS
+...
+[EXEC 1] COMPLETED SUCCESSFULLY { elapsed: 12345 }
 ```
+
+**On stage failure:**
+- Stage timeout fires → immediately stops execution
+- Returns structured error: `{ success: false, error: "Failed to open search" }`
+- Background writes `failure_reason` to database
+- CRM UI shows exact failed stage
 
 **DOM Selector Fallbacks (per element):**
 
@@ -266,13 +328,9 @@ Step D: Send (500ms delay)
 |---------|-----------------|-----------|
 | Search Input | `[data-testid="chat-list-search-input"]` | `div[contenteditable="true"][data-tab="3"]`, `div[role="textbox"][title="Search input textbox"]` |
 | Search Icon | `[data-testid="chat-list-search"]` | `[data-icon="search"]`, `button[aria-label="Search"]` |
-| Message Input | `[data-testid="conversation-compose-box-input"]` | `div[contenteditable="true"][data-tab="10"]`, `#main footer div[contenteditable="true"]`, `div[role="textbox"][title="Type a message"]` |
-| Send Button | `[data-testid="send"]` | `button[aria-label="Send"]`, `span[data-icon="send"]`, `[data-testid="compose-btn-send"]` |
+| Message Input | `[data-testid="conversation-compose-box-input"]` | `div[contenteditable="true"][data-tab="10"]`, `#main footer div[contenteditable="true"]`, `div[role="textbox"][title="Type a message"]`, `#main footer [contenteditable="true"]` |
+| Send Button | `[data-testid="send"]` | `button[aria-label="Send"]`, `span[data-icon="send"]`, `[data-testid="compose-btn-send"]`, `button[data-tab="11"]` |
 | Clear Search | `[data-testid="x-alt"]` | `[data-icon="x-alt"]`, `[data-testid="search-close"]`, `button[aria-label="Cancel search"]` |
-
-**Error Handling:**
-- If any DOM element is missing → logs `"DOM element missing: <label>"` with tried selectors
-- Reports failure to background via callback → background marks post as `failed`
 
 ---
 
@@ -288,15 +346,14 @@ Step D: Send (500ms delay)
 ├── .vanto-status (success/error/loading banner)
 ├── .vanto-body (scrollable)
 │   ├── #vanto-no-chat (empty state)
-│   └── #vanto-form-body
-│       ├── #vanto-group-banner (shown for group chats)
-│       └── #vanto-form-fields (shown for 1:1 chats)
-│           ├── Contact Info (name, phone, email)
-│           ├── Lead Classification (lead_type, temperature)
-│           ├── Assignment (team member dropdown)
-│           ├── Tags (chip display + input)
-│           ├── Notes (textarea)
-│           └── Save Button
+│   ├── #vanto-group-banner (shown for group chats — Save Group button)
+│   └── #vanto-form-body (shown for 1:1 chats)
+│       ├── Contact Info (name, phone, email)
+│       ├── Lead Classification (lead_type, temperature)
+│       ├── Assignment (team member dropdown)
+│       ├── Tags (comma-separated input)
+│       ├── Notes (textarea)
+│       └── Save Contact Button
 └── .vanto-footer (dashboard link)
 
 #vanto-crm-toggle (fixed, right: 0, center-Y — shown when sidebar hidden)
@@ -382,7 +439,7 @@ background.js → POST /auth/v1/token?grant_type=password
 - **Logout:** Clears session, notifies all WhatsApp tabs
 - **Forgot Password:** Sends reset link via `/auth/v1/recover`
 - **Quick Links:** "Open WhatsApp Web" and "Open Dashboard" buttons
-- **Version Display:** Footer shows `v2.0.0`
+- **Version Display:** Header shows `v6.0.0 — Lovable Edition`
 
 ---
 
@@ -394,6 +451,7 @@ background.js → POST /auth/v1/token?grant_type=password
 | `profiles` | Read | Populate team member assignment dropdown |
 | `whatsapp_groups` | Write | Auto-capture group names on group chat detection |
 | `scheduled_group_posts` | Read/Write | Poll for due posts; update status after execution |
+| `integration_settings` | Write | Store heartbeat data (key: `chrome_extension_heartbeat`) |
 
 ### 9.1 Contact Save Payload
 
@@ -415,106 +473,60 @@ All writes go through `upsert-whatsapp-contact` Edge Function — never direct R
 
 ---
 
-## 10. Security Model
+## 10. Failure Taxonomy
 
-| Layer | Implementation |
-|-------|---------------|
-| **Authentication** | Supabase JWT via `/auth/v1/token` — stored in `chrome.storage.local` |
-| **Token Refresh** | Auto-refresh when `< 300s` remaining; clear on failure |
-| **RLS Enforcement** | All API calls include `Authorization: Bearer <token>` — server-side RLS applies |
-| **No Service Role** | Extension never uses service role key; only anon key + user JWT |
-| **CSP Compliance** | No inline scripts (MV3); all JS externalized |
-| **DOM Isolation** | Sidebar `stopPropagation` on keydown/keyup/keypress/click prevents leaking to WhatsApp |
-| **Session Expiry** | On 401 response → auto-clear session → show auth banner |
-| **Timeout Protection** | All fetch calls use `AbortController` with 15-20s timeouts |
+When a group post execution fails, the `failure_reason` field follows a prefix convention:
 
----
-
-## 11. Event Isolation
-
-The sidebar prevents keyboard events from leaking to WhatsApp:
-
-```javascript
-['keydown', 'keyup', 'keypress', 'click'].forEach(function(evt) {
-  sidebar.addEventListener(evt, function(e) { e.stopPropagation(); });
-});
-```
-
-This ensures typing in sidebar inputs doesn't trigger WhatsApp's search or chat shortcuts.
+| Prefix | Meaning |
+|--------|---------|
+| `[no_tab]` | No WhatsApp Web tab was open |
+| `[no_content_script]` | Content script could not be injected/initialized |
+| `[exec_error]` | Exception during execution (includes message) |
+| `Failed to open search` | Stage 1 timeout |
+| `Group not found: <name>` | Stage 2 — search returned no matching group |
+| `Failed to select group` | Stage 3 timeout |
+| `Message input not found` | Stage 5 timeout |
+| `Failed to inject message` | Stage 6 timeout |
+| `Send button not found` | Stage 7 timeout |
+| `Failed to click send button` | Stage 8 timeout |
+| `Total execution timeout (90s)` | Global safety net exceeded |
 
 ---
 
-## 12. Error Handling Matrix
+## 11. Version History
 
-| Scenario | Detection | Response |
-|----------|-----------|----------|
-| Not authenticated | `!session.token` | Show auth banner; disable save |
-| Token expired | 401 from API | Clear session → `VANTO_TOKEN_CLEARED` → auth banner |
-| Refresh failed | Non-200 from refresh endpoint | Clear session |
-| Network timeout | `AbortController` abort | Show "Network timeout" error |
-| Phone not detected | P0–P3 all fail | Show "Phone not detected" warning; allow manual entry |
-| DOM element missing | `findElement()` returns null | Log selectors tried; report failure to background |
-| Group not found | Search yields no match | Clear search; report failure; mark post as `failed` |
-| Background unreachable | `chrome.runtime.lastError` | Log error; return null to callback |
+| Version | Date | Changes |
+|---------|------|---------|
+| 6.2.2 | 2026-03-16 | Fixed SyntaxError (await in non-async), 9-stage pipeline with individual timeouts, structured error reporting |
+| 6.2.1 | 2026-03-15 | Proactive tab injection via `chrome.tabs.onUpdated`, improved content script initialization |
+| 6.2 | 2026-03-14 | Programmatic content script injection fallback, pre-flight ping |
+| 6.1 | 2026-03-13 | Fixed `failure_reason` column name, retry logic, content script ping check |
+| 6.0 | 2026-03-12 | Heartbeat engine, multi-tab recovery, increased timeouts, stage logging |
+| 5.0 | 2026-03-10 | Initial Lovable Edition — overlay sidebar, group capture, auto-poster |
 
 ---
 
-## 13. Installation
+## 12. Debugging Guide
 
-### Developer Mode
+### Console Log Prefixes
 
-1. Open Chrome → `chrome://extensions`
-2. Enable **Developer mode** (top-right toggle)
-3. Click **Load unpacked**
-4. Select `public/chrome-extension/` folder
-5. Navigate to `https://web.whatsapp.com`
-6. Click the Vanto CRM extension icon → Log in
-7. Sidebar appears on the right side of WhatsApp Web
+| Prefix | Source |
+|--------|--------|
+| `[VANTO BG (Lovable)]` | Background service worker |
+| `[VANTO CS v6.2.2 (Lovable)]` | Content script |
+| `[VANTO CS ERROR]` | Content script errors |
+| `[EXEC N] Stage: <name> - START/SUCCESS` | Auto-poster execution stages |
 
-### Updating
+### Common Issues
 
-1. Make changes to files in `public/chrome-extension/`
-2. Go to `chrome://extensions`
-3. Click the refresh icon on the Vanto CRM extension card
-4. Reload any open WhatsApp Web tabs
-
----
-
-## 14. Known Limitations
-
-| Limitation | Reason | Mitigation |
-|-----------|--------|------------|
-| WhatsApp DOM selectors may break | WhatsApp Web updates without notice | Multiple fallback selectors per element |
-| Cannot send WhatsApp messages | Requires WhatsApp Business API | Extension only captures data; Twilio handles sending |
-| Group post timing ±1 min | `chrome.alarms` minimum interval is 1 minute | Acceptable for scheduled posts |
-| Service worker may sleep | MV3 service worker lifecycle | Alarms wake the worker; session persists in storage |
-| No image posting | `document.execCommand` only handles text | Future: clipboard API for image injection |
-| Extension not published | Requires Chrome Web Store review | Developer mode installation only |
+| Symptom | Check |
+|---------|-------|
+| "Chrome Extension Not Detected" in CRM | Verify extension is loaded, WhatsApp Web is open, heartbeat alarm is firing |
+| Post stuck as `pending` | Check `chrome.alarms` are active; verify token is valid |
+| Post fails with `[no_tab]` | Open WhatsApp Web before scheduled time |
+| Post fails with `[no_content_script]` | Reload WhatsApp Web tab; re-enable extension |
+| Post fails at specific stage | Check console for `[EXEC N]` logs to see which selector failed |
 
 ---
 
-## 15. File Dependencies
-
-```
-manifest.json
-├── background.js (service_worker)
-│   └── Supabase REST API + Auth API
-├── content.js (content_script)
-│   └── background.js (via chrome.runtime.sendMessage)
-├── sidebar.css (content_script CSS)
-├── popup.html (action popup)
-│   └── popup.js (external script)
-└── icon128.png (extension icon)
-```
-
----
-
-## 16. Version History
-
-| Version | Changes |
-|---------|---------|
-| v1.0 | Basic sidebar with local storage |
-| v2.0 | Supabase auth integration, background service worker |
-| v3.0 | Group campaign capture, auto-poster execution engine |
-| v4.0 | Password reset, team member assignment, polling engine |
-| v5.0 | Multi-selector DOM fallbacks, robust error reporting, MutationObserver improvements |
+*End of Chrome Extension Specification*
