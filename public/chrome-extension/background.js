@@ -1,5 +1,6 @@
-// Vanto CRM Chrome Extension - Background Service Worker v6.1.0
+// Vanto CRM Chrome Extension - Background Service Worker v6.2.0
 // LOVABLE EDITION - Uses OLD Supabase
+// v6.2: Added programmatic content script injection fallback
 // v6.1: Fixed failure_reason column, added retry logic, content script ping check
 
 // =====================================================
@@ -330,6 +331,49 @@ async function handleUpsertGroup(groupName, token) {
 }
 
 // =====================================================
+// CONTENT SCRIPT INJECTION HELPER
+// =====================================================
+async function ensureContentScriptInjected(tabId) {
+  // First, try to ping the content script
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, { type: 'VANTO_PING' });
+    if (response && response.pong) {
+      log('Content script already active on tab:', tabId);
+      return true;
+    }
+  } catch (e) {
+    log('Content script not responding, will inject programmatically');
+  }
+
+  // Content script not loaded - inject it programmatically
+  try {
+    // First inject CSS
+    await chrome.scripting.insertCSS({
+      target: { tabId: tabId },
+      files: ['sidebar.css']
+    });
+    log('CSS injected');
+
+    // Then inject JS
+    await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      files: ['content.js']
+    });
+    log('Content script injected programmatically');
+
+    // Wait a moment for initialization
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Verify injection worked
+    const verifyResponse = await chrome.tabs.sendMessage(tabId, { type: 'VANTO_PING' });
+    return verifyResponse && verifyResponse.pong;
+  } catch (injectError) {
+    logError('Failed to inject content script:', injectError);
+    return false;
+  }
+}
+
+// =====================================================
 // GROUP POLLING ENGINE
 // =====================================================
 chrome.alarms.create('vanto-group-poll', { periodInMinutes: 1 });
@@ -478,20 +522,14 @@ async function executeGroupPost(post, token) {
   await updatePostStatus(post.id, 'executing', null, token);
 
   try {
-    // First, verify content script is ready by pinging it
-    try {
-      const pingResponse = await Promise.race([
-        chrome.tabs.sendMessage(tab.id, { type: 'VANTO_PING' }),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Content script not responding')), 3000)
-        )
-      ]);
-      log('Content script ping response:', pingResponse);
-    } catch (pingError) {
-      logError('Content script not ready:', pingError);
-      await updatePostStatus(post.id, 'failed', '[no_content_script] WhatsApp page not ready. Please refresh WhatsApp Web and try again.', token);
+    // Ensure content script is injected (with programmatic fallback)
+    const scriptReady = await ensureContentScriptInjected(tab.id);
+    if (!scriptReady) {
+      logError('Content script injection failed after all attempts');
+      await updatePostStatus(post.id, 'failed', '[no_content_script] Could not initialize extension on WhatsApp page. Please refresh WhatsApp Web and reload the extension.', token);
       return;
     }
+    log('Content script verified ready');
 
     // Send execution message with longer timeout (content script has its own 90s timeout)
     const response = await Promise.race([
