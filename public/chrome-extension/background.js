@@ -1,5 +1,6 @@
-// Vanto CRM Chrome Extension - Background Service Worker v6.2.1
-// LOVABLE EDITION - Uses OLD Supabase
+// Vanto CRM Chrome Extension - Background Service Worker v6.2.3
+// LOVABLE EDITION - Uses chat.onlinecourseformlm.com
+// v6.2.3: Fixed RLS policy violation in handleUpsertGroup - now includes user_id from JWT token
 // v6.2.1: Improved content script initialization with proactive tab injection
 // v6.2: Added programmatic content script injection fallback
 // v6.1: Fixed failure_reason column, added retry logic, content script ping check
@@ -301,33 +302,95 @@ async function handleLoadTeamMembers(token) {
 }
 
 // =====================================================
+// JWT HELPER - Extract user ID from token
+// =====================================================
+function getUserIdFromToken(token) {
+  try {
+    // JWT tokens have 3 parts: header.payload.signature
+    const parts = token.split('.');
+    if (parts.length !== 3) {
+      logError('Invalid JWT token format');
+      return null;
+    }
+    // Decode the payload (middle part)
+    const payload = JSON.parse(atob(parts[1]));
+    // The user ID is in the 'sub' claim
+    return payload.sub || null;
+  } catch (error) {
+    logError('Failed to decode JWT token', error);
+    return null;
+  }
+}
+
+// =====================================================
 // GROUP UPSERT
 // =====================================================
-async function handleUpsertGroup(groupName, token) {
-  log('Upserting group:', groupName);
+async function handleUpsertGroup(groupName, token, groupJid = null) {
+  log('Upserting group:', groupName, 'with JID:', groupJid);
+  
+  // Validate token exists
+  if (!token) {
+    logError('Upsert group failed: No authentication token provided');
+    return { success: false, error: '[auth_missing] No authentication token. Please log in again.' };
+  }
+  
+  // Extract user ID from JWT token
+  const userId = getUserIdFromToken(token);
+  if (!userId) {
+    logError('Upsert group failed: Could not extract user ID from token');
+    return { success: false, error: '[auth_invalid] Invalid session. Please log in again.' };
+  }
+  
+  log('Extracted user ID from token:', userId);
+  
   try {
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_groups`, {
+    // Build payload with user_id to satisfy RLS policy: auth.uid() = user_id
+    const payload = {
+      group_name: groupName,
+      user_id: userId
+    };
+    
+    // Include group_jid if provided (for stable WhatsApp group identifier)
+    if (groupJid) {
+      payload.group_jid = groupJid;
+    }
+    
+    log('Sending group upsert payload:', payload);
+    
+    const response = await fetch(`${SUPABASE_URL}/rest/v1/whatsapp_groups?on_conflict=user_id,group_name`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${token}`,
         'apikey': SUPABASE_ANON_KEY,
-        'Prefer': 'resolution=merge-duplicates'
+        'Prefer': 'resolution=merge-duplicates,return=minimal'
       },
-      body: JSON.stringify({ group_name: groupName })
+      body: JSON.stringify(payload)
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      logError('Upsert group failed', error);
-      return { success: false, error };
+      const errorText = await response.text();
+      let errorMsg = errorText;
+      
+      // Parse structured error for better user feedback
+      try {
+        const errorJson = JSON.parse(errorText);
+        if (errorJson.code === '42501') {
+          errorMsg = `[rls_violation] Row-level security policy violation. Ensure you are logged in.`;
+        }
+      } catch (e) {
+        // Keep original error text
+      }
+      
+      logError('Upsert group failed:', errorText);
+      return { success: false, error: errorMsg };
     }
 
-    log('Group upserted successfully');
+    log('Group upserted successfully for user:', userId);
     return { success: true };
   } catch (error) {
-    logError('Upsert group error', error);
-    return { success: false, error: error.message };
+    logError('Upsert group error:', error);
+    return { success: false, error: `[network_error] ${error.message}` };
   }
 }
 
@@ -683,9 +746,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'VANTO_UPSERT_GROUP':
         const groupToken = await refreshTokenIfNeeded();
         if (!groupToken) {
-          result = { success: false, error: 'Not authenticated' };
+          result = { success: false, error: '[no_session] Not authenticated. Please log in to save groups.' };
         } else {
-          result = await handleUpsertGroup(message.groupName, groupToken);
+          result = await handleUpsertGroup(message.groupName, groupToken, message.groupJid || null);
         }
         break;
 
