@@ -1,6 +1,6 @@
-// Vanto CRM Chrome Extension - Content Script v6.2.4
+// Vanto CRM Chrome Extension - Content Script v6.2.5
 // LOVABLE EDITION - Uses chat.onlinecourseformlm.com
-// v6.2.4: Fixed group name extraction - added 255 char limit, prioritize title attribute
+// v6.2.5: Fixed select_group stage - relaxed text matching for pipe symbols, better search result selectors
 
 (function() {
   'use strict';
@@ -8,7 +8,7 @@
   // =====================================================
   // CONFIGURATION - LOVABLE EDITION
   // =====================================================
-  const VERSION = '6.2.4 (Lovable)';
+  const VERSION = '6.2.5 (Lovable)';
   const DASHBOARD_URL = 'https://chat.onlinecourseformlm.com';
   const DETECTION_DEBOUNCE_MS = 600;
   const POLLING_INTERVAL_MS = 1500;
@@ -140,8 +140,29 @@
       'button[aria-label="Cancel search"]'
     ],
 
-    // Chat list items
+    // Chat list items (general sidebar)
     chatListItems: '#pane-side [role="listitem"]',
+    
+    // Search results container and items (for select_group stage)
+    searchResultsContainer: [
+      'div[aria-label="Search results"]',
+      'div[data-testid="search-results"]',
+      '#pane-side div[role="listbox"]',
+      '#search-results'
+    ],
+    searchResultItems: [
+      'div[aria-label="Search results"] [role="listitem"]',
+      'div[aria-label="Search results"] > div > div',
+      '#pane-side [role="listbox"] [role="listitem"]',
+      'div[aria-label*="result"] [role="listitem"]'
+    ],
+    // Chat title within search results
+    chatTitleSpan: [
+      'div[data-testid="cell-frame-title"] span[title]',
+      'span[dir="auto"][title]',
+      'span[title]',
+      '[data-testid="cell-frame-title"]'
+    ],
     groupIndicator: '[data-id*="@g.us"]'
   };
 
@@ -188,8 +209,61 @@
   }
 
   // =====================================================
-  // TEXT SANITIZATION
+  // TEXT NORMALIZATION & SANITIZATION
   // =====================================================
+  /**
+   * Normalizes text for comparison by removing special characters,
+   * zero-width chars, and collapsing multiple spaces.
+   * This helps match group names like "APLGO | Health and Biz" against
+   * DOM text that might render differently.
+   * 
+   * @param {string} text - The text to normalize
+   * @returns {string} - Normalized text for comparison
+   */
+  function normalizeText(text) {
+    if (!text) return '';
+    return text
+      // Remove zero-width characters
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      // Replace multiple spaces/tabs with single space
+      .replace(/\s+/g, ' ')
+      // Remove common decorative separators (pipe, dash) with spaces around them
+      .replace(/\s*\|\s*/g, ' ')
+      .replace(/\s*-\s*/g, ' ')
+      // Remove parentheses and brackets content (emoji indicators etc)
+      .replace(/[\[\](){}]/g, '')
+      // Final trim and lowercase
+      .trim()
+      .toLowerCase();
+  }
+
+  /**
+   * Checks if normalized target text matches normalized DOM text.
+   * Uses both exact match and word-based partial matching.
+   * 
+   * @param {string} targetName - The group name we're looking for
+   * @param {string} domText - The text from DOM element
+   * @returns {object} - { exact: boolean, partial: boolean, score: number }
+   */
+  function matchGroupNames(targetName, domText) {
+    const normalizedTarget = normalizeText(targetName);
+    const normalizedDom = normalizeText(domText);
+    
+    // Exact match after normalization
+    const exact = normalizedTarget === normalizedDom;
+    
+    // Partial match - one contains the other
+    const partial = normalizedTarget.includes(normalizedDom) || normalizedDom.includes(normalizedTarget);
+    
+    // Word-based matching - count how many significant words match
+    const targetWords = normalizedTarget.split(/\s+/).filter(w => w.length > 1);
+    const domWords = normalizedDom.split(/\s+/).filter(w => w.length > 1);
+    const matchingWords = targetWords.filter(w => domWords.includes(w)).length;
+    const score = targetWords.length > 0 ? matchingWords / targetWords.length : 0;
+    
+    return { exact, partial, score };
+  }
+
   /**
    * Sanitizes extracted text to prevent database index overflow.
    * PostgreSQL B-tree index has a max size of ~2704 bytes.
@@ -997,53 +1071,155 @@
   async function selectGroup(groupName) {
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
-        logError('select_group timeout');
+        logError('select_group timeout - no clickable search result found');
         resolve(false);
       }, STAGE_TIMEOUTS.select_group);
 
       (async () => {
-        // Find chat list items
-        const chatItems = document.querySelectorAll(SELECTORS.chatListItems);
-        log(`Found ${chatItems.length} chat items`);
-
-        let foundItem = null;
-
-        // Try exact match first
-        for (const item of chatItems) {
-          const titleEl = item.querySelector('[title]');
-          if (titleEl && titleEl.getAttribute('title') === groupName) {
-            foundItem = item;
-            log('Found exact match for group');
-            break;
-          }
-        }
-
-        // Try partial match
-        if (!foundItem) {
-          for (const item of chatItems) {
-            const titleEl = item.querySelector('[title]');
-            const title = titleEl?.getAttribute('title') || titleEl?.textContent || '';
-            if (title.includes(groupName) || groupName.includes(title)) {
-              foundItem = item;
-              log('Found partial match for group:', title);
+        log(`select_group: Looking for "${groupName}"`);
+        
+        // Wait a moment for search results to render
+        await sleep(500);
+        
+        // STEP 1: Try to find search results using multiple selector strategies
+        let resultItems = [];
+        
+        // Try search result-specific selectors first
+        for (const selector of SELECTORS.searchResultItems) {
+          try {
+            const items = document.querySelectorAll(selector);
+            if (items.length > 0) {
+              log(`select_group: Found ${items.length} results with selector: ${selector}`);
+              resultItems = Array.from(items);
               break;
             }
+          } catch (e) {
+            logError(`Invalid selector: ${selector}`, e);
           }
         }
-
-        // Just click first result
-        if (!foundItem && chatItems.length > 0) {
-          foundItem = chatItems[0];
-          log('Using first available chat item');
+        
+        // Fallback to general chat list items
+        if (resultItems.length === 0) {
+          const generalItems = document.querySelectorAll(SELECTORS.chatListItems);
+          if (generalItems.length > 0) {
+            log(`select_group: Falling back to ${generalItems.length} general chat items`);
+            resultItems = Array.from(generalItems);
+          }
         }
-
+        
+        log(`select_group: Total ${resultItems.length} items to search`);
+        
+        if (resultItems.length === 0) {
+          clearTimeout(timeout);
+          logError('select_group: No search results found at all');
+          resolve(false);
+          return;
+        }
+        
+        // STEP 2: Try to find best match
+        let bestMatch = null;
+        let bestScore = 0;
+        let exactMatch = null;
+        
+        for (const item of resultItems) {
+          // Try multiple ways to get the title/name from the item
+          let title = '';
+          
+          // Method 1: title attribute on the item itself
+          title = item.getAttribute('title') || '';
+          
+          // Method 2: Look for title span inside
+          if (!title) {
+            for (const titleSelector of SELECTORS.chatTitleSpan) {
+              const titleEl = item.querySelector(titleSelector);
+              if (titleEl) {
+                title = titleEl.getAttribute('title') || titleEl.textContent || '';
+                if (title) break;
+              }
+            }
+          }
+          
+          // Method 3: Any element with title attribute inside
+          if (!title) {
+            const titleEl = item.querySelector('[title]');
+            if (titleEl) {
+              title = titleEl.getAttribute('title') || '';
+            }
+          }
+          
+          // Method 4: textContent fallback (be careful with this)
+          if (!title) {
+            const textContent = item.textContent || '';
+            // Only use if it's reasonably short (likely a name, not full message preview)
+            const firstLine = textContent.split('\n')[0];
+            if (firstLine && firstLine.length < 100) {
+              title = firstLine.trim();
+            }
+          }
+          
+          if (!title) continue;
+          
+          // STEP 2A: Check for exact match (after normalization)
+          const match = matchGroupNames(groupName, title);
+          
+          if (match.exact) {
+            exactMatch = item;
+            log(`select_group: EXACT match found: "${title}"`);
+            break;
+          }
+          
+          // STEP 2B: Track best partial match
+          if (match.score > bestScore) {
+            bestScore = match.score;
+            bestMatch = item;
+            log(`select_group: Partial match candidate: "${title}" (score: ${match.score.toFixed(2)})`);
+          }
+        }
+        
+        // STEP 3: Click the match
+        let foundItem = exactMatch || bestMatch;
+        
+        // STEP 3C: First result fallback (after 3 seconds of searching)
+        // If we haven't found a good match after searching, use the first result
+        // This is safe because Stage 2 (search_group) already filtered the list
+        if (!foundItem && resultItems.length > 0) {
+          // Check if the first item is a reasonable candidate
+          const firstItem = resultItems[0];
+          const firstItemClickable = firstItem && (
+            firstItem.getAttribute('role') === 'listitem' ||
+            firstItem.querySelector('[role="listitem"]') ||
+            firstItem.hasAttribute('data-id') ||
+            firstItem.querySelector('[data-id]')
+          );
+          
+          if (firstItemClickable) {
+            foundItem = firstItem;
+            log('select_group: Using first result fallback (search already filtered list)');
+          }
+        }
+        
         if (foundItem) {
-          foundItem.click();
+          // Try to find the actual clickable element
+          let clickTarget = foundItem;
+          
+          // Some WhatsApp versions require clicking a specific child
+          const clickableChild = foundItem.querySelector('[role="button"]') || 
+                                 foundItem.querySelector('[data-testid="cell-frame-container"]');
+          if (clickableChild) {
+            clickTarget = clickableChild;
+          }
+          
+          log(`select_group: Clicking on result`);
+          clickTarget.click();
           await sleep(500);
+          
+          clearTimeout(timeout);
+          resolve(true);
+        } else {
+          logError('select_group: No suitable match found in search results');
+          clearTimeout(timeout);
+          resolve(false);
         }
-
-        clearTimeout(timeout);
-        resolve(!!foundItem);
       })();
     });
   }
