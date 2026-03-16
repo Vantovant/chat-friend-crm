@@ -1,6 +1,6 @@
-// Vanto CRM Chrome Extension - Content Script v6.2.1
+// Vanto CRM Chrome Extension - Content Script v6.2.2
 // LOVABLE EDITION - Uses chat.onlinecourseformlm.com
-// v6.2.1: Improved initialization with visible console logging
+// v6.2.2: Fixed SyntaxError - await was used in non-async function
 
 (function() {
   'use strict';
@@ -8,7 +8,7 @@
   // =====================================================
   // CONFIGURATION - LOVABLE EDITION
   // =====================================================
-  const VERSION = '6.2.1 (Lovable)';
+  const VERSION = '6.2.2 (Lovable)';
   const DASHBOARD_URL = 'https://chat.onlinecourseformlm.com';
   const DETECTION_DEBOUNCE_MS = 600;
   const POLLING_INTERVAL_MS = 1500;
@@ -36,7 +36,7 @@
 
   function log(message, data = null) {
     const timestamp = new Date().toISOString();
-    const prefix = `[VANTO CS (Lovable) v${VERSION} ${timestamp}]`;
+    const prefix = `[VANTO CS v${VERSION} ${timestamp}]`;
     if (data) {
       console.log(prefix, message, data);
     } else {
@@ -52,7 +52,7 @@
 
   function logError(message, error = null) {
     const timestamp = new Date().toISOString();
-    const prefix = `[VANTO CS ERROR (Lovable) ${timestamp}]`;
+    const prefix = `[VANTO CS ERROR ${timestamp}]`;
     if (error) {
       console.error(prefix, message, error);
     } else {
@@ -1104,53 +1104,56 @@
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     log('Received message:', message.type);
 
-    switch (message.type) {
-      case 'VANTO_SESSION_UPDATE':
-        session.token = message.token;
-        session.email = message.email;
-        loadTeamMembers();
-        updateUI();
-        sendResponse({ success: true });
-        break;
+    // Handle async operations properly
+    (async () => {
+      switch (message.type) {
+        case 'VANTO_SESSION_UPDATE':
+          session.token = message.token;
+          session.email = message.email;
+          await loadTeamMembers();
+          updateUI();
+          sendResponse({ success: true });
+          break;
 
-      case 'VANTO_TOKEN_CLEARED':
-        session = { token: null, email: null };
-        updateUI();
-        sendResponse({ success: true });
-        break;
+        case 'VANTO_TOKEN_CLEARED':
+          session = { token: null, email: null };
+          updateUI();
+          sendResponse({ success: true });
+          break;
 
-      case 'VANTO_PING':
-        log('Received heartbeat ping');
-        sendResponse({ success: true, pong: true, initialized: isInitialized });
-        break;
+        case 'VANTO_PING':
+          log('Received heartbeat ping');
+          sendResponse({ success: true, pong: true, initialized: isInitialized });
+          break;
 
-      case 'VANTO_INIT':
-        log('Received manual init request');
-        const initResult = await init();
-        sendResponse({ success: initResult, initialized: isInitialized });
-        break;
+        case 'VANTO_INIT':
+          log('Received manual init request');
+          const initResult = await init();
+          sendResponse({ success: initResult, initialized: isInitialized });
+          break;
 
-      case 'VANTO_EXECUTE_GROUP_POST':
-        if (message.post) {
-          log('Starting group post execution, will wait for completion...');
-          // CRITICAL FIX: Actually await the execution and return the real result
-          try {
-            const result = await executeGroupPost(message.post);
-            log('Execution completed, sending result:', result);
-            sendResponse(result);
-          } catch (error) {
-            logError('Execution error:', error);
-            sendResponse({ success: false, error: error.message });
+        case 'VANTO_EXECUTE_GROUP_POST':
+          if (message.post) {
+            log('Starting group post execution, will wait for completion...');
+            try {
+              const result = await executeGroupPost(message.post);
+              log('Execution completed, sending result:', result);
+              sendResponse(result);
+            } catch (error) {
+              logError('Execution error:', error);
+              sendResponse({ success: false, error: error.message });
+            }
+          } else {
+            sendResponse({ success: false, error: 'No post data' });
           }
-        } else {
-          sendResponse({ success: false, error: 'No post data' });
-        }
-        break;
+          break;
 
-      default:
-        sendResponse({ success: false, error: 'Unknown message type' });
-    }
+        default:
+          sendResponse({ success: false, error: 'Unknown message type' });
+      }
+    })();
 
+    // Return true to indicate async response
     return true;
   });
 
