@@ -352,31 +352,28 @@ async function sendHeartbeat() {
     const tabs = await chrome.tabs.query({ url: 'https://web.whatsapp.com/*' });
     const hasWhatsAppTab = tabs.length > 0;
 
-    // Send heartbeat to database for "last seen" tracking
+    // Send heartbeat to extension_heartbeats table (upsert)
     try {
-      const response = await fetch(`${SUPABASE_URL}/rest/v1/webhook_events`, {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/extension_heartbeats?on_conflict=user_id`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.token}`,
           'apikey': SUPABASE_ANON_KEY,
-          'Prefer': 'return=minimal'
+          'Prefer': 'resolution=merge-duplicates,return=minimal'
         },
         body: JSON.stringify({
-          source: 'chrome_extension',
-          action: 'heartbeat',
-          payload: {
-            whatsapp_tab_open: hasWhatsAppTab,
-            timestamp: new Date().toISOString()
-          },
-          status: 'received'
+          user_id: session.email, // This will be replaced by auth.uid() on server
+          whatsapp_tab_open: hasWhatsAppTab,
+          extension_version: '6.0.0'
         })
       });
 
       if (response.ok) {
-        log('Heartbeat recorded to database');
+        log('Heartbeat recorded to extension_heartbeats table');
       } else {
-        logError('Failed to record heartbeat to database');
+        const errorText = await response.text();
+        logError('Failed to record heartbeat:', errorText);
       }
     } catch (e) {
       logError('Heartbeat database error:', e);
