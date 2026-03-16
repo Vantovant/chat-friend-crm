@@ -350,6 +350,39 @@ async function sendHeartbeat() {
   try {
     // Find WhatsApp tabs
     const tabs = await chrome.tabs.query({ url: 'https://web.whatsapp.com/*' });
+    const hasWhatsAppTab = tabs.length > 0;
+
+    // Send heartbeat to database for "last seen" tracking
+    try {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/webhook_events`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.token}`,
+          'apikey': SUPABASE_ANON_KEY,
+          'Prefer': 'return=minimal'
+        },
+        body: JSON.stringify({
+          source: 'chrome_extension',
+          action: 'heartbeat',
+          payload: {
+            whatsapp_tab_open: hasWhatsAppTab,
+            timestamp: new Date().toISOString()
+          },
+          status: 'received'
+        })
+      });
+
+      if (response.ok) {
+        log('Heartbeat recorded to database');
+      } else {
+        logError('Failed to record heartbeat to database');
+      }
+    } catch (e) {
+      logError('Heartbeat database error:', e);
+    }
+
+    // Ping content scripts
     for (const tab of tabs) {
       try {
         await chrome.tabs.sendMessage(tab.id, { type: 'VANTO_PING' });
