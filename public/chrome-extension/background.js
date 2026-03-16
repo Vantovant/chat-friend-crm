@@ -8,7 +8,7 @@
 const SUPABASE_URL = 'https://nqyyvqcmcyggvlcswkio.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5xeXl2cWNtY3lnZ3ZsY3N3a2lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1NDYxMjYsImV4cCI6MjA4NzEyMjEyNn0.oK04GkXogHo9pohYd4A7XAV0-Q-qSu-uUiGWaj4ClM8';
 const EXECUTION_TIMEOUT = 90000; // 90 seconds (increased from 45s)
-const DASHBOARD_URL = 'https://crm.onlinecourseformlm.com';
+const DASHBOARD_URL = 'https://chat.onlinecourseformlm.com';
 
 // =====================================================
 // LOGGING UTILITY

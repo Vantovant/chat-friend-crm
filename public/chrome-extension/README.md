@@ -4,7 +4,7 @@
 
 | Setting | Value |
 |---------|-------|
-| **Dashboard** | https://crm.onlinecourseformlm.com |
+| **Dashboard** | https://chat.onlinecourseformlm.com |
 | **Supabase** | https://nqyyvqcmcyggvlcswkio.supabase.co (OLD) |
 | **Anon Key** | YOUR_OLD_SUPABASE_ANON_KEY_HERE |
 
@@ -67,5 +67,5 @@ Open Chrome DevTools (F12) → Console tab and look for:
 
 ## Support
 
-- Dashboard: https://crm.onlinecourseformlm.com
+- Dashboard: https://chat.onlinecourseformlm.com
 - Lovable App: https://chat-friend-crm.lovable.app

@@ -1,5 +1,5 @@
 // Vanto CRM Chrome Extension - Content Script v6.0
-// LOVABLE EDITION - Uses crm.onlinecourseformlm.com
+// LOVABLE EDITION - Uses chat.onlinecourseformlm.com
 // Enhanced with microstage tracing, stage timeouts, and detailed logging
 
 (function() {
@@ -9,7 +9,7 @@
   // CONFIGURATION - LOVABLE EDITION
   // =====================================================
   const VERSION = '6.0.0 (Lovable)';
-  const DASHBOARD_URL = 'https://crm.onlinecourseformlm.com';
+  const DASHBOARD_URL = 'https://chat.onlinecourseformlm.com';
   const DETECTION_DEBOUNCE_MS = 600;
   const POLLING_INTERVAL_MS = 1500;
 
