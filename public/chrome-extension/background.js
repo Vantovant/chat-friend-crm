@@ -1,6 +1,6 @@
-// Vanto CRM Chrome Extension - Background Service Worker v6.0
+// Vanto CRM Chrome Extension - Background Service Worker v6.1.0
 // LOVABLE EDITION - Uses OLD Supabase
-// Updated with enhanced logging and 90s timeout
+// v6.1: Fixed failure_reason column, added retry logic, content script ping check
 
 // =====================================================
 // CONFIGURATION - UPDATE ANON KEY BELOW
@@ -437,11 +437,38 @@ async function pollDuePosts() {
 async function executeGroupPost(post, token) {
   log('Executing post:', post.id, 'to group:', post.target_group_name);
 
-  // Find WhatsApp tabs
-  const tabs = await chrome.tabs.query({ url: 'https://web.whatsapp.com/*' });
+  // Find WhatsApp tabs with retry logic
+  let tabs = [];
+  const maxRetries = 3;
+  const retryDelay = 2000; // 2 seconds between retries
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    log(`Tab detection attempt ${attempt}/${maxRetries}`);
+    tabs = await chrome.tabs.query({ url: 'https://web.whatsapp.com/*' });
+    
+    if (tabs.length > 0) {
+      log('WhatsApp tab found:', tabs[0].id, tabs[0].title);
+      break;
+    }
+    
+    // Also try without trailing slash
+    if (tabs.length === 0) {
+      tabs = await chrome.tabs.query({ url: 'https://web.whatsapp.com/' });
+      if (tabs.length > 0) {
+        log('WhatsApp tab found (alternate URL):', tabs[0].id);
+        break;
+      }
+    }
+    
+    if (attempt < maxRetries) {
+      log(`No tabs found, waiting ${retryDelay}ms before retry...`);
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
+    }
+  }
+
   if (tabs.length === 0) {
-    logError('No WhatsApp tabs found');
-    await updatePostStatus(post.id, 'failed', 'No WhatsApp tab open', token);
+    logError('No WhatsApp tabs found after all retries');
+    await updatePostStatus(post.id, 'failed', '[no_tab] No WhatsApp Web tab open. Please open web.whatsapp.com and keep it active.', token);
     return;
   }
 
@@ -451,7 +478,22 @@ async function executeGroupPost(post, token) {
   await updatePostStatus(post.id, 'executing', null, token);
 
   try {
-    // Send execution message with timeout
+    // First, verify content script is ready by pinging it
+    try {
+      const pingResponse = await Promise.race([
+        chrome.tabs.sendMessage(tab.id, { type: 'VANTO_PING' }),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Content script not responding')), 3000)
+        )
+      ]);
+      log('Content script ping response:', pingResponse);
+    } catch (pingError) {
+      logError('Content script not ready:', pingError);
+      await updatePostStatus(post.id, 'failed', '[no_content_script] WhatsApp page not ready. Please refresh WhatsApp Web and try again.', token);
+      return;
+    }
+
+    // Send execution message with longer timeout (content script has its own 90s timeout)
     const response = await Promise.race([
       chrome.tabs.sendMessage(tab.id, {
         type: 'VANTO_EXECUTE_GROUP_POST',
@@ -462,7 +504,7 @@ async function executeGroupPost(post, token) {
         }
       }),
       new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Tab message timeout')), 5000)
+        setTimeout(() => reject(new Error('Execution timeout - no response from content script')), EXECUTION_TIMEOUT)
       )
     ]);
 
@@ -472,13 +514,13 @@ async function executeGroupPost(post, token) {
       await updatePostStatus(post.id, 'sent', null, token);
       log('Post sent successfully:', post.id);
     } else {
-      const errorMsg = response?.error || 'Unknown error';
+      const errorMsg = response?.error || 'Unknown error from content script';
       await updatePostStatus(post.id, 'failed', errorMsg, token);
       logError('Post failed:', errorMsg);
     }
   } catch (error) {
     logError('Execute post error', error);
-    await updatePostStatus(post.id, 'failed', error.message, token);
+    await updatePostStatus(post.id, 'failed', `[exec_error] ${error.message}`, token);
   }
 }
 
@@ -487,8 +529,10 @@ async function updatePostStatus(postId, status, errorMessage, token) {
   try {
     const updateData = { status };
     if (errorMessage) {
-      updateData.error_message = errorMessage;
+      updateData.failure_reason = errorMessage; // Fixed: was error_message, DB uses failure_reason
     }
+    updateData.last_attempt_at = new Date().toISOString();
+    updateData.attempt_count = 1; // Increment on each attempt
 
     const response = await fetch(
       `${SUPABASE_URL}/rest/v1/scheduled_group_posts?id=eq.${postId}`,
