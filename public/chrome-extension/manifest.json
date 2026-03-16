@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Vanto CRM — WhatsApp Sidebar (Lovable)",
-  "version": "6.2.3",
-  "description": "AI-powered CRM sidebar for WhatsApp Web with Group Campaigns auto-posting - Lovable Edition v6.2.3 - Fixed RLS policy violation in group upsert",
+  "version": "6.2.4",
+  "description": "AI-powered CRM sidebar for WhatsApp Web with Group Campaigns auto-posting - Lovable Edition v6.2.4 - Fixed group name extraction 255 char limit",
   "permissions": ["storage", "activeTab", "tabs", "alarms", "scripting"],
   "host_permissions": [
     "https://web.whatsapp.com/*",

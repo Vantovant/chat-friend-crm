@@ -1,6 +1,6 @@
-// Vanto CRM Chrome Extension - Content Script v6.2.2
+// Vanto CRM Chrome Extension - Content Script v6.2.4
 // LOVABLE EDITION - Uses chat.onlinecourseformlm.com
-// v6.2.2: Fixed SyntaxError - await was used in non-async function
+// v6.2.4: Fixed group name extraction - added 255 char limit, prioritize title attribute
 
 (function() {
   'use strict';
@@ -8,7 +8,7 @@
   // =====================================================
   // CONFIGURATION - LOVABLE EDITION
   // =====================================================
-  const VERSION = '6.2.2 (Lovable)';
+  const VERSION = '6.2.4 (Lovable)';
   const DASHBOARD_URL = 'https://chat.onlinecourseformlm.com';
   const DETECTION_DEBOUNCE_MS = 600;
   const POLLING_INTERVAL_MS = 1500;
@@ -28,6 +28,9 @@
 
   // Total execution timeout
   const TOTAL_EXECUTION_TIMEOUT = 90000; // 90 seconds
+
+  // Maximum allowed characters for group/contact names (PostgreSQL B-tree index limit)
+  const MAX_NAME_LENGTH = 255;
 
   // =====================================================
   // LOGGING UTILITY
@@ -185,17 +188,82 @@
   }
 
   // =====================================================
+  // TEXT SANITIZATION
+  // =====================================================
+  /**
+   * Sanitizes extracted text to prevent database index overflow.
+   * PostgreSQL B-tree index has a max size of ~2704 bytes.
+   * We limit to 255 chars to stay well under the limit.
+   * 
+   * @param {string} text - The raw extracted text
+   * @param {string} context - Context for logging (e.g., 'group name', 'contact name')
+   * @returns {string|null} - Sanitized text or null if invalid
+   */
+  function sanitizeExtractedText(text, context = 'text') {
+    if (!text) return null;
+    
+    const trimmed = text.trim();
+    
+    // Check for excessive length - indicates DOM selector grabbed junk
+    if (trimmed.length > MAX_NAME_LENGTH) {
+      logError(`${context} extraction grabbed too much text (${trimmed.length} chars). First 100 chars:`, trimmed.substring(0, 100));
+      console.error(`%c[VANTO CS ERROR] ${context} extraction grabbed too much text (${trimmed.length} chars). DOM selector may need updating.`, 'background: #ff6b6b; color: #fff; padding: 4px 8px;');
+      return null;
+    }
+    
+    // Check for suspicious patterns that indicate junk data
+    // Multiple newlines or excessive whitespace often indicates innerText of large containers
+    const newlineCount = (trimmed.match(/\n/g) || []).length;
+    if (newlineCount > 3) {
+      logError(`${context} contains ${newlineCount} newlines - likely grabbed container innerText. Aborting.`);
+      return null;
+    }
+    
+    // Final safe trim
+    return trimmed.substring(0, MAX_NAME_LENGTH).trim();
+  }
+
+  // =====================================================
   // DETECTION FUNCTIONS
   // =====================================================
   function detectContactName() {
     for (const selector of SELECTORS.contactName) {
       try {
         const el = document.querySelector(selector);
-        if (el && el.textContent) {
-          return el.textContent.trim();
+        if (!el) continue;
+        
+        // PRIORITY 1: Use 'title' attribute (most reliable, always short)
+        // WhatsApp uses title attributes for display names which are clean and concise
+        const titleAttr = el.getAttribute ? el.getAttribute('title') : null;
+        if (titleAttr && titleAttr.trim()) {
+          const sanitized = sanitizeExtractedText(titleAttr, 'Contact name (title attr)');
+          if (sanitized) {
+            log('Contact name from title attribute:', sanitized);
+            return sanitized;
+          }
+        }
+        
+        // PRIORITY 2: Fall back to textContent (can be risky)
+        // Only use if element has direct text (not nested children with lots of text)
+        if (el.textContent && el.textContent.trim()) {
+          // Check if this element has direct text content (not inherited from children)
+          const directText = Array.from(el.childNodes)
+            .filter(node => node.nodeType === Node.TEXT_NODE)
+            .map(node => node.textContent)
+            .join('')
+            .trim();
+          
+          // Prefer direct text over full textContent
+          const textToUse = directText || el.textContent;
+          const sanitized = sanitizeExtractedText(textToUse, 'Contact name (textContent)');
+          if (sanitized) {
+            log('Contact name from textContent:', sanitized);
+            return sanitized;
+          }
         }
       } catch (e) {
         // Continue to next selector
+        logError('Error in detectContactName selector:', e);
       }
     }
     return null;
@@ -283,8 +351,32 @@
   }
 
   function detectGroupName() {
-    // Get group name from contact name detection
-    return detectContactName();
+    // Get group name from contact name detection with additional validation
+    const rawName = detectContactName();
+    
+    if (!rawName) {
+      log('No group name detected');
+      return null;
+    }
+    
+    // Additional validation for group names
+    // Group names should not contain certain patterns that indicate DOM junk
+    const suspiciousPatterns = [
+      /click to view/,           // UI helper text
+      /search\s*contacts/i,      // Search placeholder text
+      /type a message/i,         // Input placeholder
+      /\d+\s*participants/i,     // Participant count (not the name)
+    ];
+    
+    for (const pattern of suspiciousPatterns) {
+      if (pattern.test(rawName)) {
+        logError('Group name matched suspicious pattern, rejecting:', rawName.substring(0, 50));
+        return null;
+      }
+    }
+    
+    log('Group name validated:', rawName);
+    return rawName;
   }
 
   // =====================================================
@@ -486,13 +578,33 @@
       return;
     }
 
-    log('Saving group:', currentGroupName);
+    // Final sanitization before sending to background script
+    const safeGroupName = sanitizeExtractedText(currentGroupName, 'Group name (save)');
+    if (!safeGroupName) {
+      showStatus('Invalid group name (too long or corrupted)', 'error');
+      logError('Group name failed final sanitization before save');
+      return;
+    }
+
+    log('Saving group:', safeGroupName, `(${safeGroupName.length} chars)`);
     showStatus('Saving group...', 'loading');
 
     try {
+      // Extract group JID from DOM if available (more stable than name)
+      const mainEl = document.querySelector('#main');
+      let groupJid = null;
+      if (mainEl) {
+        const dataId = mainEl.getAttribute('data-id');
+        if (dataId && dataId.includes('@g.us')) {
+          groupJid = dataId;
+          log('Group JID extracted:', groupJid);
+        }
+      }
+
       const response = await chrome.runtime.sendMessage({
         type: 'VANTO_UPSERT_GROUP',
-        groupName: currentGroupName
+        groupName: safeGroupName,
+        groupJid: groupJid
       });
 
       if (response.success) {
