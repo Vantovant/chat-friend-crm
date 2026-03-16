@@ -1,196 +1,149 @@
-/**
- * Vanto CRM — Popup UI Script v2.1
- * MV3 compliant: NO inline scripts. All logic here.
- * Auth is owned by background.js service worker.
- * Popup only handles UI and delegates actions via chrome.runtime.sendMessage.
- */
+// Vanto CRM Popup Script v6.0 - Lovable Edition
 
-'use strict';
+document.addEventListener('DOMContentLoaded', init);
 
-// ── DOM refs ──────────────────────────────────────────────────────────────────
-var viewLogin    = document.getElementById('view-login');
-var viewLoggedin = document.getElementById('view-loggedin');
-var viewForgot   = document.getElementById('view-forgot');
-var emailInput   = document.getElementById('input-email');
-var passInput    = document.getElementById('input-password');
-var loginBtn     = document.getElementById('btn-login');
-var logoutBtn    = document.getElementById('btn-logout');
-var errorEl      = document.getElementById('login-error');
-var displayEmail = document.getElementById('display-email');
+async function init() {
+  // Check session
+  const session = await sendMessage({ type: 'VANTO_GET_SESSION' });
 
-// Forgot password refs
-var forgotBtn       = document.getElementById('btn-forgot');
-var backLoginBtn    = document.getElementById('btn-back-login');
-var forgotEmailInput = document.getElementById('input-forgot-email');
-var sendResetBtn    = document.getElementById('btn-send-reset');
-var forgotError     = document.getElementById('forgot-error');
-var forgotSuccess   = document.getElementById('forgot-success');
-
-// ── UI helpers ─────────────────────────────────────────────────────────────────
-function showError(msg) {
-  errorEl.textContent   = msg;
-  errorEl.style.display = 'block';
-}
-
-function clearError() {
-  errorEl.textContent   = '';
-  errorEl.style.display = 'none';
-}
-
-function setLoginBtnState(loading) {
-  loginBtn.disabled    = loading;
-  loginBtn.textContent = loading ? 'Logging in…' : 'Log in';
-}
-
-function showLoggedInView(email) {
-  viewLogin.style.display    = 'none';
-  viewForgot.style.display   = 'none';
-  viewLoggedin.style.display = 'flex';
-  displayEmail.textContent   = email || '—';
-}
-
-function showLoginView() {
-  viewLoggedin.style.display = 'none';
-  viewForgot.style.display   = 'none';
-  viewLogin.style.display    = 'flex';
-  setLoginBtnState(false);
-  passInput.value = '';
-}
-
-function showForgotView() {
-  viewLogin.style.display    = 'none';
-  viewLoggedin.style.display = 'none';
-  viewForgot.style.display   = 'flex';
-  forgotError.style.display  = 'none';
-  forgotSuccess.style.display = 'none';
-  // Pre-fill email from login form
-  if (emailInput.value) {
-    forgotEmailInput.value = emailInput.value;
+  if (session && session.token) {
+    showView('loggedin');
+    document.getElementById('user-email').textContent = session.email || 'User';
+  } else {
+    showView('login');
   }
+
+  // Wire up events
+  wireEvents();
 }
 
-// ── On load: ask background for session state ──────────────────────────────────
-console.log('[Vanto Popup] Initialising');
+function showView(viewId) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + viewId).classList.add('active');
+}
 
-chrome.runtime.sendMessage({ type: 'VANTO_GET_SESSION' }, function(response) {
-  if (chrome.runtime.lastError) {
-    console.warn('[Vanto Popup] Background not ready:', chrome.runtime.lastError.message);
-    return;
-  }
-  console.log('[Vanto Popup] Session state:', response);
-  if (response && response.token) {
-    showLoggedInView(response.email);
-  }
-});
+function showError(elementId, message) {
+  const el = document.getElementById(elementId);
+  el.textContent = message;
+  el.style.display = 'block';
+}
 
-// ── Login handler ──────────────────────────────────────────────────────────────
-function doLogin() {
-  console.log('[Vanto Popup] Login clicked');
-  clearError();
+function hideError(elementId) {
+  document.getElementById(elementId).style.display = 'none';
+}
 
-  var email    = (emailInput.value || '').trim();
-  var password = passInput.value || '';
+function showSuccess(elementId, message) {
+  const el = document.getElementById(elementId);
+  el.textContent = message;
+  el.style.display = 'block';
+}
+
+function hideSuccess(elementId) {
+  document.getElementById(elementId).style.display = 'none';
+}
+
+function wireEvents() {
+  // Login button
+  document.getElementById('login-btn').addEventListener('click', handleLogin);
+
+  // Enter key on password field
+  document.getElementById('login-password').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') handleLogin();
+  });
+
+  // Forgot password button
+  document.getElementById('forgot-btn').addEventListener('click', () => {
+    hideError('login-error');
+    showView('forgot');
+  });
+
+  // Back to login
+  document.getElementById('back-to-login').addEventListener('click', () => {
+    hideError('forgot-error');
+    hideSuccess('forgot-success');
+    showView('login');
+  });
+
+  // Reset password button
+  document.getElementById('reset-btn').addEventListener('click', handleResetPassword);
+
+  // Logout button
+  document.getElementById('logout-btn').addEventListener('click', handleLogout);
+}
+
+async function handleLogin() {
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
 
   if (!email || !password) {
-    showError('Please enter email and password.');
+    showError('login-error', 'Please enter email and password');
     return;
   }
 
-  setLoginBtnState(true);
+  hideError('login-error');
+  document.getElementById('login-btn').disabled = true;
+  document.getElementById('login-btn').textContent = 'Logging in...';
 
-  chrome.runtime.sendMessage(
-    { type: 'VANTO_LOGIN', email: email, password: password },
-    function(response) {
-      if (chrome.runtime.lastError) {
-        console.error('[Vanto Popup] Runtime error:', chrome.runtime.lastError.message);
-        showError('Extension error — try reloading.');
-        setLoginBtnState(false);
-        return;
-      }
-
-      console.log('[Vanto Popup] Login response:', response);
-
-      if (response && response.success) {
-        console.log('[Vanto Popup] Login success:', response.email);
-        showLoggedInView(response.email);
-      } else {
-        var msg = (response && response.error) || 'Login failed — check credentials.';
-        console.warn('[Vanto Popup] Login failed:', msg);
-        showError(msg);
-        setLoginBtnState(false);
-      }
-    }
-  );
-}
-
-// ── Logout handler ─────────────────────────────────────────────────────────────
-function doLogout() {
-  chrome.runtime.sendMessage({ type: 'VANTO_LOGOUT' }, function() {
-    if (chrome.runtime.lastError) {
-      console.warn('[Vanto Popup] Logout runtime error:', chrome.runtime.lastError.message);
-    }
-    showLoginView();
+  const response = await sendMessage({
+    type: 'VANTO_LOGIN',
+    email,
+    password
   });
+
+  document.getElementById('login-btn').disabled = false;
+  document.getElementById('login-btn').textContent = 'Log In';
+
+  if (response.success) {
+    document.getElementById('user-email').textContent = response.email || email;
+    showView('loggedin');
+  } else {
+    showError('login-error', response.error || 'Login failed');
+  }
 }
 
-// ── Forgot password handler ────────────────────────────────────────────────────
-function doSendReset() {
-  var email = (forgotEmailInput.value || '').trim();
+async function handleResetPassword() {
+  const email = document.getElementById('forgot-email').value.trim();
+
   if (!email) {
-    forgotError.textContent   = 'Please enter your email.';
-    forgotError.style.display = 'block';
+    showError('forgot-error', 'Please enter your email');
     return;
   }
 
-  forgotError.style.display   = 'none';
-  forgotSuccess.style.display = 'none';
-  sendResetBtn.disabled       = true;
-  sendResetBtn.textContent    = 'Sending…';
+  hideError('forgot-error');
+  hideSuccess('forgot-success');
+  document.getElementById('reset-btn').disabled = true;
+  document.getElementById('reset-btn').textContent = 'Sending...';
 
-  chrome.runtime.sendMessage(
-    { type: 'VANTO_RESET_PASSWORD', email: email },
-    function(response) {
-      sendResetBtn.disabled    = false;
-      sendResetBtn.textContent = 'Send Reset Link';
+  const response = await sendMessage({
+    type: 'VANTO_RESET_PASSWORD',
+    email
+  });
 
+  document.getElementById('reset-btn').disabled = false;
+  document.getElementById('reset-btn').textContent = 'Send Reset Link';
+
+  if (response.success) {
+    showSuccess('forgot-success', 'Reset link sent! Check your email.');
+  } else {
+    showError('forgot-error', response.error || 'Failed to send reset link');
+  }
+}
+
+async function handleLogout() {
+  await sendMessage({ type: 'VANTO_LOGOUT' });
+  showView('login');
+  document.getElementById('login-email').value = '';
+  document.getElementById('login-password').value = '';
+}
+
+function sendMessage(message) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(message, (response) => {
       if (chrome.runtime.lastError) {
-        forgotError.textContent   = 'Extension error — try again.';
-        forgotError.style.display = 'block';
-        return;
-      }
-
-      if (response && response.success) {
-        forgotSuccess.style.display = 'block';
-        forgotError.style.display   = 'none';
+        resolve({ success: false, error: chrome.runtime.lastError.message });
       } else {
-        forgotError.textContent   = (response && response.error) || 'Failed to send reset link.';
-        forgotError.style.display = 'block';
+        resolve(response || { success: false, error: 'No response' });
       }
-    }
-  );
-}
-
-// ── Event listeners ────────────────────────────────────────────────────────────
-function attachListeners() {
-  loginBtn.addEventListener('click', doLogin);
-  logoutBtn.addEventListener('click', doLogout);
-
-  emailInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') doLogin();
+    });
   });
-  passInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') doLogin();
-  });
-
-  forgotBtn.addEventListener('click', showForgotView);
-  backLoginBtn.addEventListener('click', showLoginView);
-  sendResetBtn.addEventListener('click', doSendReset);
-  forgotEmailInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') doSendReset();
-  });
-}
-
-document.addEventListener('DOMContentLoaded', attachListeners);
-if (document.readyState !== 'loading') {
-  attachListeners();
 }

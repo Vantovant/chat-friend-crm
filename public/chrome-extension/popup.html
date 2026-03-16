@@ -1,184 +1,253 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <title>Vanto CRM</title>
+  <meta charset="UTF-8">
+  <title>Vanto CRM (Lovable)</title>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
     body {
-      width: 260px;
+      width: 280px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: hsl(222, 47%, 6%);
       color: hsl(210, 40%, 98%);
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      font-size: 13px;
-      overflow: hidden;
     }
-    .popup-header {
-      padding: 14px 16px 12px;
+
+    .container {
+      padding: 16px;
+    }
+
+    .header {
+      text-align: center;
+      padding-bottom: 16px;
       border-bottom: 1px solid hsl(217, 33%, 17%);
-      display: flex;
-      align-items: center;
-      gap: 10px;
+      margin-bottom: 16px;
     }
-    .popup-logo { font-size: 22px; }
-    .popup-title { font-weight: 700; font-size: 14px; color: hsl(172, 66%, 50%); }
-    .popup-subtitle { font-size: 10px; color: hsl(215, 20%, 55%); margin-top: 1px; }
 
-    .popup-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
-
-    #view-loggedin { display: none; flex-direction: column; gap: 10px; }
-    #view-login    { display: flex; flex-direction: column; gap: 10px; }
-
-    .user-badge {
-      display: flex; align-items: center; gap: 8px;
-      padding: 8px 12px;
-      background: hsl(172, 66%, 8%);
-      border: 1px solid hsl(172, 66%, 20%);
-      border-radius: 8px;
-      font-size: 12px;
-      color: hsl(172, 66%, 60%);
+    .logo {
+      font-size: 20px;
+      font-weight: 700;
+      color: hsl(172, 66%, 50%);
+      margin-bottom: 4px;
     }
-    .status-dot {
-      width: 7px; height: 7px; border-radius: 50%;
-      background: hsl(172, 66%, 50%); flex-shrink: 0;
-    }
-    .user-email { font-size: 11px; color: hsl(210,40%,70%); word-break: break-all; }
 
-    .form-label {
-      font-size: 10px; font-weight: 600; letter-spacing: 0.05em;
-      color: hsl(215, 20%, 55%); text-transform: uppercase; margin-bottom: 3px;
+    .version {
+      font-size: 11px;
+      color: hsl(215, 20%, 55%);
     }
-    .form-input {
-      width: 100%; padding: 8px 10px;
-      background: hsl(217, 33%, 11%);
-      border: 1px solid hsl(217, 33%, 22%);
-      border-radius: 7px;
-      color: hsl(210, 40%, 98%);
-      font-size: 12px;
-      outline: none;
-      transition: border-color 0.15s;
-    }
-    .form-input:focus { border-color: hsl(172, 66%, 40%); }
 
-    .error-msg {
-      font-size: 11px; color: hsl(0, 72%, 65%);
-      padding: 7px 10px;
-      background: hsl(0, 50%, 10%);
-      border: 1px solid hsl(0, 60%, 25%);
-      border-radius: 7px;
+    .edition {
+      font-size: 10px;
+      color: hsl(33, 90%, 70%);
+      margin-top: 2px;
+    }
+
+    .view {
       display: none;
     }
-    .error-msg.show { display: block; }
 
-    .popup-btn {
+    .view.active {
       display: block;
-      width: 100%;
-      padding: 9px 14px;
-      border-radius: 8px;
-      border: none;
+    }
+
+    .field {
+      margin-bottom: 12px;
+    }
+
+    label {
+      display: block;
       font-size: 12px;
+      color: hsl(215, 20%, 55%);
+      margin-bottom: 4px;
+    }
+
+    input {
+      width: 100%;
+      padding: 10px;
+      background: hsl(222, 47%, 9%);
+      border: 1px solid hsl(217, 33%, 17%);
+      border-radius: 6px;
+      color: hsl(210, 40%, 98%);
+      font-size: 14px;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: hsl(172, 66%, 50%);
+    }
+
+    .btn {
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
       font-weight: 600;
       cursor: pointer;
-      text-align: center;
-      text-decoration: none;
+      margin-bottom: 8px;
+    }
+
+    .btn-primary {
       background: hsl(172, 66%, 50%);
       color: hsl(222, 47%, 6%);
-      transition: background 0.15s;
     }
-    .popup-btn:hover { background: hsl(172, 66%, 42%); }
-    .popup-btn:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-    .popup-btn-outline {
-      background: transparent;
-      color: hsl(210, 40%, 98%);
-      border: 1px solid hsl(217, 33%, 25%);
-    }
-    .popup-btn-outline:hover { background: hsl(217, 33%, 14%); }
-    .popup-btn-danger {
-      background: transparent;
-      color: hsl(0, 72%, 65%);
-      border: 1px solid hsl(0, 50%, 28%);
-      font-size: 11px;
-      padding: 7px 14px;
-    }
-    .popup-btn-danger:hover { background: hsl(0, 50%, 10%); }
 
-    .popup-footer {
-      padding: 10px 16px;
+    .btn-primary:hover {
+      background: hsl(172, 66%, 44%);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: hsl(215, 20%, 55%);
+      border: 1px solid hsl(217, 33%, 17%);
+    }
+
+    .btn-secondary:hover {
+      border-color: hsl(172, 66%, 50%);
+      color: hsl(172, 66%, 50%);
+    }
+
+    .btn-danger {
+      background: hsl(0, 84%, 50%);
+      color: white;
+    }
+
+    .error {
+      background: hsl(0, 84%, 30%);
+      color: hsl(0, 84%, 90%);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-bottom: 12px;
+      display: none;
+    }
+
+    .success {
+      background: hsl(172, 66%, 30%);
+      color: hsl(172, 66%, 90%);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-bottom: 12px;
+      display: none;
+    }
+
+    .user-info {
+      text-align: center;
+      padding: 16px;
+      background: hsl(222, 47%, 9%);
+      border-radius: 6px;
+      margin-bottom: 16px;
+    }
+
+    .user-email {
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .user-status {
+      font-size: 12px;
+      color: hsl(172, 66%, 50%);
+    }
+
+    .links {
+      margin-top: 16px;
+      padding-top: 16px;
       border-top: 1px solid hsl(217, 33%, 17%);
-      font-size: 10px; color: hsl(215, 20%, 40%); text-align: center;
+    }
+
+    .link-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 10px;
+      background: transparent;
+      border: 1px solid hsl(217, 33%, 17%);
+      border-radius: 6px;
+      color: hsl(210, 40%, 98%);
+      font-size: 13px;
+      cursor: pointer;
+      margin-bottom: 8px;
+      text-decoration: none;
+    }
+
+    .link-btn:hover {
+      border-color: hsl(172, 66%, 50%);
+      background: hsl(222, 47%, 9%);
+    }
+
+    .back-link {
+      color: hsl(215, 20%, 55%);
+      font-size: 12px;
+      cursor: pointer;
+      margin-bottom: 12px;
+      display: inline-block;
+    }
+
+    .back-link:hover {
+      color: hsl(210, 40%, 98%);
     }
   </style>
 </head>
 <body>
-  <div class="popup-header">
-    <span class="popup-logo">⚡</span>
-    <div>
-      <p class="popup-title">Vanto CRM</p>
-      <p class="popup-subtitle">WhatsApp Web Extension</p>
+  <div class="container">
+    <div class="header">
+      <div class="logo">Vanto CRM</div>
+      <div class="version">v6.0.0</div>
+      <div class="edition">Lovable Edition</div>
+    </div>
+
+    <!-- Login View -->
+    <div id="view-login" class="view active">
+      <div class="field">
+        <label>Email</label>
+        <input type="email" id="login-email" placeholder="your@email.com">
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" id="login-password" placeholder="••••••••">
+      </div>
+      <div id="login-error" class="error"></div>
+      <button class="btn btn-primary" id="login-btn">Log In</button>
+      <button class="btn btn-secondary" id="forgot-btn">Forgot Password?</button>
+    </div>
+
+    <!-- Logged In View -->
+    <div id="view-loggedin" class="view">
+      <div class="user-info">
+        <div class="user-email" id="user-email"></div>
+        <div class="user-status">● Logged In</div>
+      </div>
+      <button class="btn btn-danger" id="logout-btn">Log Out</button>
+
+      <div class="links">
+        <a href="https://web.whatsapp.com" target="_blank" class="link-btn">
+          📱 Open WhatsApp Web
+        </a>
+        <a href="https://crm.onlinecourseformlm.com" target="_blank" class="link-btn">
+          📊 Open Dashboard
+        </a>
+      </div>
+    </div>
+
+    <!-- Forgot Password View -->
+    <div id="view-forgot" class="view">
+      <span class="back-link" id="back-to-login">← Back to Login</span>
+      <div class="field">
+        <label>Email</label>
+        <input type="email" id="forgot-email" placeholder="your@email.com">
+      </div>
+      <div id="forgot-error" class="error"></div>
+      <div id="forgot-success" class="success"></div>
+      <button class="btn btn-primary" id="reset-btn">Send Reset Link</button>
     </div>
   </div>
 
-  <div class="popup-body">
-
-    <!-- Logged-in view -->
-    <div id="view-loggedin">
-      <div class="user-badge">
-        <span class="status-dot"></span>
-        <span>Logged in</span>
-      </div>
-      <p class="user-email" id="display-email">—</p>
-      <a class="popup-btn" href="https://web.whatsapp.com" target="_blank">Open WhatsApp Web</a>
-      <a class="popup-btn popup-btn-outline" href="https://chat-friend-crm.lovable.app" target="_blank">Open Dashboard</a>
-      <button class="popup-btn popup-btn-danger" id="btn-logout">Log out</button>
-    </div>
-
-    <!-- Login view (visible by default) -->
-    <div id="view-login">
-      <p style="font-size:12px;color:hsl(215,20%,60%);">Log in to save contacts to Vanto CRM.</p>
-
-      <div>
-        <p class="form-label">Email</p>
-        <input class="form-input" type="email" id="input-email" placeholder="you@example.com" autocomplete="email" />
-      </div>
-
-      <div>
-        <p class="form-label">Password</p>
-        <input class="form-input" type="password" id="input-password" placeholder="••••••••" autocomplete="current-password" />
-      </div>
-
-      <div class="error-msg" id="login-error"></div>
-
-      <button class="popup-btn" id="btn-login">Log in</button>
-      <button class="popup-btn popup-btn-outline" id="btn-forgot" style="font-size:11px;">Forgot password?</button>
-      <a class="popup-btn popup-btn-outline" href="https://chat-friend-crm.lovable.app" target="_blank">Open Dashboard</a>
-    </div>
-
-    <!-- Forgot password view -->
-    <div id="view-forgot" style="display:none;flex-direction:column;gap:10px;">
-      <p style="font-size:12px;color:hsl(215,20%,60%);">Enter your email to receive a password reset link.</p>
-
-      <div>
-        <p class="form-label">Email</p>
-        <input class="form-input" type="email" id="input-forgot-email" placeholder="you@example.com" autocomplete="email" />
-      </div>
-
-      <div class="error-msg" id="forgot-error"></div>
-      <div id="forgot-success" style="display:none;font-size:11px;color:hsl(172,66%,50%);padding:7px 10px;background:hsl(172,66%,8%);border:1px solid hsl(172,66%,20%);border-radius:7px;">
-        Reset link sent! Check your email inbox.
-      </div>
-
-      <button class="popup-btn" id="btn-send-reset">Send Reset Link</button>
-      <button class="popup-btn popup-btn-outline" id="btn-back-login" style="font-size:11px;">← Back to login</button>
-    </div>
-
-  </div>
-
-  <div class="popup-footer">Vanto CRM v2.0.0</div>
-
-  <!-- MV3 requires external script — NO inline JS allowed -->
   <script src="popup.js"></script>
 </body>
 </html>

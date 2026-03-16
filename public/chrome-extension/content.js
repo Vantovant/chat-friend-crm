@@ -1,1204 +1,1176 @@
-/**
- * Vanto CRM — WhatsApp Web Content Script v5.0
- * MV3 compliant: ALL auth + API calls delegated to background.js via sendMessage.
- * This script handles DOM detection, sidebar UI, group capture, and auto-poster execution.
- */
-
-'use strict';
-
-// ── Config ─────────────────────────────────────────────────────────────────────
-var SIDEBAR_ID = 'vanto-crm-sidebar';
-var TOGGLE_ID  = 'vanto-crm-toggle';
-
-// ── State ──────────────────────────────────────────────────────────────────────
-var currentPhone    = null;
-var currentName     = null;
-var currentContact  = null;
-var sidebarVisible  = true;
-var detectionTimer  = null;
-var headerObserver  = null;
-var pollInterval    = null;
-var heartbeatTimer  = null;
-var heartbeatHooksBound = false;
-var lastDetectedKey = '';
-var currentTags     = [];
-var isAuthenticated = false;
-var teamMembers     = [];
-var isGroupChat     = false;
-
-// ── Logging ────────────────────────────────────────────────────────────────────
-function log(msg, data) {
-  if (data !== undefined) {
-    console.log('[Vanto CRM]', msg, data);
-  } else {
-    console.log('[Vanto CRM]', msg);
-  }
-}
-
-// ── Background bridge ──────────────────────────────────────────────────────────
-function sendToBackground(message, callback) {
-  try {
-    chrome.runtime.sendMessage(message, function(response) {
-      if (chrome.runtime.lastError) {
-        log('Background error', chrome.runtime.lastError.message);
-        if (callback) callback(null);
-        return;
-      }
-      if (callback) callback(response);
-    });
-  } catch (e) {
-    log('sendToBackground failed', e.message);
-    if (callback) callback(null);
-  }
-}
-
-// ── Live heartbeat from WhatsApp tab ───────────────────────────────────────────
-function isWhatsAppDomReady() {
-  return !!(document.getElementById('app') && document.getElementById('main'));
-}
-
-function sendLiveHeartbeat(source) {
-  sendToBackground({
-    type: 'VANTO_HEARTBEAT_PING',
-    whatsappReady: isWhatsAppDomReady(),
-    source: source || 'content_script',
-  }, function(response) {
-    if (response && response.success) return;
-    log('Heartbeat ping failed', response && response.error ? response.error : 'no_response');
-  });
-}
-
-function startHeartbeatLoop() {
-  if (heartbeatTimer) clearInterval(heartbeatTimer);
-
-  sendLiveHeartbeat('content_init');
-  heartbeatTimer = setInterval(function() {
-    sendLiveHeartbeat('content_interval');
-  }, 30000);
-
-  if (!heartbeatHooksBound) {
-    heartbeatHooksBound = true;
-    document.addEventListener('visibilitychange', function() {
-      if (!document.hidden) sendLiveHeartbeat('content_visible');
-    });
-    window.addEventListener('focus', function() {
-      sendLiveHeartbeat('content_focus');
-    });
-  }
-}
-
-// ── Auth state ─────────────────────────────────────────────────────────────────
-function checkAuthState(callback) {
-  sendToBackground({ type: 'VANTO_GET_SESSION' }, function(response) {
-    isAuthenticated = !!(response && response.token);
-    log('Auth state', isAuthenticated ? 'logged in' : 'not logged in');
-    updateAuthBanner();
-    if (callback) callback(isAuthenticated);
-  });
-}
-
-// Listen for auth changes, pings, and group post execution commands from background
-chrome.runtime.onMessage.addListener(function(msg, sender, sendResponse) {
-  if (!msg || !msg.type) {
-    sendResponse({ error: 'no_type' });
-    return false;
-  }
-
-  // ── Ping/pong for liveness check ──────────────────────────────────────────
-  if (msg.type === 'VANTO_PING') {
-    sendResponse({ pong: true, ready: isWhatsAppDomReady(), timestamp: Date.now() });
-    return false;
-  }
-
-  if (msg.type === 'VANTO_TOKEN_UPDATED') {
-    isAuthenticated = true;
-    log('Token updated — refreshing');
-    updateAuthBanner();
-    loadTeamMembers();
-    runDetection();
-    sendResponse({ ok: true });
-    return false;
-  }
-
-  if (msg.type === 'VANTO_TOKEN_CLEARED') {
-    isAuthenticated = false;
-    log('Token cleared');
-    updateAuthBanner();
-    sendResponse({ ok: true });
-    return false;
-  }
-
-  // ── Auto-poster execution engine ──────────────────────────────────────────
-  if (msg.type === 'VANTO_EXECUTE_GROUP_POST') {
-    log('Executing group post:', msg.groupName);
-    // Check if WhatsApp main pane is ready
-    var appEl = document.getElementById('app');
-    if (!appEl) {
-      sendResponse({ success: false, error: 'WhatsApp Web DOM not ready (#app missing)', stage: 'dom_not_ready' });
-      return false;
-    }
-    try {
-      executeGroupPostInDOM(msg.groupName, msg.messageContent, function(result) {
-        try {
-          sendResponse(result);
-        } catch (e) {
-          log('sendResponse failed (channel closed):', e.message);
-        }
-      });
-    } catch (err) {
-      log('executeGroupPostInDOM threw:', err.message);
-      sendResponse({ success: false, error: 'Execution exception: ' + err.message, stage: 'exception' });
-      return false;
-    }
-    return true; // keep channel open for async response
-  }
-
-  // Default: respond to avoid dangling channels
-  sendResponse({ ok: false, error: 'unknown_type' });
-  return false;
-});
-
-// ── Normalize group name for comparison (light clean, preserves meaningful symbols) ──
-function normalizeGroupName(name) {
-  if (!name) return '';
-  return name
-    .toLowerCase()
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')   // zero-width chars
-    .replace(/\s+/g, ' ')                      // collapse whitespace
-    .trim();
-}
-
-// Heavy normalize: strips ALL symbols for fuzzy fallback only
-function heavyNormalize(name) {
-  if (!name) return '';
-  return name
-    .toLowerCase()
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .replace(/[|•·—–\-_~&]+/g, ' ')
-    .replace(/[^\w\s]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-// Build search queries in priority order: raw first, then cleaned
-function buildSearchQueries(rawName) {
-  if (!rawName) return [];
-  var queries = [];
-  // Stage A: exact raw (trimmed)
-  var raw = rawName.replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\s+/g, ' ').trim();
-  if (raw) queries.push(raw);
-  // Stage B: first significant word (4+ chars) for broader search
-  var words = raw.split(/[\s|•·—–\-_~&]+/).filter(function(w) { return w.length >= 4; });
-  if (words.length > 0 && words[0] !== raw) queries.push(words[0]);
-  // Stage C: heavy cleaned
-  var heavy = heavyNormalize(rawName);
-  if (heavy && queries.indexOf(heavy) === -1) {
-    var heavyWords = heavy.split(' ').filter(function(w) { return w.length > 0; });
-    if (heavyWords.length <= 4) {
-      queries.push(heavy);
-    } else {
-      queries.push(heavyWords.slice(0, 3).join(' '));
-    }
-  }
-  return queries;
-}
-
-// ── Stage-level execution engine ───────────────────────────────────────────────
-
-var STAGE_TIMEOUTS = {
-  open_search:      5000,
-  search_group:     8000,
-  select_group:     5000,
-  wait_chat_open:   8000,
-  find_input:       5000,
-  inject_message:   5000,
-  find_send_button: 5000,
-  click_send:       5000,
-  confirm_sent:     8000,
-};
-
-function pollUntil(conditionFn, timeoutMs, intervalMs) {
-  return new Promise(function(resolve) {
-    var elapsed = 0;
-    var iv = intervalMs || 400;
-    function check() {
-      var result = conditionFn();
-      if (result) { resolve(result); return; }
-      elapsed += iv;
-      if (elapsed >= timeoutMs) { resolve(null); return; }
-      setTimeout(check, iv);
-    }
-    check();
-  });
-}
-
-function findElement(selectors) {
-  for (var i = 0; i < selectors.length; i++) {
-    var el = document.querySelector(selectors[i]);
-    if (el) return el;
-  }
-  return null;
-}
-
-// ── Execute group post in WhatsApp DOM ─────────────────────────────────────────
-function executeGroupPostInDOM(groupName, messageContent, callback) {
-  log('executeGroupPostInDOM started for group:', groupName);
-
-  var searchQueries = buildSearchQueries(groupName);
-  var normalizedTarget = normalizeGroupName(groupName);
-  var heavyTarget = heavyNormalize(groupName);
-  var stageTrace = { completed: [], failed_stage: null, error_code: null, details: {} };
-  var callbackCalled = false;
-
-  function safeCallback(result) {
-    if (callbackCalled) return;
-    callbackCalled = true;
-    callback(result);
-  }
-
-  function stageOk(name) { stageTrace.completed.push(name); log('Stage OK:', name); }
-  function stageFail(name, code, details) {
-    stageTrace.failed_stage = name;
-    stageTrace.error_code = code;
-    if (details) stageTrace.details = details;
-    var last = stageTrace.completed.length > 0 ? stageTrace.completed[stageTrace.completed.length - 1] : 'none';
-    var errorMsg = '[' + name + '] ' + code + ' — last completed: ' + last +
-      (details ? ' | ' + JSON.stringify(details) : '');
-    log('Stage FAILED:', errorMsg);
-    safeCallback({
-      success: false,
-      error: errorMsg,
-      error_code: code,
-      failed_stage: name,
-      last_completed_stage: last,
-      details: details || {},
-      stage: name,
-    });
-  }
-
-  function matchGroupTitle(title) {
-    var norm = normalizeGroupName(title);
-    if (norm === normalizedTarget) return 'exact';
-    if (norm.indexOf(normalizedTarget) !== -1 || normalizedTarget.indexOf(norm) !== -1) return 'partial';
-    var targetWords = heavyTarget.split(' ').filter(function(w) { return w.length > 2; });
-    if (targetWords.length > 0) {
-      var hc = heavyNormalize(title);
-      var ok = true;
-      for (var w = 0; w < targetWords.length; w++) {
-        if (hc.indexOf(targetWords[w]) === -1) { ok = false; break; }
-      }
-      if (ok) return 'fuzzy';
-    }
-    return null;
-  }
-
-  function gatherCandidates() {
-    var sels = [
-      '[data-testid="cell-frame-container"] span[title]',
-      '[role="listitem"] span[title]',
-      '[data-testid="chat-list"] span[title]',
-      'div[aria-label="Search results"] span[title]',
-    ];
-    var seen = []; var out = [];
-    for (var s = 0; s < sels.length; s++) {
-      var nodes = document.querySelectorAll(sels[s]);
-      for (var n = 0; n < nodes.length; n++) {
-        if (seen.indexOf(nodes[n]) === -1) { seen.push(nodes[n]); out.push(nodes[n]); }
-      }
-    }
-    return out;
-  }
-
-  function findMatchInCandidates(candidates) {
-    var types = ['exact', 'partial', 'fuzzy'];
-    for (var pass = 0; pass < 3; pass++) {
-      for (var i = 0; i < candidates.length; i++) {
-        var t = candidates[i].getAttribute('title') || '';
-        if (matchGroupTitle(t) === types[pass]) return { el: candidates[i], type: types[pass], title: t };
-      }
-    }
-    return null;
-  }
-
-  function clearSearch() {
-    var btn = findElement([
-      '[data-testid="x-alt"]', '[data-icon="x-alt"]',
-      '[data-testid="search-close"]', 'button[aria-label="Cancel search"]',
-    ]);
-    if (btn) (btn.closest('button') || btn).click();
-  }
-
-  var searchInputSels = [
-    '[data-testid="chat-list-search-input"]',
-    'div[contenteditable="true"][data-tab="3"]',
-    'div[contenteditable="true"][role="textbox"][title="Search input textbox"]',
-  ];
-  var searchIconSels = [
-    '[data-testid="chat-list-search"]', '[data-icon="search"]',
-    'button[aria-label="Search"]', 'header button span[data-icon="search"]',
-  ];
-  var msgInputSels = [
-    '[data-testid="conversation-compose-box-input"]',
-    'div[contenteditable="true"][data-tab="10"]',
-    '#main footer div[contenteditable="true"]',
-    'div[contenteditable="true"][role="textbox"][title="Type a message"]',
-    '#main div[contenteditable="true"][role="textbox"]',
-  ];
-  var sendBtnSels = [
-    '[data-testid="send"]', 'button[aria-label="Send"]',
-    'span[data-icon="send"]', '[data-testid="compose-btn-send"]',
-  ];
-
-  // ── STAGE 1: open_search ────────────────────────────────────────────────────
-  var existingInput = findElement(searchInputSels);
-  if (!existingInput) {
-    var icon = findElement(searchIconSels);
-    if (icon) (icon.closest('button') || icon).click();
-  }
-
-  pollUntil(function() { return findElement(searchInputSels); }, STAGE_TIMEOUTS.open_search)
-    .then(function(input) {
-      if (!input) { stageFail('open_search', 'OPEN_SEARCH_TIMEOUT', { msg: 'Search input never appeared' }); return; }
-      stageOk('open_search');
-      runSearchStages(input);
-    });
-
-  // ── STAGE 2: search_group ───────────────────────────────────────────────────
-  function runSearchStages() {
-    var qIdx = 0;
-    var triedQ = [];
-    var candTitles = [];
-
-    function tryQuery() {
-      if (qIdx >= searchQueries.length) {
-        clearSearch();
-        stageFail('search_group', 'GROUP_NOT_FOUND', {
-          raw_title: groupName, queries_tried: triedQ, normalized: normalizedTarget,
-          heavy: heavyTarget, visible_count: candTitles.length, visible_titles: candTitles.slice(0, 10),
-        });
-        return;
-      }
-      var query = searchQueries[qIdx]; triedQ.push(query); qIdx++;
-      clearSearch();
-
-      setTimeout(function() {
-        var inp = findElement(searchInputSels);
-        if (!inp) { stageFail('search_group', 'SEARCH_GROUP_TIMEOUT', { msg: 'Search input lost' }); return; }
-        inp.focus(); inp.textContent = '';
-        document.execCommand('selectAll', false, null);
-        document.execCommand('insertText', false, query);
-        inp.dispatchEvent(new InputEvent('input', { bubbles: true, data: query }));
-        log('Search query:', query);
-
-        pollUntil(function() {
-          var c = gatherCandidates();
-          var m = findMatchInCandidates(c);
-          if (m) return { match: m, candidates: c };
-          for (var i = 0; i < Math.min(c.length, 10); i++) {
-            var t = c[i].getAttribute('title') || '';
-            if (t && candTitles.indexOf(t) === -1) candTitles.push(t);
-          }
-          return null;
-        }, STAGE_TIMEOUTS.search_group, 600)
-          .then(function(r) {
-            if (r && r.match) {
-              log('Match (' + r.match.type + '):', r.match.title);
-              stageOk('search_group');
-              runSelectStage(r.match);
-            } else {
-              var fc = gatherCandidates();
-              for (var i = 0; i < Math.min(fc.length, 10); i++) {
-                var t = fc[i].getAttribute('title') || '';
-                if (t && candTitles.indexOf(t) === -1) candTitles.push(t);
-              }
-              clearSearch();
-              setTimeout(tryQuery, 400);
-            }
-          });
-      }, 500);
-    }
-    tryQuery();
-  }
-
-  // ── STAGE 3: select_group ───────────────────────────────────────────────────
-  function runSelectStage(match) {
-    var target = match.el.closest('[data-testid="cell-frame-container"]') || match.el.closest('[role="listitem"]') || match.el;
-    target.click();
-    stageOk('select_group');
-
-    // ── STAGE 4: wait_chat_open ─────────────────────────────────────────────
-    pollUntil(function() {
-      var h = findElement([
-        '[data-testid="conversation-header"] span[title]',
-        '#main header span[title]', '#main header span[dir="auto"]',
-      ]);
-      if (h) { var t = h.getAttribute('title') || h.textContent || ''; if (t.length > 0) return t; }
-      return null;
-    }, STAGE_TIMEOUTS.wait_chat_open)
-      .then(function(ht) {
-        if (!ht) { stageFail('wait_chat_open', 'CHAT_OPEN_TIMEOUT', { msg: 'Header never appeared' }); return; }
-        log('Chat header:', ht);
-        stageOk('wait_chat_open');
-        clearSearch();
-        runFindInputStage();
-      });
-  }
-
-  // ── STAGE 5: find_input ─────────────────────────────────────────────────────
-  function runFindInputStage() {
-    pollUntil(function() { return findElement(msgInputSels); }, STAGE_TIMEOUTS.find_input)
-      .then(function(msgInput) {
-        if (!msgInput) { stageFail('find_input', 'INPUT_NOT_FOUND', { tried_count: msgInputSels.length }); return; }
-        stageOk('find_input');
-        runInjectStage(msgInput);
-      });
-  }
-
-  // ── STAGE 6: inject_message ─────────────────────────────────────────────────
-  function runInjectStage(msgInput) {
-    try {
-      msgInput.focus(); msgInput.textContent = '';
-      document.execCommand('selectAll', false, null);
-      document.execCommand('insertText', false, messageContent);
-      msgInput.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: messageContent }));
-    } catch (e) {
-      stageFail('inject_message', 'INJECT_MESSAGE_TIMEOUT', { error: e.message }); return;
-    }
-
-    pollUntil(function() {
-      var txt = msgInput.textContent || msgInput.innerText || '';
-      return txt.length > 0 ? true : null;
-    }, STAGE_TIMEOUTS.inject_message, 300)
-      .then(function(ok) {
-        if (!ok) { stageFail('inject_message', 'INJECT_MESSAGE_TIMEOUT', { msg: 'Text not visible in input' }); return; }
-        stageOk('inject_message');
-        runSendStage();
-      });
-  }
-
-  // ── STAGE 7+8+9: send ──────────────────────────────────────────────────────
-  function runSendStage() {
-    pollUntil(function() { return findElement(sendBtnSels); }, STAGE_TIMEOUTS.find_send_button)
-      .then(function(sendBtn) {
-        if (!sendBtn) { stageFail('find_send_button', 'SEND_BUTTON_NOT_FOUND', { tried_count: sendBtnSels.length }); return; }
-        stageOk('find_send_button');
-
-        try { (sendBtn.closest('button') || sendBtn).click(); }
-        catch (e) { stageFail('click_send', 'CLICK_SEND_TIMEOUT', { error: e.message }); return; }
-        stageOk('click_send');
-
-        pollUntil(function() {
-          var inp = findElement([
-            '[data-testid="conversation-compose-box-input"]',
-            '#main footer div[contenteditable="true"]',
-          ]);
-          if (inp) { var t = inp.textContent || inp.innerText || ''; if (t.trim().length === 0) return true; }
-          return null;
-        }, STAGE_TIMEOUTS.confirm_sent, 500)
-          .then(function(cleared) {
-            if (!cleared) log('confirm_sent: input still has text — cautious success');
-            stageOk('confirm_sent');
-            log('All stages complete — sent to:', groupName);
-            safeCallback({ success: true, stages_completed: stageTrace.completed });
-          });
-      });
-  }
-}
-
-// ── Save contact via background ────────────────────────────────────────────────
-function saveContactViaBackground(payload, callback) {
-  sendToBackground({ type: 'VANTO_SAVE_CONTACT', payload: payload }, function(response) {
-    callback(response || { success: false, error: 'No response from background' });
-  });
-}
-
-// ── Load contact via background ────────────────────────────────────────────────
-function loadContactViaBackground(phone, callback) {
-  sendToBackground({ type: 'VANTO_LOAD_CONTACT', phone: phone }, function(response) {
-    callback(response || { success: false, error: 'No response' });
-  });
-}
-
-// ── Load team members via background ──────────────────────────────────────────
-function loadTeamMembers() {
-  sendToBackground({ type: 'VANTO_LOAD_TEAM' }, function(response) {
-    if (response && response.success && response.members) {
-      teamMembers = response.members;
-      renderAssignToDropdown();
-    }
-  });
-}
-
-function renderAssignToDropdown() {
-  var sel = document.getElementById('vanto-f-assigned-to');
-  if (!sel) return;
-  var currentVal = sel.value || '';
-  sel.innerHTML = '<option value="">— Unassigned —</option>';
-  teamMembers.forEach(function(m) {
-    var opt = document.createElement('option');
-    opt.value = m.id;
-    opt.textContent = m.full_name || m.email || m.id.slice(0,8);
-    if (m.id === currentVal) opt.selected = true;
-    sel.appendChild(opt);
-  });
-}
-
-// ── Phone sanitizer ────────────────────────────────────────────────────────────
-function sanitizePhone(raw) {
-  return (raw || '').replace(/\D/g, '');
-}
-
-function getPhoneInputValue() {
-  var el = document.getElementById('vanto-f-phone');
-  return el ? (el.value || '').trim() : '';
-}
-
-// ── Auth banner ────────────────────────────────────────────────────────────────
-function updateAuthBanner() {
-  var banner = document.getElementById('vanto-auth-banner');
-  if (!banner) return;
-  banner.style.display = isAuthenticated ? 'none' : 'block';
-}
-
-// ── Detect if current chat is a group ──────────────────────────────────────────
-function detectIfGroupChat() {
-  // Groups typically show member count or "click here for group info"
-  var groupIndicators = [
-    '[data-testid="conversation-info-header"] span[data-testid="conversation-subtitle"]',
-    '#main header span[title*=","]', // group members listed with commas
-  ];
-
-  // Check for group data-id pattern (ends with @g.us)
-  var mainPanel = document.getElementById('main');
-  if (mainPanel) {
-    var dataId = mainPanel.getAttribute('data-id') || '';
-    if (dataId.indexOf('@g.us') !== -1) return true;
-  }
-
-  // Check URL hash
-  var hash = window.location.hash || '';
-  if (hash.indexOf('@g.us') !== -1) return true;
-
-  // Check for data-id in sub elements
-  var els = document.querySelectorAll('#main [data-id]');
-  for (var i = 0; i < els.length; i++) {
-    if ((els[i].getAttribute('data-id') || '').indexOf('@g.us') !== -1) return true;
-  }
-
-  // Check subtitle for member indicators (e.g., "You, Alice, Bob")
-  var subtitles = document.querySelectorAll('#main header span[dir="auto"]:not([title])');
-  for (var j = 0; j < subtitles.length; j++) {
-    var txt = (subtitles[j].textContent || '').trim();
-    // If it contains commas and names, likely a group
-    if (txt.indexOf(',') !== -1 && txt.length > 5 && !/^\+?\d/.test(txt)) return true;
-  }
-
-  return false;
-}
-
-// ── Chat detection ─────────────────────────────────────────────────────────────
-function getActiveContactInfo() {
-  var name  = null;
-  var phone = null;
-
-  var nameSelectors = [
-    '[data-testid="conversation-header"] span[title]',
-    '[data-testid="conversation-info-header-chat-title"] span',
-    '[data-testid="conversation-info-header-chat-title"]',
-    'header [data-testid="conversation-info-header"] span[title]',
-    'header span[dir="auto"][title]',
-    '#main header span[title]',
-    '#main header span[dir="auto"]',
-    '#main header > div > div > div > div span[title]',
-  ];
-  for (var i = 0; i < nameSelectors.length; i++) {
-    var el = document.querySelector(nameSelectors[i]);
-    if (el) {
-      var t = el.getAttribute('title') || (el.textContent || '').trim();
-      if (t && t.length > 0 && t.length < 200) { name = t; break; }
-    }
-  }
-
-  // P0: #main data-id
-  var mainPanel = document.getElementById('main');
-  if (mainPanel) {
-    var m = (mainPanel.getAttribute('data-id') || '').match(/(\d{7,15})@/);
-    if (m) phone = m[1];
-  }
-
-  // P1: URL hash
-  if (!phone) {
-    var hm = window.location.hash.match(/\/chat\/(\d{7,15})@/);
-    if (hm) phone = hm[1];
-  }
-
-  // P2: any [data-id] in #main
-  if (!phone) {
-    var els = document.querySelectorAll('#main [data-id]');
-    for (var j = 0; j < els.length; j++) {
-      var dm = (els[j].getAttribute('data-id') || '').match(/(\d{7,15})@/);
-      if (dm) { phone = dm[1]; break; }
-    }
-  }
-
-  // P3: subtitle spans with phone pattern
-  if (!phone) {
-    var subtitleSelectors = [
-      '[data-testid="conversation-info-header"] span[dir="auto"]:not([title])',
-      'header span[dir="ltr"]',
-      '#main header span[dir="ltr"]',
-    ];
-    for (var k = 0; k < subtitleSelectors.length; k++) {
-      var se = document.querySelector(subtitleSelectors[k]);
-      var txt = (se && se.textContent && se.textContent.trim()) || '';
-      if (/^\+?\d[\d\s\-(). ]{5,}$/.test(txt)) { phone = sanitizePhone(txt); break; }
-    }
-  }
-
-  return { name: name || null, phone: phone ? sanitizePhone(phone) : null };
-}
-
-// ── Debounced detection ────────────────────────────────────────────────────────
-function scheduleDetection() {
-  clearTimeout(detectionTimer);
-  detectionTimer = setTimeout(runDetection, 600);
-}
-
-function runDetection() {
-  var info = getActiveContactInfo();
-  var key  = info.name + '|' + info.phone;
-  if (key === lastDetectedKey) return;
-  lastDetectedKey = key;
-  currentPhone = info.phone;
-  currentName  = info.name;
-
-  // Detect if this is a group chat
-  isGroupChat = detectIfGroupChat();
-
-  if (isGroupChat && info.name && isAuthenticated) {
-    // Extract group JID if available
-    var groupJid = null;
-    var mainPanel = document.getElementById('main');
-    if (mainPanel) {
-      var dataId = mainPanel.getAttribute('data-id') || '';
-      if (dataId.indexOf('@g.us') !== -1) groupJid = dataId;
-    }
-    if (!groupJid) {
-      var els = document.querySelectorAll('#main [data-id]');
-      for (var gi = 0; gi < els.length; gi++) {
-        var gid = els[gi].getAttribute('data-id') || '';
-        if (gid.indexOf('@g.us') !== -1) { groupJid = gid; break; }
-      }
-    }
-
-    log('Group detected — capturing:', info.name, groupJid ? '(JID: ' + groupJid + ')' : '');
-    sendToBackground({ type: 'VANTO_UPSERT_GROUP', groupName: info.name, groupJid: groupJid }, function(resp) {
-      if (resp && resp.success) {
-        log('Group captured successfully:', info.name);
-      } else {
-        log('Group capture failed:', resp && resp.error);
-      }
-    });
-  }
-
-  refreshSidebar(info.name, info.phone);
-}
-
-// ── Sidebar Refresh ────────────────────────────────────────────────────────────
-function refreshSidebar(name, phone) {
-  updateContactHeader(name, phone);
-  updateAuthBanner();
-
-  if (!name && !phone) {
-    showNoChatState();
-    return;
-  }
-
-  // For group chats, show a different message
-  if (isGroupChat) {
-    showFormBody();
-    var groupBanner = document.getElementById('vanto-group-banner');
-    var formFields = document.getElementById('vanto-form-fields');
-    if (groupBanner) groupBanner.style.display = 'block';
-    if (formFields) formFields.style.display = 'none';
-    return;
-  }
-
-  // Regular contact chat
-  var groupBanner2 = document.getElementById('vanto-group-banner');
-  var formFields2 = document.getElementById('vanto-form-fields');
-  if (groupBanner2) groupBanner2.style.display = 'none';
-  if (formFields2) formFields2.style.display = 'block';
-
-  showFormBody();
-
-  if (!isAuthenticated) {
-    populateForm({ name: name || '', phone: phone || '', email: '', lead_type: 'prospect', temperature: 'cold', tags: [], notes: '' });
-    showStatus('info', '🔐 Log in via the extension popup to save contacts');
-    return;
-  }
-
-  if (!phone) {
-    populateForm({ name: name || '', phone: '', email: '', lead_type: 'prospect', temperature: 'cold', tags: [], notes: '' });
-    showStatus('info', '⚠️ Phone not detected — enter manually');
-    setTimeout(clearStatus, 4000);
-    return;
-  }
-
-  showStatus('loading', '⏳ Loading contact…');
-
-  loadContactViaBackground(phone, function(response) {
-    if (response && response.success) {
-      currentContact = response.contact;
-      if (response.contact) {
-        populateForm(response.contact);
-        showStatus('success', '✅ Contact loaded');
-      } else {
-        populateForm({ name: name || '', phone: phone, email: '', lead_type: 'prospect', temperature: 'cold', tags: [], notes: '' });
-        showStatus('info', '📋 New contact — fill in and save');
-      }
-    } else {
-      log('Load error', response && response.error);
-      populateForm({ name: name || '', phone: phone, email: '', lead_type: 'prospect', temperature: 'cold', tags: [], notes: '' });
-      showStatus('error', '❌ ' + ((response && response.error) || 'Load failed'));
-    }
-    setTimeout(clearStatus, 3500);
-  });
-}
-
-// ── Header ─────────────────────────────────────────────────────────────────────
-function updateContactHeader(name, phone) {
-  var nameEl   = document.getElementById('vanto-hdr-name');
-  var phoneEl  = document.getElementById('vanto-hdr-phone');
-  var avatarEl = document.getElementById('vanto-avatar');
-  if (nameEl)   nameEl.textContent  = name  || 'Select a chat';
-  if (phoneEl)  phoneEl.textContent = isGroupChat ? '👥 Group' : (phone ? '+' + phone : '—');
-  if (avatarEl) avatarEl.textContent = (name || '?')[0].toUpperCase();
-}
-
-// ── Form populate ──────────────────────────────────────────────────────────────
-function populateForm(data) {
-  function setField(id, val) {
-    var el = document.getElementById(id);
-    if (!el) return;
-    el.value    = val || '';
-    el.disabled = false;
-    el.readOnly = false;
-  }
-  setField('vanto-f-name',        data.name        || '');
-  setField('vanto-f-phone',       data.phone_raw   || data.phone_normalized || '');
-  setField('vanto-f-email',       data.email       || '');
-  setField('vanto-f-lead-type',   data.lead_type   || 'prospect');
-  setField('vanto-f-temperature', data.temperature || 'cold');
-  setField('vanto-f-notes',       data.notes       || '');
-
-  var assignSel = document.getElementById('vanto-f-assigned-to');
-  if (assignSel) assignSel.value = data.assigned_to || '';
-
-  currentTags = Array.isArray(data.tags) ? data.tags.slice() : [];
-  renderTags();
-}
-
-// ── Show/Hide states ───────────────────────────────────────────────────────────
-function showNoChatState() {
-  var nc = document.getElementById('vanto-no-chat');
-  var fb = document.getElementById('vanto-form-body');
-  if (nc) nc.style.display = 'flex';
-  if (fb) fb.style.display = 'none';
-  clearStatus();
-}
-
-function showFormBody() {
-  var nc = document.getElementById('vanto-no-chat');
-  var fb = document.getElementById('vanto-form-body');
-  if (nc) nc.style.display = 'none';
-  if (fb) fb.style.display = 'block';
-}
-
-// ── Tags ───────────────────────────────────────────────────────────────────────
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function renderTags() {
-  var container = document.getElementById('vanto-tags-display');
-  if (!container) return;
-  if (currentTags.length === 0) {
-    container.innerHTML = '<span style="color:hsl(215,20%,35%);font-size:11px;">No tags yet</span>';
-  } else {
-    container.innerHTML = currentTags.map(function(t) {
-      return '<span class="vanto-tag-chip">' + escapeHtml(t) +
-        '<button class="vanto-tag-remove" data-tag="' + escapeHtml(t) + '" title="Remove">×</button></span>';
-    }).join('');
-  }
-  container.querySelectorAll('.vanto-tag-remove').forEach(function(btn) {
-    btn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      currentTags = currentTags.filter(function(x) { return x !== btn.dataset.tag; });
-      renderTags();
-    });
-  });
-}
-
-function addTag(raw) {
-  var tag = raw.trim().toLowerCase().replace(/[^a-z0-9_\-]/g, '');
-  if (tag && currentTags.indexOf(tag) === -1) {
-    currentTags.push(tag);
-    renderTags();
-  }
-}
-
-// ── Status Banner ──────────────────────────────────────────────────────────────
-function showStatus(type, msg) {
-  var el = document.getElementById('vanto-status');
-  if (!el) return;
-  el.textContent = msg;
-  el.className   = 'vanto-status show ' + type;
-}
-
-function clearStatus() {
-  var el = document.getElementById('vanto-status');
-  if (el) el.className = 'vanto-status';
-}
-
-// ── Save ───────────────────────────────────────────────────────────────────────
-function handleSave() {
-  if (!isAuthenticated) {
-    showStatus('error', '🔐 Please log in via the extension popup first');
-    setTimeout(clearStatus, 5000);
-    return;
-  }
-
-  var nameEl  = document.getElementById('vanto-f-name');
-  var phoneEl = document.getElementById('vanto-f-phone');
-  var emailEl = document.getElementById('vanto-f-email');
-  var ltEl    = document.getElementById('vanto-f-lead-type');
-  var tempEl  = document.getElementById('vanto-f-temperature');
-  var notesEl = document.getElementById('vanto-f-notes');
-
-  var userPhone = ((phoneEl && phoneEl.value) || '').trim();
-  var waId      = currentPhone || null;
-
-  var name = ((nameEl && nameEl.value) || '').trim() || currentName || '';
-
-  if (!userPhone && !waId) {
-    showStatus('error', '❌ Phone number required — enter in the Phone field');
-    setTimeout(clearStatus, 4000);
-    return;
-  }
-  if (!name) {
-    showStatus('error', '❌ Name is required');
-    setTimeout(clearStatus, 3000);
-    return;
-  }
-
-  var assignEl = document.getElementById('vanto-f-assigned-to');
-  var assignedTo = (assignEl && assignEl.value) || null;
-
-  var payload = {
-    name:         name,
-    phone:        userPhone || null,
-    whatsapp_id:  waId      || null,
-    email:        ((emailEl && emailEl.value) || '').trim() || null,
-    lead_type:    (ltEl && ltEl.value)    || 'prospect',
-    temperature:  (tempEl && tempEl.value) || 'cold',
-    tags:         currentTags.slice(),
-    notes:        ((notesEl && notesEl.value) || '').trim() || null,
-    assigned_to:  assignedTo,
+// Vanto CRM Chrome Extension - Content Script v6.0
+// LOVABLE EDITION - Uses crm.onlinecourseformlm.com
+// Enhanced with microstage tracing, stage timeouts, and detailed logging
+
+(function() {
+  'use strict';
+
+  // =====================================================
+  // CONFIGURATION - LOVABLE EDITION
+  // =====================================================
+  const VERSION = '6.0.0 (Lovable)';
+  const DASHBOARD_URL = 'https://crm.onlinecourseformlm.com';
+  const DETECTION_DEBOUNCE_MS = 600;
+  const POLLING_INTERVAL_MS = 1500;
+
+  // Microstage timeouts (in milliseconds) - increased for reliability
+  const STAGE_TIMEOUTS = {
+    open_search: 10000,      // 10s to open search
+    search_group: 15000,     // 15s to search for group
+    select_group: 8000,      // 8s to select group
+    wait_chat_open: 12000,   // 12s to wait for chat to open
+    find_input: 10000,       // 10s to find input box
+    inject_message: 8000,    // 8s to inject message
+    find_send_button: 10000, // 10s to find send button
+    click_send: 8000,        // 8s to click send
+    confirm_sent: 12000      // 12s to confirm message sent
   };
 
-  log('Saving contact via background', payload);
+  // Total execution timeout
+  const TOTAL_EXECUTION_TIMEOUT = 90000; // 90 seconds
 
-  var saveBtn = document.getElementById('vanto-save-btn');
-  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ Saving…'; }
-  showStatus('loading', '⏳ Saving contact…');
+  // =====================================================
+  // LOGGING UTILITY
+  // =====================================================
+  let executionId = 0;
 
-  saveContactViaBackground(payload, function(response) {
-    if (response && response.success) {
-      currentContact = response.contact;
-      var displayPhone = (response.contact && response.contact.phone_raw) || userPhone || waId || '';
-      showStatus('success', '✅ Saved: ' + name + ' • ' + displayPhone);
-      if (saveBtn) saveBtn.textContent = '✅ Saved!';
-      setTimeout(function() {
-        if (saveBtn) { saveBtn.textContent = '💾 Save Contact'; saveBtn.disabled = false; }
-        clearStatus();
-      }, 2500);
+  function log(message, data = null) {
+    const timestamp = new Date().toISOString();
+    const prefix = `[VANTO CS (Lovable) v${VERSION} ${timestamp}]`;
+    if (data) {
+      console.log(prefix, message, data);
     } else {
-      var errCode = (response && response.error) || 'unknown';
-      var errMsg;
-      if (errCode === 'not_logged_in') {
-        errMsg = '🔐 Session expired — log in via popup';
-        isAuthenticated = false;
-        updateAuthBanner();
-      } else if (errCode === 'token_expired') {
-        errMsg = '🔐 Token expired — please log in again';
-        isAuthenticated = false;
-        updateAuthBanner();
-      } else if (errCode === 'network_timeout') {
-        errMsg = '🌐 Network timeout — try again';
-      } else {
-        errMsg = '❌ ' + errCode;
-      }
-      log('Save error', errCode);
-      showStatus('error', errMsg);
-      if (saveBtn) { saveBtn.textContent = '💾 Save Contact'; saveBtn.disabled = false; }
-      setTimeout(clearStatus, 5000);
+      console.log(prefix, message);
     }
-  });
-}
-
-// ── Sidebar HTML ───────────────────────────────────────────────────────────────
-function buildSidebarHTML() {
-  return [
-    '<div id="' + SIDEBAR_ID + '">',
-
-    '  <div class="vanto-header">',
-    '    <span class="vanto-logo">⚡ Vanto CRM</span>',
-    '    <button class="vanto-close" id="vanto-close-btn" title="Hide sidebar">✕</button>',
-    '  </div>',
-
-    '  <div id="vanto-auth-banner" style="display:none;padding:8px 12px;background:hsl(33,90%,12%);border-bottom:1px solid hsl(33,90%,25%);font-size:11px;color:hsl(33,90%,70%);">',
-    '    🔐 Log in via the extension popup to save contacts.',
-    '  </div>',
-
-    '  <div class="vanto-contact-card">',
-    '    <div class="vanto-avatar" id="vanto-avatar">?</div>',
-    '    <div class="vanto-contact-meta">',
-    '      <p class="vanto-contact-name-display" id="vanto-hdr-name">Select a chat</p>',
-    '      <p class="vanto-contact-phone-display" id="vanto-hdr-phone">—</p>',
-    '    </div>',
-    '  </div>',
-
-    '  <div class="vanto-status" id="vanto-status"></div>',
-
-    '  <div class="vanto-body">',
-    '    <div id="vanto-no-chat" class="vanto-no-chat">',
-    '      <span class="vanto-no-chat-icon">💬</span>',
-    '      <span>Open a WhatsApp chat to load or create a contact.</span>',
-    '    </div>',
-
-    '    <div id="vanto-form-body" style="display:none;">',
-
-    '      <div id="vanto-group-banner" style="display:none;padding:16px 12px;text-align:center;">',
-    '        <span style="font-size:32px;">👥</span>',
-    '        <p style="font-size:13px;font-weight:600;color:hsl(172,66%,50%);margin:8px 0 4px;">Group Chat Captured!</p>',
-    '        <p style="font-size:11px;color:hsl(215,20%,55%);">This group has been saved to your Group Campaigns. Schedule posts from the Vanto dashboard.</p>',
-    '        <a href="https://chat-friend-crm.lovable.app" target="_blank" style="display:inline-block;margin-top:10px;font-size:11px;color:hsl(172,66%,50%);text-decoration:underline;">Open Dashboard →</a>',
-    '      </div>',
-
-    '      <div id="vanto-form-fields">',
-    '      <div class="vanto-section">',
-    '        <p class="vanto-section-title">Contact Info</p>',
-    '        <div class="vanto-field">',
-    '          <label class="vanto-label" for="vanto-f-name">Full Name</label>',
-    '          <input class="vanto-input" id="vanto-f-name" type="text" placeholder="e.g. Olivier Agnin" autocomplete="off" />',
-    '        </div>',
-    '        <div class="vanto-field">',
-    '          <label class="vanto-label" for="vanto-f-phone">Phone Number</label>',
-    '          <input class="vanto-input" id="vanto-f-phone" type="text" placeholder="e.g. 27821234567" autocomplete="off" />',
-    '        </div>',
-    '        <div class="vanto-field">',
-    '          <label class="vanto-label" for="vanto-f-email">Email Address</label>',
-    '          <input class="vanto-input" id="vanto-f-email" type="email" placeholder="email@example.com" autocomplete="off" />',
-    '        </div>',
-    '      </div>',
-
-    '      <div class="vanto-section">',
-    '        <p class="vanto-section-title">Lead Classification</p>',
-    '        <div class="vanto-field">',
-    '          <label class="vanto-label" for="vanto-f-lead-type">Lead Type</label>',
-    '          <select class="vanto-select" id="vanto-f-lead-type">',
-    '            <option value="prospect">Prospect</option>',
-    '            <option value="registered">Registered_Nopurchase</option>',
-    '            <option value="buyer">Purchase_Nostatus</option>',
-    '            <option value="vip">Purchase_Status</option>',
-    '            <option value="expired">Expired</option>',
-    '          </select>',
-    '        </div>',
-    '        <div class="vanto-field">',
-    '          <label class="vanto-label" for="vanto-f-temperature">Temperature</label>',
-    '          <select class="vanto-select" id="vanto-f-temperature">',
-    '            <option value="hot">🔥 Hot</option>',
-    '            <option value="warm">🌤 Warm</option>',
-    '            <option value="cold">❄️ Cold</option>',
-    '          </select>',
-    '        </div>',
-    '      </div>',
-
-     '      <div class="vanto-section">',
-    '        <p class="vanto-section-title">Assignment</p>',
-    '        <div class="vanto-field">',
-    '          <label class="vanto-label" for="vanto-f-assigned-to">Assign To</label>',
-    '          <select class="vanto-select" id="vanto-f-assigned-to">',
-    '            <option value="">— Unassigned —</option>',
-    '          </select>',
-    '        </div>',
-    '      </div>',
-
-    '      <div class="vanto-section">',
-    '        <p class="vanto-section-title">Tags</p>',
-    '        <div class="vanto-tags-display" id="vanto-tags-display"></div>',
-    '        <div style="display:flex;gap:6px;margin-top:6px;">',
-    '          <input class="vanto-input" id="vanto-tag-input" type="text" placeholder="Add tag, press Enter" style="flex:1;" autocomplete="off" />',
-    '          <button class="vanto-btn" id="vanto-tag-add" style="width:auto;padding:7px 12px;flex-shrink:0;">+</button>',
-    '        </div>',
-    '      </div>',
-
-    '      <div class="vanto-section">',
-    '        <p class="vanto-section-title">Notes</p>',
-    '        <textarea class="vanto-textarea" id="vanto-f-notes" placeholder="Add notes about this contact…"></textarea>',
-    '      </div>',
-
-    '      <div class="vanto-section">',
-    '        <button class="vanto-btn vanto-btn-primary" id="vanto-save-btn">💾 Save Contact</button>',
-    '      </div>',
-
-    '      </div>', // end vanto-form-fields
-
-    '    </div>',
-    '  </div>',
-
-    '  <div class="vanto-footer">',
-    '    <a href="https://chat-friend-crm.lovable.app" target="_blank" class="vanto-footer-link">Open Vanto Dashboard ↗</a>',
-    '  </div>',
-
-    '</div>',
-  ].join('\n');
-}
-
-// ── Toggle Button ──────────────────────────────────────────────────────────────
-function buildToggleButton() {
-  var btn = document.createElement('button');
-  btn.id    = TOGGLE_ID;
-  btn.title = 'Open Vanto CRM';
-  btn.innerHTML = '⚡';
-  btn.addEventListener('click', showSidebar);
-  return btn;
-}
-
-// ── Show/Hide Sidebar ──────────────────────────────────────────────────────────
-function showSidebar() {
-  var el = document.getElementById(SIDEBAR_ID);
-  var tg = document.getElementById(TOGGLE_ID);
-  if (el) el.style.display = 'flex';
-  if (tg) tg.style.display = 'none';
-  sidebarVisible = true;
-}
-
-function hideSidebar() {
-  var el = document.getElementById(SIDEBAR_ID);
-  var tg = document.getElementById(TOGGLE_ID);
-  if (el) el.style.display = 'none';
-  if (tg) tg.style.display = 'flex';
-  sidebarVisible = false;
-}
-
-// ── Wire Events ────────────────────────────────────────────────────────────────
-function wireEvents() {
-  var closeBtn = document.getElementById('vanto-close-btn');
-  if (closeBtn) closeBtn.addEventListener('click', hideSidebar);
-
-  var saveBtn = document.getElementById('vanto-save-btn');
-  if (saveBtn) saveBtn.addEventListener('click', handleSave);
-
-  var tagAddBtn = document.getElementById('vanto-tag-add');
-  if (tagAddBtn) {
-    tagAddBtn.addEventListener('click', function() {
-      var inp = document.getElementById('vanto-tag-input');
-      if (inp && inp.value.trim()) { addTag(inp.value); inp.value = ''; inp.focus(); }
-    });
   }
 
-  var tagInput = document.getElementById('vanto-tag-input');
-  if (tagInput) {
-    tagInput.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        e.stopPropagation();
-        if (tagInput.value.trim()) { addTag(tagInput.value); tagInput.value = ''; }
+  function logStage(stage, status, data = null) {
+    const eid = executionId;
+    const msg = `[EXEC ${eid}] Stage: ${stage} - ${status}`;
+    log(msg, data);
+  }
+
+  function logError(message, error = null) {
+    const timestamp = new Date().toISOString();
+    const prefix = `[VANTO CS ERROR (Lovable) ${timestamp}]`;
+    if (error) {
+      console.error(prefix, message, error);
+    } else {
+      console.error(prefix, message);
+    }
+  }
+
+  // =====================================================
+  // STATE
+  // =====================================================
+  let sidebar = null;
+  let toggleButton = null;
+  let session = { token: null, email: null };
+  let teamMembers = [];
+  let detectionTimer = null;
+  let lastDetectedPhone = null;
+  let lastDetectedName = null;
+  let isGroupChat = false;
+  let currentGroupName = null;
+
+  // Execution state tracking
+  let currentExecution = null;
+
+  // =====================================================
+  // DOM SELECTOR CASCADES
+  // =====================================================
+  const SELECTORS = {
+    // Contact name selectors (priority order)
+    contactName: [
+      '[data-testid="conversation-header"] span[title]',
+      '[data-testid="conversation-info-header-chat-title"] span',
+      '[data-testid="conversation-info-header-chat-title"]',
+      'header [data-testid="conversation-info-header"] span[title]',
+      'header span[dir="auto"][title]',
+      '#main header span[title]',
+      '#main header span[dir="auto"]',
+      '#main header > div > div > div > div span[title]'
+    ],
+
+    // Phone number sources
+    phoneFromMainDataId: '#main[data-id]',
+    phoneFromUrl: () => window.location.hash,
+    phoneFromElements: '#main [data-id]',
+
+    // Search input
+    searchInput: [
+      '[data-testid="chat-list-search-input"]',
+      'div[contenteditable="true"][data-tab="3"]',
+      'div[role="textbox"][title="Search input textbox"]'
+    ],
+
+    // Search icon/button
+    searchIcon: [
+      '[data-testid="chat-list-search"]',
+      '[data-icon="search"]',
+      'button[aria-label="Search"]'
+    ],
+
+    // Message input
+    messageInput: [
+      '[data-testid="conversation-compose-box-input"]',
+      'div[contenteditable="true"][data-tab="10"]',
+      '#main footer div[contenteditable="true"]',
+      'div[role="textbox"][title="Type a message"]',
+      '#main footer [contenteditable="true"]'
+    ],
+
+    // Send button
+    sendButton: [
+      '[data-testid="send"]',
+      'button[aria-label="Send"]',
+      'span[data-icon="send"]',
+      '[data-testid="compose-btn-send"]',
+      'button[data-tab="11"]'
+    ],
+
+    // Clear search
+    clearSearch: [
+      '[data-testid="x-alt"]',
+      '[data-icon="x-alt"]',
+      '[data-testid="search-close"]',
+      'button[aria-label="Cancel search"]'
+    ],
+
+    // Chat list items
+    chatListItems: '#pane-side [role="listitem"]',
+    groupIndicator: '[data-id*="@g.us"]'
+  };
+
+  // =====================================================
+  // DOM UTILITIES
+  // =====================================================
+  function findElement(selectors, label = 'element') {
+    for (const selector of selectors) {
+      try {
+        const element = document.querySelector(selector);
+        if (element) {
+          log(`Found ${label} with selector: ${selector}`);
+          return element;
+        }
+      } catch (e) {
+        logError(`Invalid selector for ${label}: ${selector}`, e);
       }
+    }
+    logError(`${label} not found with any selector`, selectors);
+    return null;
+  }
+
+  function waitForElement(selectors, timeout = 5000, label = 'element') {
+    return new Promise((resolve, reject) => {
+      const startTime = Date.now();
+
+      function check() {
+        const element = findElement(selectors, label);
+        if (element) {
+          resolve(element);
+          return;
+        }
+
+        if (Date.now() - startTime > timeout) {
+          reject(new Error(`${label} not found within ${timeout}ms`));
+          return;
+        }
+
+        requestAnimationFrame(check);
+      }
+
+      check();
     });
   }
 
-  // Prevent keyboard events from leaking to WhatsApp
-  var sidebar = document.getElementById(SIDEBAR_ID);
-  if (sidebar) {
+  // =====================================================
+  // DETECTION FUNCTIONS
+  // =====================================================
+  function detectContactName() {
+    for (const selector of SELECTORS.contactName) {
+      try {
+        const el = document.querySelector(selector);
+        if (el && el.textContent) {
+          return el.textContent.trim();
+        }
+      } catch (e) {
+        // Continue to next selector
+      }
+    }
+    return null;
+  }
+
+  function detectPhoneNumber() {
+    // Priority 0: From #main[data-id]
+    const mainEl = document.querySelector(SELECTORS.phoneFromMainDataId);
+    if (mainEl) {
+      const dataId = mainEl.getAttribute('data-id');
+      if (dataId) {
+        const match = dataId.match(/(\d{7,15})@/);
+        if (match) {
+          log('Phone detected from #main[data-id]:', match[1]);
+          return match[1];
+        }
+      }
+    }
+
+    // Priority 1: From URL hash
+    const hash = SELECTORS.phoneFromUrl();
+    if (hash) {
+      const match = hash.match(/chat\/(\d{7,15})@/);
+      if (match) {
+        log('Phone detected from URL:', match[1]);
+        return match[1];
+      }
+    }
+
+    // Priority 2: From elements with data-id
+    const dataIdElements = document.querySelectorAll(SELECTORS.phoneFromElements);
+    for (const el of dataIdElements) {
+      const dataId = el.getAttribute('data-id');
+      if (dataId) {
+        const match = dataId.match(/(\d{7,15})@/);
+        if (match) {
+          log('Phone detected from element data-id:', match[1]);
+          return match[1];
+        }
+      }
+    }
+
+    // Priority 3: From header subtitle
+    const headerSpans = document.querySelectorAll('#main header span');
+    for (const span of headerSpans) {
+      const text = span.textContent || '';
+      if (/^\+?\d[\d\s\-(). ]{5,}$/.test(text)) {
+        const phone = text.replace(/\D/g, '');
+        if (phone.length >= 7) {
+          log('Phone detected from header:', phone);
+          return phone;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  function detectGroupChat() {
+    // Check for @g.us in data-id attributes
+    const mainEl = document.querySelector('#main');
+    if (mainEl) {
+      const dataId = mainEl.getAttribute('data-id');
+      if (dataId && dataId.includes('@g.us')) {
+        log('Group chat detected from data-id');
+        return true;
+      }
+    }
+
+    // Check URL hash
+    const hash = window.location.hash;
+    if (hash && hash.includes('@g.us')) {
+      log('Group chat detected from URL');
+      return true;
+    }
+
+    // Check for group indicators in DOM
+    const groupIndicator = document.querySelector(SELECTORS.groupIndicator);
+    if (groupIndicator) {
+      log('Group chat detected from DOM indicator');
+      return true;
+    }
+
+    return false;
+  }
+
+  function detectGroupName() {
+    // Get group name from contact name detection
+    return detectContactName();
+  }
+
+  // =====================================================
+  // SIDEBAR UI
+  // =====================================================
+  function createSidebar() {
+    if (sidebar) return;
+
+    log('Creating sidebar...');
+
+    sidebar = document.createElement('div');
+    sidebar.id = 'vanto-crm-sidebar';
+    sidebar.innerHTML = `
+      <div class="vanto-header">
+        <div class="vanto-logo">Vanto CRM</div>
+        <button class="vanto-close-btn" id="vanto-close">&times;</button>
+      </div>
+      <div id="vanto-auth-banner" class="vanto-auth-banner" style="display: none;">
+        <p>Please log in to save contacts</p>
+        <a href="${DASHBOARD_URL}" target="_blank">Open Dashboard</a>
+      </div>
+      <div class="vanto-contact-card">
+        <div class="vanto-avatar" id="vanto-avatar">?</div>
+        <div class="vanto-contact-info">
+          <div class="vanto-contact-name" id="vanto-display-name">No chat selected</div>
+          <div class="vanto-contact-phone" id="vanto-display-phone"></div>
+        </div>
+      </div>
+      <div class="vanto-status" id="vanto-status" style="display: none;"></div>
+      <div class="vanto-body">
+        <div id="vanto-no-chat">
+          <p>Click on a WhatsApp chat to capture contact details</p>
+        </div>
+        <div id="vanto-group-banner" style="display: none;">
+          <div class="vanto-group-icon">👥</div>
+          <p>Group Chat Detected</p>
+          <p class="vanto-group-name" id="vanto-group-name"></p>
+          <button class="vanto-btn vanto-btn-primary" id="vanto-save-group">Save Group</button>
+        </div>
+        <div id="vanto-form-body" style="display: none;">
+          <div class="vanto-field">
+            <label>Name</label>
+            <input type="text" id="vanto-name" class="vanto-input" placeholder="Contact name">
+          </div>
+          <div class="vanto-field">
+            <label>Phone</label>
+            <input type="text" id="vanto-phone" class="vanto-input" placeholder="Phone number">
+          </div>
+          <div class="vanto-field">
+            <label>Email</label>
+            <input type="email" id="vanto-email" class="vanto-input" placeholder="Email address">
+          </div>
+          <div class="vanto-field">
+            <label>Lead Type</label>
+            <select id="vanto-lead-type" class="vanto-select">
+              <option value="prospect">Prospect</option>
+              <option value="registered">Registered</option>
+              <option value="buyer">Buyer</option>
+              <option value="vip">VIP</option>
+              <option value="expired">Expired</option>
+            </select>
+          </div>
+          <div class="vanto-field">
+            <label>Temperature</label>
+            <select id="vanto-temperature" class="vanto-select">
+              <option value="warm">Warm</option>
+              <option value="hot">Hot</option>
+              <option value="cold">Cold</option>
+            </select>
+          </div>
+          <div class="vanto-field">
+            <label>Assign To</label>
+            <select id="vanto-assigned-to" class="vanto-select">
+              <option value="">Unassigned</option>
+            </select>
+          </div>
+          <div class="vanto-field">
+            <label>Tags</label>
+            <input type="text" id="vanto-tags" class="vanto-input" placeholder="Comma separated tags">
+          </div>
+          <div class="vanto-field">
+            <label>Notes</label>
+            <textarea id="vanto-notes" class="vanto-textarea" placeholder="Add notes..."></textarea>
+          </div>
+          <button class="vanto-btn vanto-btn-primary" id="vanto-save">Save Contact</button>
+        </div>
+      </div>
+      <div class="vanto-footer">
+        <a href="${DASHBOARD_URL}" target="_blank">Open Dashboard →</a>
+      </div>
+    `;
+
+    // Prevent events from propagating to WhatsApp
     ['keydown', 'keyup', 'keypress', 'click'].forEach(function(evt) {
-      sidebar.addEventListener(evt, function(e) { e.stopPropagation(); });
+      sidebar.addEventListener(evt, function(e) {
+        e.stopPropagation();
+      });
+    });
+
+    document.body.appendChild(sidebar);
+    wireEvents();
+    log('Sidebar created');
+  }
+
+  function createToggleButton() {
+    if (toggleButton) return;
+
+    toggleButton = document.createElement('button');
+    toggleButton.id = 'vanto-crm-toggle';
+    toggleButton.innerHTML = 'V';
+    toggleButton.title = 'Toggle Vanto CRM Sidebar';
+    toggleButton.addEventListener('click', () => {
+      if (sidebar) {
+        sidebar.classList.toggle('hidden');
+        toggleButton.classList.toggle('active');
+      }
+    });
+
+    document.body.appendChild(toggleButton);
+    log('Toggle button created');
+  }
+
+  // =====================================================
+  // EVENT WIRING
+  // =====================================================
+  function wireEvents() {
+    // Close button
+    const closeBtn = document.getElementById('vanto-close');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        sidebar.classList.add('hidden');
+        toggleButton.classList.add('active');
+      });
+    }
+
+    // Save contact button
+    const saveBtn = document.getElementById('vanto-save');
+    if (saveBtn) {
+      saveBtn.addEventListener('click', saveContact);
+    }
+
+    // Save group button
+    const saveGroupBtn = document.getElementById('vanto-save-group');
+    if (saveGroupBtn) {
+      saveGroupBtn.addEventListener('click', saveGroup);
+    }
+  }
+
+  // =====================================================
+  // SAVE FUNCTIONS
+  // =====================================================
+  async function saveContact() {
+    if (!session.token) {
+      showStatus('Please log in first', 'error');
+      return;
+    }
+
+    const payload = {
+      name: document.getElementById('vanto-name').value,
+      phone: document.getElementById('vanto-phone').value,
+      email: document.getElementById('vanto-email').value || null,
+      lead_type: document.getElementById('vanto-lead-type').value,
+      temperature: document.getElementById('vanto-temperature').value,
+      assigned_to: document.getElementById('vanto-assigned-to').value || null,
+      tags: document.getElementById('vanto-tags').value.split(',').map(t => t.trim()).filter(Boolean),
+      notes: document.getElementById('vanto-notes').value || null,
+      whatsapp_id: lastDetectedPhone || null
+    };
+
+    log('Saving contact:', payload);
+
+    showStatus('Saving...', 'loading');
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'VANTO_SAVE_CONTACT',
+        payload
+      });
+
+      if (response.success) {
+        showStatus('Contact saved!', 'success');
+      } else {
+        showStatus('Error: ' + response.error, 'error');
+      }
+    } catch (error) {
+      logError('Save contact error', error);
+      showStatus('Error saving contact', 'error');
+    }
+  }
+
+  async function saveGroup() {
+    if (!session.token) {
+      showStatus('Please log in first', 'error');
+      return;
+    }
+
+    if (!currentGroupName) {
+      showStatus('No group detected', 'error');
+      return;
+    }
+
+    log('Saving group:', currentGroupName);
+    showStatus('Saving group...', 'loading');
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'VANTO_UPSERT_GROUP',
+        groupName: currentGroupName
+      });
+
+      if (response.success) {
+        showStatus('Group saved!', 'success');
+      } else {
+        showStatus('Error: ' + response.error, 'error');
+      }
+    } catch (error) {
+      logError('Save group error', error);
+      showStatus('Error saving group', 'error');
+    }
+  }
+
+  // =====================================================
+  // UI UPDATE FUNCTIONS
+  // =====================================================
+  function showStatus(message, type = 'info') {
+    const statusEl = document.getElementById('vanto-status');
+    if (statusEl) {
+      statusEl.textContent = message;
+      statusEl.className = 'vanto-status ' + type;
+      statusEl.style.display = 'block';
+
+      if (type === 'success') {
+        setTimeout(() => {
+          statusEl.style.display = 'none';
+        }, 3000);
+      }
+    }
+  }
+
+  function updateUI() {
+    const noChatEl = document.getElementById('vanto-no-chat');
+    const formBodyEl = document.getElementById('vanto-form-body');
+    const groupBannerEl = document.getElementById('vanto-group-banner');
+    const authBannerEl = document.getElementById('vanto-auth-banner');
+    const displayNameEl = document.getElementById('vanto-display-name');
+    const displayPhoneEl = document.getElementById('vanto-display-phone');
+    const avatarEl = document.getElementById('vanto-avatar');
+    const groupNameEl = document.getElementById('vanto-group-name');
+
+    // Show auth banner if not logged in
+    if (authBannerEl) {
+      authBannerEl.style.display = session.token ? 'none' : 'block';
+    }
+
+    // Update display name
+    if (displayNameEl) {
+      displayNameEl.textContent = lastDetectedName || 'No chat selected';
+    }
+
+    // Update avatar
+    if (avatarEl && lastDetectedName) {
+      avatarEl.textContent = lastDetectedName.charAt(0).toUpperCase();
+    }
+
+    if (isGroupChat) {
+      // Show group banner
+      if (noChatEl) noChatEl.style.display = 'none';
+      if (formBodyEl) formBodyEl.style.display = 'none';
+      if (groupBannerEl) {
+        groupBannerEl.style.display = 'block';
+        if (groupNameEl) groupNameEl.textContent = currentGroupName || 'Group';
+      }
+      if (displayPhoneEl) displayPhoneEl.textContent = 'Group Chat';
+    } else if (lastDetectedPhone || lastDetectedName) {
+      // Show contact form
+      if (noChatEl) noChatEl.style.display = 'none';
+      if (groupBannerEl) groupBannerEl.style.display = 'none';
+      if (formBodyEl) formBodyEl.style.display = 'block';
+
+      // Update display phone
+      if (displayPhoneEl) {
+        displayPhoneEl.textContent = lastDetectedPhone || '';
+      }
+
+      // Pre-fill form
+      const nameInput = document.getElementById('vanto-name');
+      const phoneInput = document.getElementById('vanto-phone');
+      if (nameInput && lastDetectedName && !nameInput.value) {
+        nameInput.value = lastDetectedName;
+      }
+      if (phoneInput && lastDetectedPhone && !phoneInput.value) {
+        phoneInput.value = lastDetectedPhone;
+      }
+    } else {
+      // Show no chat message
+      if (noChatEl) noChatEl.style.display = 'block';
+      if (formBodyEl) formBodyEl.style.display = 'none';
+      if (groupBannerEl) groupBannerEl.style.display = 'none';
+      if (displayPhoneEl) displayPhoneEl.textContent = '';
+    }
+  }
+
+  // =====================================================
+  // TEAM MEMBERS
+  // =====================================================
+  async function loadTeamMembers() {
+    if (!session.token) return;
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'VANTO_LOAD_TEAM'
+      });
+
+      if (response.success && response.data) {
+        teamMembers = response.data;
+        const selectEl = document.getElementById('vanto-assigned-to');
+        if (selectEl) {
+          selectEl.innerHTML = '<option value="">Unassigned</option>';
+          teamMembers.forEach(member => {
+            const option = document.createElement('option');
+            option.value = member.id;
+            option.textContent = member.full_name || member.email;
+            selectEl.appendChild(option);
+          });
+        }
+        log('Loaded ' + teamMembers.length + ' team members');
+      }
+    } catch (error) {
+      logError('Load team members error', error);
+    }
+  }
+
+  // =====================================================
+  // DETECTION FLOW
+  // =====================================================
+  function scheduleDetection() {
+    if (detectionTimer) {
+      clearTimeout(detectionTimer);
+    }
+    detectionTimer = setTimeout(runDetection, DETECTION_DEBOUNCE_MS);
+  }
+
+  function runDetection() {
+    log('Running detection...');
+
+    // Detect name
+    const name = detectContactName();
+    if (name !== lastDetectedName) {
+      lastDetectedName = name;
+      log('Name detected:', name);
+    }
+
+    // Check if group chat
+    isGroupChat = detectGroupChat();
+
+    if (isGroupChat) {
+      currentGroupName = detectGroupName();
+      lastDetectedPhone = null;
+      log('Group chat:', currentGroupName);
+    } else {
+      // Detect phone
+      const phone = detectPhoneNumber();
+      if (phone !== lastDetectedPhone) {
+        lastDetectedPhone = phone;
+        log('Phone detected:', phone);
+      }
+      currentGroupName = null;
+    }
+
+    updateUI();
+  }
+
+  // =====================================================
+  // WATCH CHANGES
+  // =====================================================
+  function watchChatChanges() {
+    // Polling fallback
+    setInterval(() => {
+      scheduleDetection();
+    }, POLLING_INTERVAL_MS);
+
+    // MutationObserver for title changes
+    const titleObserver = new MutationObserver(() => {
+      scheduleDetection();
+    });
+
+    const titleEl = document.querySelector('title');
+    if (titleEl) {
+      titleObserver.observe(titleEl, { childList: true, characterData: true, subtree: true });
+    }
+
+    // MutationObserver for body changes
+    const bodyObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.target.id === 'main' ||
+            (mutation.target.closest && mutation.target.closest('#main'))) {
+          scheduleDetection();
+          break;
+        }
+      }
+    });
+
+    bodyObserver.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-id']
+    });
+
+    log('Change watchers installed');
+  }
+
+  // =====================================================
+  // AUTH CHECK
+  // =====================================================
+  async function checkAuthState() {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: 'VANTO_GET_SESSION'
+      });
+
+      if (response && response.token) {
+        session.token = response.token;
+        session.email = response.email;
+        log('Session restored for:', session.email);
+        await loadTeamMembers();
+      } else {
+        log('No active session');
+      }
+    } catch (error) {
+      logError('Auth check error', error);
+    }
+
+    updateUI();
+  }
+
+  // =====================================================
+  // AUTO-POSTER EXECUTION ENGINE
+  // =====================================================
+  async function executeGroupPost(post) {
+    executionId++;
+    const eid = executionId;
+    currentExecution = { id: eid, postId: post.id, startTime: Date.now() };
+
+    log(`[EXEC ${eid}] Starting execution for post:`, post);
+
+    const totalTimeout = setTimeout(() => {
+      logStage('total', 'TIMEOUT', { elapsed: Date.now() - currentExecution.startTime });
+      reportResult(post.id, false, 'Total execution timeout (90s)');
+    }, TOTAL_EXECUTION_TIMEOUT);
+
+    try {
+      // Stage 1: Open Search
+      logStage('open_search', 'START');
+      const searchOpened = await openSearch();
+      if (!searchOpened) {
+        throw new Error('Failed to open search');
+      }
+      logStage('open_search', 'SUCCESS');
+
+      // Stage 2: Search for Group
+      logStage('search_group', 'START', { groupName: post.target_group_name });
+      const groupFound = await searchForGroup(post.target_group_name);
+      if (!groupFound) {
+        throw new Error(`Group not found: ${post.target_group_name}`);
+      }
+      logStage('search_group', 'SUCCESS');
+
+      // Stage 3: Select Group
+      logStage('select_group', 'START');
+      const groupSelected = await selectGroup(post.target_group_name);
+      if (!groupSelected) {
+        throw new Error('Failed to select group');
+      }
+      logStage('select_group', 'SUCCESS');
+
+      // Stage 4: Wait for Chat to Open
+      logStage('wait_chat_open', 'START');
+      await waitForChatToOpen();
+      logStage('wait_chat_open', 'SUCCESS');
+
+      // Stage 5: Find Input
+      logStage('find_input', 'START');
+      const inputEl = await findMessageInput();
+      if (!inputEl) {
+        throw new Error('Message input not found');
+      }
+      logStage('find_input', 'SUCCESS');
+
+      // Stage 6: Inject Message
+      logStage('inject_message', 'START');
+      const messageInjected = await injectMessage(inputEl, post.message_content);
+      if (!messageInjected) {
+        throw new Error('Failed to inject message');
+      }
+      logStage('inject_message', 'SUCCESS');
+
+      // Stage 7: Find Send Button
+      logStage('find_send_button', 'START');
+      const sendBtn = await findSendButton();
+      if (!sendBtn) {
+        throw new Error('Send button not found');
+      }
+      logStage('find_send_button', 'SUCCESS');
+
+      // Stage 8: Click Send
+      logStage('click_send', 'START');
+      const sent = await clickSendButton(sendBtn);
+      if (!sent) {
+        throw new Error('Failed to click send button');
+      }
+      logStage('click_send', 'SUCCESS');
+
+      // Stage 9: Confirm Sent
+      logStage('confirm_sent', 'START');
+      await confirmMessageSent();
+      logStage('confirm_sent', 'SUCCESS');
+
+      clearTimeout(totalTimeout);
+      log(`[EXEC ${eid}] COMPLETED SUCCESSFULLY`, { elapsed: Date.now() - currentExecution.startTime });
+      reportResult(post.id, true);
+      currentExecution = null;
+
+    } catch (error) {
+      clearTimeout(totalTimeout);
+      logError(`[EXEC ${eid}] FAILED at stage`, error);
+      reportResult(post.id, false, error.message);
+      currentExecution = null;
+    }
+  }
+
+  // =====================================================
+  // STAGE IMPLEMENTATIONS
+  // =====================================================
+  async function openSearch() {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        logError('open_search timeout');
+        resolve(false);
+      }, STAGE_TIMEOUTS.open_search);
+
+      (async () => {
+        // Try to find search input
+        let searchInput = findElement(SELECTORS.searchInput, 'search input');
+
+        if (!searchInput) {
+          // Try to click search icon first
+          const searchIcon = findElement(SELECTORS.searchIcon, 'search icon');
+          if (searchIcon) {
+            searchIcon.click();
+            await sleep(500);
+            searchInput = findElement(SELECTORS.searchInput, 'search input');
+          }
+        }
+
+        clearTimeout(timeout);
+        resolve(!!searchInput);
+      })();
     });
   }
-}
 
-// ── MutationObserver ───────────────────────────────────────────────────────────
-function watchChatChanges() {
-  pollInterval = setInterval(function() { scheduleDetection(); }, 1500);
+  async function searchForGroup(groupName) {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        logError('search_group timeout');
+        resolve(false);
+      }, STAGE_TIMEOUTS.search_group);
 
-  var titleEl = document.querySelector('title');
-  if (titleEl) {
-    new MutationObserver(function() { scheduleDetection(); })
-      .observe(titleEl, { childList: true, characterData: true, subtree: true });
+      (async () => {
+        const searchInput = findElement(SELECTORS.searchInput, 'search input');
+        if (!searchInput) {
+          clearTimeout(timeout);
+          resolve(false);
+          return;
+        }
+
+        // Clear existing content
+        searchInput.focus();
+        searchInput.textContent = '';
+
+        // Inject group name
+        document.execCommand('insertText', false, groupName);
+
+        // Wait for results
+        await sleep(1500);
+
+        clearTimeout(timeout);
+        resolve(true);
+      })();
+    });
   }
 
-  new MutationObserver(function() { scheduleDetection(); })
-    .observe(document.body, { childList: true, subtree: false });
+  async function selectGroup(groupName) {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        logError('select_group timeout');
+        resolve(false);
+      }, STAGE_TIMEOUTS.select_group);
 
-  function tryAttachHeaderObserver() {
-    var header =
-      document.querySelector('#main header') ||
-      document.querySelector('[data-testid="conversation-header"]') ||
-      document.querySelector('header');
+      (async () => {
+        // Find chat list items
+        const chatItems = document.querySelectorAll(SELECTORS.chatListItems);
+        log(`Found ${chatItems.length} chat items`);
 
-    if (header) {
-      if (headerObserver) headerObserver.disconnect();
-      headerObserver = new MutationObserver(function() { scheduleDetection(); });
-      headerObserver.observe(header, { childList: true, subtree: true, characterData: true });
-      log('Header observer attached');
-    } else {
-      setTimeout(tryAttachHeaderObserver, 1200);
+        let foundItem = null;
+
+        // Try exact match first
+        for (const item of chatItems) {
+          const titleEl = item.querySelector('[title]');
+          if (titleEl && titleEl.getAttribute('title') === groupName) {
+            foundItem = item;
+            log('Found exact match for group');
+            break;
+          }
+        }
+
+        // Try partial match
+        if (!foundItem) {
+          for (const item of chatItems) {
+            const titleEl = item.querySelector('[title]');
+            const title = titleEl?.getAttribute('title') || titleEl?.textContent || '';
+            if (title.includes(groupName) || groupName.includes(title)) {
+              foundItem = item;
+              log('Found partial match for group:', title);
+              break;
+            }
+          }
+        }
+
+        // Just click first result
+        if (!foundItem && chatItems.length > 0) {
+          foundItem = chatItems[0];
+          log('Using first available chat item');
+        }
+
+        if (foundItem) {
+          foundItem.click();
+          await sleep(500);
+        }
+
+        clearTimeout(timeout);
+        resolve(!!foundItem);
+      })();
+    });
+  }
+
+  async function waitForChatToOpen() {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        logError('wait_chat_open timeout');
+        resolve(false);
+      }, STAGE_TIMEOUTS.wait_chat_open);
+
+      (async () => {
+        // Wait for main chat area to be ready
+        const startTime = Date.now();
+
+        while (Date.now() - startTime < STAGE_TIMEOUTS.wait_chat_open) {
+          const mainEl = document.querySelector('#main');
+          const headerEl = mainEl?.querySelector('header');
+
+          if (headerEl && mainEl) {
+            clearTimeout(timeout);
+            resolve(true);
+            return;
+          }
+
+          await sleep(500);
+        }
+
+        clearTimeout(timeout);
+        resolve(false);
+      })();
+    });
+  }
+
+  async function findMessageInput() {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        logError('find_input timeout');
+        resolve(null);
+      }, STAGE_TIMEOUTS.find_input);
+
+      (async () => {
+        const input = await waitForElement(SELECTORS.messageInput, STAGE_TIMEOUTS.find_input, 'message input');
+        clearTimeout(timeout);
+        resolve(input);
+      })().catch(() => {
+        clearTimeout(timeout);
+        resolve(null);
+      });
+    });
+  }
+
+  async function injectMessage(inputEl, message) {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        logError('inject_message timeout');
+        resolve(false);
+      }, STAGE_TIMEOUTS.inject_message);
+
+      (async () => {
+        inputEl.focus();
+
+        // Clear existing content
+        inputEl.textContent = '';
+
+        // Inject message
+        document.execCommand('insertText', false, message);
+
+        // Dispatch input event
+        const inputEvent = new InputEvent('input', {
+          bubbles: true,
+          cancelable: true,
+          inputType: 'insertText',
+          data: message
+        });
+        inputEl.dispatchEvent(inputEvent);
+
+        await sleep(500);
+
+        clearTimeout(timeout);
+        resolve(true);
+      })();
+    });
+  }
+
+  async function findSendButton() {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        logError('find_send_button timeout');
+        resolve(null);
+      }, STAGE_TIMEOUTS.find_send_button);
+
+      (async () => {
+        // Wait a bit for send button to appear
+        await sleep(300);
+
+        const sendBtn = await waitForElement(SELECTORS.sendButton, STAGE_TIMEOUTS.find_send_button, 'send button');
+        clearTimeout(timeout);
+        resolve(sendBtn);
+      })().catch(() => {
+        clearTimeout(timeout);
+        resolve(null);
+      });
+    });
+  }
+
+  async function clickSendButton(sendBtn) {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        logError('click_send timeout');
+        resolve(false);
+      }, STAGE_TIMEOUTS.click_send);
+
+      (async () => {
+        sendBtn.click();
+        await sleep(500);
+
+        clearTimeout(timeout);
+        resolve(true);
+      })();
+    });
+  }
+
+  async function confirmMessageSent() {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        logError('confirm_sent timeout');
+        resolve(false);
+      }, STAGE_TIMEOUTS.confirm_sent);
+
+      (async () => {
+        // Wait for message to appear in chat
+        await sleep(1000);
+
+        // Check if input is now empty (message sent)
+        const inputEl = findElement(SELECTORS.messageInput, 'message input');
+        if (inputEl && inputEl.textContent.trim() === '') {
+          log('Message sent confirmed - input is empty');
+        }
+
+        clearTimeout(timeout);
+        resolve(true);
+      })();
+    });
+  }
+
+  // =====================================================
+  // HELPER FUNCTIONS
+  // =====================================================
+  function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  async function reportResult(postId, success, error = null) {
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'VANTO_POST_RESULT',
+        postId,
+        success,
+        error
+      });
+    } catch (e) {
+      logError('Failed to report result', e);
     }
   }
-  tryAttachHeaderObserver();
-}
 
-// ── Inject ─────────────────────────────────────────────────────────────────────
-function injectSidebar() {
-  if (document.getElementById(SIDEBAR_ID)) return;
+  // =====================================================
+  // MESSAGE LISTENER
+  // =====================================================
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    log('Received message:', message.type);
 
-  var wrapper = document.createElement('div');
-  wrapper.innerHTML = buildSidebarHTML();
-  document.body.appendChild(wrapper.firstElementChild);
-  document.body.appendChild(buildToggleButton());
+    switch (message.type) {
+      case 'VANTO_SESSION_UPDATE':
+        session.token = message.token;
+        session.email = message.email;
+        loadTeamMembers();
+        updateUI();
+        sendResponse({ success: true });
+        break;
 
-  wireEvents();
-  watchChatChanges();
+      case 'VANTO_TOKEN_CLEARED':
+        session = { token: null, email: null };
+        updateUI();
+        sendResponse({ success: true });
+        break;
 
-  // Check auth then trigger first detection
-  checkAuthState(function() {
-    startHeartbeatLoop();
-    if (isAuthenticated) loadTeamMembers();
-    setTimeout(runDetection, 1200);
-  });
+      case 'VANTO_PING':
+        log('Received heartbeat ping');
+        sendResponse({ success: true, pong: true });
+        break;
 
-  log('Sidebar injected v5.1 (with live heartbeat)');
-}
+      case 'VANTO_EXECUTE_GROUP_POST':
+        if (message.post) {
+          executeGroupPost(message.post);
+          sendResponse({ success: true, started: true });
+        } else {
+          sendResponse({ success: false, error: 'No post data' });
+        }
+        break;
 
-// ── Boot ───────────────────────────────────────────────────────────────────────
-function boot() {
-  if (document.getElementById('app')) {
-    setTimeout(injectSidebar, 1500);
-    return;
-  }
-  var obs = new MutationObserver(function() {
-    if (document.getElementById('app')) {
-      obs.disconnect();
-      setTimeout(injectSidebar, 1500);
+      default:
+        sendResponse({ success: false, error: 'Unknown message type' });
     }
-  });
-  obs.observe(document.body, { childList: true, subtree: true });
-}
 
-boot();
+    return true;
+  });
+
+  // =====================================================
+  // INITIALIZATION
+  // =====================================================
+  async function init() {
+    log('Content script v' + VERSION + ' initializing...');
+
+    // Wait for WhatsApp to load
+    let attempts = 0;
+    const maxAttempts = 60;
+
+    while (attempts < maxAttempts) {
+      const appEl = document.querySelector('#app');
+      if (appEl && document.readyState === 'complete') {
+        break;
+      }
+      await sleep(500);
+      attempts++;
+    }
+
+    if (attempts >= maxAttempts) {
+      logError('WhatsApp did not load within timeout');
+      return;
+    }
+
+    log('WhatsApp loaded, creating sidebar...');
+
+    createSidebar();
+    createToggleButton();
+    await checkAuthState();
+    watchChatChanges();
+    runDetection();
+
+    log('Content script initialized');
+  }
+
+  // Start initialization
+  init();
+
+})();
