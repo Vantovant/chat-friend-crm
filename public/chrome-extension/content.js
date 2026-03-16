@@ -731,9 +731,12 @@
 
     log(`[EXEC ${eid}] Starting execution for post:`, post);
 
+    let executionResult = { success: false, error: null };
+
     const totalTimeout = setTimeout(() => {
       logStage('total', 'TIMEOUT', { elapsed: Date.now() - currentExecution.startTime });
-      reportResult(post.id, false, 'Total execution timeout (90s)');
+      executionResult = { success: false, error: 'Total execution timeout (90s)' };
+      currentExecution = null;
     }, TOTAL_EXECUTION_TIMEOUT);
 
     try {
@@ -805,15 +808,17 @@
 
       clearTimeout(totalTimeout);
       log(`[EXEC ${eid}] COMPLETED SUCCESSFULLY`, { elapsed: Date.now() - currentExecution.startTime });
-      reportResult(post.id, true);
+      executionResult = { success: true, error: null };
       currentExecution = null;
 
     } catch (error) {
       clearTimeout(totalTimeout);
       logError(`[EXEC ${eid}] FAILED at stage`, error);
-      reportResult(post.id, false, error.message);
+      executionResult = { success: false, error: error.message };
       currentExecution = null;
     }
+
+    return executionResult;
   }
 
   // =====================================================
@@ -1121,8 +1126,16 @@
 
       case 'VANTO_EXECUTE_GROUP_POST':
         if (message.post) {
-          executeGroupPost(message.post);
-          sendResponse({ success: true, started: true });
+          log('Starting group post execution, will wait for completion...');
+          // CRITICAL FIX: Actually await the execution and return the real result
+          try {
+            const result = await executeGroupPost(message.post);
+            log('Execution completed, sending result:', result);
+            sendResponse(result);
+          } catch (error) {
+            logError('Execution error:', error);
+            sendResponse({ success: false, error: error.message });
+          }
         } else {
           sendResponse({ success: false, error: 'No post data' });
         }
