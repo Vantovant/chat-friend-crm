@@ -120,19 +120,26 @@ export function KnowledgeVaultModule() {
 
   useEffect(() => { fetchFiles(); }, [fetchFiles]);
 
-  /** Insert a batch with up to 3 retries */
-  const insertBatchWithRetry = async (batch: any[], retries = 3): Promise<{ error: any }> => {
+  /** Insert a batch with retries, then fall back to row-by-row to isolate bad chunks */
+  const insertBatchWithRetry = async (batch: any[], retries = 3): Promise<{ error: any; failedRowIndex?: number }> => {
     for (let attempt = 0; attempt < retries; attempt++) {
       const { error } = await supabase.from('knowledge_chunks').insert(batch);
       if (!error) return { error: null };
       console.warn(`[KnowledgeVault] Batch insert attempt ${attempt + 1} failed:`, error.message);
       if (attempt < retries - 1) {
-        await new Promise(r => setTimeout(r, 1000 * (attempt + 1))); // backoff
-      } else {
-        return { error };
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
       }
     }
-    return { error: { message: 'Unknown retry failure' } };
+
+    for (let rowIndex = 0; rowIndex < batch.length; rowIndex++) {
+      const { error } = await supabase.from('knowledge_chunks').insert(batch[rowIndex]);
+      if (error) {
+        console.error('[KnowledgeVault] Isolated bad chunk row:', rowIndex, error.message);
+        return { error, failedRowIndex: rowIndex };
+      }
+    }
+
+    return { error: null };
   };
 
   /** Client-side ingestion: read text → chunk → insert directly to DB */
