@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   BookOpen, Upload, Search, FileText, CheckCircle, Clock, XCircle,
-  Trash2, RefreshCw, Loader2, Shield, Sparkles, ClipboardPaste,
+  Trash2, RefreshCw, Loader2, Shield, Sparkles, ClipboardPaste, Pencil,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
