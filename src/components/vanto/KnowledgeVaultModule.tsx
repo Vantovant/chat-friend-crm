@@ -432,7 +432,23 @@ export function KnowledgeVaultModule() {
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-destructive/15 text-destructive border border-destructive/30">EXPIRED</span>
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground truncate">{f.file_name} · v{f.version} · {col?.label}</p>
+                      {editingFileId === f.id ? (
+                        <div className="flex items-center gap-2 mt-1">
+                          <select
+                            value={editCollection}
+                            onChange={e => setEditCollection(e.target.value)}
+                            className="bg-secondary/60 border border-border rounded px-2 py-1 text-xs text-foreground outline-none focus:border-primary/50"
+                          >
+                            {COLLECTIONS.map(c => (
+                              <option key={c.id} value={c.id}>{c.icon} {c.label} ({c.mode})</option>
+                            ))}
+                          </select>
+                          <Button size="sm" variant="outline" className="h-6 text-[10px] px-2" onClick={() => handleEditCollection(f.id, editCollection)}>Save</Button>
+                          <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2" onClick={() => setEditingFileId(null)}>Cancel</Button>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground truncate">{f.file_name} · v{f.version} · {col?.label}</p>
+                      )}
                       <p className="text-[10px] text-muted-foreground">
                         Added {new Date(f.created_at).toLocaleDateString()}
                         {f.effective_date && ` · Effective ${new Date(f.effective_date).toLocaleDateString()}`}
