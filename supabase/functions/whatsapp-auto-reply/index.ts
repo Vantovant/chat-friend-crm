@@ -355,7 +355,7 @@ Deno.serve(async (req) => {
         const aiAnswer = await generateAIAnswer(searchQuery, chunks, effectiveMode);
 
         if (aiAnswer) {
-          replyContent = aiAnswer + "\n\nReply 3 to speak to a person.";
+          replyContent = aiAnswer + "\n\nReply 3 to speak to Vanto Vanto.";
           actionTaken = effectiveMode === "strict" ? "knowledge_strict" : "knowledge_assisted";
         } else {
           // AI failed — use raw snippets
@@ -363,7 +363,7 @@ Deno.serve(async (req) => {
             .slice(0, 3)
             .map((r: any) => `📌 *${r.file_title}*\n${r.chunk_text.slice(0, 300)}`)
             .join("\n\n");
-          replyContent = `Here's what I found:\n\n${snippets}\n\nReply 3 to speak to a person.`;
+          replyContent = `Here's what I found:\n\n${snippets}\n\nReply 3 to speak to Vanto Vanto.`;
           actionTaken = "knowledge_reply";
         }
       } else {
