@@ -41,15 +41,23 @@ type SearchResult = {
   relevance: number;
 };
 
-/** Clean text: remove null bytes, control chars, normalize whitespace */
+/** Clean text: remove null bytes, control chars, normalize whitespace, ensure JSON-safe */
 function cleanText(raw: string): string {
   return raw
     .replace(/\0/g, '')
-    .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F]/g, '')
+    .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '') // all control chars
     .replace(/\r\n/g, '\n')
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
+    .replace(/\\/g, '\\\\')  // escape backslashes for JSON safety
     .trim();
+}
+
+/** Ensure a chunk string is safe for JSON/PostgREST insertion */
+function sanitizeChunk(text: string): string {
+  // Remove any remaining characters that could break JSON encoding
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim();
 }
 
 /** Split text into chunks of ~2000 chars with 200 char overlap */
@@ -233,7 +241,7 @@ export function KnowledgeVaultModule() {
         const batch = chunks.slice(i, i + BATCH_SIZE).map((chunk, batchIndex) => ({
           file_id: fileRecord.id,
           chunk_index: i + batchIndex,
-          chunk_text: chunk,
+          chunk_text: sanitizeChunk(chunk),
           token_count: Math.ceil(chunk.length / 4),
         }));
 
