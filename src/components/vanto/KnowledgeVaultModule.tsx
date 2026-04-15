@@ -100,6 +100,21 @@ export function KnowledgeVaultModule() {
 
   useEffect(() => { fetchFiles(); }, [fetchFiles]);
 
+  /** Insert a batch with up to 3 retries */
+  const insertBatchWithRetry = async (batch: any[], retries = 3): Promise<{ error: any }> => {
+    for (let attempt = 0; attempt < retries; attempt++) {
+      const { error } = await supabase.from('knowledge_chunks').insert(batch);
+      if (!error) return { error: null };
+      console.warn(`[KnowledgeVault] Batch insert attempt ${attempt + 1} failed:`, error.message);
+      if (attempt < retries - 1) {
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1))); // backoff
+      } else {
+        return { error };
+      }
+    }
+    return { error: { message: 'Unknown retry failure' } };
+  };
+
   /** Client-side ingestion: read text → chunk → insert directly to DB */
   const handleUpload = async () => {
     if (!uploadTitle) {
@@ -144,10 +159,20 @@ export function KnowledgeVaultModule() {
     }
 
     setUploading(true);
+    setUploadProgress({ current: 0, total: 0, stage: 'Preparing…' });
 
     try {
-      // Create file record (no storage upload needed — text is chunked directly)
+      // Create file record
       const { data: user } = await supabase.auth.getUser();
+      if (!user?.user?.id) {
+        toast({ title: 'Not authenticated', description: 'Please sign in first', variant: 'destructive' });
+        setUploading(false);
+        setUploadProgress(null);
+        return;
+      }
+
+      setUploadProgress({ current: 0, total: 0, stage: 'Creating record…' });
+
       const { data: fileRecord, error: insertErr } = await supabase
         .from('knowledge_files')
         .insert({
@@ -159,19 +184,27 @@ export function KnowledgeVaultModule() {
           status: 'processing',
           effective_date: uploadEffective || null,
           expiry_date: uploadExpiry || null,
-          created_by: user?.user?.id,
+          created_by: user.user.id,
         })
         .select('id')
         .single();
 
       if (insertErr || !fileRecord) {
-        toast({ title: 'Failed to create record', description: insertErr?.message, variant: 'destructive' });
+        console.error('[KnowledgeVault] File record insert failed:', insertErr);
+        toast({ title: 'Failed to create record', description: insertErr?.message || 'RLS may be blocking. Check admin role.', variant: 'destructive' });
         setUploading(false);
+        setUploadProgress(null);
         return;
       }
 
       // Chunk text client-side
+      setUploadProgress({ current: 0, total: 0, stage: 'Chunking text…' });
       const chunks = chunkText(text);
+      const BATCH_SIZE = 25; // smaller batches for reliability
+      const totalBatches = Math.ceil(chunks.length / BATCH_SIZE);
+
+      setUploadProgress({ current: 0, total: totalBatches, stage: `Uploading 0/${totalBatches} batches…` });
+
       const chunkRows = chunks.map((chunk, i) => ({
         file_id: fileRecord.id,
         chunk_index: i,
@@ -179,22 +212,41 @@ export function KnowledgeVaultModule() {
         token_count: Math.ceil(chunk.length / 4),
       }));
 
-      // Insert chunks in batches of 50
+      // Insert chunks in batches with retry
       let insertError = null;
-      for (let i = 0; i < chunkRows.length; i += 50) {
-        const batch = chunkRows.slice(i, i + 50);
-        const { error } = await supabase.from('knowledge_chunks').insert(batch);
-        if (error) { insertError = error; break; }
+      let batchesDone = 0;
+      for (let i = 0; i < chunkRows.length; i += BATCH_SIZE) {
+        const batch = chunkRows.slice(i, i + BATCH_SIZE);
+        const { error } = await insertBatchWithRetry(batch);
+        if (error) {
+          insertError = error;
+          console.error(`[KnowledgeVault] Batch ${batchesDone + 1}/${totalBatches} failed permanently:`, error);
+          break;
+        }
+        batchesDone++;
+        setUploadProgress({
+          current: batchesDone,
+          total: totalBatches,
+          stage: `Uploading ${batchesDone}/${totalBatches} batches…`,
+        });
       }
 
       if (insertError) {
         await supabase.from('knowledge_files').update({ status: 'rejected' }).eq('id', fileRecord.id);
-        toast({ title: 'Chunking failed', description: insertError.message, variant: 'destructive' });
+        toast({
+          title: `❌ Upload failed at batch ${batchesDone + 1}/${totalBatches}`,
+          description: `${batchesDone * BATCH_SIZE} of ${chunks.length} chunks saved. Error: ${insertError.message}`,
+          variant: 'destructive',
+        });
       } else {
         await supabase.from('knowledge_files').update({ status: 'approved' }).eq('id', fileRecord.id);
-        toast({ title: '✅ Indexed successfully', description: `${chunks.length} chunks from "${uploadTitle}"` });
+        toast({
+          title: '✅ Indexed successfully',
+          description: `${chunks.length} chunks (${totalBatches} batches) from "${uploadTitle}" · ${(text.length / 1000).toFixed(0)}K chars`,
+        });
       }
     } catch (err: any) {
+      console.error('[KnowledgeVault] Upload error:', err);
       toast({ title: 'Error', description: err?.message, variant: 'destructive' });
     }
 
@@ -205,6 +257,7 @@ export function KnowledgeVaultModule() {
     setUploadEffective('');
     setUploadExpiry('');
     setUploading(false);
+    setUploadProgress(null);
     fetchFiles();
   };
 
