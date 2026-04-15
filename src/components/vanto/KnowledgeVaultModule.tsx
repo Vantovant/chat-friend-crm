@@ -241,7 +241,7 @@ export function KnowledgeVaultModule() {
         const batch = chunks.slice(i, i + BATCH_SIZE).map((chunk, batchIndex) => ({
           file_id: fileRecord.id,
           chunk_index: i + batchIndex,
-          chunk_text: chunk,
+          chunk_text: sanitizeChunk(chunk),
           token_count: Math.ceil(chunk.length / 4),
         }));
 
