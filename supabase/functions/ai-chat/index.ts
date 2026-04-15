@@ -1,6 +1,6 @@
 /**
- * Vanto CRM — ai-chat Edge Function
- * Hybrid AI routing: Lovable AI primary → OpenAI fallback (from user settings).
+ * Vanto CRM — ai-chat Edge Function (v2)
+ * Hybrid AI routing with Knowledge Vault RAG + SSE streaming.
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -22,6 +22,7 @@ You help users:
 - Suggest optimal contact timing based on engagement patterns
 - Score leads based on conversation history
 - Generate workflow ideas for automating repetitive tasks
+- Answer product questions using knowledge base sources when available
 
 Key context:
 - Leads have temperature ratings: hot, warm, cold
@@ -29,6 +30,8 @@ Key context:
 - Communication is primarily via WhatsApp
 - The team uses a shared inbox model
 - The CRM integrates with Twilio for WhatsApp Business API
+
+When knowledge base sources are provided, use them to give factual, grounded answers. Cite the source name when quoting factual information.
 
 Be concise, actionable, and friendly. Use emojis sparingly. When writing messages for leads, make them feel personal and warm — never robotic. Always provide a clear next step or CTA.`;
 
@@ -46,34 +49,33 @@ interface AIProvider {
   name: string;
 }
 
-async function callAI(provider: AIProvider, aiMessages: any[]): Promise<{ ok: true; reply: string } | { ok: false; error: string; status: number }> {
+async function searchKnowledge(serviceClient: any, query: string) {
   try {
-    const response = await fetch(provider.url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${provider.key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: provider.model,
-        messages: aiMessages,
-        max_tokens: 1000,
-        temperature: 0.7,
-      }),
+    const { data, error } = await serviceClient.rpc('search_knowledge', {
+      query_text: query,
+      collection_filter: null,
+      max_results: 3,
     });
+    if (error || !data?.length) return { context: '', citations: [] };
 
-    if (!response.ok) {
-      const errData = await response.text();
-      console.error(`[ai-chat] ${provider.name} error:`, response.status, errData);
-      return { ok: false, error: errData, status: response.status };
-    }
+    const context = '\n\nRelevant Knowledge Base Sources:\n' +
+      data.map((r: any, i: number) =>
+        `[Source ${i + 1}: ${r.file_title} (${r.file_collection})]\n${r.chunk_text.slice(0, 400)}`
+      ).join('\n\n');
 
-    const data = await response.json();
-    const reply = data.choices?.[0]?.message?.content || 'I could not generate a response.';
-    return { ok: true, reply };
-  } catch (err: any) {
-    console.error(`[ai-chat] ${provider.name} exception:`, err.message);
-    return { ok: false, error: err.message, status: 500 };
+    const citations = data.map((r: any) => ({
+      file_id: r.file_id,
+      chunk_id: r.chunk_id,
+      file_title: r.file_title,
+      collection: r.file_collection,
+      snippet: r.chunk_text.slice(0, 200),
+      relevance: r.relevance,
+    }));
+
+    return { context, citations };
+  } catch (e) {
+    console.error('[ai-chat] Knowledge search failed:', e);
+    return { context: '', citations: [] };
   }
 }
 
@@ -85,15 +87,14 @@ Deno.serve(async (req) => {
     return jsonRes({ error: 'Invalid JSON' }, 400);
   }
 
-  const { messages, context } = body;
+  const { messages, context, stream = false } = body;
   if (!messages || !Array.isArray(messages)) {
     return jsonRes({ error: 'messages array required' }, 400);
   }
 
-  // Build providers list: Lovable AI primary, then user's BYO key as fallback
+  // Build providers list
   const providers: AIProvider[] = [];
 
-  // 1) Always try Lovable AI first
   const lovableKey = Deno.env.get('LOVABLE_API_KEY') || '';
   if (lovableKey) {
     providers.push({
@@ -104,7 +105,7 @@ Deno.serve(async (req) => {
     });
   }
 
-  // 2) Try to load user's BYO key as fallback
+  // BYO key fallback
   const authHeader = req.headers.get('Authorization') || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
@@ -131,19 +132,9 @@ Deno.serve(async (req) => {
         if (settings?.is_enabled && settings.api_key_encrypted) {
           const decodedKey = atob(settings.api_key_encrypted);
           if (settings.provider === 'openai') {
-            providers.push({
-              url: OPENAI_URL,
-              key: decodedKey,
-              model: settings.model || 'gpt-4o-mini',
-              name: 'openai',
-            });
+            providers.push({ url: OPENAI_URL, key: decodedKey, model: settings.model || 'gpt-4o-mini', name: 'openai' });
           } else if (settings.provider === 'gemini') {
-            providers.push({
-              url: GEMINI_URL,
-              key: decodedKey,
-              model: settings.model || 'gemini-2.0-flash',
-              name: 'gemini',
-            });
+            providers.push({ url: GEMINI_URL, key: decodedKey, model: settings.model || 'gemini-2.0-flash', name: 'gemini' });
           }
         }
       }
@@ -156,41 +147,121 @@ Deno.serve(async (req) => {
     return jsonRes({ error: 'No AI API key configured. Please add your OpenAI or Gemini key in Settings.' }, 500);
   }
 
+  // Knowledge Vault RAG search on the last user message
+  let knowledgeContext = '';
+  let citations: any[] = [];
+
+  const lastUserMsg = [...messages].reverse().find((m: any) => m.role === 'user');
+  if (lastUserMsg?.content) {
+    const serviceClient = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+    );
+    const result = await searchKnowledge(serviceClient, lastUserMsg.content);
+    knowledgeContext = result.context;
+    citations = result.citations;
+  }
+
   // Build messages
-  const systemContent = context
+  let systemContent = context
     ? `${SYSTEM_PROMPT}\n\nCurrent CRM Context:\n${context}`
     : SYSTEM_PROMPT;
+
+  if (knowledgeContext) {
+    systemContent += knowledgeContext;
+  }
 
   const aiMessages = [
     { role: 'system', content: systemContent },
     ...messages.map((m: any) => ({ role: m.role, content: m.content })),
   ];
 
-  // Try each provider in order (Lovable first, then BYO fallback)
+  // --- Streaming path ---
+  if (stream) {
+    for (const provider of providers) {
+      console.log(`[ai-chat] Trying provider (stream): ${provider.name}`);
+      try {
+        const response = await fetch(provider.url, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${provider.key}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: provider.model,
+            messages: aiMessages,
+            max_tokens: 1000,
+            temperature: 0.7,
+            stream: true,
+          }),
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          console.warn(`[ai-chat] ${provider.name} stream error:`, response.status, errText);
+          if (response.status === 429) return jsonRes({ error: 'Rate limit exceeded. Please try again later.' }, 429);
+          if (response.status === 402) return jsonRes({ error: 'Payment required. Please add funds.' }, 402);
+          continue;
+        }
+
+        // Proxy the SSE stream
+        return new Response(response.body, {
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'X-Provider': provider.name,
+            'X-Citations': JSON.stringify(citations),
+          },
+        });
+      } catch (err: any) {
+        console.error(`[ai-chat] ${provider.name} stream exception:`, err.message);
+        continue;
+      }
+    }
+    return jsonRes({ error: 'All AI providers failed for streaming.' }, 502);
+  }
+
+  // --- Non-streaming path ---
   let lastError = '';
   let lastStatus = 500;
 
   for (const provider of providers) {
     console.log(`[ai-chat] Trying provider: ${provider.name}`);
-    const result = await callAI(provider, aiMessages);
+    try {
+      const response = await fetch(provider.url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${provider.key}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: provider.model,
+          messages: aiMessages,
+          max_tokens: 1000,
+          temperature: 0.7,
+        }),
+      });
 
-    if (result.ok) {
-      console.log(`[ai-chat] Success via ${provider.name}`);
-      return jsonRes({ reply: result.reply, provider: provider.name });
+      if (!response.ok) {
+        const errData = await response.text();
+        console.error(`[ai-chat] ${provider.name} error:`, response.status, errData);
+        lastError = errData;
+        lastStatus = response.status;
+        continue;
+      }
+
+      const data = await response.json();
+      const reply = data.choices?.[0]?.message?.content || 'I could not generate a response.';
+      return jsonRes({ reply, provider: provider.name, citations });
+    } catch (err: any) {
+      console.error(`[ai-chat] ${provider.name} exception:`, err.message);
+      lastError = err.message;
+      lastStatus = 500;
     }
-
-    lastError = result.error;
-    lastStatus = result.status;
-    console.warn(`[ai-chat] ${provider.name} failed (${result.status}), trying next...`);
   }
 
-  // All providers failed
-  if (lastStatus === 429) {
-    return jsonRes({ error: 'Rate limit exceeded on all providers. Please try again later.' }, 429);
-  }
-  if (lastStatus === 402) {
-    return jsonRes({ error: 'Payment required. Please add funds or configure a fallback API key in Settings.' }, 402);
-  }
-
+  if (lastStatus === 429) return jsonRes({ error: 'Rate limit exceeded on all providers. Please try again later.' }, 429);
+  if (lastStatus === 402) return jsonRes({ error: 'Payment required. Please add funds or configure a fallback API key in Settings.' }, 402);
   return jsonRes({ error: `All AI providers failed. Last error: ${lastError}` }, 502);
 });

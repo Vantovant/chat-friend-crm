@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
   Brain, Sparkles, ThumbsUp, ThumbsDown, Send, Loader2, BookOpen,
-  AlertTriangle, Shield, RefreshCw, ChevronDown, MessageSquare,
+  AlertTriangle, Shield, RefreshCw, ChevronDown, MessageSquare, TrendingUp,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
@@ -44,16 +44,18 @@ export function CopilotSidebar({ conversationId, contactName, onInsertDraft, onS
   const [draftText, setDraftText] = useState('');
   const [showCitations, setShowCitations] = useState(false);
   const [feedbackGiven, setFeedbackGiven] = useState<'up' | 'down' | null>(null);
+  const [activeAction, setActiveAction] = useState<'nba' | 'draft'>('nba');
 
-  const fetchNBA = async () => {
+  const fetchSuggestion = async (action: 'nba' | 'draft' = activeAction) => {
     if (!conversationId) return;
     setLoading(true);
     setSuggestion(null);
     setCitations([]);
     setFeedbackGiven(null);
+    setActiveAction(action);
 
     const { data, error } = await supabase.functions.invoke('zazi-copilot', {
-      body: { conversation_id: conversationId, action: 'nba' },
+      body: { conversation_id: conversationId, action },
     });
 
     if (error || data?.error) {
@@ -70,9 +72,8 @@ export function CopilotSidebar({ conversationId, contactName, onInsertDraft, onS
     setLoading(false);
   };
 
-  // Auto-fetch when conversation changes
   useEffect(() => {
-    if (conversationId) fetchNBA();
+    if (conversationId) fetchSuggestion('nba');
   }, [conversationId]);
 
   const handleFeedback = async (rating: 'up' | 'down') => {
@@ -83,20 +84,28 @@ export function CopilotSidebar({ conversationId, contactName, onInsertDraft, onS
     await supabase.from('ai_feedback').insert({
       suggestion_id: suggestionId,
       rating,
-      used_as_is: rating === 'up',
+      used_as_is: rating === 'up' && draftText === suggestion?.draft_reply,
+      edited_text: draftText !== suggestion?.draft_reply ? draftText : null,
       user_id: user?.user?.id || '',
     });
 
-    // Update suggestion status
     await supabase.from('ai_suggestions')
       .update({ status: rating === 'up' ? 'accepted' : 'rejected' })
       .eq('id', suggestionId);
+
+    toast({ title: rating === 'up' ? '👍 Feedback recorded' : '👎 Feedback recorded' });
   };
 
   const modeColors = {
     factual: 'bg-amber-500/15 text-amber-500 border-amber-500/30',
     guidance: 'bg-primary/15 text-primary border-primary/30',
     motivation: 'bg-violet-500/15 text-violet-400 border-violet-500/30',
+  };
+
+  const confidenceColor = (c?: number) => {
+    if (!c || c < 0.3) return 'text-destructive';
+    if (c < 0.6) return 'text-amber-500';
+    return 'text-primary';
   };
 
   if (!conversationId) {
@@ -118,7 +127,7 @@ export function CopilotSidebar({ conversationId, contactName, onInsertDraft, onS
             <span className="text-sm font-bold text-foreground">Zazi Copilot</span>
           </div>
           <button
-            onClick={fetchNBA}
+            onClick={() => fetchSuggestion()}
             disabled={loading}
             className="p-1.5 rounded-lg hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors"
             title="Refresh suggestion"
@@ -127,6 +136,28 @@ export function CopilotSidebar({ conversationId, contactName, onInsertDraft, onS
           </button>
         </div>
         <p className="text-[10px] text-muted-foreground">AI-powered sales assistant for {contactName}</p>
+
+        {/* Action toggle */}
+        <div className="flex gap-1 mt-2">
+          <button
+            onClick={() => fetchSuggestion('nba')}
+            disabled={loading}
+            className={cn('flex-1 px-2 py-1 rounded text-[10px] font-medium transition-colors',
+              activeAction === 'nba' ? 'bg-primary/15 text-primary border border-primary/30' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60 border border-transparent'
+            )}
+          >
+            🎯 Next Best Action
+          </button>
+          <button
+            onClick={() => fetchSuggestion('draft')}
+            disabled={loading}
+            className={cn('flex-1 px-2 py-1 rounded text-[10px] font-medium transition-colors',
+              activeAction === 'draft' ? 'bg-primary/15 text-primary border border-primary/30' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60 border border-transparent'
+            )}
+          >
+            📝 Quick Draft
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
@@ -148,19 +179,30 @@ export function CopilotSidebar({ conversationId, contactName, onInsertDraft, onS
             {/* NBA Card */}
             <div className="vanto-card p-3 space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-foreground">Next Best Action</span>
-                {suggestion.reply_mode && (
-                  <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold border',
-                    modeColors[suggestion.reply_mode as keyof typeof modeColors] || modeColors.guidance
-                  )}>
-                    {suggestion.reply_mode?.toUpperCase()}
-                  </span>
-                )}
+                <span className="text-xs font-bold text-foreground">
+                  {activeAction === 'nba' ? 'Next Best Action' : 'Quick Draft'}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {/* Confidence */}
+                  {suggestion.confidence !== undefined && (
+                    <span className={cn('flex items-center gap-0.5 text-[9px] font-bold', confidenceColor(suggestion.confidence))}>
+                      <TrendingUp size={9} />
+                      {Math.round((suggestion.confidence || 0) * 100)}%
+                    </span>
+                  )}
+                  {suggestion.reply_mode && (
+                    <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold border',
+                      modeColors[suggestion.reply_mode as keyof typeof modeColors] || modeColors.guidance
+                    )}>
+                      {suggestion.reply_mode?.toUpperCase()}
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Lead detection */}
               {suggestion.lead_type_detected && (
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-secondary border border-border text-foreground">
                     {suggestion.lead_type_detected}
                   </span>
@@ -221,6 +263,9 @@ export function CopilotSidebar({ conversationId, contactName, onInsertDraft, onS
                           <Shield size={10} className="text-amber-500" />
                           <span className="text-[10px] font-semibold text-foreground">{c.file_title}</span>
                           <span className="text-[9px] text-muted-foreground">({c.collection})</span>
+                          <span className={cn('text-[9px] font-bold ml-auto', confidenceColor(c.relevance))}>
+                            {Math.round(c.relevance * 100)}%
+                          </span>
                         </div>
                         <p className="text-[11px] text-muted-foreground leading-relaxed">{c.snippet}</p>
                       </div>
