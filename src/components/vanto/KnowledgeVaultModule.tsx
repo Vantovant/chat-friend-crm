@@ -45,19 +45,21 @@ type SearchResult = {
 function cleanText(raw: string): string {
   return raw
     .replace(/\0/g, '')
-    .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '') // all control chars
+    .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '')
+    .replace(/[\uD800-\uDFFF]/g, '') // strip unpaired/surrogate unicode that can break JSON serialization
     .replace(/\r\n/g, '\n')
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
-    .replace(/\\/g, '\\\\')  // escape backslashes for JSON safety
     .trim();
 }
 
 /** Ensure a chunk string is safe for JSON/PostgREST insertion */
 function sanitizeChunk(text: string): string {
-  // Remove any remaining characters that could break JSON encoding
-  // eslint-disable-next-line no-control-regex
-  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim();
+  return text
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '')
+    .replace(/[\uD800-\uDFFF]/g, '')
+    .replace(/\uFFFD/g, '')
+    .trim();
 }
 
 /** Split text into chunks of ~2000 chars with 200 char overlap */
@@ -119,19 +121,26 @@ export function KnowledgeVaultModule() {
 
   useEffect(() => { fetchFiles(); }, [fetchFiles]);
 
-  /** Insert a batch with up to 3 retries */
-  const insertBatchWithRetry = async (batch: any[], retries = 3): Promise<{ error: any }> => {
+  /** Insert a batch with retries, then fall back to row-by-row to isolate bad chunks */
+  const insertBatchWithRetry = async (batch: any[], retries = 3): Promise<{ error: any; failedRowIndex?: number }> => {
     for (let attempt = 0; attempt < retries; attempt++) {
       const { error } = await supabase.from('knowledge_chunks').insert(batch);
       if (!error) return { error: null };
       console.warn(`[KnowledgeVault] Batch insert attempt ${attempt + 1} failed:`, error.message);
       if (attempt < retries - 1) {
-        await new Promise(r => setTimeout(r, 1000 * (attempt + 1))); // backoff
-      } else {
-        return { error };
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
       }
     }
-    return { error: { message: 'Unknown retry failure' } };
+
+    for (let rowIndex = 0; rowIndex < batch.length; rowIndex++) {
+      const { error } = await supabase.from('knowledge_chunks').insert(batch[rowIndex]);
+      if (error) {
+        console.error('[KnowledgeVault] Isolated bad chunk row:', rowIndex, error.message);
+        return { error, failedRowIndex: rowIndex };
+      }
+    }
+
+    return { error: null };
   };
 
   /** Client-side ingestion: read text → chunk → insert directly to DB */
