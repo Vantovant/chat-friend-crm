@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   BookOpen, Upload, Search, FileText, CheckCircle, Clock, XCircle,
-  Trash2, RefreshCw, Loader2, Shield, Sparkles, ClipboardPaste,
+  Trash2, RefreshCw, Loader2, Shield, Sparkles, ClipboardPaste, Pencil,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
@@ -92,7 +92,9 @@ export function KnowledgeVaultModule() {
 
   // Upload form state
   const [uploadTitle, setUploadTitle] = useState('');
-  const [uploadCollection, setUploadCollection] = useState('products');
+  const [uploadCollection, setUploadCollection] = useState('general');
+  const [editingFileId, setEditingFileId] = useState<string | null>(null);
+  const [editCollection, setEditCollection] = useState('');
   const [uploadMode, setUploadMode] = useState<'paste' | 'file'>('paste');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadPasteText, setUploadPasteText] = useState('');
@@ -316,11 +318,21 @@ export function KnowledgeVaultModule() {
   };
 
   const handleDelete = async (fileId: string) => {
-    // Delete chunks first, then file
     await supabase.from('knowledge_chunks').delete().eq('file_id', fileId);
     const { error } = await supabase.from('knowledge_files').delete().eq('id', fileId);
     if (error) toast({ title: 'Delete failed', description: error.message, variant: 'destructive' });
     else { toast({ title: 'File deleted' }); fetchFiles(); }
+  };
+
+  const handleEditCollection = async (fileId: string, newCollection: string) => {
+    const col = COLLECTIONS.find(c => c.id === newCollection);
+    const { error } = await supabase.from('knowledge_files').update({
+      collection: newCollection,
+      mode: col?.mode || 'strict',
+    }).eq('id', fileId);
+    if (error) toast({ title: 'Update failed', description: error.message, variant: 'destructive' });
+    else { toast({ title: '✅ Collection updated', description: `Moved to ${col?.label}` }); fetchFiles(); }
+    setEditingFileId(null);
   };
 
   const filteredFiles = selectedCollection === 'all'
@@ -420,7 +432,23 @@ export function KnowledgeVaultModule() {
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-destructive/15 text-destructive border border-destructive/30">EXPIRED</span>
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground truncate">{f.file_name} · v{f.version} · {col?.label}</p>
+                      {editingFileId === f.id ? (
+                        <div className="flex items-center gap-2 mt-1">
+                          <select
+                            value={editCollection}
+                            onChange={e => setEditCollection(e.target.value)}
+                            className="bg-secondary/60 border border-border rounded px-2 py-1 text-xs text-foreground outline-none focus:border-primary/50"
+                          >
+                            {COLLECTIONS.map(c => (
+                              <option key={c.id} value={c.id}>{c.icon} {c.label} ({c.mode})</option>
+                            ))}
+                          </select>
+                          <Button size="sm" variant="outline" className="h-6 text-[10px] px-2" onClick={() => handleEditCollection(f.id, editCollection)}>Save</Button>
+                          <Button size="sm" variant="ghost" className="h-6 text-[10px] px-2" onClick={() => setEditingFileId(null)}>Cancel</Button>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground truncate">{f.file_name} · v{f.version} · {col?.label}</p>
+                      )}
                       <p className="text-[10px] text-muted-foreground">
                         Added {new Date(f.created_at).toLocaleDateString()}
                         {f.effective_date && ` · Effective ${new Date(f.effective_date).toLocaleDateString()}`}
@@ -438,6 +466,9 @@ export function KnowledgeVaultModule() {
                           Force Retry
                         </button>
                       )}
+                      <button onClick={() => { setEditingFileId(f.id); setEditCollection(f.collection); }} className="p-2 rounded-lg hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors" title="Change collection">
+                        <Pencil size={14} />
+                      </button>
                       <button onClick={() => handleReindex(f.id)} className="p-2 rounded-lg hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors" title="Re-index">
                         <RefreshCw size={14} />
                       </button>
