@@ -58,6 +58,7 @@ function sanitizeChunk(text: string): string {
   return text
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '')
     .replace(/[\uD800-\uDFFF]/g, '')
+    .replace(/\uFFFD/g, '')
     .trim();
 }
 
