@@ -22,16 +22,24 @@ const SILENCE_THRESHOLD_MS = 4 * 60 * 60 * 1000;
 const RATE_LIMIT_INTERVAL_MS = 10 * 60 * 1000;
 const MAX_AUTO_REPLIES_PER_DAY = 3;
 
-const MENU_MESSAGE = `Hi 👋 Thanks for messaging Get Well Africa.
+const MENU_MESSAGE = `Hi 👋 Thanks for messaging *Online Course For MLM*.
 
 Reply:
 1️⃣ Prices & Product info
 2️⃣ How to use / Benefits
-3️⃣ Speak to a person`;
+3️⃣ Speak to a person
 
-const HUMAN_HANDOVER = `Thank you. A team member will assist you shortly.`;
+📞 +27 79 083 1530
+🔗 Register: https://backoffice.aplgo.com/register/?sp=787262`;
 
-const NO_ANSWER_FALLBACK = `I want to make sure I give you the right answer. Let me connect you with a team member.`;
+const HUMAN_HANDOVER = `Thank you. Vanto Vanto will assist you shortly.
+
+📞 +27 79 083 1530`;
+
+const NO_ANSWER_FALLBACK = `I want to make sure I give you the right answer. Let me connect you with Vanto Vanto.
+
+📞 +27 79 083 1530
+🔗 Register: https://backoffice.aplgo.com/register/?sp=787262`;
 
 // ── Prompt Translation Map ──────────────────────────────────────────────────────
 const MENU_QUERY_MAP: Record<string, { query: string; collections: string[] }> = {
@@ -122,9 +130,11 @@ async function generateAIAnswer(
     ? "Answer ONLY from the provided chunks. Do NOT invent prices, benefits, compensation details, or any facts not explicitly stated in the chunks."
     : "You may paraphrase and combine information from the chunks naturally.";
 
-  const systemPrompt = `You are a helpful Vanto CRM assistant for Get Well Africa customers.
+  const systemPrompt = `You are a helpful assistant for Online Course For MLM, representing Vanto Vanto.
 ${strictInstruction}
-If the answer is not in the chunks, say: "I want to make sure I give you the right answer. Let me connect you with a team member."
+If the answer is not in the chunks, say: "I want to make sure I give you the right answer. Let me connect you with Vanto Vanto."
+Always include the registration link https://backoffice.aplgo.com/register/?sp=787262 when relevant to business opportunity or sign-up questions.
+Contact: Vanto Vanto | Phone: +27 79 083 1530
 Be warm, professional, concise (under 250 words). Use WhatsApp-friendly formatting (*bold*, • bullets).
 
 KNOWLEDGE CONTEXT:
