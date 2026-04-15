@@ -19,19 +19,27 @@ function jsonRes(body: unknown, status = 200) {
 
 /** Split text into chunks of ~400 tokens (roughly 2000 chars), overlapping by 200 chars */
 function chunkText(text: string, maxChars = 2000, overlap = 200): string[] {
+  const safeOverlap = Math.max(0, Math.min(overlap, maxChars - 1));
   const chunks: string[] = [];
   let start = 0;
+
   while (start < text.length) {
     let end = Math.min(start + maxChars, text.length);
     if (end < text.length) {
       const lastPeriod = text.lastIndexOf('.', end);
       if (lastPeriod > start + maxChars / 2) end = lastPeriod + 1;
     }
-    chunks.push(text.slice(start, end).trim());
-    start = end - overlap;
-    if (start >= text.length) break;
+
+    const chunk = text.slice(start, end).trim();
+    if (chunk.length > 10) chunks.push(chunk);
+    if (end >= text.length) break;
+
+    const nextStart = Math.max(end - safeOverlap, start + 1);
+    if (nextStart <= start) break;
+    start = nextStart;
   }
-  return chunks.filter(c => c.length > 10);
+
+  return chunks;
 }
 
 /** Clean extracted text: remove excessive whitespace, null bytes, control chars */

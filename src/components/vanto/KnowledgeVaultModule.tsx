@@ -54,19 +54,28 @@ function cleanText(raw: string): string {
 
 /** Split text into chunks of ~2000 chars with 200 char overlap */
 function chunkText(text: string, maxChars = 2000, overlap = 200): string[] {
+  const safeOverlap = Math.max(0, Math.min(overlap, maxChars - 1));
   const chunks: string[] = [];
   let start = 0;
+
   while (start < text.length) {
     let end = Math.min(start + maxChars, text.length);
+
     if (end < text.length) {
       const lastPeriod = text.lastIndexOf('.', end);
       if (lastPeriod > start + maxChars / 2) end = lastPeriod + 1;
     }
-    chunks.push(text.slice(start, end).trim());
-    start = end - overlap;
-    if (start >= text.length) break;
+
+    const chunk = text.slice(start, end).trim();
+    if (chunk.length > 10) chunks.push(chunk);
+    if (end >= text.length) break;
+
+    const nextStart = Math.max(end - safeOverlap, start + 1);
+    if (nextStart <= start) break;
+    start = nextStart;
   }
-  return chunks.filter(c => c.length > 10);
+
+  return chunks;
 }
 
 export function KnowledgeVaultModule() {
@@ -161,6 +170,8 @@ export function KnowledgeVaultModule() {
     setUploading(true);
     setUploadProgress({ current: 0, total: 0, stage: 'Preparing…' });
 
+    let fileRecordId: string | null = null;
+
     try {
       // Create file record
       const { data: user } = await supabase.auth.getUser();
@@ -197,26 +208,33 @@ export function KnowledgeVaultModule() {
         return;
       }
 
+      fileRecordId = fileRecord.id;
+
       // Chunk text client-side
       setUploadProgress({ current: 0, total: 0, stage: 'Chunking text…' });
       const chunks = chunkText(text);
+      if (chunks.length === 0) {
+        await supabase.from('knowledge_files').update({ status: 'rejected' }).eq('id', fileRecord.id);
+        toast({ title: 'No indexable text found', variant: 'destructive' });
+        return;
+      }
+
       const BATCH_SIZE = 25; // smaller batches for reliability
       const totalBatches = Math.ceil(chunks.length / BATCH_SIZE);
 
       setUploadProgress({ current: 0, total: totalBatches, stage: `Uploading 0/${totalBatches} batches…` });
 
-      const chunkRows = chunks.map((chunk, i) => ({
-        file_id: fileRecord.id,
-        chunk_index: i,
-        chunk_text: chunk,
-        token_count: Math.ceil(chunk.length / 4),
-      }));
-
       // Insert chunks in batches with retry
       let insertError = null;
       let batchesDone = 0;
-      for (let i = 0; i < chunkRows.length; i += BATCH_SIZE) {
-        const batch = chunkRows.slice(i, i + BATCH_SIZE);
+      for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+        const batch = chunks.slice(i, i + BATCH_SIZE).map((chunk, batchIndex) => ({
+          file_id: fileRecord.id,
+          chunk_index: i + batchIndex,
+          chunk_text: chunk,
+          token_count: Math.ceil(chunk.length / 4),
+        }));
+
         const { error } = await insertBatchWithRetry(batch);
         if (error) {
           insertError = error;
@@ -229,6 +247,8 @@ export function KnowledgeVaultModule() {
           total: totalBatches,
           stage: `Uploading ${batchesDone}/${totalBatches} batches…`,
         });
+
+        await new Promise(resolve => setTimeout(resolve, 0));
       }
 
       if (insertError) {
@@ -247,6 +267,9 @@ export function KnowledgeVaultModule() {
       }
     } catch (err: any) {
       console.error('[KnowledgeVault] Upload error:', err);
+      if (fileRecordId) {
+        await supabase.from('knowledge_files').update({ status: 'rejected' }).eq('id', fileRecordId);
+      }
       toast({ title: 'Error', description: err?.message, variant: 'destructive' });
     }
 
