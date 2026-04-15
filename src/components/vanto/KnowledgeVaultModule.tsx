@@ -79,6 +79,7 @@ export function KnowledgeVaultModule() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [activeTab, setActiveTab] = useState<'files' | 'search'>('files');
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; stage: string } | null>(null);
 
   // Upload form state
   const [uploadTitle, setUploadTitle] = useState('');
