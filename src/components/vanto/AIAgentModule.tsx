@@ -1,14 +1,25 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bot, Send, Sparkles, Brain, MessageSquare, Settings, RefreshCw, Loader2 } from 'lucide-react';
+import { Bot, Send, Sparkles, Brain, MessageSquare, Settings, RefreshCw, Loader2, BookOpen, ThumbsUp, ThumbsDown, Shield } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
+import ReactMarkdown from 'react-markdown';
 
 interface AIMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   time: string;
+  provider?: string;
+  citations?: Citation[];
+  feedbackGiven?: 'up' | 'down' | null;
+}
+
+interface Citation {
+  file_title: string;
+  collection: string;
+  snippet: string;
+  relevance: number;
 }
 
 const suggestions = [
@@ -18,14 +29,18 @@ const suggestions = [
   'Generate a WhatsApp campaign message',
   'Help me score my leads',
   'Draft an onboarding sequence',
+  'What products do we offer?',
+  'Explain the compensation plan',
 ];
+
+const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-chat`;
 
 export function AIAgentModule() {
   const [messages, setMessages] = useState<AIMessage[]>([
     {
       id: 'welcome',
       role: 'assistant',
-      content: "Hello! I'm Vanto AI, your CRM intelligence assistant. I can help you craft perfect responses, analyze contacts, suggest follow-up strategies, and automate workflows. What would you like to do?",
+      content: "Hello! I'm **Vanto AI**, your CRM intelligence assistant. I'm now connected to your **Knowledge Vault** for factual answers about products, compensation plans, and more.\n\nI can help you:\n- 📝 Draft follow-ups & campaigns\n- 📊 Analyze pipeline health\n- 📖 Answer product questions from the knowledge base\n- ⚡ Suggest workflow automations\n\nWhat would you like to do?",
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -35,7 +50,6 @@ export function AIAgentModule() {
   const [crmContext, setCrmContext] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Load CRM context once
   useEffect(() => {
     const loadContext = async () => {
       const [contactsRes, convsRes] = await Promise.all([
@@ -61,6 +75,11 @@ export function AIAgentModule() {
 
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 
+  const handleFeedback = async (msgId: string, rating: 'up' | 'down') => {
+    setMessages(prev => prev.map(m => m.id === msgId ? { ...m, feedbackGiven: rating } : m));
+    toast({ title: rating === 'up' ? '👍 Thanks for the feedback!' : '👎 Noted, will improve.' });
+  };
+
   const sendMessage = async (text?: string) => {
     const content = (text || input).trim();
     if (!content || loading) return;
@@ -77,28 +96,125 @@ export function AIAgentModule() {
     setLoading(true);
     setTimeout(scrollToBottom, 50);
 
-    try {
-      // Send conversation history (last 10 messages)
-      const history = newMessages.slice(-10).map(m => ({
-        role: m.role,
-        content: m.content,
-      }));
+    const history = newMessages.slice(-10).map(m => ({
+      role: m.role,
+      content: m.content,
+    }));
 
-      const { data, error } = await supabase.functions.invoke('ai-chat', {
-        body: { messages: history, context: crmContext },
+    try {
+      // Use streaming
+      const { data: session } = await supabase.auth.getSession();
+      const authToken = session?.session?.access_token;
+
+      const resp = await fetch(CHAT_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken || import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+          'apikey': import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+        body: JSON.stringify({ messages: history, context: crmContext, stream: true }),
       });
 
-      if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.error);
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({ error: 'AI request failed' }));
+        throw new Error(errData.error || `HTTP ${resp.status}`);
+      }
 
-      const providerLabel = data.provider === 'openai' ? ' (OpenAI)' : data.provider === 'gemini' ? ' (Gemini)' : '';
-      const aiMsg: AIMessage = {
-        id: (Date.now() + 1).toString(),
+      // Parse citations from header
+      let citations: Citation[] = [];
+      try {
+        const citHeader = resp.headers.get('X-Citations');
+        if (citHeader) citations = JSON.parse(citHeader);
+      } catch { /* ignore */ }
+
+      const provider = resp.headers.get('X-Provider') || '';
+
+      // Stream tokens
+      const reader = resp.body?.getReader();
+      if (!reader) throw new Error('No response body');
+
+      const decoder = new TextDecoder();
+      let assistantContent = '';
+      const aiMsgId = (Date.now() + 1).toString();
+      const timeLabel = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const providerLabel = provider === 'openai' ? ' (OpenAI)' : provider === 'gemini' ? ' (Gemini)' : '';
+
+      // Create initial assistant message
+      setMessages(prev => [...prev, {
+        id: aiMsgId,
         role: 'assistant',
-        content: data.reply || 'Sorry, I could not generate a response.',
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + providerLabel,
-      };
-      setMessages(prev => [...prev, aiMsg]);
+        content: '',
+        time: timeLabel + providerLabel,
+        citations,
+        feedbackGiven: null,
+      }]);
+
+      let textBuffer = '';
+      let streamDone = false;
+
+      while (!streamDone) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        textBuffer += decoder.decode(value, { stream: true });
+
+        let newlineIndex: number;
+        while ((newlineIndex = textBuffer.indexOf('\n')) !== -1) {
+          let line = textBuffer.slice(0, newlineIndex);
+          textBuffer = textBuffer.slice(newlineIndex + 1);
+
+          if (line.endsWith('\r')) line = line.slice(0, -1);
+          if (line.startsWith(':') || line.trim() === '') continue;
+          if (!line.startsWith('data: ')) continue;
+
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === '[DONE]') { streamDone = true; break; }
+
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) {
+              assistantContent += delta;
+              const finalContent = assistantContent;
+              setMessages(prev => prev.map(m =>
+                m.id === aiMsgId ? { ...m, content: finalContent } : m
+              ));
+            }
+          } catch {
+            textBuffer = line + '\n' + textBuffer;
+            break;
+          }
+        }
+        setTimeout(scrollToBottom, 10);
+      }
+
+      // Final flush
+      if (textBuffer.trim()) {
+        for (let raw of textBuffer.split('\n')) {
+          if (!raw) continue;
+          if (raw.endsWith('\r')) raw = raw.slice(0, -1);
+          if (raw.startsWith(':') || raw.trim() === '') continue;
+          if (!raw.startsWith('data: ')) continue;
+          const jsonStr = raw.slice(6).trim();
+          if (jsonStr === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) assistantContent += delta;
+          } catch { /* ignore */ }
+        }
+        if (assistantContent) {
+          setMessages(prev => prev.map(m =>
+            m.id === aiMsgId ? { ...m, content: assistantContent } : m
+          ));
+        }
+      }
+
+      if (!assistantContent) {
+        setMessages(prev => prev.map(m =>
+          m.id === aiMsgId ? { ...m, content: 'Sorry, I could not generate a response.' } : m
+        ));
+      }
     } catch (err: any) {
       toast({
         title: 'AI Error',
@@ -130,7 +246,7 @@ export function AIAgentModule() {
             <h2 className="text-lg font-bold text-foreground">AI Agent</h2>
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
-              <p className="text-xs text-muted-foreground">Lovable AI → OpenAI fallback · Live</p>
+              <p className="text-xs text-muted-foreground">Streaming · RAG-enabled · Live</p>
             </div>
           </div>
         </div>
@@ -157,6 +273,7 @@ export function AIAgentModule() {
                 { icon: Brain, label: 'Lead Analyzer' },
                 { icon: Sparkles, label: 'Campaign Builder' },
                 { icon: RefreshCw, label: 'Workflow Generator' },
+                { icon: BookOpen, label: 'Knowledge Vault' },
               ].map(cap => {
                 const Icon = cap.icon;
                 return (
@@ -178,13 +295,60 @@ export function AIAgentModule() {
                     <Bot size={14} className="text-primary-foreground" />
                   </div>
                 )}
-                <div className={cn('max-w-[75%] rounded-2xl px-4 py-3 text-sm whitespace-pre-wrap', msg.role === 'assistant' ? 'message-bubble-in' : 'message-bubble-out')}>
-                  {msg.content}
-                  <p className="text-[10px] text-muted-foreground mt-1 text-right">{msg.time}</p>
+                <div className={cn('max-w-[75%] rounded-2xl px-4 py-3 text-sm', msg.role === 'assistant' ? 'message-bubble-in' : 'message-bubble-out')}>
+                  {msg.role === 'assistant' ? (
+                    <div className="prose prose-sm prose-invert max-w-none [&_p]:mb-1.5 [&_ul]:mb-1.5 [&_ol]:mb-1.5 [&_li]:mb-0.5 [&_strong]:text-foreground [&_em]:text-muted-foreground">
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    <span className="whitespace-pre-wrap">{msg.content}</span>
+                  )}
+
+                  {/* Citations */}
+                  {msg.citations && msg.citations.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-border/30 space-y-1">
+                      <p className="text-[10px] font-semibold text-amber-500 flex items-center gap-1">
+                        <BookOpen size={10} /> Sources ({msg.citations.length})
+                      </p>
+                      {msg.citations.map((c, i) => (
+                        <div key={i} className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                          <Shield size={8} className="text-amber-500 shrink-0" />
+                          <span className="font-medium">{c.file_title}</span>
+                          <span>({c.collection})</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between mt-1">
+                    <p className="text-[10px] text-muted-foreground">{msg.time}</p>
+                    {msg.role === 'assistant' && msg.id !== 'welcome' && (
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => handleFeedback(msg.id, 'up')}
+                          disabled={msg.feedbackGiven !== undefined && msg.feedbackGiven !== null}
+                          className={cn('p-0.5 rounded hover:bg-secondary/60 transition-colors',
+                            msg.feedbackGiven === 'up' ? 'text-primary' : 'text-muted-foreground/50'
+                          )}
+                        >
+                          <ThumbsUp size={10} />
+                        </button>
+                        <button
+                          onClick={() => handleFeedback(msg.id, 'down')}
+                          disabled={msg.feedbackGiven !== undefined && msg.feedbackGiven !== null}
+                          className={cn('p-0.5 rounded hover:bg-secondary/60 transition-colors',
+                            msg.feedbackGiven === 'down' ? 'text-destructive' : 'text-muted-foreground/50'
+                          )}
+                        >
+                          <ThumbsDown size={10} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
-            {loading && (
+            {loading && messages[messages.length - 1]?.role === 'user' && (
               <div className="flex gap-3 justify-start">
                 <div className="w-8 h-8 rounded-full vanto-gradient flex items-center justify-center shrink-0">
                   <Bot size={14} className="text-primary-foreground" />
@@ -214,7 +378,7 @@ export function AIAgentModule() {
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-                placeholder="Ask Vanto AI anything about your leads, messages, or pipeline..."
+                placeholder="Ask Vanto AI anything — products, pipeline, leads, or campaigns..."
                 rows={2}
                 disabled={loading}
                 className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none disabled:opacity-50"
@@ -232,10 +396,17 @@ export function AIAgentModule() {
       ) : (
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
           <AIConfigSection title="Model Settings">
-            <ConfigRow label="AI Routing" value="Lovable AI → OpenAI fallback" active />
+            <ConfigRow label="AI Routing" value="Lovable AI → BYO fallback" active />
+            <ConfigRow label="Streaming" value="Enabled (SSE)" active />
             <ConfigRow label="Response Style" value="Professional & Friendly" />
             <ConfigRow label="Language" value="English (Auto-detect)" />
             <ConfigRow label="Max Response Length" value="1000 tokens" />
+          </AIConfigSection>
+          <AIConfigSection title="Knowledge Vault (RAG)">
+            <ConfigRow label="Knowledge search" value="Enabled" active />
+            <ConfigRow label="Collections searched" value="All" active />
+            <ConfigRow label="Max sources per query" value="3" />
+            <ConfigRow label="Citation display" value="Inline sources" active />
           </AIConfigSection>
           <AIConfigSection title="CRM Context">
             <ConfigRow label="Auto-inject contacts data" value="Enabled" active />
@@ -247,6 +418,7 @@ export function AIAgentModule() {
             <ConfigRow label="Lead scoring suggestions" value="Active" active />
             <ConfigRow label="Campaign generation" value="Active" active />
             <ConfigRow label="Workflow recommendations" value="Active" active />
+            <ConfigRow label="Product knowledge answers" value="Active" active />
           </AIConfigSection>
         </div>
       )}
