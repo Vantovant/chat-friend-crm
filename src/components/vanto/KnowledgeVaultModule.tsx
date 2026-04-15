@@ -576,11 +576,37 @@ export function KnowledgeVaultModule() {
               </div>
             </div>
           </div>
+
+          {/* Upload Progress Bar */}
+          {uploading && uploadProgress && (
+            <div className="space-y-2 pt-2 border-t border-border">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground flex items-center gap-1.5">
+                  <Loader2 size={12} className="animate-spin" />
+                  {uploadProgress.stage}
+                </span>
+                {uploadProgress.total > 0 && (
+                  <span className="text-foreground font-medium">
+                    {Math.round((uploadProgress.current / uploadProgress.total) * 100)}%
+                  </span>
+                )}
+              </div>
+              {uploadProgress.total > 0 && (
+                <div className="w-full h-2 bg-secondary rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary rounded-full transition-all duration-300"
+                    style={{ width: `${(uploadProgress.current / uploadProgress.total) * 100}%` }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setUploadOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setUploadOpen(false)} disabled={uploading}>Cancel</Button>
             <Button onClick={handleUpload} disabled={uploading} className="vanto-gradient text-primary-foreground">
               {uploading ? <Loader2 size={14} className="animate-spin mr-1" /> : <Upload size={14} className="mr-1" />}
-              {uploadMode === 'paste' ? 'Index Content' : 'Upload & Index'}
+              {uploading ? 'Indexing…' : uploadMode === 'paste' ? 'Index Content' : 'Upload & Index'}
             </Button>
           </DialogFooter>
         </DialogContent>
