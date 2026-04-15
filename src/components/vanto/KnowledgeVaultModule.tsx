@@ -45,19 +45,20 @@ type SearchResult = {
 function cleanText(raw: string): string {
   return raw
     .replace(/\0/g, '')
-    .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '') // all control chars
+    .replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '')
+    .replace(/[\uD800-\uDFFF]/g, '') // strip unpaired/surrogate unicode that can break JSON serialization
     .replace(/\r\n/g, '\n')
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
-    .replace(/\\/g, '\\\\')  // escape backslashes for JSON safety
     .trim();
 }
 
 /** Ensure a chunk string is safe for JSON/PostgREST insertion */
 function sanitizeChunk(text: string): string {
-  // Remove any remaining characters that could break JSON encoding
-  // eslint-disable-next-line no-control-regex
-  return text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').trim();
+  return text
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '')
+    .replace(/[\uD800-\uDFFF]/g, '')
+    .trim();
 }
 
 /** Split text into chunks of ~2000 chars with 200 char overlap */
