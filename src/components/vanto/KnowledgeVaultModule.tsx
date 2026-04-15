@@ -466,6 +466,9 @@ export function KnowledgeVaultModule() {
                           Force Retry
                         </button>
                       )}
+                      <button onClick={() => { setEditingFileId(f.id); setEditCollection(f.collection); }} className="p-2 rounded-lg hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors" title="Change collection">
+                        <Pencil size={14} />
+                      </button>
                       <button onClick={() => handleReindex(f.id)} className="p-2 rounded-lg hover:bg-secondary/60 text-muted-foreground hover:text-foreground transition-colors" title="Re-index">
                         <RefreshCw size={14} />
                       </button>
