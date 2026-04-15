@@ -92,7 +92,9 @@ export function KnowledgeVaultModule() {
 
   // Upload form state
   const [uploadTitle, setUploadTitle] = useState('');
-  const [uploadCollection, setUploadCollection] = useState('products');
+  const [uploadCollection, setUploadCollection] = useState('general');
+  const [editingFileId, setEditingFileId] = useState<string | null>(null);
+  const [editCollection, setEditCollection] = useState('');
   const [uploadMode, setUploadMode] = useState<'paste' | 'file'>('paste');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadPasteText, setUploadPasteText] = useState('');
@@ -316,11 +318,21 @@ export function KnowledgeVaultModule() {
   };
 
   const handleDelete = async (fileId: string) => {
-    // Delete chunks first, then file
     await supabase.from('knowledge_chunks').delete().eq('file_id', fileId);
     const { error } = await supabase.from('knowledge_files').delete().eq('id', fileId);
     if (error) toast({ title: 'Delete failed', description: error.message, variant: 'destructive' });
     else { toast({ title: 'File deleted' }); fetchFiles(); }
+  };
+
+  const handleEditCollection = async (fileId: string, newCollection: string) => {
+    const col = COLLECTIONS.find(c => c.id === newCollection);
+    const { error } = await supabase.from('knowledge_files').update({
+      collection: newCollection,
+      mode: col?.mode || 'strict',
+    }).eq('id', fileId);
+    if (error) toast({ title: 'Update failed', description: error.message, variant: 'destructive' });
+    else { toast({ title: '✅ Collection updated', description: `Moved to ${col?.label}` }); fetchFiles(); }
+    setEditingFileId(null);
   };
 
   const filteredFiles = selectedCollection === 'all'
