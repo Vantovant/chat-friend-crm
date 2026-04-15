@@ -130,6 +130,8 @@ Deno.serve(async (req) => {
   if (existing) {
     contactId = existing.id;
   } else {
+    // Auto-assign new inbound contacts to Vanto Vanto
+    const VANTO_USER_ID = 'e336f0a0-ccf5-4992-9607-25c5bf590b11';
     const { data: created, error: createErr } = await svc
       .from('contacts')
       .insert({
@@ -138,6 +140,7 @@ Deno.serve(async (req) => {
         phone_normalized: phoneE164,
         phone_raw: phoneE164,
         whatsapp_id: phoneDigits,
+        assigned_to: VANTO_USER_ID,
       })
       .select('id')
       .single();
