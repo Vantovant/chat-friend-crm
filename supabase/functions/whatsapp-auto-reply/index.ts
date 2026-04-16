@@ -106,7 +106,14 @@ async function generateAIAnswer(
     return null;
   }
 
-  const contextSnippets = chunks
+  // Sort to put price/product chunks first for better extraction
+  const sortedChunks = [...chunks].sort((a, b) => {
+    const aIsPricing = a.file_collection === 'products' || a.file_title.toLowerCase().includes('price') ? -1 : 0;
+    const bIsPricing = b.file_collection === 'products' || b.file_title.toLowerCase().includes('price') ? -1 : 0;
+    return aIsPricing - bIsPricing;
+  });
+
+  const contextSnippets = sortedChunks
     .map((c, i) => `[Source ${i + 1}: ${c.file_title} (${c.file_collection})]\n${c.chunk_text.slice(0, 1000)}`)
     .join("\n\n");
 
