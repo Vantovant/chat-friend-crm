@@ -539,6 +539,9 @@ export function GroupCampaignsModule() {
         </CardContent>
       </Card>
 
+      {/* Smart Paste Panel */}
+      <SmartPastePanel groups={groups} onScheduled={fetchData} />
+
       {/* Campaigns Dashboard */}
       <Card className="border-border">
         <CardHeader className="pb-3">
