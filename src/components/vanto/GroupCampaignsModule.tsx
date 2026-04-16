@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,10 +11,9 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { toast } from 'sonner';
 import { format, eachDayOfInterval, setHours, setMinutes, formatDistanceToNow } from 'date-fns';
-import { Plus, Trash2, Users, CalendarClock, Send, RefreshCw, CalendarIcon, RotateCcw, AlertTriangle, Wifi, WifiOff } from 'lucide-react';
+import { Plus, Trash2, Users, CalendarClock, Send, RefreshCw, CalendarIcon, RotateCcw, AlertTriangle, Wifi, WifiOff, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 type WhatsAppGroup = { id: string; group_name: string; group_jid?: string | null; created_at: string };
@@ -29,6 +28,8 @@ type ScheduledPost = {
   failure_reason?: string | null;
   last_attempt_at?: string | null;
   attempt_count?: number;
+  provider_message_id?: string | null;
+  target_group_jid?: string | null;
 };
 
 const TIME_SLOTS = [
@@ -56,12 +57,13 @@ export function GroupCampaignsModule() {
   const [bulkDateRange, setBulkDateRange] = useState<{ from: Date | undefined; to: Date | undefined }>({ from: undefined, to: undefined });
   const [selectedTimeSlots, setSelectedTimeSlots] = useState<string[]>(['morning']);
 
-  // Extension health
-  const [extensionHealth, setExtensionHealth] = useState<{
+  // Maytapi health
+  const [maytapiHealth, setMaytapiHealth] = useState<{
     connected: boolean;
-    lastSeen: string | null;
-    whatsappReady: boolean;
-  }>({ connected: false, lastSeen: null, whatsappReady: false });
+    status: string | null;
+    checking: boolean;
+    number: string | null;
+  }>({ connected: false, status: null, checking: true, number: null });
 
   const fetchData = async () => {
     setLoading(true);
@@ -74,36 +76,31 @@ export function GroupCampaignsModule() {
     setLoading(false);
   };
 
-  // Check extension health via integration_settings
-  const checkExtensionHealth = async () => {
-    const { data } = await supabase
-      .from('integration_settings')
-      .select('value')
-      .eq('key', 'chrome_extension_heartbeat')
-      .maybeSingle();
-
-    if (data?.value) {
-      try {
-        const hb = JSON.parse(data.value);
-        const lastSeen = hb.last_seen ? new Date(hb.last_seen) : null;
-        const isRecent = lastSeen && (Date.now() - lastSeen.getTime()) < 5 * 60 * 1000; // 5 min
-        setExtensionHealth({
-          connected: !!isRecent,
-          lastSeen: hb.last_seen || null,
-          whatsappReady: !!hb.whatsapp_ready,
+  const checkMaytapiHealth = useCallback(async () => {
+    setMaytapiHealth(prev => ({ ...prev, checking: true }));
+    try {
+      const { data, error } = await supabase.functions.invoke('maytapi-health');
+      if (error) {
+        setMaytapiHealth({ connected: false, status: 'error', checking: false, number: null });
+      } else {
+        setMaytapiHealth({
+          connected: data?.connected ?? false,
+          status: data?.status ?? null,
+          checking: false,
+          number: data?.number ?? null,
         });
-      } catch {
-        setExtensionHealth({ connected: false, lastSeen: null, whatsappReady: false });
       }
+    } catch {
+      setMaytapiHealth({ connected: false, status: 'error', checking: false, number: null });
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchData();
-    checkExtensionHealth();
-    const interval = setInterval(checkExtensionHealth, 15000); // Check every 15s
+    checkMaytapiHealth();
+    const interval = setInterval(checkMaytapiHealth, 30000);
     return () => clearInterval(interval);
-  }, []);
+  }, [checkMaytapiHealth]);
 
   useEffect(() => {
     const channel = supabase
@@ -123,6 +120,10 @@ export function GroupCampaignsModule() {
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { toast.error('Not authenticated'); return; }
+
+    // Find the group JID if available
+    const selectedGroupData = groups.find(g => g.group_name === selectedGroup);
+    const groupJid = selectedGroupData?.group_jid || null;
 
     setSaving(true);
 
@@ -152,6 +153,7 @@ export function GroupCampaignsModule() {
             rows.push({
               user_id: user.id,
               target_group_name: selectedGroup,
+              target_group_jid: groupJid,
               message_content: messageContent.trim(),
               scheduled_at: scheduledDate.toISOString(),
               status: 'pending',
@@ -193,6 +195,7 @@ export function GroupCampaignsModule() {
         const { error } = await supabase.from('scheduled_group_posts').insert({
           user_id: user.id,
           target_group_name: selectedGroup,
+          target_group_jid: groupJid,
           message_content: messageContent.trim(),
           scheduled_at: scheduledDate.toISOString(),
           status: 'pending',
@@ -233,10 +236,35 @@ export function GroupCampaignsModule() {
     else { toast.success('Post queued for retry'); fetchData(); }
   };
 
+  // Trigger manual send for due posts
+  const handleTriggerSend = async () => {
+    toast.info('Processing due campaigns...');
+    try {
+      const { data, error } = await supabase.functions.invoke('maytapi-send-group');
+      if (error) {
+        toast.error('Send trigger failed: ' + error.message);
+      } else {
+        const processed = data?.processed || 0;
+        if (processed === 0) {
+          toast.info('No due campaigns to process right now.');
+        } else {
+          toast.success(`Processed ${processed} campaign(s)`);
+        }
+        fetchData();
+      }
+    } catch {
+      toast.error('Failed to trigger send');
+    }
+  };
+
   const statusBadge = (status: string) => {
     switch (status) {
       case 'sent':
         return <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">Sent</Badge>;
+      case 'delivered':
+        return <Badge className="bg-emerald-500/15 text-emerald-300 border-emerald-500/30">Delivered</Badge>;
+      case 'executing':
+        return <Badge className="bg-blue-500/15 text-blue-400 border-blue-500/30">Sending…</Badge>;
       case 'failed':
         return <Badge className="bg-red-500/15 text-red-400 border-red-500/30">Failed</Badge>;
       default:
@@ -259,46 +287,60 @@ export function GroupCampaignsModule() {
             Group Campaigns
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Schedule messages to WhatsApp groups via Chrome Extension
+            Schedule messages to WhatsApp groups via Maytapi API
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={fetchData} disabled={loading}>
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={handleTriggerSend} title="Process due campaigns now">
+            <Send size={14} />
+            Send Due
+          </Button>
+          <Button variant="outline" size="sm" onClick={fetchData} disabled={loading}>
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
-      {/* Extension Health Status */}
+      {/* Maytapi Connection Health */}
       <Card className={cn(
         "border",
-        extensionHealth.connected ? "border-emerald-500/30 bg-emerald-500/5" : "border-amber-500/30 bg-amber-500/5"
+        maytapiHealth.checking
+          ? "border-muted bg-muted/5"
+          : maytapiHealth.connected
+            ? "border-emerald-500/30 bg-emerald-500/5"
+            : "border-amber-500/30 bg-amber-500/5"
       )}>
         <CardContent className="py-3 px-4">
           <div className="flex items-center gap-3 text-sm">
-            {extensionHealth.connected ? (
+            {maytapiHealth.checking ? (
+              <Loader2 size={16} className="text-muted-foreground animate-spin" />
+            ) : maytapiHealth.connected ? (
               <Wifi size={16} className="text-emerald-400" />
             ) : (
               <WifiOff size={16} className="text-amber-400" />
             )}
             <div className="flex-1">
-              <span className={extensionHealth.connected ? "text-emerald-400 font-medium" : "text-amber-400 font-medium"}>
-                {extensionHealth.connected ? 'Chrome Extension Connected' : 'Chrome Extension Not Detected'}
-              </span>
-              {extensionHealth.lastSeen && (
-                <span className="text-muted-foreground ml-2">
-                  · Last seen {formatDistanceToNow(new Date(extensionHealth.lastSeen), { addSuffix: true })}
-                </span>
-              )}
-              {extensionHealth.connected && (
-                <span className={cn("ml-2", extensionHealth.whatsappReady ? "text-emerald-400" : "text-amber-400")}>
-                  · WhatsApp Web {extensionHealth.whatsappReady ? 'Ready' : 'Not Ready'}
-                </span>
+              {maytapiHealth.checking ? (
+                <span className="text-muted-foreground font-medium">Checking Maytapi connection…</span>
+              ) : (
+                <>
+                  <span className={maytapiHealth.connected ? "text-emerald-400 font-medium" : "text-amber-400 font-medium"}>
+                    {maytapiHealth.connected ? 'Maytapi Connected' : 'Maytapi Not Connected'}
+                  </span>
+                  {maytapiHealth.status && (
+                    <span className="text-muted-foreground ml-2">· Status: {maytapiHealth.status}</span>
+                  )}
+                  {maytapiHealth.number && (
+                    <span className="text-muted-foreground ml-2">· {maytapiHealth.number}</span>
+                  )}
+                </>
               )}
             </div>
-            {!extensionHealth.connected && (
-              <p className="text-xs text-muted-foreground">
-                Open WhatsApp Web with the extension active to enable campaigns.
-              </p>
+            {!maytapiHealth.checking && !maytapiHealth.connected && (
+              <Button variant="ghost" size="sm" onClick={checkMaytapiHealth} className="text-xs">
+                Retry
+              </Button>
             )}
           </div>
         </CardContent>
@@ -318,7 +360,7 @@ export function GroupCampaignsModule() {
               <Users size={32} className="mx-auto mb-2 text-muted-foreground/50" />
               <p className="font-medium">No groups captured yet</p>
               <p className="text-xs mt-1">
-                Open WhatsApp Web with the Vanto Chrome Extension active, then click on a group chat to capture it.
+                Groups are detected by the Chrome Extension or synced from Maytapi. Ensure your WhatsApp is linked.
               </p>
             </div>
           ) : (
@@ -327,11 +369,14 @@ export function GroupCampaignsModule() {
                 <label className="text-sm font-medium text-foreground">Target Group</label>
                 <Select value={selectedGroup} onValueChange={setSelectedGroup}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select a captured group…" />
+                    <SelectValue placeholder="Select a group…" />
                   </SelectTrigger>
                   <SelectContent>
                     {groups.map(g => (
-                      <SelectItem key={g.id} value={g.group_name}>{g.group_name}</SelectItem>
+                      <SelectItem key={g.id} value={g.group_name}>
+                        {g.group_name}
+                        {g.group_jid && <span className="text-xs text-muted-foreground ml-1">(JID ✓)</span>}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -466,7 +511,12 @@ export function GroupCampaignsModule() {
                 <TableBody>
                   {posts.map(post => (
                     <TableRow key={post.id}>
-                      <TableCell className="font-medium text-sm">{post.target_group_name}</TableCell>
+                      <TableCell className="font-medium text-sm">
+                        {post.target_group_name}
+                        {post.target_group_jid && (
+                          <span className="block text-xs text-muted-foreground truncate max-w-[120px]">{post.target_group_jid}</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-sm max-w-[200px] truncate">{post.message_content}</TableCell>
                       <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                         {format(new Date(post.scheduled_at), 'MMM d, HH:mm')}
@@ -474,6 +524,11 @@ export function GroupCampaignsModule() {
                       <TableCell>
                         <div className="space-y-1">
                           {statusBadge(post.status)}
+                          {post.provider_message_id && (
+                            <p className="text-[10px] text-muted-foreground truncate max-w-[100px]" title={post.provider_message_id}>
+                              ID: {post.provider_message_id.slice(0, 12)}…
+                            </p>
+                          )}
                           {post.status === 'failed' && post.failure_reason && (
                             <div className="mt-1 p-2 rounded bg-red-950/30 border border-red-900/40">
                               <div className="flex items-start gap-1.5 text-xs text-red-400">
@@ -498,7 +553,7 @@ export function GroupCampaignsModule() {
                               size="icon"
                               className="h-7 w-7 text-muted-foreground hover:text-amber-400"
                               onClick={() => handleRetry(post.id)}
-                              title="Retry"
+                              title="Retry via Maytapi"
                             >
                               <RotateCcw size={14} />
                             </Button>
