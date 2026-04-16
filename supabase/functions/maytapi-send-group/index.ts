@@ -13,9 +13,9 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID");
-    const PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID");
-    const API_TOKEN = Deno.env.get("MAYTAPI_API_TOKEN");
+    const PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID")?.trim();
+    const PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID")?.trim();
+    const API_TOKEN = Deno.env.get("MAYTAPI_API_TOKEN")?.trim();
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
