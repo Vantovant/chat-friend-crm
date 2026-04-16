@@ -329,7 +329,7 @@ Deno.serve(async (req) => {
       actionTaken = "greeting_sent";
       diag.route = "too_short_greeting";
     } else {
-      const chunks = await searchKnowledge(svc, searchQuery, intent.collections, 5);
+      const chunks = await searchKnowledge(svc, searchQuery, intent.collections, 8);
       chunksCount = chunks.length;
       diag.chunks_found = chunksCount;
       diag.chunk_collections = chunks.map(c => c.file_collection);
