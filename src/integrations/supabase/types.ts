@@ -812,8 +812,10 @@ export type Database = {
           image_url: string | null
           last_attempt_at: string | null
           message_content: string
+          provider_message_id: string | null
           scheduled_at: string
           status: string
+          target_group_jid: string | null
           target_group_name: string
           user_id: string
         }
@@ -825,8 +827,10 @@ export type Database = {
           image_url?: string | null
           last_attempt_at?: string | null
           message_content: string
+          provider_message_id?: string | null
           scheduled_at: string
           status?: string
+          target_group_jid?: string | null
           target_group_name: string
           user_id: string
         }
@@ -838,8 +842,10 @@ export type Database = {
           image_url?: string | null
           last_attempt_at?: string | null
           message_content?: string
+          provider_message_id?: string | null
           scheduled_at?: string
           status?: string
+          target_group_jid?: string | null
           target_group_name?: string
           user_id?: string
         }

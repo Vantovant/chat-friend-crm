@@ -60,3 +60,12 @@ verify_jwt = false
 [functions.page-help]
 verify_jwt = false
 
+[functions.maytapi-send-group]
+verify_jwt = false
+
+[functions.maytapi-webhook-inbound]
+verify_jwt = false
+
+[functions.maytapi-health]
+verify_jwt = false
+
