@@ -124,9 +124,8 @@ export function GroupCampaignsModule() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { toast.error('Not authenticated'); return; }
 
-    // Find the group JID if available
-    const selectedGroupData = groups.find(g => g.group_name === selectedGroup);
-    const groupJid = selectedGroupData?.group_jid || null;
+    // Find JIDs for all target groups
+    const groupDataMap = new Map(groups.map(g => [g.group_name, g]));
 
     setSaving(true);
 
