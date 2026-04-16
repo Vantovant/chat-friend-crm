@@ -15,6 +15,7 @@ import { toast } from 'sonner';
 import { format, eachDayOfInterval, setHours, setMinutes, formatDistanceToNow } from 'date-fns';
 import { Plus, Trash2, Users, CalendarClock, Send, RefreshCw, CalendarIcon, RotateCcw, AlertTriangle, Wifi, WifiOff, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { SmartPastePanel } from './SmartPastePanel';
 
 type WhatsAppGroup = { id: string; group_name: string; group_jid?: string | null; created_at: string };
 type ScheduledPost = {
