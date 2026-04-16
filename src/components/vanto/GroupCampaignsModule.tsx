@@ -115,8 +115,9 @@ export function GroupCampaignsModule() {
   }, []);
 
   const handleSchedule = async () => {
-    if (!selectedGroup || !messageContent.trim()) {
-      toast.error('Please fill in group and message.');
+    const targetGroups = isMultiGroup ? selectedGroups : (selectedGroup ? [selectedGroup] : []);
+    if (targetGroups.length === 0 || !messageContent.trim()) {
+      toast.error('Please select at least one group and enter a message.');
       return;
     }
 
