@@ -116,17 +116,37 @@ Deno.serve(async (req) => {
 
       // Send message via Maytapi
       try {
-        const body: any = {
-          to_number: targetJid,
-          type: "text",
-          message: post.message_content,
-        };
+        // Detect URLs in message content for link preview support
+        const urlRegex = /https?:\/\/[^\s]+/gi;
+        const urls = post.message_content.match(urlRegex);
 
-        // If image_url is present, send as image with caption
+        let body: any;
+
         if (post.image_url) {
-          body.type = "media";
-          body.message = post.image_url;
-          body.text = post.message_content;
+          // Explicit image attachment — send as media with caption
+          body = {
+            to_number: targetJid,
+            type: "media",
+            message: post.image_url,
+            text: post.message_content,
+          };
+        } else if (urls && urls.length > 0) {
+          // Message contains URL(s) — use "link" type for rich preview
+          // Maytapi "link" type fetches Open Graph meta (image, title, description)
+          // and renders a clickable preview card in WhatsApp
+          body = {
+            to_number: targetJid,
+            type: "link",
+            message: urls[0],          // Primary URL for the preview card
+            text: post.message_content, // Full message text shown above the preview
+          };
+        } else {
+          // Plain text — no links, no media
+          body = {
+            to_number: targetJid,
+            type: "text",
+            message: post.message_content,
+          };
         }
 
         const sendRes = await fetch(
