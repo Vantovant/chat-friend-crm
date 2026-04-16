@@ -49,9 +49,9 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({
       connected: isConnected,
-      status: phoneStatus,
+      status: stateStr || (isConnected ? "connected" : "unknown"),
       phone_id: PHONE_ID,
-      number: data.data?.number || null,
+      number: statusData?.number || null,
     }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
