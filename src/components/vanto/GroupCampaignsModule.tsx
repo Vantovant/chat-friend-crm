@@ -378,31 +378,63 @@ export function GroupCampaignsModule() {
             </div>
           ) : (
             <>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-foreground">Target Group</label>
-                <Select value={selectedGroup} onValueChange={setSelectedGroup}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a group…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {groups.map(g => (
-                      <SelectItem key={g.id} value={g.group_name}>
-                        {g.group_name}
-                        {g.group_jid && <span className="text-xs text-muted-foreground ml-1">(JID ✓)</span>}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Bulk toggle */}
+              {/* Multi-group toggle */}
               <div className="flex items-center gap-3 p-3 rounded-lg bg-secondary/40 border border-border">
-                <Switch checked={isBulk} onCheckedChange={setIsBulk} />
+                <Switch checked={isMultiGroup} onCheckedChange={(v) => { setIsMultiGroup(v); setSelectedGroup(''); setSelectedGroups([]); }} />
                 <div>
-                  <p className="text-sm font-medium text-foreground">{isBulk ? 'Smart Bulk Campaign' : 'Single Post'}</p>
-                  <p className="text-xs text-muted-foreground">{isBulk ? 'Schedule across a date range with multiple time slots' : 'Schedule one post at a specific date & time'}</p>
+                  <p className="text-sm font-medium text-foreground">{isMultiGroup ? 'Multi-Group Broadcast' : 'Single Group'}</p>
+                  <p className="text-xs text-muted-foreground">{isMultiGroup ? 'Same message to multiple groups' : 'Send to one specific group'}</p>
                 </div>
               </div>
+
+              {!isMultiGroup ? (
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-foreground">Target Group</label>
+                  <Select value={selectedGroup} onValueChange={setSelectedGroup}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a group…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {groups.map(g => (
+                        <SelectItem key={g.id} value={g.group_name}>
+                          {g.group_name}
+                          {g.group_jid && <span className="text-xs text-muted-foreground ml-1">(JID ✓)</span>}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-foreground">
+                    Target Groups <span className="text-muted-foreground font-normal">({selectedGroups.length} selected)</span>
+                  </label>
+                  <div className="max-h-48 overflow-y-auto rounded-lg border border-border bg-secondary/20 p-2 space-y-1">
+                    <div className="flex gap-2 mb-2">
+                      <Button variant="ghost" size="sm" className="text-xs h-6" onClick={() => setSelectedGroups(groups.map(g => g.group_name))}>
+                        Select All
+                      </Button>
+                      <Button variant="ghost" size="sm" className="text-xs h-6" onClick={() => setSelectedGroups([])}>
+                        Clear
+                      </Button>
+                    </div>
+                    {groups.map(g => (
+                      <label key={g.id} className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-secondary/60">
+                        <Checkbox
+                          checked={selectedGroups.includes(g.group_name)}
+                          onCheckedChange={(checked) => {
+                            setSelectedGroups(prev =>
+                              checked ? [...prev, g.group_name] : prev.filter(n => n !== g.group_name)
+                            );
+                          }}
+                        />
+                        <span className="text-sm text-foreground">{g.group_name}</span>
+                        {g.group_jid && <span className="text-xs text-muted-foreground">(JID ✓)</span>}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )
 
               {!isBulk ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
