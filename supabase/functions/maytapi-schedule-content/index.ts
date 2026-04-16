@@ -103,6 +103,7 @@ Deno.serve(async (req) => {
       start_date,         // ISO date string e.g. "2026-04-17"
       morning_start_day,  // 1-30, which day in the cycle to start (default 5 = current)
       days = 30,          // how many days to schedule
+      target_groups,      // optional array of { name, jid } — defaults to APLGO | Health and Biz
     } = body;
 
     if (!user_id || !start_date) {
