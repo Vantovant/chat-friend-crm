@@ -198,23 +198,29 @@ export function GroupCampaignsModule() {
           return;
         }
 
-        const { error } = await supabase.from('scheduled_group_posts').insert({
-          user_id: user.id,
-          target_group_name: selectedGroup,
-          target_group_jid: groupJid,
-          message_content: messageContent.trim(),
-          scheduled_at: scheduledDate.toISOString(),
-          status: 'pending',
-        } as any);
+        const rows = targetGroups.map(groupName => {
+          const gData = groupDataMap.get(groupName);
+          return {
+            user_id: user.id,
+            target_group_name: groupName,
+            target_group_jid: gData?.group_jid || null,
+            message_content: messageContent.trim(),
+            scheduled_at: scheduledDate.toISOString(),
+            status: 'pending',
+          };
+        });
+
+        const { error } = await supabase.from('scheduled_group_posts').insert(rows as any);
 
         if (error) {
           toast.error('Failed to schedule: ' + error.message);
         } else {
-          toast.success('Campaign scheduled!');
+          toast.success(`${rows.length} campaign(s) scheduled!`);
           setMessageContent('');
           setSingleDate(undefined);
           setSingleTime('09:00');
           setSelectedGroup('');
+          setSelectedGroups([]);
           fetchData();
         }
       }
