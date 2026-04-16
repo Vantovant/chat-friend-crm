@@ -499,6 +499,10 @@ export function InboxModule() {
                     // Parse error code from stored error string like "[TWILIO_63007] ..."
                     const errorCode = msg.error?.match(/\[([A-Z_0-9]+)\]/)?.[1] || '';
                     const errorMessage = msg.error?.replace(/\[[A-Z_0-9]+\]\s*/, '') || msg.error || 'Delivery failed';
+                    // Classify error category for UI
+                    const isMetaBlock = errorCode.startsWith('META_');
+                    const isPolicy = errorCode === 'TEMPLATE_REQUIRED' || errorCode === 'META_POLICY_BLOCK';
+                    const errorCategory = isMetaBlock ? '⚠️ Meta/Admin' : isPolicy ? '📋 Policy' : errorCode.startsWith('TWILIO_') ? '🔧 Transport' : errorCode.startsWith('MISSING_') ? '⚙️ Config' : '';
 
                     return (
                     <div key={msg.id} className={cn('flex', msg.is_outbound ? 'justify-end' : 'justify-start')}>
@@ -523,6 +527,7 @@ export function InboxModule() {
                               </TooltipTrigger>
                               <TooltipContent side="left" className="max-w-xs">
                                 <div className="space-y-1">
+                                  {errorCategory && <p className="text-[10px] font-semibold text-amber-400">{errorCategory}</p>}
                                   {errorCode && <p className="font-mono text-[10px] text-destructive">{errorCode}</p>}
                                   <p className="text-xs">{errorMessage}</p>
                                 </div>

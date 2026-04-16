@@ -253,10 +253,19 @@ Deno.serve(async (req) => {
       let errorCode = `TWILIO_${twilioCode}`;
       let hint = "Check Twilio console for details.";
 
-      if (twilioCode === 63007) {
+      // Meta / admin restrictions — non-code issues
+      if (twilioCode === 63112) {
+        errorCode = "META_ADMIN_BLOCK";
+        hint = "Meta Business Manager restriction: your WhatsApp sender display name is not approved. Resolve in Meta Business Manager → WhatsApp Manager → Phone Numbers. This is NOT a code issue.";
+      } else if (twilioCode === 63032 || twilioCode === 63033) {
+        errorCode = "META_POLICY_BLOCK";
+        hint = "Meta policy restriction on this message. Check Meta Business Manager for compliance issues.";
+      // Channel / config issues
+      } else if (twilioCode === 63007) {
         hint = "Channel not found. Verify your Messaging Service is configured for WhatsApp and linked to your approved sender.";
       } else if (twilioCode === 63016) {
         hint = "Message content too long or contains unsupported characters.";
+      // Permission / transport issues
       } else if (twilioCode === 21408) {
         hint = "Permission denied. Check your Twilio account permissions for WhatsApp.";
       } else if (twilioCode === 21610) {
