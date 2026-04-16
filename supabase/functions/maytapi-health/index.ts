@@ -42,15 +42,16 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Maytapi returns { success: true, data: { status: "active", ... } }
-    const phoneStatus = data.data?.status || data.status;
-    const isConnected = phoneStatus === "active" || phoneStatus === "connected";
+    // Maytapi returns { success: true, status: { loggedIn: true, state: { state: "CONNECTED" }, number: "..." } }
+    const statusData = data.status || data.data || data;
+    const stateStr = statusData?.state?.state || "";
+    const isConnected = statusData?.loggedIn === true || stateStr === "CONNECTED";
 
     return new Response(JSON.stringify({
       connected: isConnected,
-      status: phoneStatus,
+      status: stateStr || (isConnected ? "connected" : "unknown"),
       phone_id: PHONE_ID,
-      number: data.data?.number || null,
+      number: statusData?.number || null,
     }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
