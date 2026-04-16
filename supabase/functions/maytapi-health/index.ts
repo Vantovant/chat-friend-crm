@@ -11,9 +11,9 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID");
-    const PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID");
-    const API_TOKEN = Deno.env.get("MAYTAPI_API_TOKEN");
+    const PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID")?.trim();
+    const PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID")?.trim();
+    const API_TOKEN = Deno.env.get("MAYTAPI_API_TOKEN")?.trim();
 
     if (!PRODUCT_ID || !PHONE_ID || !API_TOKEN) {
       return new Response(JSON.stringify({
@@ -31,6 +31,7 @@ Deno.serve(async (req) => {
     );
 
     const data = await res.json();
+    console.log("Maytapi status response:", JSON.stringify(data));
 
     if (!res.ok) {
       return new Response(JSON.stringify({
