@@ -42,13 +42,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Maytapi may return flat status or wrapped in { success, data }
-    const statusData = data.data || data;
-    console.log("statusData keys:", Object.keys(statusData), "loggedIn:", statusData?.loggedIn, "state:", JSON.stringify(statusData?.state));
-    const stateStr = statusData?.state?.state || statusData?.state || "";
-    const isLoggedIn = statusData?.loggedIn === true;
-    const isConnected = isLoggedIn || stateStr === "CONNECTED" || stateStr === "active";
-    console.log("isLoggedIn:", isLoggedIn, "stateStr:", stateStr, "isConnected:", isConnected);
+    // Maytapi returns { success: true, status: { loggedIn: true, state: { state: "CONNECTED" }, number: "..." } }
+    const statusData = data.status || data.data || data;
+    const stateStr = statusData?.state?.state || "";
+    const isConnected = statusData?.loggedIn === true || stateStr === "CONNECTED";
 
     return new Response(JSON.stringify({
       connected: isConnected,
