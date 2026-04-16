@@ -46,6 +46,8 @@ export function GroupCampaignsModule() {
 
   // Form state
   const [selectedGroup, setSelectedGroup] = useState('');
+  const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
+  const [isMultiGroup, setIsMultiGroup] = useState(false);
   const [messageContent, setMessageContent] = useState('');
   const [isBulk, setIsBulk] = useState(false);
 
