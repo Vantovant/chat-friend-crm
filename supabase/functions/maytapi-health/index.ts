@@ -42,9 +42,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Maytapi returns { success: true, data: { status: "active", ... } }
-    const phoneStatus = data.data?.status || data.status;
-    const isConnected = phoneStatus === "active" || phoneStatus === "connected";
+    // Maytapi returns nested: { success: true, data: { state: { state: "CONNECTED" }, loggedIn: true, number: "..." } }
+    const statusData = data.data || data;
+    const stateStr = statusData?.state?.state || statusData?.status || "";
+    const isConnected = statusData?.loggedIn === true || stateStr === "CONNECTED" || stateStr === "active";
 
     return new Response(JSON.stringify({
       connected: isConnected,
