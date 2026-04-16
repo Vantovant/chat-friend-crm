@@ -113,47 +113,55 @@ Deno.serve(async (req) => {
     }
 
     const morningStart = (morning_start_day || 5) - 1; // convert to 0-indexed
+    const groups = Array.isArray(target_groups) && target_groups.length > 0
+      ? target_groups
+      : [DEFAULT_TARGET];
     const rows: any[] = [];
 
-    for (let i = 0; i < days; i++) {
-      const date = new Date(start_date + "T00:00:00+02:00"); // SAST
-      date.setDate(date.getDate() + i);
-      const dateStr = date.toISOString().split("T")[0];
-      const dayOfWeek = date.getDay(); // 0=Sun
+    for (const group of groups) {
+      const groupName = group.name || DEFAULT_TARGET.name;
+      const groupJid = group.jid || DEFAULT_TARGET.jid;
 
-      // Morning post at 07:00 SAST (05:00 UTC)
-      const morningIdx = (morningStart + i) % 30;
-      rows.push({
-        user_id,
-        target_group_name: TARGET_GROUP_NAME,
-        target_group_jid: TARGET_GROUP_JID,
-        message_content: MORNING_MESSAGES[morningIdx],
-        scheduled_at: `${dateStr}T05:00:00+00:00`, // 07:00 SAST
-        status: "pending",
-      });
+      for (let i = 0; i < days; i++) {
+        const date = new Date(start_date + "T00:00:00+02:00"); // SAST
+        date.setDate(date.getDate() + i);
+        const dateStr = date.toISOString().split("T")[0];
+        const dayOfWeek = date.getDay(); // 0=Sun
 
-      // Midday post at 12:00 SAST (10:00 UTC)
-      const middayIdx = (morningStart + i) % 30;
-      rows.push({
-        user_id,
-        target_group_name: TARGET_GROUP_NAME,
-        target_group_jid: TARGET_GROUP_JID,
-        message_content: MIDDAY_MESSAGES[middayIdx],
-        scheduled_at: `${dateStr}T10:00:00+00:00`, // 12:00 SAST
-        status: "pending",
-      });
-
-      // Evening post at 17:00 SAST (15:00 UTC)
-      const eveningMsg = EVENING_MESSAGES[dayOfWeek];
-      if (eveningMsg) {
+        // Morning post at 07:00 SAST (05:00 UTC)
+        const morningIdx = (morningStart + i) % 30;
         rows.push({
           user_id,
-          target_group_name: TARGET_GROUP_NAME,
-          target_group_jid: TARGET_GROUP_JID,
-          message_content: eveningMsg,
-          scheduled_at: `${dateStr}T15:00:00+00:00`, // 17:00 SAST
+          target_group_name: groupName,
+          target_group_jid: groupJid,
+          message_content: MORNING_MESSAGES[morningIdx],
+          scheduled_at: `${dateStr}T05:00:00+00:00`,
           status: "pending",
         });
+
+        // Midday post at 12:00 SAST (10:00 UTC)
+        const middayIdx = (morningStart + i) % 30;
+        rows.push({
+          user_id,
+          target_group_name: groupName,
+          target_group_jid: groupJid,
+          message_content: MIDDAY_MESSAGES[middayIdx],
+          scheduled_at: `${dateStr}T10:00:00+00:00`,
+          status: "pending",
+        });
+
+        // Evening post at 17:00 SAST (15:00 UTC)
+        const eveningMsg = EVENING_MESSAGES[dayOfWeek];
+        if (eveningMsg) {
+          rows.push({
+            user_id,
+            target_group_name: groupName,
+            target_group_jid: groupJid,
+            message_content: eveningMsg,
+            scheduled_at: `${dateStr}T15:00:00+00:00`,
+            status: "pending",
+          });
+        }
       }
     }
 
