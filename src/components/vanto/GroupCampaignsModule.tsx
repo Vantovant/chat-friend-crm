@@ -146,20 +146,24 @@ export function GroupCampaignsModule() {
         const rows: any[] = [];
         const now = new Date();
 
-        for (const day of days) {
-          for (const slotId of selectedTimeSlots) {
-            const slot = TIME_SLOTS.find(s => s.id === slotId);
-            if (!slot) continue;
-            const scheduledDate = setMinutes(setHours(day, slot.hour), slot.minute);
-            if (scheduledDate <= now) continue;
-            rows.push({
-              user_id: user.id,
-              target_group_name: selectedGroup,
-              target_group_jid: groupJid,
-              message_content: messageContent.trim(),
-              scheduled_at: scheduledDate.toISOString(),
-              status: 'pending',
-            });
+        for (const groupName of targetGroups) {
+          const gData = groupDataMap.get(groupName);
+          const jid = gData?.group_jid || null;
+          for (const day of days) {
+            for (const slotId of selectedTimeSlots) {
+              const slot = TIME_SLOTS.find(s => s.id === slotId);
+              if (!slot) continue;
+              const scheduledDate = setMinutes(setHours(day, slot.hour), slot.minute);
+              if (scheduledDate <= now) continue;
+              rows.push({
+                user_id: user.id,
+                target_group_name: groupName,
+                target_group_jid: jid,
+                message_content: messageContent.trim(),
+                scheduled_at: scheduledDate.toISOString(),
+                status: 'pending',
+              });
+            }
           }
         }
 
