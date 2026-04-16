@@ -434,7 +434,16 @@ export function GroupCampaignsModule() {
                     ))}
                   </div>
                 </div>
-              )
+              )}
+
+              {/* Bulk toggle */}
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-secondary/40 border border-border">
+                <Switch checked={isBulk} onCheckedChange={setIsBulk} />
+                <div>
+                  <p className="text-sm font-medium text-foreground">{isBulk ? 'Smart Bulk Campaign' : 'Single Post'}</p>
+                  <p className="text-xs text-muted-foreground">{isBulk ? 'Schedule across a date range with multiple time slots' : 'Schedule one post at a specific date & time'}</p>
+                </div>
+              </div>
 
               {!isBulk ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
