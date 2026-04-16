@@ -31,6 +31,7 @@ Deno.serve(async (req) => {
     );
 
     const data = await res.json();
+    console.log("Maytapi status response:", JSON.stringify(data));
 
     if (!res.ok) {
       return new Response(JSON.stringify({
