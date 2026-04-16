@@ -46,6 +46,8 @@ export function GroupCampaignsModule() {
 
   // Form state
   const [selectedGroup, setSelectedGroup] = useState('');
+  const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
+  const [isMultiGroup, setIsMultiGroup] = useState(false);
   const [messageContent, setMessageContent] = useState('');
   const [isBulk, setIsBulk] = useState(false);
 
@@ -113,17 +115,17 @@ export function GroupCampaignsModule() {
   }, []);
 
   const handleSchedule = async () => {
-    if (!selectedGroup || !messageContent.trim()) {
-      toast.error('Please fill in group and message.');
+    const targetGroups = isMultiGroup ? selectedGroups : (selectedGroup ? [selectedGroup] : []);
+    if (targetGroups.length === 0 || !messageContent.trim()) {
+      toast.error('Please select at least one group and enter a message.');
       return;
     }
 
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { toast.error('Not authenticated'); return; }
 
-    // Find the group JID if available
-    const selectedGroupData = groups.find(g => g.group_name === selectedGroup);
-    const groupJid = selectedGroupData?.group_jid || null;
+    // Find JIDs for all target groups
+    const groupDataMap = new Map(groups.map(g => [g.group_name, g]));
 
     setSaving(true);
 
@@ -144,20 +146,24 @@ export function GroupCampaignsModule() {
         const rows: any[] = [];
         const now = new Date();
 
-        for (const day of days) {
-          for (const slotId of selectedTimeSlots) {
-            const slot = TIME_SLOTS.find(s => s.id === slotId);
-            if (!slot) continue;
-            const scheduledDate = setMinutes(setHours(day, slot.hour), slot.minute);
-            if (scheduledDate <= now) continue;
-            rows.push({
-              user_id: user.id,
-              target_group_name: selectedGroup,
-              target_group_jid: groupJid,
-              message_content: messageContent.trim(),
-              scheduled_at: scheduledDate.toISOString(),
-              status: 'pending',
-            });
+        for (const groupName of targetGroups) {
+          const gData = groupDataMap.get(groupName);
+          const jid = gData?.group_jid || null;
+          for (const day of days) {
+            for (const slotId of selectedTimeSlots) {
+              const slot = TIME_SLOTS.find(s => s.id === slotId);
+              if (!slot) continue;
+              const scheduledDate = setMinutes(setHours(day, slot.hour), slot.minute);
+              if (scheduledDate <= now) continue;
+              rows.push({
+                user_id: user.id,
+                target_group_name: groupName,
+                target_group_jid: jid,
+                message_content: messageContent.trim(),
+                scheduled_at: scheduledDate.toISOString(),
+                status: 'pending',
+              });
+            }
           }
         }
 
@@ -174,6 +180,7 @@ export function GroupCampaignsModule() {
           toast.success(`${rows.length} campaign posts scheduled!`);
           setMessageContent('');
           setSelectedGroup('');
+          setSelectedGroups([]);
           setBulkDateRange({ from: undefined, to: undefined });
           setSelectedTimeSlots(['morning']);
           fetchData();
@@ -192,23 +199,29 @@ export function GroupCampaignsModule() {
           return;
         }
 
-        const { error } = await supabase.from('scheduled_group_posts').insert({
-          user_id: user.id,
-          target_group_name: selectedGroup,
-          target_group_jid: groupJid,
-          message_content: messageContent.trim(),
-          scheduled_at: scheduledDate.toISOString(),
-          status: 'pending',
-        } as any);
+        const rows = targetGroups.map(groupName => {
+          const gData = groupDataMap.get(groupName);
+          return {
+            user_id: user.id,
+            target_group_name: groupName,
+            target_group_jid: gData?.group_jid || null,
+            message_content: messageContent.trim(),
+            scheduled_at: scheduledDate.toISOString(),
+            status: 'pending',
+          };
+        });
+
+        const { error } = await supabase.from('scheduled_group_posts').insert(rows as any);
 
         if (error) {
           toast.error('Failed to schedule: ' + error.message);
         } else {
-          toast.success('Campaign scheduled!');
+          toast.success(`${rows.length} campaign(s) scheduled!`);
           setMessageContent('');
           setSingleDate(undefined);
           setSingleTime('09:00');
           setSelectedGroup('');
+          setSelectedGroups([]);
           fetchData();
         }
       }
@@ -365,22 +378,63 @@ export function GroupCampaignsModule() {
             </div>
           ) : (
             <>
-              <div className="space-y-1.5">
-                <label className="text-sm font-medium text-foreground">Target Group</label>
-                <Select value={selectedGroup} onValueChange={setSelectedGroup}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a group…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {groups.map(g => (
-                      <SelectItem key={g.id} value={g.group_name}>
-                        {g.group_name}
-                        {g.group_jid && <span className="text-xs text-muted-foreground ml-1">(JID ✓)</span>}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              {/* Multi-group toggle */}
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-secondary/40 border border-border">
+                <Switch checked={isMultiGroup} onCheckedChange={(v) => { setIsMultiGroup(v); setSelectedGroup(''); setSelectedGroups([]); }} />
+                <div>
+                  <p className="text-sm font-medium text-foreground">{isMultiGroup ? 'Multi-Group Broadcast' : 'Single Group'}</p>
+                  <p className="text-xs text-muted-foreground">{isMultiGroup ? 'Same message to multiple groups' : 'Send to one specific group'}</p>
+                </div>
               </div>
+
+              {!isMultiGroup ? (
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-foreground">Target Group</label>
+                  <Select value={selectedGroup} onValueChange={setSelectedGroup}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a group…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {groups.map(g => (
+                        <SelectItem key={g.id} value={g.group_name}>
+                          {g.group_name}
+                          {g.group_jid && <span className="text-xs text-muted-foreground ml-1">(JID ✓)</span>}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium text-foreground">
+                    Target Groups <span className="text-muted-foreground font-normal">({selectedGroups.length} selected)</span>
+                  </label>
+                  <div className="max-h-48 overflow-y-auto rounded-lg border border-border bg-secondary/20 p-2 space-y-1">
+                    <div className="flex gap-2 mb-2">
+                      <Button variant="ghost" size="sm" className="text-xs h-6" onClick={() => setSelectedGroups(groups.map(g => g.group_name))}>
+                        Select All
+                      </Button>
+                      <Button variant="ghost" size="sm" className="text-xs h-6" onClick={() => setSelectedGroups([])}>
+                        Clear
+                      </Button>
+                    </div>
+                    {groups.map(g => (
+                      <label key={g.id} className="flex items-center gap-2 cursor-pointer p-1.5 rounded hover:bg-secondary/60">
+                        <Checkbox
+                          checked={selectedGroups.includes(g.group_name)}
+                          onCheckedChange={(checked) => {
+                            setSelectedGroups(prev =>
+                              checked ? [...prev, g.group_name] : prev.filter(n => n !== g.group_name)
+                            );
+                          }}
+                        />
+                        <span className="text-sm text-foreground">{g.group_name}</span>
+                        {g.group_jid && <span className="text-xs text-muted-foreground">(JID ✓)</span>}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Bulk toggle */}
               <div className="flex items-center gap-3 p-3 rounded-lg bg-secondary/40 border border-border">
