@@ -84,8 +84,8 @@ const EVENING_MESSAGES: Record<number, string> = {
   6: "🔥 SATURDAY — Vision Builders with Vanto\nTonight we go deeper — purpose, vision, calling. Saturday is for builders who want legacy, not just income. This is where fire is ignited.\n🕖 Time: 7PM (Harare / Pretoria)\n🔗 Zoom: https://us06web.zoom.us/j/86968140352?pwd=oLTdNxe8rkTQjdaPiYzTKqYYIgIyP8.1\n🆔 Meeting ID: 869 6814 0352\n🔑 Passcode: 790619\nBring your heart, your dreams and your commitment to impact. We build vision here.",
 };
 
-const TARGET_GROUP_NAME = "APLGO | Health and Biz";
-const TARGET_GROUP_JID = "120363419298058298@g.us";
+// Default target (can be overridden via request body)
+const DEFAULT_TARGET = { name: "APLGO | Health and Biz", jid: "120363419298058298@g.us" };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
