@@ -180,6 +180,7 @@ export function GroupCampaignsModule() {
           toast.success(`${rows.length} campaign posts scheduled!`);
           setMessageContent('');
           setSelectedGroup('');
+          setSelectedGroups([]);
           setBulkDateRange({ from: undefined, to: undefined });
           setSelectedTimeSlots(['morning']);
           fetchData();
