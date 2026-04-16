@@ -24,14 +24,28 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Check phone status
+    // Parse optional action from query string
+    const url = new URL(req.url);
+    const action = url.searchParams.get("action");
+
+    if (action === "groups") {
+      const groupsRes = await fetch(
+        `${MAYTAPI_BASE}/${PRODUCT_ID}/${PHONE_ID}/getGroups`,
+        { headers: { "x-maytapi-key": API_TOKEN } }
+      );
+      const groupsData = await groupsRes.json();
+      return new Response(JSON.stringify(groupsData), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Default: Check phone status
     const res = await fetch(
       `${MAYTAPI_BASE}/${PRODUCT_ID}/${PHONE_ID}/status`,
       { headers: { "x-maytapi-key": API_TOKEN } }
     );
 
     const data = await res.json();
-    console.log("Maytapi status response:", JSON.stringify(data));
 
     if (!res.ok) {
       return new Response(JSON.stringify({
@@ -42,7 +56,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Maytapi returns { success: true, status: { loggedIn: true, state: { state: "CONNECTED" }, number: "..." } }
     const statusData = data.status || data.data || data;
     const stateStr = statusData?.state?.state || "";
     const isConnected = statusData?.loggedIn === true || stateStr === "CONNECTED";
