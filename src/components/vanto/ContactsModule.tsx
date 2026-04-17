@@ -513,6 +513,19 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
             {!canReassign && <p className="text-[10px] text-muted-foreground mt-1">Only admins or the contact creator can reassign.</p>}
           </div>
           <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Pipeline Stage</label>
+            <select value={form.stage_id} onChange={e => set('stage_id', e.target.value)}
+              className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50">
+              <option value="">Unassigned</option>
+              {stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+            {form.stage_id && (
+              <div className="flex items-center gap-1.5 mt-1.5">
+                <div className="w-2 h-2 rounded-full" style={{ background: stages.find(s => s.id === form.stage_id)?.color || 'hsl(var(--primary))' }} />
+                <span className="text-[10px] text-muted-foreground">Currently in pipeline</span>
+              </div>
+            )}
+          <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1">Tags (comma separated)</label>
             <input type="text" value={form.tags} onChange={e => set('tags', e.target.value)} placeholder="e.g. mlm, vip" className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 transition-colors" />
           </div>
