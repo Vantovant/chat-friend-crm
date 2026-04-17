@@ -11,9 +11,11 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { format, eachDayOfInterval, setHours, setMinutes, formatDistanceToNow } from 'date-fns';
-import { Plus, Trash2, Users, CalendarClock, Send, RefreshCw, CalendarIcon, RotateCcw, AlertTriangle, Wifi, WifiOff, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Users, CalendarClock, Send, RefreshCw, CalendarIcon, RotateCcw, AlertTriangle, Wifi, WifiOff, Loader2, Pencil, Save, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SmartPastePanel } from './SmartPastePanel';
 
@@ -248,6 +250,81 @@ export function GroupCampaignsModule() {
       .eq('id', id);
     if (error) toast.error('Retry failed: ' + error.message);
     else { toast.success('Post queued for retry'); fetchData(); }
+  };
+
+  // Edit dialog state
+  const [editingPost, setEditingPost] = useState<ScheduledPost | null>(null);
+  const [editMessage, setEditMessage] = useState('');
+  const [editGroup, setEditGroup] = useState('');
+  const [editScheduledAt, setEditScheduledAt] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
+  const openEditDialog = (post: ScheduledPost) => {
+    setEditingPost(post);
+    setEditMessage(post.message_content);
+    setEditGroup(post.target_group_name);
+    // datetime-local format: YYYY-MM-DDTHH:mm
+    setEditScheduledAt(format(new Date(post.scheduled_at), "yyyy-MM-dd'T'HH:mm"));
+  };
+
+  const closeEditDialog = () => {
+    setEditingPost(null);
+    setEditMessage('');
+    setEditGroup('');
+    setEditScheduledAt('');
+  };
+
+  const isEditableInPlace = editingPost?.status === 'pending' || editingPost?.status === 'failed';
+
+  const handleSaveEdit = async () => {
+    if (!editingPost) return;
+    if (!editMessage.trim()) { toast.error('Message cannot be empty'); return; }
+    if (!editGroup) { toast.error('Group is required'); return; }
+    setEditSaving(true);
+    try {
+      const groupRow = groups.find(g => g.group_name === editGroup);
+      const newScheduled = new Date(editScheduledAt);
+      if (isNaN(newScheduled.getTime())) { toast.error('Invalid date/time'); setEditSaving(false); return; }
+
+      if (isEditableInPlace) {
+        // Update the existing row in place
+        const { error } = await supabase
+          .from('scheduled_group_posts')
+          .update({
+            message_content: editMessage.trim(),
+            target_group_name: editGroup,
+            target_group_jid: groupRow?.group_jid || null,
+            scheduled_at: newScheduled.toISOString(),
+            // Reset failure metadata so the cron picks it up again
+            status: 'pending',
+            failure_reason: null,
+            last_attempt_at: null,
+          } as any)
+          .eq('id', editingPost.id);
+        if (error) throw error;
+        toast.success('Post updated');
+      } else {
+        // Sent / delivered / executing → clone as a new corrected post
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) { toast.error('Not signed in'); setEditSaving(false); return; }
+        const { error } = await supabase.from('scheduled_group_posts').insert({
+          user_id: user.id,
+          target_group_name: editGroup,
+          target_group_jid: groupRow?.group_jid || null,
+          message_content: editMessage.trim(),
+          scheduled_at: newScheduled.toISOString(),
+          status: 'pending',
+        } as any);
+        if (error) throw error;
+        toast.success('Corrected post queued');
+      }
+      closeEditDialog();
+      fetchData();
+    } catch (e: any) {
+      toast.error('Save failed: ' + (e?.message || 'unknown'));
+    } finally {
+      setEditSaving(false);
+    }
   };
 
   // Trigger manual send for due posts
@@ -567,8 +644,15 @@ export function GroupCampaignsModule() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {posts.map(post => (
-                    <TableRow key={post.id}>
+                  {posts.map(post => {
+                    const editable = post.status === 'pending' || post.status === 'failed';
+                    return (
+                    <TableRow
+                      key={post.id}
+                      className="cursor-pointer hover:bg-muted/40 transition-colors"
+                      onClick={() => openEditDialog(post)}
+                      title={editable ? 'Click to edit this post' : 'Click to edit & resend a corrected copy'}
+                    >
                       <TableCell className="font-medium text-sm">
                         {post.target_group_name}
                         {post.target_group_jid && (
@@ -603,8 +687,17 @@ export function GroupCampaignsModule() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <div className="flex gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-primary"
+                            onClick={() => openEditDialog(post)}
+                            title={editable ? 'Edit post' : 'Edit & resend corrected copy'}
+                          >
+                            {editable ? <Pencil size={14} /> : <Copy size={14} />}
+                          </Button>
                           {post.status === 'failed' && (
                             <Button
                               variant="ghost"
@@ -629,13 +722,77 @@ export function GroupCampaignsModule() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                  );})}
                 </TableBody>
               </Table>
             </div>
           )}
         </CardContent>
       </Card>
+
+      {/* Edit Post Dialog */}
+      <Dialog open={!!editingPost} onOpenChange={(open) => !open && closeEditDialog()}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {isEditableInPlace ? <Pencil size={16} /> : <Copy size={16} />}
+              {isEditableInPlace ? 'Edit scheduled post' : 'Edit & resend corrected copy'}
+            </DialogTitle>
+            <DialogDescription>
+              {isEditableInPlace
+                ? 'Updates the existing post in place. If it was failed it will be re-queued.'
+                : 'This post was already sent. Saving will queue a new corrected post — the original send is not retracted.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Group</Label>
+              <Select value={editGroup} onValueChange={setEditGroup}>
+                <SelectTrigger><SelectValue placeholder="Select group" /></SelectTrigger>
+                <SelectContent>
+                  {groups.map(g => (
+                    <SelectItem key={g.id} value={g.group_name}>{g.group_name}</SelectItem>
+                  ))}
+                  {/* Allow keeping original even if not in groups list */}
+                  {editingPost && !groups.some(g => g.group_name === editingPost.target_group_name) && (
+                    <SelectItem value={editingPost.target_group_name}>
+                      {editingPost.target_group_name} (original)
+                    </SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Message</Label>
+              <Textarea
+                value={editMessage}
+                onChange={(e) => setEditMessage(e.target.value)}
+                rows={6}
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">{editMessage.length} characters</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Scheduled at</Label>
+              <Input
+                type="datetime-local"
+                value={editScheduledAt}
+                onChange={(e) => setEditScheduledAt(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Set to ~1 minute in the future to send immediately on the next cron tick.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeEditDialog} disabled={editSaving}>Cancel</Button>
+            <Button onClick={handleSaveEdit} disabled={editSaving}>
+              {editSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              {isEditableInPlace ? 'Save changes' : 'Queue corrected post'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
