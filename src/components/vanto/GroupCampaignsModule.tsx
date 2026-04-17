@@ -628,9 +628,47 @@ export function GroupCampaignsModule() {
                 </label>
                 <Textarea
                   value={messageContent}
-                  onChange={e => setMessageContent(e.target.value)}
+                  onChange={e => {
+                    setMessageContent(e.target.value);
+                    setPreviewCheck({ checking: false, ok: null, reason: null, imageUrl: null });
+                  }}
                   placeholder={isBulk ? 'Enter the master script that will be posted at each scheduled time…' : 'Type the message to post in the group…'}
                   rows={isBulk ? 6 : 4}
+                />
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => runPreviewCheck(messageContent)}
+                    disabled={previewCheck.checking || !messageContent.trim()}
+                  >
+                    {previewCheck.checking ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
+                    {previewCheck.checking ? 'Checking link…' : 'Check link preview'}
+                  </Button>
+                  {previewCheck.ok === true && (
+                    <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+                      ✓ Preview OK — will send rich card
+                    </Badge>
+                  )}
+                  {previewCheck.ok === false && (
+                    <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30">
+                      ⚠ No preview ({previewCheck.reason}) — fallback will be used
+                    </Badge>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-foreground flex items-center gap-2">
+                  Fallback Message
+                  <span className="text-xs font-normal text-muted-foreground">(used if link has no preview image)</span>
+                </label>
+                <Textarea
+                  value={fallbackMessage}
+                  onChange={e => setFallbackMessage(e.target.value)}
+                  placeholder="Optional. Example: Hi! Ask me about GRW directly — I'll send you the exact link."
+                  rows={2}
                 />
               </div>
 
