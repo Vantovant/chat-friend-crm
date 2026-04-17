@@ -40,8 +40,20 @@ type Conversation = {
   unread_count: number;
   last_message: string | null;
   last_message_at: string | null;
+  last_inbound_at: string | null;
   contact: Contact;
 };
+
+/** WhatsApp 24h customer-care window helpers. */
+const WINDOW_MS = 24 * 60 * 60 * 1000;
+function getWindowState(lastInboundAt: string | null | undefined) {
+  if (!lastInboundAt) return { open: false, hoursLeft: 0, never: true };
+  const elapsed = Date.now() - new Date(lastInboundAt).getTime();
+  const remaining = WINDOW_MS - elapsed;
+  return { open: remaining > 0, hoursLeft: Math.max(0, Math.round(remaining / 3_600_000)), never: false };
+}
+/** Error codes that mean "retrying the same free-form text will fail again". */
+const NON_RETRYABLE_CODES = new Set(['TWILIO_63016', 'TEMPLATE_REQUIRED', 'META_POLICY_BLOCK']);
 
 type Message = {
   id: string;
@@ -401,6 +413,32 @@ export function InboxModule() {
                       {selected.contact.temperature.toUpperCase()}
                     </span>
                   )}
+                  {(() => {
+                    const ws = getWindowState(selected.last_inbound_at);
+                    return (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className={cn(
+                              'px-2 py-0.5 rounded-full text-[10px] font-semibold border cursor-help',
+                              ws.open
+                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                            )}
+                          >
+                            {ws.open ? `🟢 Window open · ${ws.hoursLeft}h left` : ws.never ? '🔒 Never replied' : '🔒 Window closed'}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-xs">
+                          {ws.open ? (
+                            <p className="text-xs">You can send free-form messages for the next {ws.hoursLeft} hour(s). After that, only pre-approved Template messages can be sent until the contact replies.</p>
+                          ) : (
+                            <p className="text-xs">WhatsApp 24-hour reply window has expired. Free-form messages will be rejected (TWILIO_63016). Wait for the contact to reply, or send an approved Template message.</p>
+                          )}
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  })()}
                   <AssignmentControl
                     assignedTo={selected.contact?.assigned_to ?? null}
                     profiles={profiles}
@@ -540,25 +578,42 @@ export function InboxModule() {
                           {!isFailed && !isQueued && msg.is_outbound && msg.status === 'sent' && <span className="text-[10px] text-muted-foreground">✓</span>}
                         </div>
                         {isFailed && (
-                          <button
-                            onClick={async () => {
-                              setSending(true);
-                              const { data, error } = await supabase.functions.invoke('send-message', {
-                                body: { conversation_id: msg.conversation_id, content: msg.content, message_type: msg.message_type },
-                              });
-                              if (error || !data?.success) {
-                                toast({ title: 'Retry failed', description: data?.hint || data?.message || error?.message, variant: 'destructive' });
-                              } else {
-                                toast({ title: 'Message resent' });
-                                fetchMessages(msg.conversation_id);
-                              }
-                              setSending(false);
-                            }}
-                            disabled={sending}
-                            className="flex items-center gap-1 mt-1.5 text-[10px] text-primary hover:underline disabled:opacity-50"
-                          >
-                            <RotateCcw size={10} /> Retry
-                          </button>
+                          (() => {
+                            const nonRetryable = NON_RETRYABLE_CODES.has(errorCode);
+                            if (nonRetryable) {
+                              return (
+                                <div className="flex items-center gap-1 mt-1.5 text-[10px] text-amber-400">
+                                  <AlertTriangle size={10} />
+                                  <span>{errorCode === 'TWILIO_63016' ? '24-hour reply window expired — Retry won\'t work. Wait for the contact to reply, or send a Template.' : 'Cannot retry — requires a Template message.'}</span>
+                                </div>
+                              );
+                            }
+                            return (
+                              <button
+                                onClick={async () => {
+                                  setSending(true);
+                                  const { data, error } = await supabase.functions.invoke('send-message', {
+                                    body: { conversation_id: msg.conversation_id, content: msg.content, message_type: msg.message_type },
+                                  });
+                                  if (error || !data?.success) {
+                                    const code = data?.code || '';
+                                    const friendly = code === 'TWILIO_63016'
+                                      ? 'WhatsApp 24-hour window has closed. Free-form messages are blocked until the contact replies.'
+                                      : data?.hint || data?.message || error?.message || 'Delivery failed';
+                                    toast({ title: 'Retry failed', description: friendly, variant: 'destructive' });
+                                  } else {
+                                    toast({ title: 'Message resent' });
+                                    fetchMessages(msg.conversation_id);
+                                  }
+                                  setSending(false);
+                                }}
+                                disabled={sending}
+                                className="flex items-center gap-1 mt-1.5 text-[10px] text-primary hover:underline disabled:opacity-50"
+                              >
+                                <RotateCcw size={10} /> Retry
+                              </button>
+                            );
+                          })()
                         )}
                       </div>
                     </div>
