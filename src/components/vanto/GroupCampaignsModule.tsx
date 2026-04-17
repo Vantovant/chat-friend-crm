@@ -11,9 +11,11 @@ import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { format, eachDayOfInterval, setHours, setMinutes, formatDistanceToNow } from 'date-fns';
-import { Plus, Trash2, Users, CalendarClock, Send, RefreshCw, CalendarIcon, RotateCcw, AlertTriangle, Wifi, WifiOff, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Users, CalendarClock, Send, RefreshCw, CalendarIcon, RotateCcw, AlertTriangle, Wifi, WifiOff, Loader2, Pencil, Save, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SmartPastePanel } from './SmartPastePanel';
 
