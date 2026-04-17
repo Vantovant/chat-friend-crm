@@ -808,10 +808,14 @@ export type Database = {
           attempt_count: number
           created_at: string
           failure_reason: string | null
+          fallback_message: string | null
           id: string
           image_url: string | null
           last_attempt_at: string | null
           message_content: string
+          preview_checked_at: string | null
+          preview_image_url: string | null
+          preview_status: string | null
           provider_message_id: string | null
           scheduled_at: string
           status: string
@@ -823,10 +827,14 @@ export type Database = {
           attempt_count?: number
           created_at?: string
           failure_reason?: string | null
+          fallback_message?: string | null
           id?: string
           image_url?: string | null
           last_attempt_at?: string | null
           message_content: string
+          preview_checked_at?: string | null
+          preview_image_url?: string | null
+          preview_status?: string | null
           provider_message_id?: string | null
           scheduled_at: string
           status?: string
@@ -838,10 +846,14 @@ export type Database = {
           attempt_count?: number
           created_at?: string
           failure_reason?: string | null
+          fallback_message?: string | null
           id?: string
           image_url?: string | null
           last_attempt_at?: string | null
           message_content?: string
+          preview_checked_at?: string | null
+          preview_image_url?: string | null
+          preview_status?: string | null
           provider_message_id?: string | null
           scheduled_at?: string
           status?: string

@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogD
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { format, eachDayOfInterval, setHours, setMinutes, formatDistanceToNow } from 'date-fns';
-import { Plus, Trash2, Users, CalendarClock, Send, RefreshCw, CalendarIcon, RotateCcw, AlertTriangle, Wifi, WifiOff, Loader2, Pencil, Save, Copy } from 'lucide-react';
+import { Plus, Trash2, Users, CalendarClock, Send, RefreshCw, CalendarIcon, RotateCcw, AlertTriangle, Wifi, WifiOff, Loader2, Pencil, Save, Copy, Eye, ImageOff, ImageIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { SmartPastePanel } from './SmartPastePanel';
 
@@ -33,6 +33,10 @@ type ScheduledPost = {
   attempt_count?: number;
   provider_message_id?: string | null;
   target_group_jid?: string | null;
+  fallback_message?: string | null;
+  preview_status?: string | null;
+  preview_checked_at?: string | null;
+  preview_image_url?: string | null;
 };
 
 const TIME_SLOTS = [
@@ -52,7 +56,24 @@ export function GroupCampaignsModule() {
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
   const [isMultiGroup, setIsMultiGroup] = useState(false);
   const [messageContent, setMessageContent] = useState('');
+  const [fallbackMessage, setFallbackMessage] = useState('');
+  const [previewCheck, setPreviewCheck] = useState<{ checking: boolean; ok: boolean | null; reason: string | null; imageUrl: string | null }>({ checking: false, ok: null, reason: null, imageUrl: null });
   const [isBulk, setIsBulk] = useState(false);
+
+  const runPreviewCheck = useCallback(async (text: string) => {
+    if (!text.trim()) {
+      setPreviewCheck({ checking: false, ok: null, reason: 'empty', imageUrl: null });
+      return;
+    }
+    setPreviewCheck({ checking: true, ok: null, reason: null, imageUrl: null });
+    try {
+      const { data, error } = await supabase.functions.invoke('link-preview-check', { body: { text } });
+      if (error) throw error;
+      setPreviewCheck({ checking: false, ok: !!data?.ok, reason: data?.reason || null, imageUrl: data?.imageUrl || null });
+    } catch (e: any) {
+      setPreviewCheck({ checking: false, ok: false, reason: e?.message || 'check_failed', imageUrl: null });
+    }
+  }, []);
 
   // Single post date/time
   const [singleDate, setSingleDate] = useState<Date | undefined>();
@@ -163,6 +184,7 @@ export function GroupCampaignsModule() {
                 target_group_name: groupName,
                 target_group_jid: jid,
                 message_content: messageContent.trim(),
+                fallback_message: fallbackMessage.trim() || null,
                 scheduled_at: scheduledDate.toISOString(),
                 status: 'pending',
               });
@@ -182,6 +204,8 @@ export function GroupCampaignsModule() {
         } else {
           toast.success(`${rows.length} campaign posts scheduled!`);
           setMessageContent('');
+          setFallbackMessage('');
+          setPreviewCheck({ checking: false, ok: null, reason: null, imageUrl: null });
           setSelectedGroup('');
           setSelectedGroups([]);
           setBulkDateRange({ from: undefined, to: undefined });
@@ -209,6 +233,7 @@ export function GroupCampaignsModule() {
             target_group_name: groupName,
             target_group_jid: gData?.group_jid || null,
             message_content: messageContent.trim(),
+            fallback_message: fallbackMessage.trim() || null,
             scheduled_at: scheduledDate.toISOString(),
             status: 'pending',
           };
@@ -221,6 +246,8 @@ export function GroupCampaignsModule() {
         } else {
           toast.success(`${rows.length} campaign(s) scheduled!`);
           setMessageContent('');
+          setFallbackMessage('');
+          setPreviewCheck({ checking: false, ok: null, reason: null, imageUrl: null });
           setSingleDate(undefined);
           setSingleTime('09:00');
           setSelectedGroup('');
@@ -255,23 +282,45 @@ export function GroupCampaignsModule() {
   // Edit dialog state
   const [editingPost, setEditingPost] = useState<ScheduledPost | null>(null);
   const [editMessage, setEditMessage] = useState('');
+  const [editFallback, setEditFallback] = useState('');
   const [editGroup, setEditGroup] = useState('');
   const [editScheduledAt, setEditScheduledAt] = useState('');
   const [editSaving, setEditSaving] = useState(false);
+  const [editPreview, setEditPreview] = useState<{ checking: boolean; ok: boolean | null; reason: string | null; imageUrl: string | null }>({ checking: false, ok: null, reason: null, imageUrl: null });
 
   const openEditDialog = (post: ScheduledPost) => {
     setEditingPost(post);
     setEditMessage(post.message_content);
+    setEditFallback(post.fallback_message || '');
     setEditGroup(post.target_group_name);
-    // datetime-local format: YYYY-MM-DDTHH:mm
     setEditScheduledAt(format(new Date(post.scheduled_at), "yyyy-MM-dd'T'HH:mm"));
+    setEditPreview({
+      checking: false,
+      ok: post.preview_status === 'ok' ? true : (post.preview_status === 'fallback_used' ? false : null),
+      reason: post.preview_status === 'fallback_used' ? 'no_og_image' : null,
+      imageUrl: post.preview_image_url || null,
+    });
   };
 
   const closeEditDialog = () => {
     setEditingPost(null);
     setEditMessage('');
+    setEditFallback('');
     setEditGroup('');
     setEditScheduledAt('');
+    setEditPreview({ checking: false, ok: null, reason: null, imageUrl: null });
+  };
+
+  const runEditPreviewCheck = async () => {
+    if (!editMessage.trim()) return;
+    setEditPreview({ checking: true, ok: null, reason: null, imageUrl: null });
+    try {
+      const { data, error } = await supabase.functions.invoke('link-preview-check', { body: { text: editMessage } });
+      if (error) throw error;
+      setEditPreview({ checking: false, ok: !!data?.ok, reason: data?.reason || null, imageUrl: data?.imageUrl || null });
+    } catch (e: any) {
+      setEditPreview({ checking: false, ok: false, reason: e?.message || 'check_failed', imageUrl: null });
+    }
   };
 
   const isEditableInPlace = editingPost?.status === 'pending' || editingPost?.status === 'failed';
@@ -287,24 +336,26 @@ export function GroupCampaignsModule() {
       if (isNaN(newScheduled.getTime())) { toast.error('Invalid date/time'); setEditSaving(false); return; }
 
       if (isEditableInPlace) {
-        // Update the existing row in place
         const { error } = await supabase
           .from('scheduled_group_posts')
           .update({
             message_content: editMessage.trim(),
+            fallback_message: editFallback.trim() || null,
             target_group_name: editGroup,
             target_group_jid: groupRow?.group_jid || null,
             scheduled_at: newScheduled.toISOString(),
-            // Reset failure metadata so the cron picks it up again
             status: 'pending',
             failure_reason: null,
             last_attempt_at: null,
+            // reset preview snapshot so send-time check re-runs fresh
+            preview_status: 'unchecked',
+            preview_checked_at: null,
+            preview_image_url: null,
           } as any)
           .eq('id', editingPost.id);
         if (error) throw error;
         toast.success('Post updated');
       } else {
-        // Sent / delivered / executing → clone as a new corrected post
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) { toast.error('Not signed in'); setEditSaving(false); return; }
         const { error } = await supabase.from('scheduled_group_posts').insert({
@@ -312,6 +363,7 @@ export function GroupCampaignsModule() {
           target_group_name: editGroup,
           target_group_jid: groupRow?.group_jid || null,
           message_content: editMessage.trim(),
+          fallback_message: editFallback.trim() || null,
           scheduled_at: newScheduled.toISOString(),
           status: 'pending',
         } as any);
@@ -601,9 +653,47 @@ export function GroupCampaignsModule() {
                 </label>
                 <Textarea
                   value={messageContent}
-                  onChange={e => setMessageContent(e.target.value)}
+                  onChange={e => {
+                    setMessageContent(e.target.value);
+                    setPreviewCheck({ checking: false, ok: null, reason: null, imageUrl: null });
+                  }}
                   placeholder={isBulk ? 'Enter the master script that will be posted at each scheduled time…' : 'Type the message to post in the group…'}
                   rows={isBulk ? 6 : 4}
+                />
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => runPreviewCheck(messageContent)}
+                    disabled={previewCheck.checking || !messageContent.trim()}
+                  >
+                    {previewCheck.checking ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
+                    {previewCheck.checking ? 'Checking link…' : 'Check link preview'}
+                  </Button>
+                  {previewCheck.ok === true && (
+                    <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+                      ✓ Preview OK — will send rich card
+                    </Badge>
+                  )}
+                  {previewCheck.ok === false && (
+                    <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30">
+                      ⚠ No preview ({previewCheck.reason}) — fallback will be used
+                    </Badge>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium text-foreground flex items-center gap-2">
+                  Fallback Message
+                  <span className="text-xs font-normal text-muted-foreground">(used if link has no preview image)</span>
+                </label>
+                <Textarea
+                  value={fallbackMessage}
+                  onChange={e => setFallbackMessage(e.target.value)}
+                  placeholder="Optional. Example: Hi! Ask me about GRW directly — I'll send you the exact link."
+                  rows={2}
                 />
               </div>
 
@@ -666,6 +756,16 @@ export function GroupCampaignsModule() {
                       <TableCell>
                         <div className="space-y-1">
                           {statusBadge(post.status)}
+                          {post.preview_status === 'ok' && (
+                            <Badge variant="outline" className="text-[10px] py-0 h-4 border-emerald-500/30 text-emerald-400">
+                              <ImageIcon size={9} /> Rich preview
+                            </Badge>
+                          )}
+                          {post.preview_status === 'fallback_used' && (
+                            <Badge variant="outline" className="text-[10px] py-0 h-4 border-amber-500/30 text-amber-400">
+                              <ImageOff size={9} /> Fallback
+                            </Badge>
+                          )}
                           {post.provider_message_id && (
                             <p className="text-[10px] text-muted-foreground truncate max-w-[100px]" title={post.provider_message_id}>
                               ID: {post.provider_message_id.slice(0, 12)}…
@@ -763,14 +863,54 @@ export function GroupCampaignsModule() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Message</Label>
+              <div className="flex items-center justify-between">
+                <Label>Message</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7"
+                  onClick={runEditPreviewCheck}
+                  disabled={editPreview.checking || !editMessage.trim()}
+                >
+                  {editPreview.checking ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
+                  Check link preview
+                </Button>
+              </div>
               <Textarea
                 value={editMessage}
-                onChange={(e) => setEditMessage(e.target.value)}
+                onChange={(e) => {
+                  setEditMessage(e.target.value);
+                  setEditPreview({ checking: false, ok: null, reason: null, imageUrl: null });
+                }}
                 rows={6}
                 className="font-mono text-sm"
               />
-              <p className="text-xs text-muted-foreground">{editMessage.length} characters</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">{editMessage.length} characters</p>
+                {editPreview.ok === true && (
+                  <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+                    <ImageIcon size={10} /> Preview OK
+                  </Badge>
+                )}
+                {editPreview.ok === false && (
+                  <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30">
+                    <ImageOff size={10} /> No preview ({editPreview.reason}) → fallback used
+                  </Badge>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                Fallback message
+                <span className="text-xs font-normal text-muted-foreground">(sent if no preview)</span>
+              </Label>
+              <Textarea
+                value={editFallback}
+                onChange={(e) => setEditFallback(e.target.value)}
+                rows={2}
+                placeholder="Optional. Example: Hi! Ask me about GRW directly."
+              />
             </div>
             <div className="space-y-2">
               <Label>Scheduled at</Label>
