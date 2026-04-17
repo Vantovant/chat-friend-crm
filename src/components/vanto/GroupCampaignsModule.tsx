@@ -204,6 +204,8 @@ export function GroupCampaignsModule() {
         } else {
           toast.success(`${rows.length} campaign posts scheduled!`);
           setMessageContent('');
+          setFallbackMessage('');
+          setPreviewCheck({ checking: false, ok: null, reason: null, imageUrl: null });
           setSelectedGroup('');
           setSelectedGroups([]);
           setBulkDateRange({ from: undefined, to: undefined });
