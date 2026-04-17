@@ -756,6 +756,16 @@ export function GroupCampaignsModule() {
                       <TableCell>
                         <div className="space-y-1">
                           {statusBadge(post.status)}
+                          {post.preview_status === 'ok' && (
+                            <Badge variant="outline" className="text-[10px] py-0 h-4 border-emerald-500/30 text-emerald-400">
+                              <ImageIcon size={9} /> Rich preview
+                            </Badge>
+                          )}
+                          {post.preview_status === 'fallback_used' && (
+                            <Badge variant="outline" className="text-[10px] py-0 h-4 border-amber-500/30 text-amber-400">
+                              <ImageOff size={9} /> Fallback
+                            </Badge>
+                          )}
                           {post.provider_message_id && (
                             <p className="text-[10px] text-muted-foreground truncate max-w-[100px]" title={post.provider_message_id}>
                               ID: {post.provider_message_id.slice(0, 12)}…
