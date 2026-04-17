@@ -525,6 +525,7 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
                 <span className="text-[10px] text-muted-foreground">Currently in pipeline</span>
               </div>
             )}
+          </div>
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1">Tags (comma separated)</label>
             <input type="text" value={form.tags} onChange={e => set('tags', e.target.value)} placeholder="e.g. mlm, vip" className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 transition-colors" />
