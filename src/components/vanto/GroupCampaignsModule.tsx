@@ -282,23 +282,45 @@ export function GroupCampaignsModule() {
   // Edit dialog state
   const [editingPost, setEditingPost] = useState<ScheduledPost | null>(null);
   const [editMessage, setEditMessage] = useState('');
+  const [editFallback, setEditFallback] = useState('');
   const [editGroup, setEditGroup] = useState('');
   const [editScheduledAt, setEditScheduledAt] = useState('');
   const [editSaving, setEditSaving] = useState(false);
+  const [editPreview, setEditPreview] = useState<{ checking: boolean; ok: boolean | null; reason: string | null; imageUrl: string | null }>({ checking: false, ok: null, reason: null, imageUrl: null });
 
   const openEditDialog = (post: ScheduledPost) => {
     setEditingPost(post);
     setEditMessage(post.message_content);
+    setEditFallback(post.fallback_message || '');
     setEditGroup(post.target_group_name);
-    // datetime-local format: YYYY-MM-DDTHH:mm
     setEditScheduledAt(format(new Date(post.scheduled_at), "yyyy-MM-dd'T'HH:mm"));
+    setEditPreview({
+      checking: false,
+      ok: post.preview_status === 'ok' ? true : (post.preview_status === 'fallback_used' ? false : null),
+      reason: post.preview_status === 'fallback_used' ? 'no_og_image' : null,
+      imageUrl: post.preview_image_url || null,
+    });
   };
 
   const closeEditDialog = () => {
     setEditingPost(null);
     setEditMessage('');
+    setEditFallback('');
     setEditGroup('');
     setEditScheduledAt('');
+    setEditPreview({ checking: false, ok: null, reason: null, imageUrl: null });
+  };
+
+  const runEditPreviewCheck = async () => {
+    if (!editMessage.trim()) return;
+    setEditPreview({ checking: true, ok: null, reason: null, imageUrl: null });
+    try {
+      const { data, error } = await supabase.functions.invoke('link-preview-check', { body: { text: editMessage } });
+      if (error) throw error;
+      setEditPreview({ checking: false, ok: !!data?.ok, reason: data?.reason || null, imageUrl: data?.imageUrl || null });
+    } catch (e: any) {
+      setEditPreview({ checking: false, ok: false, reason: e?.message || 'check_failed', imageUrl: null });
+    }
   };
 
   const isEditableInPlace = editingPost?.status === 'pending' || editingPost?.status === 'failed';
@@ -314,24 +336,26 @@ export function GroupCampaignsModule() {
       if (isNaN(newScheduled.getTime())) { toast.error('Invalid date/time'); setEditSaving(false); return; }
 
       if (isEditableInPlace) {
-        // Update the existing row in place
         const { error } = await supabase
           .from('scheduled_group_posts')
           .update({
             message_content: editMessage.trim(),
+            fallback_message: editFallback.trim() || null,
             target_group_name: editGroup,
             target_group_jid: groupRow?.group_jid || null,
             scheduled_at: newScheduled.toISOString(),
-            // Reset failure metadata so the cron picks it up again
             status: 'pending',
             failure_reason: null,
             last_attempt_at: null,
+            // reset preview snapshot so send-time check re-runs fresh
+            preview_status: 'unchecked',
+            preview_checked_at: null,
+            preview_image_url: null,
           } as any)
           .eq('id', editingPost.id);
         if (error) throw error;
         toast.success('Post updated');
       } else {
-        // Sent / delivered / executing → clone as a new corrected post
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) { toast.error('Not signed in'); setEditSaving(false); return; }
         const { error } = await supabase.from('scheduled_group_posts').insert({
@@ -339,6 +363,7 @@ export function GroupCampaignsModule() {
           target_group_name: editGroup,
           target_group_jid: groupRow?.group_jid || null,
           message_content: editMessage.trim(),
+          fallback_message: editFallback.trim() || null,
           scheduled_at: newScheduled.toISOString(),
           status: 'pending',
         } as any);
