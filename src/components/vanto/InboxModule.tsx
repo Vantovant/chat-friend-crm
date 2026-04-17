@@ -413,6 +413,32 @@ export function InboxModule() {
                       {selected.contact.temperature.toUpperCase()}
                     </span>
                   )}
+                  {(() => {
+                    const ws = getWindowState(selected.last_inbound_at);
+                    return (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className={cn(
+                              'px-2 py-0.5 rounded-full text-[10px] font-semibold border cursor-help',
+                              ws.open
+                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                            )}
+                          >
+                            {ws.open ? `🟢 Window open · ${ws.hoursLeft}h left` : ws.never ? '🔒 Never replied' : '🔒 Window closed'}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="bottom" className="max-w-xs">
+                          {ws.open ? (
+                            <p className="text-xs">You can send free-form messages for the next {ws.hoursLeft} hour(s). After that, only pre-approved Template messages can be sent until the contact replies.</p>
+                          ) : (
+                            <p className="text-xs">WhatsApp 24-hour reply window has expired. Free-form messages will be rejected (TWILIO_63016). Wait for the contact to reply, or send an approved Template message.</p>
+                          )}
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+                  })()}
                   <AssignmentControl
                     assignedTo={selected.contact?.assigned_to ?? null}
                     profiles={profiles}
