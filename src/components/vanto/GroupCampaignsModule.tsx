@@ -853,14 +853,54 @@ export function GroupCampaignsModule() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Message</Label>
+              <div className="flex items-center justify-between">
+                <Label>Message</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7"
+                  onClick={runEditPreviewCheck}
+                  disabled={editPreview.checking || !editMessage.trim()}
+                >
+                  {editPreview.checking ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
+                  Check link preview
+                </Button>
+              </div>
               <Textarea
                 value={editMessage}
-                onChange={(e) => setEditMessage(e.target.value)}
+                onChange={(e) => {
+                  setEditMessage(e.target.value);
+                  setEditPreview({ checking: false, ok: null, reason: null, imageUrl: null });
+                }}
                 rows={6}
                 className="font-mono text-sm"
               />
-              <p className="text-xs text-muted-foreground">{editMessage.length} characters</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">{editMessage.length} characters</p>
+                {editPreview.ok === true && (
+                  <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+                    <ImageIcon size={10} /> Preview OK
+                  </Badge>
+                )}
+                {editPreview.ok === false && (
+                  <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30">
+                    <ImageOff size={10} /> No preview ({editPreview.reason}) → fallback used
+                  </Badge>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                Fallback message
+                <span className="text-xs font-normal text-muted-foreground">(sent if no preview)</span>
+              </Label>
+              <Textarea
+                value={editFallback}
+                onChange={(e) => setEditFallback(e.target.value)}
+                rows={2}
+                placeholder="Optional. Example: Hi! Ask me about GRW directly."
+              />
             </div>
             <div className="space-y-2">
               <Label>Scheduled at</Label>
