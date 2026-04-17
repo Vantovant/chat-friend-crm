@@ -13,9 +13,9 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID")!;
-    const PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID")!;
-    const TOKEN = Deno.env.get("MAYTAPI_API_TOKEN")!;
+    const PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID")?.trim()!;
+    const PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID")?.trim()!;
+    const TOKEN = Deno.env.get("MAYTAPI_API_TOKEN")?.trim()!;
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
     // Fetch groups from Maytapi
