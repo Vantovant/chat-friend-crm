@@ -644,8 +644,15 @@ export function GroupCampaignsModule() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {posts.map(post => (
-                    <TableRow key={post.id}>
+                  {posts.map(post => {
+                    const editable = post.status === 'pending' || post.status === 'failed';
+                    return (
+                    <TableRow
+                      key={post.id}
+                      className="cursor-pointer hover:bg-muted/40 transition-colors"
+                      onClick={() => openEditDialog(post)}
+                      title={editable ? 'Click to edit this post' : 'Click to edit & resend a corrected copy'}
+                    >
                       <TableCell className="font-medium text-sm">
                         {post.target_group_name}
                         {post.target_group_jid && (
@@ -680,8 +687,17 @@ export function GroupCampaignsModule() {
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
                         <div className="flex gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-primary"
+                            onClick={() => openEditDialog(post)}
+                            title={editable ? 'Edit post' : 'Edit & resend corrected copy'}
+                          >
+                            {editable ? <Pencil size={14} /> : <Copy size={14} />}
+                          </Button>
                           {post.status === 'failed' && (
                             <Button
                               variant="ghost"
@@ -706,13 +722,77 @@ export function GroupCampaignsModule() {
                         </div>
                       </TableCell>
                     </TableRow>
-                  ))}
+                  );})}
                 </TableBody>
               </Table>
             </div>
           )}
         </CardContent>
       </Card>
+
+      {/* Edit Post Dialog */}
+      <Dialog open={!!editingPost} onOpenChange={(open) => !open && closeEditDialog()}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {isEditableInPlace ? <Pencil size={16} /> : <Copy size={16} />}
+              {isEditableInPlace ? 'Edit scheduled post' : 'Edit & resend corrected copy'}
+            </DialogTitle>
+            <DialogDescription>
+              {isEditableInPlace
+                ? 'Updates the existing post in place. If it was failed it will be re-queued.'
+                : 'This post was already sent. Saving will queue a new corrected post — the original send is not retracted.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label>Group</Label>
+              <Select value={editGroup} onValueChange={setEditGroup}>
+                <SelectTrigger><SelectValue placeholder="Select group" /></SelectTrigger>
+                <SelectContent>
+                  {groups.map(g => (
+                    <SelectItem key={g.id} value={g.group_name}>{g.group_name}</SelectItem>
+                  ))}
+                  {/* Allow keeping original even if not in groups list */}
+                  {editingPost && !groups.some(g => g.group_name === editingPost.target_group_name) && (
+                    <SelectItem value={editingPost.target_group_name}>
+                      {editingPost.target_group_name} (original)
+                    </SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Message</Label>
+              <Textarea
+                value={editMessage}
+                onChange={(e) => setEditMessage(e.target.value)}
+                rows={6}
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">{editMessage.length} characters</p>
+            </div>
+            <div className="space-y-2">
+              <Label>Scheduled at</Label>
+              <Input
+                type="datetime-local"
+                value={editScheduledAt}
+                onChange={(e) => setEditScheduledAt(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Set to ~1 minute in the future to send immediately on the next cron tick.
+              </p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeEditDialog} disabled={editSaving}>Cancel</Button>
+            <Button onClick={handleSaveEdit} disabled={editSaving}>
+              {editSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              {isEditableInPlace ? 'Save changes' : 'Queue corrected post'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
