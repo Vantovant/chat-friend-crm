@@ -56,7 +56,24 @@ export function GroupCampaignsModule() {
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
   const [isMultiGroup, setIsMultiGroup] = useState(false);
   const [messageContent, setMessageContent] = useState('');
+  const [fallbackMessage, setFallbackMessage] = useState('');
+  const [previewCheck, setPreviewCheck] = useState<{ checking: boolean; ok: boolean | null; reason: string | null; imageUrl: string | null }>({ checking: false, ok: null, reason: null, imageUrl: null });
   const [isBulk, setIsBulk] = useState(false);
+
+  const runPreviewCheck = useCallback(async (text: string) => {
+    if (!text.trim()) {
+      setPreviewCheck({ checking: false, ok: null, reason: 'empty', imageUrl: null });
+      return;
+    }
+    setPreviewCheck({ checking: true, ok: null, reason: null, imageUrl: null });
+    try {
+      const { data, error } = await supabase.functions.invoke('link-preview-check', { body: { text } });
+      if (error) throw error;
+      setPreviewCheck({ checking: false, ok: !!data?.ok, reason: data?.reason || null, imageUrl: data?.imageUrl || null });
+    } catch (e: any) {
+      setPreviewCheck({ checking: false, ok: false, reason: e?.message || 'check_failed', imageUrl: null });
+    }
+  }, []);
 
   // Single post date/time
   const [singleDate, setSingleDate] = useState<Date | undefined>();
