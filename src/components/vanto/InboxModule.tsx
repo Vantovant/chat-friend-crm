@@ -578,25 +578,42 @@ export function InboxModule() {
                           {!isFailed && !isQueued && msg.is_outbound && msg.status === 'sent' && <span className="text-[10px] text-muted-foreground">✓</span>}
                         </div>
                         {isFailed && (
-                          <button
-                            onClick={async () => {
-                              setSending(true);
-                              const { data, error } = await supabase.functions.invoke('send-message', {
-                                body: { conversation_id: msg.conversation_id, content: msg.content, message_type: msg.message_type },
-                              });
-                              if (error || !data?.success) {
-                                toast({ title: 'Retry failed', description: data?.hint || data?.message || error?.message, variant: 'destructive' });
-                              } else {
-                                toast({ title: 'Message resent' });
-                                fetchMessages(msg.conversation_id);
-                              }
-                              setSending(false);
-                            }}
-                            disabled={sending}
-                            className="flex items-center gap-1 mt-1.5 text-[10px] text-primary hover:underline disabled:opacity-50"
-                          >
-                            <RotateCcw size={10} /> Retry
-                          </button>
+                          (() => {
+                            const nonRetryable = NON_RETRYABLE_CODES.has(errorCode);
+                            if (nonRetryable) {
+                              return (
+                                <div className="flex items-center gap-1 mt-1.5 text-[10px] text-amber-400">
+                                  <AlertTriangle size={10} />
+                                  <span>{errorCode === 'TWILIO_63016' ? '24-hour reply window expired — Retry won\'t work. Wait for the contact to reply, or send a Template.' : 'Cannot retry — requires a Template message.'}</span>
+                                </div>
+                              );
+                            }
+                            return (
+                              <button
+                                onClick={async () => {
+                                  setSending(true);
+                                  const { data, error } = await supabase.functions.invoke('send-message', {
+                                    body: { conversation_id: msg.conversation_id, content: msg.content, message_type: msg.message_type },
+                                  });
+                                  if (error || !data?.success) {
+                                    const code = data?.code || '';
+                                    const friendly = code === 'TWILIO_63016'
+                                      ? 'WhatsApp 24-hour window has closed. Free-form messages are blocked until the contact replies.'
+                                      : data?.hint || data?.message || error?.message || 'Delivery failed';
+                                    toast({ title: 'Retry failed', description: friendly, variant: 'destructive' });
+                                  } else {
+                                    toast({ title: 'Message resent' });
+                                    fetchMessages(msg.conversation_id);
+                                  }
+                                  setSending(false);
+                                }}
+                                disabled={sending}
+                                className="flex items-center gap-1 mt-1.5 text-[10px] text-primary hover:underline disabled:opacity-50"
+                              >
+                                <RotateCcw size={10} /> Retry
+                              </button>
+                            );
+                          })()
                         )}
                       </div>
                     </div>
