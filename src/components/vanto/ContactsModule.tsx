@@ -378,6 +378,8 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
   const [loadingActivity, setLoadingActivity] = useState(true);
   const canReassign = isAdmin || contact.created_by === userId || contact.assigned_to === userId || !contact.assigned_to;
 
+  const [stages, setStages] = useState<{ id: string; name: string; color: string | null; stage_order: number }[]>([]);
+
   const [form, setForm] = useState({
     name: contact.name,
     phone_raw: contact.phone_raw || contact.phone || '',
@@ -387,6 +389,7 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
     notes: contact.notes || '',
     tags: (contact.tags || []).join(', '),
     assigned_to: contact.assigned_to || '',
+    stage_id: contact.stage_id || '',
   });
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
@@ -399,6 +402,8 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
       setLoadingActivity(false);
     };
     loadActivity();
+    supabase.from('pipeline_stages').select('id, name, color, stage_order').order('stage_order')
+      .then(({ data }) => { if (data) setStages(data as any); });
   }, [contact.id]);
 
   const handleSave = async () => {
@@ -408,6 +413,8 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
     const tagsArr = form.tags.split(',').map(t => t.trim()).filter(Boolean);
     const oldAssigned = contact.assigned_to;
     const newAssigned = form.assigned_to || null;
+    const oldStageId = contact.stage_id;
+    const newStageId = form.stage_id || null;
 
     const updatePayload: Record<string, any> = {
       name: form.name.trim(),
@@ -420,6 +427,7 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
       notes: form.notes.trim() || null,
       tags: tagsArr,
       assigned_to: newAssigned,
+      stage_id: newStageId,
       updated_at: new Date().toISOString(),
     };
 
@@ -440,6 +448,15 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
         await logActivity(contact.id, 'reassigned', userId, {
           from: oldAssigned ? profileLabel(profiles, oldAssigned) : 'Unassigned',
           to: newAssigned ? profileLabel(profiles, newAssigned) : 'Unassigned',
+        });
+      }
+      // Log stage change
+      if (oldStageId !== newStageId) {
+        await logActivity(contact.id, 'stage_changed', userId, {
+          from_stage: oldStageId ? (stages.find(s => s.id === oldStageId)?.name || 'Unknown') : 'Unassigned',
+          to_stage: newStageId ? (stages.find(s => s.id === newStageId)?.name || 'Unknown') : 'Unassigned',
+          from_stage_id: oldStageId,
+          to_stage_id: newStageId,
         });
       }
       await logActivity(contact.id, 'updated', userId, { fields: Object.keys(updatePayload) });
