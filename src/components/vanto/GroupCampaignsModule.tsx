@@ -252,6 +252,81 @@ export function GroupCampaignsModule() {
     else { toast.success('Post queued for retry'); fetchData(); }
   };
 
+  // Edit dialog state
+  const [editingPost, setEditingPost] = useState<ScheduledPost | null>(null);
+  const [editMessage, setEditMessage] = useState('');
+  const [editGroup, setEditGroup] = useState('');
+  const [editScheduledAt, setEditScheduledAt] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
+  const openEditDialog = (post: ScheduledPost) => {
+    setEditingPost(post);
+    setEditMessage(post.message_content);
+    setEditGroup(post.target_group_name);
+    // datetime-local format: YYYY-MM-DDTHH:mm
+    setEditScheduledAt(format(new Date(post.scheduled_at), "yyyy-MM-dd'T'HH:mm"));
+  };
+
+  const closeEditDialog = () => {
+    setEditingPost(null);
+    setEditMessage('');
+    setEditGroup('');
+    setEditScheduledAt('');
+  };
+
+  const isEditableInPlace = editingPost?.status === 'pending' || editingPost?.status === 'failed';
+
+  const handleSaveEdit = async () => {
+    if (!editingPost) return;
+    if (!editMessage.trim()) { toast.error('Message cannot be empty'); return; }
+    if (!editGroup) { toast.error('Group is required'); return; }
+    setEditSaving(true);
+    try {
+      const groupRow = groups.find(g => g.group_name === editGroup);
+      const newScheduled = new Date(editScheduledAt);
+      if (isNaN(newScheduled.getTime())) { toast.error('Invalid date/time'); setEditSaving(false); return; }
+
+      if (isEditableInPlace) {
+        // Update the existing row in place
+        const { error } = await supabase
+          .from('scheduled_group_posts')
+          .update({
+            message_content: editMessage.trim(),
+            target_group_name: editGroup,
+            target_group_jid: groupRow?.group_jid || null,
+            scheduled_at: newScheduled.toISOString(),
+            // Reset failure metadata so the cron picks it up again
+            status: 'pending',
+            failure_reason: null,
+            last_attempt_at: null,
+          } as any)
+          .eq('id', editingPost.id);
+        if (error) throw error;
+        toast.success('Post updated');
+      } else {
+        // Sent / delivered / executing → clone as a new corrected post
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) { toast.error('Not signed in'); setEditSaving(false); return; }
+        const { error } = await supabase.from('scheduled_group_posts').insert({
+          user_id: user.id,
+          target_group_name: editGroup,
+          target_group_jid: groupRow?.group_jid || null,
+          message_content: editMessage.trim(),
+          scheduled_at: newScheduled.toISOString(),
+          status: 'pending',
+        } as any);
+        if (error) throw error;
+        toast.success('Corrected post queued');
+      }
+      closeEditDialog();
+      fetchData();
+    } catch (e: any) {
+      toast.error('Save failed: ' + (e?.message || 'unknown'));
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   // Trigger manual send for due posts
   const handleTriggerSend = async () => {
     toast.info('Processing due campaigns...');
