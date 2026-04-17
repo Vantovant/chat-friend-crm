@@ -33,6 +33,10 @@ type ScheduledPost = {
   attempt_count?: number;
   provider_message_id?: string | null;
   target_group_jid?: string | null;
+  fallback_message?: string | null;
+  preview_status?: string | null;
+  preview_checked_at?: string | null;
+  preview_image_url?: string | null;
 };
 
 const TIME_SLOTS = [
