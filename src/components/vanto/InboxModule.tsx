@@ -40,8 +40,20 @@ type Conversation = {
   unread_count: number;
   last_message: string | null;
   last_message_at: string | null;
+  last_inbound_at: string | null;
   contact: Contact;
 };
+
+/** WhatsApp 24h customer-care window helpers. */
+const WINDOW_MS = 24 * 60 * 60 * 1000;
+function getWindowState(lastInboundAt: string | null | undefined) {
+  if (!lastInboundAt) return { open: false, hoursLeft: 0, never: true };
+  const elapsed = Date.now() - new Date(lastInboundAt).getTime();
+  const remaining = WINDOW_MS - elapsed;
+  return { open: remaining > 0, hoursLeft: Math.max(0, Math.round(remaining / 3_600_000)), never: false };
+}
+/** Error codes that mean "retrying the same free-form text will fail again". */
+const NON_RETRYABLE_CODES = new Set(['TWILIO_63016', 'TEMPLATE_REQUIRED', 'META_POLICY_BLOCK']);
 
 type Message = {
   id: string;
