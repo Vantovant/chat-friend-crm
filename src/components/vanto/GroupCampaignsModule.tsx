@@ -184,6 +184,7 @@ export function GroupCampaignsModule() {
                 target_group_name: groupName,
                 target_group_jid: jid,
                 message_content: messageContent.trim(),
+                fallback_message: fallbackMessage.trim() || null,
                 scheduled_at: scheduledDate.toISOString(),
                 status: 'pending',
               });
