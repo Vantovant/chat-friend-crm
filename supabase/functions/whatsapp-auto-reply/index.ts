@@ -513,6 +513,7 @@ async function generateAIAnswer(
   mode: "strict" | "assisted",
   topicCategory: string,
   detectedProduct: string | null,
+  history: { role: "user" | "assistant"; content: string }[] = [],
 ): Promise<string | null> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) {
