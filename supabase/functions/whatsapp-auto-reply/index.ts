@@ -652,18 +652,50 @@ Deno.serve(async (req) => {
     replyContent = GREETING_REPLY;
     actionTaken = "greeting_sent";
   } else {
-    // ── AI-FIRST ONE-SHOT RESPONSE ──
+    // ── Knowledge-grounded path ──
     const searchQuery = intent.query;
     diag.search_query = searchQuery.slice(0, 100);
 
-    if (!searchQuery || searchQuery.length < 2) {
+    // Deterministic menu_1 / menu_2: load canonical pricing doc directly,
+    // skip ts_rank guessing, ground from verbatim source.
+    if (intent.intent === "menu_1" || intent.intent === "menu_2") {
+      const pricingChunks = await loadPricingDocChunks(svc);
+      diag.menu_loaded_pricing_doc = pricingChunks.length;
+
+      if (pricingChunks.length > 0) {
+        knowledgeFound = true;
+        chunksCount = pricingChunks.length;
+
+        const intro = intent.intent === "menu_1"
+          ? "Here's a quick view of our most popular APLGO products and prices (member, incl. VAT):"
+          : "Here are the APLGO products and what each is used for:";
+
+        // Use AI in strict mode to summarise from the canonical doc (≤ 5 lines).
+        const aiAnswer = await generateAIAnswer(
+          intent.intent === "menu_1"
+            ? "List 4-6 popular APLGO products with their member price (R) and one-line benefit. Be brief."
+            : "List 4-6 popular APLGO products with one-line benefit each. Brief, no prices.",
+          pricingChunks,
+          "strict",
+          "products",
+          null,
+        );
+
+        const body = aiAnswer?.trim() || pricingChunks[0].chunk_text.slice(0, 600);
+        replyContent = `${intro}\n\n${body}\n\n_Reply with a product code (e.g. NRM, RLX, GRW) for full details, or ask "How much is [product]?"._${HUMAN_CONTACT_FOOTER}`;
+        actionTaken = intent.intent === "menu_1" ? "menu_sent" : "knowledge_strict";
+      } else {
+        replyContent = NO_ANSWER_FALLBACK;
+        shouldAssignHuman = true;
+        actionTaken = "human_handover";
+      }
+    } else if (!searchQuery || searchQuery.length < 2) {
       replyContent = GREETING_REPLY;
       actionTaken = "greeting_sent";
     } else {
       const searchQueries = buildSearchQueries(rawInput, intent);
       diag.search_queries = searchQueries.slice(0, 5);
 
-      // Search knowledge + topics-and-links in parallel
       const [chunks, topicChunks] = await Promise.all([
         searchKnowledge(svc, searchQueries, intent.collections, intent, 8),
         searchTopicsAndLinks(svc, searchQuery),
@@ -673,19 +705,24 @@ Deno.serve(async (req) => {
       diag.chunks_found = chunksCount;
       diag.topic_links_found = topicChunks.length;
 
-      if (chunks.length > 0) {
-        knowledgeFound = true;
-        const matchedCol = chunks[0]?.file_collection || "";
-        const effectiveMode = STRICT_COLLECTIONS.has(matchedCol) ? "strict" : intent.mode;
-        const directPricingAnswer = extractDirectPricingAnswer(chunks, intent.detectedProduct);
+      const matchedCol = chunks[0]?.file_collection || "";
+      const effectiveMode: "strict" | "assisted" = STRICT_COLLECTIONS.has(matchedCol) ? "strict" : intent.mode;
+      const topRelevance = chunks[0]?.relevance || 0;
+      diag.top_relevance = topRelevance;
+      diag.effective_mode = effectiveMode;
 
-        const aiAnswer = directPricingAnswer || await generateAIAnswer(searchQuery, chunks, effectiveMode, intent.topicCategory, intent.detectedProduct);
+      // Strict-mode min-relevance gate: refuse to bluff on weak retrieval.
+      const passesRelevanceGate = effectiveMode !== "strict" || topRelevance >= STRICT_MIN_RELEVANCE;
+
+      if (chunks.length > 0 && passesRelevanceGate) {
+        knowledgeFound = true;
+        // Try deterministic pricing extractor first (no AI, no hallucination risk).
+        const directPricingAnswer = extractDirectPricingAnswer(chunks, intent.detectedProduct);
+        const aiAnswer = directPricingAnswer
+          || await generateAIAnswer(searchQuery, chunks, effectiveMode, intent.topicCategory, intent.detectedProduct);
 
         if (aiAnswer) {
-          // Build the one-shot 3-part response
           let fullReply = aiAnswer.trim();
-
-          // Part 2: Smart next steps (from topic links + detected product)
           const dynamicLinks = extractLinksFromChunks(topicChunks, intent.detectedProduct);
           if (dynamicLinks.length > 0) {
             topicsLinksUsed = true;
@@ -693,21 +730,22 @@ Deno.serve(async (req) => {
           } else {
             fullReply += buildNextSteps(intent.topicCategory, intent.detectedProduct);
           }
-
-          // Part 3: Human contact footer
           fullReply += HUMAN_CONTACT_FOOTER;
-
           replyContent = fullReply;
-          actionTaken = "one_shot_reply";
+          actionTaken = directPricingAnswer ? "knowledge_strict" : "one_shot_reply";
         } else {
-          // AI failed — raw snippets + footer
           const snippets = chunks.slice(0, 2).map((r: any) => `📌 *${r.file_title}*\n${r.chunk_text.slice(0, 250)}`).join("\n\n");
           replyContent = `Here's what I found:\n\n${snippets}${buildNextSteps(intent.topicCategory, intent.detectedProduct)}${HUMAN_CONTACT_FOOTER}`;
           actionTaken = "knowledge_reply";
         }
       } else {
-        replyContent = NO_ANSWER_FALLBACK;
-        shouldAssignHuman = true;
+        // Honest fallback: zero chunks OR strict-mode chunks below relevance threshold.
+        diag.fallback_reason = chunks.length === 0 ? "no_chunks" : "low_relevance_strict";
+        const honest = chunks.length === 0
+          ? `I couldn't find that in our approved knowledge yet.`
+          : `I couldn't verify a confident answer from our approved knowledge for "${searchQuery.slice(0, 60)}".`;
+        replyContent = `${honest}\n\nCould you rephrase, or name the specific product / topic? Otherwise Vanto Vanto can help directly:\n📲 https://wa.me/27790831530\n📞 +27 79 083 1530\n\n_Reply *CALL ME* or *WHATSAPP ME* for personal follow-up._`;
+        shouldAssignHuman = chunks.length === 0;
         actionTaken = "human_handover";
       }
     }
