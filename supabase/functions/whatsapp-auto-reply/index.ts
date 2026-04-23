@@ -263,15 +263,45 @@ function buildSearchQueries(rawInput: string, intent: IntentResult): string[] {
   return uniqueQueries(queries);
 }
 
+// Files that must NEVER be the primary answer source (helpers/meta only).
+// They may still be used for next-step links via Topics-and-Links extractor.
+const HELPER_FILE_TITLES = new Set([
+  "topics and links",
+  "zazi crm",
+  "zazi final override - whatsapp auto-reply ai rules",
+  "bank code",
+  "backoffice training",
+]);
+
+function isHelperFile(title: string): boolean {
+  return HELPER_FILE_TITLES.has(title.toLowerCase().trim());
+}
+
 function scoreKnowledgeChunk(chunk: KnowledgeChunk, intent: IntentResult): number {
   const title = chunk.file_title.toLowerCase();
   const text = chunk.chunk_text.toLowerCase();
   let score = Number(chunk.relevance || 0);
 
-  if (chunk.file_collection === "products") score += 3;
-  if (/price|pricing|quick reference/.test(title)) score += 4;
-  if (intent.isPricing && /(vat|pv|zar|r\d)/.test(text)) score += 1.5;
-  if (intent.detectedProduct && text.includes(intent.detectedProduct.toLowerCase())) score += 5;
+  // STRICT collection boosts (approved books are primary source of truth)
+  if (chunk.file_collection === "products") score += 4;
+  if (chunk.file_collection === "compensation") score += 4;
+  if (chunk.file_collection === "orders") score += 4;
+  if (chunk.file_collection === "opportunity") score += 3;
+
+  // Approved reference / guide / pricing docs always outrank generic files
+  if (/price|pricing|quick reference/.test(title)) score += 5;
+  if (/product reference|product guide/.test(title)) score += 5;
+  if (/compensation|onboarding|joining|distributor guide/.test(title)) score += 3;
+
+  // Pricing/product specificity
+  if (intent.isPricing && /(vat|pv|zar|r\d)/.test(text)) score += 2;
+  if (intent.detectedProduct && text.includes(intent.detectedProduct.toLowerCase())) score += 6;
+
+  // Wellness questions: prefer chunks that mention products/symptoms together
+  if (intent.topicCategory === "wellness" && /(stress|sleep|sugar|digest|immune|energy|detox|skin|breath)/.test(text)) score += 2;
+
+  // Heavy penalty: helper/meta files must not be primary answer source
+  if (isHelperFile(chunk.file_title)) score -= 100;
 
   return score;
 }
