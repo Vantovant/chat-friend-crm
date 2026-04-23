@@ -416,7 +416,7 @@ Deno.serve(async (req) => {
   if ((recentCount || 0) >= 1) {
     diag.result = "rate_limited_cooldown";
     console.log("[auto-reply] DIAG:", JSON.stringify(diag));
-    return jsonRes({ ok: true, auto_reply: false, reason: "Cooldown active (2 min)" });
+    return jsonRes({ ok: true, auto_reply: false, reason: "Cooldown active (15s)" });
   }
 
   const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
