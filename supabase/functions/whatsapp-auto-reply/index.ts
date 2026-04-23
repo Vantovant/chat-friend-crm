@@ -1,15 +1,15 @@
 /**
- * Vanto CRM — whatsapp-auto-reply Edge Function v5.0
- * ONE-SHOT AI-First Auto-Reply with Knowledge Vault RAG
+ * Vanto CRM — whatsapp-auto-reply Edge Function v6.0
+ * Two-Layer System: TRUTH LAYER (knowledge grounding) + SALES INTELLIGENCE LAYER
  *
- * v5.0 changes:
- * - ONE-SHOT design: first reply is a complete, high-value response
- * - 3-part structure: Direct Answer → Smart Next Steps → Human Contact
- * - Topic-to-link routing from "Topics and Links" knowledge document
- * - Pricing priority: product/price questions search products collection first
- * - "CALL ME" / "WHATSAPP ME" intent detection for human handoff
- * - Product alias recognition (NRM, HTR, ICE, PWR, etc.)
- * - Always includes human contact options in every response
+ * v6.0 — Sales Intelligence Upgrade (truth layer preserved from v5.3):
+ * - Elite WhatsApp sales-consultant persona, African market aware
+ * - Response-mode policy: GREETING / DIRECT_FACT / CLARIFY / RECOMMEND / SALES_ADVANCE / HANDOFF
+ * - Light, warm greeting (no giant menu dump)
+ * - Smart context-aware next-step (not heavy footer on every reply)
+ * - AI must always end factual answers with one sharp follow-up question
+ * - Truth layer (v5.3): helper-file demotion, strict-collection scoring boost,
+ *   Product Reference forced inclusion, deterministic pricing extractor preserved
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -31,18 +31,20 @@ function jsonRes(body: unknown, status = 200) {
 const RATE_LIMIT_COOLDOWN_MS = 15 * 1000;
 const MAX_AUTO_REPLIES_PER_DAY = 40;
 
-const HUMAN_CONTACT_FOOTER = `\n\n───────────────\n📲 *For faster personal help:*\n• WhatsApp Vanto directly: https://wa.me/27790831530\n• Call/message: +27 79 083 1530\n• Register: https://backoffice.aplgo.com/register/?sp=787262\n\n_If you don't want links, just reply:_\n• *CALL ME*\n• *WHATSAPP ME*\n• *I'M AVAILABLE AT [time]*\n_and Vanto Vanto will follow up personally._`;
+// v6.0 — slim, contextual footer. Only attached when handoff is offered, not on every factual answer.
+const HUMAN_CONTACT_FOOTER = `\n\n_Prefer to talk to Vanto directly?_ 📲 https://wa.me/27790831530`;
 
-const GREETING_REPLY = `Hi 👋 Welcome to *Online Course For MLM*!\n\nI'm here to help you with product info, pricing, business opportunities, and more. Just ask me anything!\n\nYou can also reply:\n1️⃣ Prices & Products\n2️⃣ How to use / Benefits\n3️⃣ Speak to Vanto Vanto${HUMAN_CONTACT_FOOTER}`;
+// v6.0 — short warm greeting, no menu dump. AI handles the rest in conversation.
+const GREETING_REPLY = `Hey 👋 Vanto here from *Online Course For MLM*.\n\nWhat can I help you with today — a product, a price, or the business opportunity?`;
 
-const HUMAN_HANDOVER = `Thank you! Vanto Vanto will assist you shortly.\n\n📲 WhatsApp: https://wa.me/27790831530\n📞 Call: +27 79 083 1530`;
+const HUMAN_HANDOVER = `On it ✅ Vanto Vanto will reach out to you personally.\n\n📲 WhatsApp: https://wa.me/27790831530\n📞 Call: +27 79 083 1530`;
 
-const CALL_ME_RESPONSE = `Got it! ✅ Vanto Vanto will call you back shortly.\n\nIf you need to reach him sooner:\n📞 +27 79 083 1530\n📲 https://wa.me/27790831530`;
+const CALL_ME_RESPONSE = `Got it ✅ Vanto Vanto will call you back shortly.\n\nNeed him sooner? 📞 +27 79 083 1530`;
 
 const AVAILABLE_AT_RESPONSE = (time: string) =>
-  `Noted! ✅ Vanto Vanto will follow up with you at *${time}*.\n\nIf you need him sooner:\n📞 +27 79 083 1530\n📲 https://wa.me/27790831530`;
+  `Noted ✅ Vanto Vanto will follow up at *${time}*.\n\nNeed him sooner? 📞 +27 79 083 1530`;
 
-const NO_ANSWER_FALLBACK = `I couldn't find a specific answer for that in our knowledge base, but Vanto Vanto can help you directly!\n\n📲 WhatsApp: https://wa.me/27790831530\n📞 Call: +27 79 083 1530\n🔗 Register: https://backoffice.aplgo.com/register/?sp=787262\n\n_Reply *CALL ME* or *WHATSAPP ME* and he'll follow up._`;
+const NO_ANSWER_FALLBACK = `I don't have a verified answer for that yet. Could you tell me a bit more about what you're looking for — a product, a price, or how to join?\n\nOr Vanto can help you directly: 📲 https://wa.me/27790831530`;
 
 // ── Product Aliases ─────────────────────────────────────────────────────────
 const PRODUCT_ALIASES: Record<string, string> = {
@@ -378,7 +380,7 @@ function buildNextSteps(topicCategory: TopicCategory, detectedProduct: string | 
   }
 
   // Topic-based links
-  const topicSpecific = TOPIC_LINKS[topicCategory] || TOPIC_LINKS.products;
+  const topicSpecific = (TOPIC_LINKS as Record<string, { label: string; url: string }[]>)[topicCategory] || TOPIC_LINKS.products;
   for (const tl of topicSpecific) {
     if (links.length >= 4) break;
     links.push(`• 🔗 ${tl.label}: ${tl.url}`);
@@ -418,32 +420,55 @@ async function generateAIAnswer(
     .join("\n\n");
 
   const strictRule = mode === "strict"
-    ? `STRICT GROUNDING MODE — Answer ONLY using facts that appear verbatim or near-verbatim in the KNOWLEDGE CONTEXT below.
-- DO NOT invent prices, PV values, product names, benefits, ranks, bonuses, or rules.
-- DO NOT round, estimate, convert currency, or "fix" numbers.
-- If the specific fact is NOT in the context, you MUST reply exactly:
+    ? `TRUTH LAYER — STRICT MODE
+- Every fact (price, PV, benefit, rule, bonus, rank) MUST appear in the KNOWLEDGE CONTEXT below.
+- DO NOT invent, round, estimate, convert, or "fix" numbers.
+- If the specific fact is NOT in context, reply exactly:
   "I couldn't verify that from our approved knowledge right now."
-  Then suggest the user ask in another way or speak to Vanto Vanto.`
-    : "Stay grounded in the provided knowledge. You may paraphrase naturally but do not invent facts.";
+  Then offer one helpful next step (rephrase, name a product, or speak to Vanto).`
+    : `TRUTH LAYER — ASSISTED MODE
+- Stay grounded in the provided knowledge. Paraphrase naturally, do NOT invent facts beyond the context.`;
 
   const pricingRule = detectedProduct
-    ? `The user is asking about *${detectedProduct}*. Quote the price exactly as it appears (e.g. "R433.13"). If ${detectedProduct} is NOT in the context, say so honestly — do NOT guess.`
+    ? `User is asking about *${detectedProduct}*. Quote the price exactly as it appears (e.g. "R433.13"). If ${detectedProduct} is NOT in context, say so honestly — never guess.`
     : "";
 
-  const systemPrompt = `You are a WhatsApp assistant for *Online Course For MLM*, representing Vanto Vanto (APLGO distributor).
+  const systemPrompt = `You are *Vanto's WhatsApp sales assistant* for *Online Course For MLM* (APLGO distributor, South Africa). You speak on behalf of Vanto Vanto.
+
+YOU ARE NOT a generic FAQ bot. You are an elite, warm, sharp sales consultant who happens to live inside WhatsApp. African market aware. Conversational, never academic. Confident, never pushy.
 
 ${strictRule}
 ${pricingRule}
 
-YOUR TASK: Generate ONLY the direct answer (Part 1). Links and contact footer are added automatically — do NOT include them.
+═══ SALES INTELLIGENCE LAYER — RESPONSE MODE ═══
+Pick ONE mode for THIS reply, then write accordingly:
 
-RULES:
-- Answer the exact question asked, in 2–5 short lines.
-- Use WhatsApp formatting: *bold*, • bullets.
-- No giant lists unless the user asked for "all" / "full list".
-- Do NOT tell the user to upload documents.
-- Do NOT add registration links, phone numbers, or "Reply 3" prompts.
-- For pricing: state the exact ZAR price + VAT note + PV if present in context.
+1. DIRECT_FACT — user asked a clear factual question and the answer is in context.
+   → Answer in 1–3 short lines. Then ONE smart follow-up question that moves them forward.
+
+2. CLARIFY — user's request is broad ("tell me about products", "I want to buy").
+   → Don't dump. Ask ONE sharp clarifying question. 1–2 lines max.
+
+3. RECOMMEND — user describes a problem/goal (stress, sleep, sugar, energy, business).
+   → Recommend the most relevant product/path FROM CONTEXT in 2–4 lines, briefly say why.
+   → End with one next-step question (price? how to use? order?).
+
+4. SALES_ADVANCE — after answering, always nudge to the natural next step:
+   pricing → "Want the order link?"
+   product → "Want the price or how to use it?"
+   onboarding → "Want the registration link or the quick explanation first?"
+   compensation → "Want the full summary or just the qualification rules?"
+
+5. HONEST_FALLBACK — fact not verifiable from context.
+   → Say so cleanly, offer to rephrase OR speak to Vanto. Stay warm, never robotic.
+
+═══ STYLE RULES ═══
+- WhatsApp native: short lines, *bold* for key terms, • bullets only when listing 2-4 items.
+- Default length: 2–5 short lines. NEVER paste long lists unless user asked for "all" / "full list".
+- Sound human and confident. No phrases like "Based on the provided context" or "According to the knowledge base".
+- No emoji spam — at most 1–2 per message.
+- Do NOT include phone numbers, wa.me links, registration links, or "Reply 3" prompts — those are appended automatically when needed.
+- ALWAYS end with one short, natural follow-up question (except in pure HONEST_FALLBACK).
 
 KNOWLEDGE CONTEXT:
 ${contextSnippets}`;
@@ -456,11 +481,12 @@ ${contextSnippets}`;
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "google/gemini-2.5-pro",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: question },
         ],
+        temperature: 0.6,
         stream: false,
       }),
     });
@@ -729,14 +755,14 @@ Deno.serve(async (req) => {
         chunksCount = pricingChunks.length;
 
         const intro = intent.intent === "menu_1"
-          ? "Here's a quick view of our most popular APLGO products and prices (member, incl. VAT):"
-          : "Here are the APLGO products and what each is used for:";
+          ? "Sure 👌 our most popular APLGO products (member price, incl. VAT):"
+          : "Here's what each of our top APLGO products is used for:";
 
         // Use AI in strict mode to summarise from the canonical doc (≤ 5 lines).
         const aiAnswer = await generateAIAnswer(
           intent.intent === "menu_1"
-            ? "List 4-6 popular APLGO products with their member price (R) and one-line benefit. Be brief."
-            : "List 4-6 popular APLGO products with one-line benefit each. Brief, no prices.",
+            ? "List 4-5 popular APLGO products with their member price (R) on one short line each. End with: 'Which one would you like more info on?'"
+            : "List 4-5 popular APLGO products with one-line benefit each. No prices. End with: 'Want the price for any of these?'",
           pricingChunks,
           "strict",
           "products",
@@ -744,7 +770,7 @@ Deno.serve(async (req) => {
         );
 
         const body = aiAnswer?.trim() || pricingChunks[0].chunk_text.slice(0, 600);
-        replyContent = `${intro}\n\n${body}\n\n_Reply with a product code (e.g. NRM, RLX, GRW) for full details, or ask "How much is [product]?"._${HUMAN_CONTACT_FOOTER}`;
+        replyContent = `${intro}\n\n${body}`;
         actionTaken = intent.intent === "menu_1" ? "menu_sent" : "knowledge_strict";
         diag.answer_source = "knowledge_pricing_doc";
         diag.source_files = [PRICING_DOC_TITLE];
@@ -791,20 +817,23 @@ Deno.serve(async (req) => {
 
         if (aiAnswer) {
           let fullReply = aiAnswer.trim();
-          const dynamicLinks = extractLinksFromChunks(topicChunks, intent.detectedProduct);
-          if (dynamicLinks.length > 0) {
-            topicsLinksUsed = true;
-            fullReply += `\n\n📌 *Helpful next steps:*\n${dynamicLinks.join("\n")}`;
+          // v6.0 — attach at most ONE relevant product/topic link, not the giant block.
+          // The AI's own follow-up question carries the conversation forward.
+          if (intent.detectedProduct && PRODUCT_LINKS[intent.detectedProduct]) {
+            fullReply += `\n\n📖 More on ${intent.detectedProduct}: ${PRODUCT_LINKS[intent.detectedProduct]}`;
           } else {
-            fullReply += buildNextSteps(intent.topicCategory, intent.detectedProduct);
+            const dynamicLinks = extractLinksFromChunks(topicChunks, intent.detectedProduct);
+            if (dynamicLinks.length > 0) {
+              topicsLinksUsed = true;
+              fullReply += `\n\n${dynamicLinks[0]}`;
+            }
           }
-          fullReply += HUMAN_CONTACT_FOOTER;
           replyContent = fullReply;
           actionTaken = directPricingAnswer ? "knowledge_strict" : "one_shot_reply";
           diag.answer_source = directPricingAnswer ? "deterministic_extract" : "ai_grounded_chunks";
         } else {
-          const snippets = chunks.slice(0, 2).map((r: any) => `📌 *${r.file_title}*\n${r.chunk_text.slice(0, 250)}`).join("\n\n");
-          replyContent = `Here's what I found:\n\n${snippets}${buildNextSteps(intent.topicCategory, intent.detectedProduct)}${HUMAN_CONTACT_FOOTER}`;
+          const snippets = chunks.slice(0, 1).map((r: any) => r.chunk_text.slice(0, 280)).join("\n\n");
+          replyContent = `${snippets}\n\n_Want me to dig deeper on this, or speak to Vanto directly?_`;
           actionTaken = "knowledge_reply";
           diag.answer_source = "raw_chunk_snippets";
         }
@@ -813,9 +842,9 @@ Deno.serve(async (req) => {
         diag.fallback_reason = chunks.length === 0 ? "no_chunks" : "low_relevance_strict";
         diag.answer_source = "honest_fallback";
         const honest = chunks.length === 0
-          ? `I couldn't find that in our approved knowledge yet.`
-          : `I couldn't verify a confident answer from our approved knowledge for "${searchQuery.slice(0, 60)}".`;
-        replyContent = `${honest}\n\nCould you rephrase, or name the specific product / topic? Otherwise Vanto Vanto can help directly:\n📲 https://wa.me/27790831530\n📞 +27 79 083 1530\n\n_Reply *CALL ME* or *WHATSAPP ME* for personal follow-up._`;
+          ? `I don't have a verified answer for that yet 🤔`
+          : `I couldn't confidently verify that from our approved info.`;
+        replyContent = `${honest}\n\nCould you give me a bit more detail — a specific product, price, or topic? Or I can connect you straight to Vanto: 📲 https://wa.me/27790831530`;
         shouldAssignHuman = chunks.length === 0;
         actionTaken = "human_handover";
       }
