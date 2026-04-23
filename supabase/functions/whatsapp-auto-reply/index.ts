@@ -693,21 +693,26 @@ Deno.serve(async (req) => {
     replyContent = HUMAN_HANDOVER;
     shouldAssignHuman = true;
     actionTaken = "human_handover";
+    diag.answer_source = "static_handoff";
   } else if (intent.intent === "call_me") {
     replyContent = CALL_ME_RESPONSE;
     shouldAssignHuman = true;
     actionTaken = "call_me";
+    diag.answer_source = "static_handoff";
   } else if (intent.intent === "whatsapp_me") {
     replyContent = HUMAN_HANDOVER;
     shouldAssignHuman = true;
     actionTaken = "whatsapp_me";
+    diag.answer_source = "static_handoff";
   } else if (intent.intent === "available_at") {
     replyContent = AVAILABLE_AT_RESPONSE(intent.availableTime || "your preferred time");
     shouldAssignHuman = true;
     actionTaken = "available_at";
+    diag.answer_source = "static_handoff";
   } else if (intent.intent === "greeting") {
     replyContent = GREETING_REPLY;
     actionTaken = "greeting_sent";
+    diag.answer_source = "static_greeting";
   } else {
     // ── Knowledge-grounded path ──
     const searchQuery = intent.query;
