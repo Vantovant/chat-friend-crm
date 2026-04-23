@@ -1,15 +1,22 @@
 /**
- * Vanto CRM — whatsapp-auto-reply Edge Function v6.0
- * Two-Layer System: TRUTH LAYER (knowledge grounding) + SALES INTELLIGENCE LAYER
+ * Vanto CRM — whatsapp-auto-reply Edge Function v6.1
+ * Two-Layer System: TRUTH LAYER (hybrid retrieval) + SALES INTELLIGENCE LAYER
  *
- * v6.0 — Sales Intelligence Upgrade (truth layer preserved from v5.3):
- * - Elite WhatsApp sales-consultant persona, African market aware
- * - Response-mode policy: GREETING / DIRECT_FACT / CLARIFY / RECOMMEND / SALES_ADVANCE / HANDOFF
- * - Light, warm greeting (no giant menu dump)
- * - Smart context-aware next-step (not heavy footer on every reply)
- * - AI must always end factual answers with one sharp follow-up question
- * - Truth layer (v5.3): helper-file demotion, strict-collection scoring boost,
- *   Product Reference forced inclusion, deterministic pricing extractor preserved
+ * v6.1 — Knowledge Grounding Hardening (per VantoOS Fix Report 2026-04-23):
+ * - FIX 1: raw_text fallback — if chunk search returns 0 hits or top relevance < gate,
+ *   pull full document bodies (concatenated chunks) by keyword/tag/topic match before
+ *   honest fallback. Eliminates "AI ignores my books" failures.
+ * - FIX 3: helper-file penalty softened from -100 → -10 (still demoted, never invisible).
+ * - FIX 4: forced inclusion now uses tags + title-ILIKE keyword set (product, pricing,
+ *   wellness, compensation), no longer dependent on exact "Product Reference" string.
+ * - FIX 5: top-K raised from 3/8 → 12 for strict collections (Gemini re-ranks in-context).
+ * - FIX 6: conversational memory — last 6 turns of the conversation are injected so
+ *   "and the price?" follow-ups keep context.
+ * - FIX 7: expanded diagnostics: retrieval_path, raw_text_fallback_used, memory_turns,
+ *   top_k_used, forced_doc_titles, fallback_reason.
+ *
+ * v6.0 features preserved: persona, response-mode policy, deterministic menu/pricing,
+ *   strict no-hallucination contract, slim greeting, contextual next-step links.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
