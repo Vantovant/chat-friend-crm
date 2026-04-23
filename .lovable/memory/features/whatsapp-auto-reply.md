@@ -1,35 +1,30 @@
 ---
-name: WhatsApp Auto-Reply v5.2
-description: Grounded auto-reply with deterministic menu routing, strict-mode min-relevance gate, verbatim pricing extraction
+name: WhatsApp Auto-Reply v5.3
+description: Knowledge-first answering: helper files demoted, Product Reference auto-included for wellness, source-usage diag
 type: feature
 ---
-v5.2 Grounding Hardening (2026-04-23):
-- Menu 1/2 now load the canonical "APLGO Product Pricing Quick Reference (ZAR)" doc directly via title (loadPricingDocChunks) — no ts_rank guessing.
-- Strict collections (products/compensation/orders) enforce STRICT_MIN_RELEVANCE = 0.05 gate. Below threshold → honest "couldn't verify" fallback, no bluffing.
-- AI prompt strict-mode block tightened: forbids invented prices/PV/benefits, requires verbatim quoting, mandates "couldn't verify" phrasing on miss.
-- extractDirectPricingAnswer regex fixed to match real chunk format `- NRM (Blood sugar balance): R433.13`. PV is now read from the COLLECTION header (e.g. `DAILY COLLECTION (20 PV each, ...)`) rather than the first PV match in chunk.
-- Honest fallback path replaces NO_ANSWER_FALLBACK dump when retrieval fails — short, owns the gap, offers handoff.
+v5.3 Knowledge-First Source Priority (2026-04-23):
+- HELPER_FILE_TITLES set ("Topics and Links", "ZAZI CRM", "ZAZI Final Override", "Bank Code", "Backoffice training") are filtered OUT of answer chunks. They may only feed the link extractor — never the AI's answer source.
+- scoreKnowledgeChunk: products/compensation/orders collections get +4 boost; "Product Reference"/"Product Guide" titles get +5; helpers get -100 penalty so they cannot win.
+- Wellness/products/detected-product queries now ALWAYS pull the canonical "Product Reference" doc by title via loadFileChunksByTitle, so it can outrank ts_rank winners on vague queries like "What helps with stress?".
+- New diag fields per call: `answer_source` (static_greeting | static_handoff | knowledge_pricing_doc | deterministic_extract | ai_grounded_chunks | raw_chunk_snippets | honest_fallback), `source_files`, `top_chunk_title`. Visible in Edge Function logs as `[auto-reply] DIAG: ...` for source-usage audit.
+- Greeting and menu_3/handoff branches remain static by design (TASK 3) — tagged answer_source=static_*.
 
-v5.1 Inbox Stabilization (2026-04-23):
-- Cooldown 120s → 15s, daily limit 20 → 40 (natural follow-up Q&A).
-- maytapi-webhook-inbound handles both group ack callbacks AND inbound 1-on-1 messages (parser hardened: nested body / caption / conversation).
-- send-message routes via the same provider as last inbound (maytapi vs twilio).
-- maytapi-send-direct trims env vars (fixes "invalid instance ID").
+v5.2 Grounding Hardening (retained):
+- Menu 1/2 load canonical pricing doc directly via title.
+- Strict collections enforce STRICT_MIN_RELEVANCE = 0.05 gate.
+- extractDirectPricingAnswer matches `- NRM (Blood sugar balance): R433.13` and reads PV from collection header.
 
-v5.0 retained:
-- 3-part response: Direct Answer → Smart Next Steps → Human Contact Footer.
-- Product alias recognition (NRM, HTR, ICE, PWR…).
-- Topic-to-link routing via "Topics and Links" doc.
-- Intents: 1/2/3, CALL ME, WHATSAPP ME, I'M AVAILABLE AT [time].
-- PRODUCT_LINKS map for APLGO product guide URLs.
+v5.1 Inbox Stabilization (retained):
+- Cooldown 15s, daily limit 40. maytapi-webhook-inbound handles both group ack + 1-on-1. send-message routes via last inbound provider.
 
-Grounding routing rules:
-- greeting → static GREETING_REPLY (no retrieval)
-- menu_1 → load PRICING_DOC_TITLE chunks → strict AI summary
-- menu_2 → load PRICING_DOC_TITLE chunks → strict AI benefits summary
-- menu_3 / call_me / whatsapp_me / available_at → static handoff
-- pricing q + detectedProduct → search products → extractDirectPricingAnswer (deterministic, no AI) → AI fallback
-- compensation q → search compensation (strict) → AI grounded
-- opportunity q → search opportunity + general (assisted) → AI grounded
-- wellness/freeform → search products + general → AI grounded
-- zero chunks OR (strict AND top_relevance < 0.05) → honest fallback + handoff
+Source-priority order (factual answers):
+1. Deterministic extract from approved doc (e.g. NRM price from Pricing Quick Reference)
+2. AI grounded on STRICT collection chunks (products/compensation/orders) — boosted scoring
+3. AI grounded on Product Reference (forced-included for wellness/products)
+4. AI grounded on opportunity/general chunks (assisted mode)
+5. Honest fallback ("couldn't verify") — never bluff, never use helper files as primary source
+
+Helper files are link-only:
+- Topics and Links → searched separately, only injected as "Helpful next steps" links
+- ZAZI Final Override / ZAZI CRM / Bank Code / Backoffice training → -100 score, filtered out of answer pool
