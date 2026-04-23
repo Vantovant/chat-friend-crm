@@ -49,5 +49,6 @@ Group Campaigns: Maytapi REST API (NOT Chrome Extension autoposter). Twilio stay
 - [Documentation](mem://project/documentation) — Location and contents of technical docs
 - [Group Campaigns](mem://features/group-campaigns) — Automated WA group messaging via Chrome Extension
 - [Group Campaigns Maytapi](mem://features/group-campaigns-maytapi) — Maytapi REST API migration for group campaigns
+- [Missed Inquiry Recovery](mem://features/missed-inquiry-recovery) — 5-step Maytapi auto-follow-up for stalled inbox convos
 - [Technical Debt](mem://technical/debt) — Modules needing refactor, future backlog
 - [Auto-Reply Branding](mem://features/auto-reply-branding) — Vanto Vanto's details only in auto-replies
