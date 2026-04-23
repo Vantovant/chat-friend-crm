@@ -596,6 +596,7 @@ ${contextSnippets}`;
         model: "google/gemini-2.5-pro",
         messages: [
           { role: "system", content: systemPrompt },
+          ...history,
           { role: "user", content: question },
         ],
         temperature: 0.6,
