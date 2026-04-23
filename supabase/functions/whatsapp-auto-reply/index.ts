@@ -512,7 +512,27 @@ async function searchKnowledge(
     }
   }
 
-  return results
+  // Wellness/product freeform: also pull canonical "Product Reference" doc by title
+  // so it can outrank generic ts_rank winners like Topics-and-Links.
+  if (
+    intent.topicCategory === "wellness" ||
+    intent.topicCategory === "products" ||
+    intent.detectedProduct
+  ) {
+    const refChunks = await loadFileChunksByTitle(svc, "Product Reference");
+    for (const c of refChunks) {
+      const key = `${c.file_title}:${c.chunk_index}:${c.chunk_text.slice(0, 120)}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        results.push(c);
+      }
+    }
+  }
+
+  // Filter helper/meta files OUT of answer chunks — they may only feed link extraction
+  const answerable = results.filter((r) => !isHelperFile(r.file_title));
+
+  return answerable
     .sort((a, b) => scoreKnowledgeChunk(b, intent) - scoreKnowledgeChunk(a, intent))
     .slice(0, maxResults);
 }
