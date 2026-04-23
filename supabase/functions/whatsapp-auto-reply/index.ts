@@ -97,7 +97,7 @@ const TOPIC_LINKS = {
 
 // ── Menu Backward Compatibility ─────────────────────────────────────────────
 const MENU_QUERY_MAP: Record<string, { query: string; collections: string[] }> = {
-  "1": { query: "prices product information cost aplgo products pricing membership joining GO-Status", collections: ["products", "opportunity", "general"] },
+  "1": { query: "APLGO product prices South Africa VAT PV daily collection member prices", collections: ["products", "general"] },
   "2": { query: "how to use benefits product usage wellness health benefits dosage drops", collections: ["products", "general"] },
 };
 
