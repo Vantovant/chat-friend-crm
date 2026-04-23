@@ -507,6 +507,69 @@ function buildNextSteps(topicCategory: TopicCategory, detectedProduct: string | 
 }
 
 // ── AI Answer Generation ────────────────────────────────────────────────────
+// ── Trainer Rules (admin-managed correction layer) ─────────────────────────
+type TrainerRule = {
+  id: string;
+  title: string;
+  triggers: string[];
+  product: string | null;
+  instruction: string;
+  priority: "advisory" | "strong" | "override";
+  enabled: boolean;
+};
+
+async function loadTrainerRules(svc: any): Promise<TrainerRule[]> {
+  try {
+    const { data, error } = await svc
+      .from("ai_trainer_rules")
+      .select("id,title,triggers,product,instruction,priority,enabled")
+      .eq("enabled", true);
+    if (error) {
+      console.error("[auto-reply] trainer rules load error:", error.message);
+      return [];
+    }
+    return (data || []) as TrainerRule[];
+  } catch (e: any) {
+    console.error("[auto-reply] trainer rules load failed:", e?.message);
+    return [];
+  }
+}
+
+export function matchTrainerRules(
+  rules: TrainerRule[],
+  userText: string,
+  detectedProduct: string | null,
+): TrainerRule[] {
+  const lc = (userText || "").toLowerCase();
+  const product = (detectedProduct || "").toUpperCase();
+  const matched = rules.filter((r) => {
+    if (!r.enabled) return false;
+    const productHit = r.product && product && r.product.toUpperCase() === product;
+    const triggerHit = (r.triggers || []).some((t) => {
+      const tt = (t || "").trim().toLowerCase();
+      return tt.length > 0 && lc.includes(tt);
+    });
+    return productHit || triggerHit;
+  });
+  // Priority order: override > strong > advisory
+  const weight = { override: 3, strong: 2, advisory: 1 } as const;
+  return matched.sort((a, b) => weight[b.priority] - weight[a.priority]);
+}
+
+function renderTrainerBlock(rules: TrainerRule[]): string {
+  if (rules.length === 0) return "";
+  const lines = rules.map((r) => {
+    const tag =
+      r.priority === "override"
+        ? "🛑 HARD OVERRIDE (must follow exactly, beats inference)"
+        : r.priority === "strong"
+        ? "⚠️ STRONG PREFERENCE (follow unless directly contradicted by knowledge)"
+        : "💡 ADVISORY (consider when relevant)";
+    return `• [${tag}] ${r.title}\n   → ${r.instruction}`;
+  });
+  return `\n═══ TRAINER RULES (admin corrections — APPLY BEFORE INFERENCE) ═══\n${lines.join("\n")}\n`;
+}
+
 async function generateAIAnswer(
   question: string,
   chunks: { chunk_text: string; file_title: string; file_collection: string }[],
@@ -514,6 +577,7 @@ async function generateAIAnswer(
   topicCategory: string,
   detectedProduct: string | null,
   history: { role: "user" | "assistant"; content: string }[] = [],
+  trainerRules: TrainerRule[] = [],
 ): Promise<string | null> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) {
