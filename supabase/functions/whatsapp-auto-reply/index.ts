@@ -96,10 +96,18 @@ const TOPIC_LINKS = {
 };
 
 // ── Menu Backward Compatibility ─────────────────────────────────────────────
+// Deterministic menu routing — these queries match the canonical pricing doc.
 const MENU_QUERY_MAP: Record<string, { query: string; collections: string[] }> = {
-  "1": { query: "APLGO product prices South Africa VAT PV daily collection member prices", collections: ["products", "general"] },
-  "2": { query: "how to use benefits product usage wellness health benefits dosage drops", collections: ["products", "general"] },
+  "1": { query: "APLGO PRODUCT PRICING QUICK REFERENCE SOUTH AFRICA daily collection premium elite", collections: ["products"] },
+  "2": { query: "APLGO PRODUCT PRICING QUICK REFERENCE benefits immune support stress digestion", collections: ["products"] },
 };
+
+// Canonical doc title used as the source of truth for menu_1 / menu_2 grounding
+const PRICING_DOC_TITLE = "APLGO Product Pricing Quick Reference (ZAR)";
+
+// Minimum ts_rank relevance to consider a chunk usable for STRICT collections.
+// Below this the bot must give an honest "couldn't verify" fallback instead of bluffing.
+const STRICT_MIN_RELEVANCE = 0.05;
 
 // ── Intent Detection ────────────────────────────────────────────────────────
 const GREETING_PATTERNS = [
