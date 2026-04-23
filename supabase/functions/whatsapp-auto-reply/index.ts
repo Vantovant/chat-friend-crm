@@ -31,18 +31,20 @@ function jsonRes(body: unknown, status = 200) {
 const RATE_LIMIT_COOLDOWN_MS = 15 * 1000;
 const MAX_AUTO_REPLIES_PER_DAY = 40;
 
-const HUMAN_CONTACT_FOOTER = `\n\n───────────────\n📲 *For faster personal help:*\n• WhatsApp Vanto directly: https://wa.me/27790831530\n• Call/message: +27 79 083 1530\n• Register: https://backoffice.aplgo.com/register/?sp=787262\n\n_If you don't want links, just reply:_\n• *CALL ME*\n• *WHATSAPP ME*\n• *I'M AVAILABLE AT [time]*\n_and Vanto Vanto will follow up personally._`;
+// v6.0 — slim, contextual footer. Only attached when handoff is offered, not on every factual answer.
+const HUMAN_CONTACT_FOOTER = `\n\n_Prefer to talk to Vanto directly?_ 📲 https://wa.me/27790831530`;
 
-const GREETING_REPLY = `Hi 👋 Welcome to *Online Course For MLM*!\n\nI'm here to help you with product info, pricing, business opportunities, and more. Just ask me anything!\n\nYou can also reply:\n1️⃣ Prices & Products\n2️⃣ How to use / Benefits\n3️⃣ Speak to Vanto Vanto${HUMAN_CONTACT_FOOTER}`;
+// v6.0 — short warm greeting, no menu dump. AI handles the rest in conversation.
+const GREETING_REPLY = `Hey 👋 Vanto here from *Online Course For MLM*.\n\nWhat can I help you with today — a product, a price, or the business opportunity?`;
 
-const HUMAN_HANDOVER = `Thank you! Vanto Vanto will assist you shortly.\n\n📲 WhatsApp: https://wa.me/27790831530\n📞 Call: +27 79 083 1530`;
+const HUMAN_HANDOVER = `On it ✅ Vanto Vanto will reach out to you personally.\n\n📲 WhatsApp: https://wa.me/27790831530\n📞 Call: +27 79 083 1530`;
 
-const CALL_ME_RESPONSE = `Got it! ✅ Vanto Vanto will call you back shortly.\n\nIf you need to reach him sooner:\n📞 +27 79 083 1530\n📲 https://wa.me/27790831530`;
+const CALL_ME_RESPONSE = `Got it ✅ Vanto Vanto will call you back shortly.\n\nNeed him sooner? 📞 +27 79 083 1530`;
 
 const AVAILABLE_AT_RESPONSE = (time: string) =>
-  `Noted! ✅ Vanto Vanto will follow up with you at *${time}*.\n\nIf you need him sooner:\n📞 +27 79 083 1530\n📲 https://wa.me/27790831530`;
+  `Noted ✅ Vanto Vanto will follow up at *${time}*.\n\nNeed him sooner? 📞 +27 79 083 1530`;
 
-const NO_ANSWER_FALLBACK = `I couldn't find a specific answer for that in our knowledge base, but Vanto Vanto can help you directly!\n\n📲 WhatsApp: https://wa.me/27790831530\n📞 Call: +27 79 083 1530\n🔗 Register: https://backoffice.aplgo.com/register/?sp=787262\n\n_Reply *CALL ME* or *WHATSAPP ME* and he'll follow up._`;
+const NO_ANSWER_FALLBACK = `I don't have a verified answer for that yet. Could you tell me a bit more about what you're looking for — a product, a price, or how to join?\n\nOr Vanto can help you directly: 📲 https://wa.me/27790831530`;
 
 // ── Product Aliases ─────────────────────────────────────────────────────────
 const PRODUCT_ALIASES: Record<string, string> = {
