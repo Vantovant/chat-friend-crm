@@ -27,8 +27,9 @@ function jsonRes(body: unknown, status = 200) {
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
-const RATE_LIMIT_COOLDOWN_MS = 2 * 60 * 1000;
-const MAX_AUTO_REPLIES_PER_DAY = 20;
+// v5.1 STABILIZATION: shortened cooldown to allow natural follow-up Q&A flow
+const RATE_LIMIT_COOLDOWN_MS = 15 * 1000;
+const MAX_AUTO_REPLIES_PER_DAY = 40;
 
 const HUMAN_CONTACT_FOOTER = `\n\n───────────────\n📲 *For faster personal help:*\n• WhatsApp Vanto directly: https://wa.me/27790831530\n• Call/message: +27 79 083 1530\n• Register: https://backoffice.aplgo.com/register/?sp=787262\n\n_If you don't want links, just reply:_\n• *CALL ME*\n• *WHATSAPP ME*\n• *I'M AVAILABLE AT [time]*\n_and Vanto Vanto will follow up personally._`;
 
@@ -415,7 +416,7 @@ Deno.serve(async (req) => {
   if ((recentCount || 0) >= 1) {
     diag.result = "rate_limited_cooldown";
     console.log("[auto-reply] DIAG:", JSON.stringify(diag));
-    return jsonRes({ ok: true, auto_reply: false, reason: "Cooldown active (2 min)" });
+    return jsonRes({ ok: true, auto_reply: false, reason: "Cooldown active (15s)" });
   }
 
   const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
@@ -427,7 +428,7 @@ Deno.serve(async (req) => {
   if ((dailyCount || 0) >= MAX_AUTO_REPLIES_PER_DAY) {
     diag.result = "rate_limited_daily";
     console.log("[auto-reply] DIAG:", JSON.stringify(diag));
-    return jsonRes({ ok: true, auto_reply: false, reason: "Daily limit reached (20)" });
+    return jsonRes({ ok: true, auto_reply: false, reason: "Daily limit reached (40)" });
   }
 
   // ── Normalize & detect intent ──
