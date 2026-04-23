@@ -381,11 +381,16 @@ async function generateAIAnswer(
     .join("\n\n");
 
   const strictRule = mode === "strict"
-    ? "Answer ONLY from the provided knowledge chunks. Do NOT invent prices, benefits, or facts not in the chunks."
-    : "You may paraphrase and combine info from chunks naturally. Stay grounded in provided knowledge.";
+    ? `STRICT GROUNDING MODE — Answer ONLY using facts that appear verbatim or near-verbatim in the KNOWLEDGE CONTEXT below.
+- DO NOT invent prices, PV values, product names, benefits, ranks, bonuses, or rules.
+- DO NOT round, estimate, convert currency, or "fix" numbers.
+- If the specific fact is NOT in the context, you MUST reply exactly:
+  "I couldn't verify that from our approved knowledge right now."
+  Then suggest the user ask in another way or speak to Vanto Vanto.`
+    : "Stay grounded in the provided knowledge. You may paraphrase naturally but do not invent facts.";
 
   const pricingRule = detectedProduct
-    ? `The user is asking about "${detectedProduct}". If the price is in the chunks, state it clearly (e.g. "NRM costs R431.25 incl. VAT"). If the price is NOT found, say so honestly.`
+    ? `The user is asking about *${detectedProduct}*. Quote the price exactly as it appears (e.g. "R433.13"). If ${detectedProduct} is NOT in the context, say so honestly — do NOT guess.`
     : "";
 
   const systemPrompt = `You are a WhatsApp assistant for *Online Course For MLM*, representing Vanto Vanto (APLGO distributor).
@@ -393,19 +398,15 @@ async function generateAIAnswer(
 ${strictRule}
 ${pricingRule}
 
-YOUR TASK: Generate ONLY the direct answer part (Part 1). Do NOT add links, contact details, or footer — those are added automatically.
+YOUR TASK: Generate ONLY the direct answer (Part 1). Links and contact footer are added automatically — do NOT include them.
 
 RULES:
-- Answer the question directly and clearly FIRST.
-- If the answer is in the chunks, provide it naturally with specific details (prices, names, benefits).
-- If the answer is NOT in the chunks, say: "I don't have specific information on that right now."
-- Be warm, professional, concise (under 200 words).
+- Answer the exact question asked, in 2–5 short lines.
 - Use WhatsApp formatting: *bold*, • bullets.
-- Do NOT tell the user to upload documents or visit a website to find the answer.
-- Do NOT add registration links, phone numbers, or contact info (those are added separately).
-- Do NOT repeat menu options.
-- Do NOT add "Reply 3" or similar prompts.
-- For pricing: state the exact ZAR price with VAT if found. Include Activity PV if available.
+- No giant lists unless the user asked for "all" / "full list".
+- Do NOT tell the user to upload documents.
+- Do NOT add registration links, phone numbers, or "Reply 3" prompts.
+- For pricing: state the exact ZAR price + VAT note + PV if present in context.
 
 KNOWLEDGE CONTEXT:
 ${contextSnippets}`;
