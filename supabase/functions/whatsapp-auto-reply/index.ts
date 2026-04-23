@@ -309,8 +309,9 @@ function scoreKnowledgeChunk(chunk: KnowledgeChunk, intent: IntentResult): numbe
   // Wellness questions: prefer chunks that mention products/symptoms together
   if (intent.topicCategory === "wellness" && /(stress|sleep|sugar|digest|immune|energy|detox|skin|breath)/.test(text)) score += 2;
 
-  // Heavy penalty: helper/meta files must not be primary answer source
-  if (isHelperFile(chunk.file_title)) score -= 100;
+  // FIX 3 (v6.1): softened penalty -100 → -10. Helpers stay demoted but can still
+  // surface when they are the only source of a piece of knowledge.
+  if (isHelperFile(chunk.file_title)) score -= 10;
 
   return score;
 }
