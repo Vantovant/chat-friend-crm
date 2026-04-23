@@ -533,6 +533,26 @@ Deno.serve(async (req) => {
     return jsonRes({ ok: true, auto_reply: false, reason: "TEMPLATE_REQUIRED", window_expired: true });
   }
 
+   // ── Message dedupe ──
+  if (inbound_message_id) {
+    const { count: existingInboundCount } = await svc
+      .from("auto_reply_events")
+      .select("id", { count: "exact", head: true })
+      .eq("conversation_id", conversation_id)
+      .eq("inbound_message_id", inbound_message_id);
+
+    if ((existingInboundCount || 0) > 0) {
+      diag.result = "duplicate_inbound_ignored";
+      console.log("[auto-reply] DIAG:", JSON.stringify(diag));
+      return jsonRes({ ok: true, auto_reply: false, reason: "Inbound already processed" });
+    }
+  }
+
+  // ── Normalize & detect intent ──
+  const rawInput = (inbound_content || "").trim();
+  const normalized = rawInput.toLowerCase().replace(/\s+/g, " ").trim();
+  const intent = detectIntent(normalized);
+
   // ── Rate limiting ──
   const cooldownAgo = new Date(Date.now() - RATE_LIMIT_COOLDOWN_MS).toISOString();
   const { count: recentCount } = await svc.from("auto_reply_events").select("id", { count: "exact", head: true })
@@ -540,7 +560,8 @@ Deno.serve(async (req) => {
     .in("action_taken", ["one_shot_reply", "menu_sent", "knowledge_strict", "knowledge_assisted", "ai_knowledge_reply", "knowledge_reply", "greeting_sent", "human_handover", "call_me", "whatsapp_me", "available_at"])
     .gte("created_at", cooldownAgo);
 
-  if ((recentCount || 0) >= 1) {
+  const shouldBypassCooldown = intent.intent !== "greeting";
+  if (!shouldBypassCooldown && (recentCount || 0) >= 1) {
     diag.result = "rate_limited_cooldown";
     console.log("[auto-reply] DIAG:", JSON.stringify(diag));
     return jsonRes({ ok: true, auto_reply: false, reason: "Cooldown active (15s)" });
@@ -557,11 +578,6 @@ Deno.serve(async (req) => {
     console.log("[auto-reply] DIAG:", JSON.stringify(diag));
     return jsonRes({ ok: true, auto_reply: false, reason: "Daily limit reached (40)" });
   }
-
-  // ── Normalize & detect intent ──
-  const rawInput = (inbound_content || "").trim();
-  const normalized = rawInput.toLowerCase().replace(/\s+/g, " ").trim();
-  const intent = detectIntent(normalized);
 
   diag.normalized = normalized.slice(0, 100);
   diag.intent = intent.intent;
@@ -605,9 +621,12 @@ Deno.serve(async (req) => {
       replyContent = GREETING_REPLY;
       actionTaken = "greeting_sent";
     } else {
+      const searchQueries = buildSearchQueries(rawInput, intent);
+      diag.search_queries = searchQueries.slice(0, 5);
+
       // Search knowledge + topics-and-links in parallel
       const [chunks, topicChunks] = await Promise.all([
-        searchKnowledge(svc, searchQuery, intent.collections, 8),
+        searchKnowledge(svc, searchQueries, intent.collections, intent, 8),
         searchTopicsAndLinks(svc, searchQuery),
       ]);
 
@@ -619,8 +638,9 @@ Deno.serve(async (req) => {
         knowledgeFound = true;
         const matchedCol = chunks[0]?.file_collection || "";
         const effectiveMode = STRICT_COLLECTIONS.has(matchedCol) ? "strict" : intent.mode;
+        const directPricingAnswer = extractDirectPricingAnswer(chunks, intent.detectedProduct);
 
-        const aiAnswer = await generateAIAnswer(searchQuery, chunks, effectiveMode, intent.topicCategory, intent.detectedProduct);
+        const aiAnswer = directPricingAnswer || await generateAIAnswer(searchQuery, chunks, effectiveMode, intent.topicCategory, intent.detectedProduct);
 
         if (aiAnswer) {
           // Build the one-shot 3-part response
