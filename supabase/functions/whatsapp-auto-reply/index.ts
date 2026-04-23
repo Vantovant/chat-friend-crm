@@ -1016,6 +1016,12 @@ Deno.serve(async (req) => {
       const memory = await loadConversationMemory(svc, conversation_id, inbound_message_id || null);
       diag.memory_turns = memory.length;
 
+      // TRAINER LAYER: load admin-managed correction rules and match against this turn.
+      const allTrainerRules = await loadTrainerRules(svc);
+      const matchedTrainerRules = matchTrainerRules(allTrainerRules, rawInput, intent.detectedProduct);
+      diag.trainer_rules_loaded = allTrainerRules.length;
+      diag.trainer_rules_matched = matchedTrainerRules.map((r) => `${r.priority}:${r.title}`);
+
       const TOP_K = 12;
       diag.top_k_used = TOP_K;
 
