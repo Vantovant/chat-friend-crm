@@ -288,11 +288,14 @@ function extractDirectPricingAnswer(chunks: KnowledgeChunk[], detectedProduct: s
     );
     if (productLineMatch) {
       const [, benefit, price] = productLineMatch;
-      // Look for collection-level PV (e.g. "DAILY COLLECTION (20 PV each, R433.13)")
-      const collectionPvMatch = chunk.chunk_text.match(
-        new RegExp(`(?:DAILY|PREMIUM|ELITE|SPECIALTY)[^\\n]*?\\((\\d+)\\s*PV[^)]*\\)[\\s\\S]{0,1500}?${escapedProduct}\\b`, "i"),
-      );
-      const pvText = collectionPvMatch ? ` It carries *${collectionPvMatch[1]} PV*.` : "";
+      // Find PV from the nearest preceding "(N PV ...)" collection header.
+      const idx = chunk.chunk_text.search(new RegExp(`${escapedProduct}\\b\\s*\\(`, "i"));
+      let pvText = "";
+      if (idx > 0) {
+        const before = chunk.chunk_text.slice(0, idx);
+        const headers = [...before.matchAll(/\((\d+)\s*PV[^)]*\)/gi)];
+        if (headers.length) pvText = ` It carries *${headers[headers.length - 1][1]} PV*.`;
+      }
       return `*${detectedProduct}* is *R${price}* incl. VAT (member price) in South Africa.${pvText} Listed for *${benefit.trim()}*.`;
     }
 
