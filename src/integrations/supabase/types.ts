@@ -144,6 +144,48 @@ export type Database = {
           },
         ]
       }
+      ai_trainer_rules: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          enabled: boolean
+          id: string
+          instruction: string
+          notes: string | null
+          priority: Database["public"]["Enums"]["trainer_priority"]
+          product: string | null
+          title: string
+          triggers: string[]
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          enabled?: boolean
+          id?: string
+          instruction: string
+          notes?: string | null
+          priority?: Database["public"]["Enums"]["trainer_priority"]
+          product?: string | null
+          title: string
+          triggers?: string[]
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          enabled?: boolean
+          id?: string
+          instruction?: string
+          notes?: string | null
+          priority?: Database["public"]["Enums"]["trainer_priority"]
+          product?: string | null
+          title?: string
+          triggers?: string[]
+          updated_at?: string
+        }
+        Relationships: []
+      }
       auto_reply_events: {
         Row: {
           action_taken: string
@@ -1216,6 +1258,7 @@ export type Database = {
       lead_type: "prospect" | "registered" | "buyer" | "vip" | "expired"
       message_status: "sent" | "delivered" | "read" | "queued" | "failed"
       message_type: "text" | "image" | "ai"
+      trainer_priority: "advisory" | "strong" | "override"
       user_role: "agent" | "admin" | "super_admin"
     }
     CompositeTypes: {
@@ -1350,6 +1393,7 @@ export const Constants = {
       lead_type: ["prospect", "registered", "buyer", "vip", "expired"],
       message_status: ["sent", "delivered", "read", "queued", "failed"],
       message_type: ["text", "image", "ai"],
+      trainer_priority: ["advisory", "strong", "override"],
       user_role: ["agent", "admin", "super_admin"],
     },
   },
