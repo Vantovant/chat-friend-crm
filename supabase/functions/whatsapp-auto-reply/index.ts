@@ -943,37 +943,62 @@ Deno.serve(async (req) => {
       const searchQueries = buildSearchQueries(rawInput, intent);
       diag.search_queries = searchQueries.slice(0, 5);
 
-      const [chunks, topicChunks] = await Promise.all([
-        searchKnowledge(svc, searchQueries, intent.collections, intent, 8),
+      // FIX 6: pull last 6 turns so follow-ups keep context.
+      const memory = await loadConversationMemory(svc, conversation_id, inbound_message_id || null);
+      diag.memory_turns = memory.length;
+
+      const TOP_K = 12;
+      diag.top_k_used = TOP_K;
+
+      let [chunks, topicChunks] = await Promise.all([
+        searchKnowledge(svc, searchQueries, intent.collections, intent, TOP_K),
         searchTopicsAndLinks(svc, searchQuery),
       ]);
+
+      diag.retrieval_path = "chunk_search";
+      let topRelevance = chunks[0]?.relevance || 0;
+      let matchedCol = chunks[0]?.file_collection || "";
+      let effectiveMode: "strict" | "assisted" =
+        STRICT_COLLECTIONS.has(matchedCol) ? "strict" : intent.mode;
+      let passesRelevanceGate = effectiveMode !== "strict" || topRelevance >= STRICT_MIN_RELEVANCE;
+
+      // FIX 1: raw_text fallback BEFORE giving up. If chunk search produced nothing
+      // useful, synthesize a "raw_text" view by pulling full bodies of the most
+      // likely doc(s) by keyword/tag match. This is the single biggest unlock.
+      if (chunks.length === 0 || !passesRelevanceGate) {
+        const fallback = await rawTextFallback(svc, intent);
+        diag.raw_text_fallback_attempted = true;
+        diag.forced_doc_titles = fallback.titles;
+        if (fallback.chunks.length > 0) {
+          chunks = fallback.chunks
+            .sort((a, b) => scoreKnowledgeChunk(b, intent) - scoreKnowledgeChunk(a, intent))
+            .slice(0, TOP_K);
+          diag.retrieval_path = "raw_text_fallback";
+          topRelevance = chunks[0]?.relevance || 0;
+          matchedCol = chunks[0]?.file_collection || "";
+          effectiveMode = STRICT_COLLECTIONS.has(matchedCol) ? "strict" : intent.mode;
+          // raw_text fallback bypasses the strict relevance gate — we have the doc body
+          passesRelevanceGate = true;
+        }
+      }
 
       chunksCount = chunks.length;
       diag.chunks_found = chunksCount;
       diag.topic_links_found = topicChunks.length;
       diag.source_files = chunks.slice(0, 5).map((c) => `${c.file_title} (${c.file_collection})`);
-
-      const matchedCol = chunks[0]?.file_collection || "";
-      const effectiveMode: "strict" | "assisted" = STRICT_COLLECTIONS.has(matchedCol) ? "strict" : intent.mode;
-      const topRelevance = chunks[0]?.relevance || 0;
       diag.top_relevance = topRelevance;
       diag.effective_mode = effectiveMode;
       diag.top_chunk_title = chunks[0]?.file_title || null;
-
-      // Strict-mode min-relevance gate: refuse to bluff on weak retrieval.
-      const passesRelevanceGate = effectiveMode !== "strict" || topRelevance >= STRICT_MIN_RELEVANCE;
 
       if (chunks.length > 0 && passesRelevanceGate) {
         knowledgeFound = true;
         // Try deterministic pricing extractor first (no AI, no hallucination risk).
         const directPricingAnswer = extractDirectPricingAnswer(chunks, intent.detectedProduct);
         const aiAnswer = directPricingAnswer
-          || await generateAIAnswer(searchQuery, chunks, effectiveMode, intent.topicCategory, intent.detectedProduct);
+          || await generateAIAnswer(searchQuery, chunks, effectiveMode, intent.topicCategory, intent.detectedProduct, memory);
 
         if (aiAnswer) {
           let fullReply = aiAnswer.trim();
-          // v6.0 — attach at most ONE relevant product/topic link, not the giant block.
-          // The AI's own follow-up question carries the conversation forward.
           if (intent.detectedProduct && PRODUCT_LINKS[intent.detectedProduct]) {
             fullReply += `\n\n📖 More on ${intent.detectedProduct}: ${PRODUCT_LINKS[intent.detectedProduct]}`;
           } else {
@@ -985,7 +1010,9 @@ Deno.serve(async (req) => {
           }
           replyContent = fullReply;
           actionTaken = directPricingAnswer ? "knowledge_strict" : "one_shot_reply";
-          diag.answer_source = directPricingAnswer ? "deterministic_extract" : "ai_grounded_chunks";
+          diag.answer_source = directPricingAnswer
+            ? "deterministic_extract"
+            : (diag.retrieval_path === "raw_text_fallback" ? "ai_grounded_raw_text" : "ai_grounded_chunks");
         } else {
           const snippets = chunks.slice(0, 1).map((r: any) => r.chunk_text.slice(0, 280)).join("\n\n");
           replyContent = `${snippets}\n\n_Want me to dig deeper on this, or speak to Vanto directly?_`;
@@ -993,8 +1020,8 @@ Deno.serve(async (req) => {
           diag.answer_source = "raw_chunk_snippets";
         }
       } else {
-        // Honest fallback: zero chunks OR strict-mode chunks below relevance threshold.
-        diag.fallback_reason = chunks.length === 0 ? "no_chunks" : "low_relevance_strict";
+        // True last-resort fallback: even raw_text path produced nothing.
+        diag.fallback_reason = chunks.length === 0 ? "no_chunks_after_raw_text" : "low_relevance_after_raw_text";
         diag.answer_source = "honest_fallback";
         const honest = chunks.length === 0
           ? `I don't have a verified answer for that yet 🤔`
