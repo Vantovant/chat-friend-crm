@@ -378,6 +378,109 @@ async function loadFileChunksByTitle(svc: any, title: string): Promise<Knowledge
   }));
 }
 
+// ── FIX 4 (v6.1) — Tag/keyword-based forced inclusion (replaces brittle title match) ──
+// Resolves docs by tags array OR title-ILIKE keyword match, returns ALL approved chunks.
+async function loadDocsByKeywords(
+  svc: any,
+  keywords: string[],
+  tags: string[],
+  limitDocs = 3,
+): Promise<KnowledgeChunk[]> {
+  // Build OR filter: title ILIKE %kw% OR tag overlap
+  const titleOr = keywords.map((k) => `title.ilike.%${k}%`).join(",");
+  let q = svc
+    .from("knowledge_files")
+    .select("id, title, collection, tags")
+    .eq("status", "approved")
+    .or(titleOr)
+    .limit(limitDocs);
+  const { data: byTitle } = await q;
+
+  let files = byTitle || [];
+  if (tags.length > 0) {
+    const { data: byTag } = await svc
+      .from("knowledge_files")
+      .select("id, title, collection, tags")
+      .eq("status", "approved")
+      .overlaps("tags", tags)
+      .limit(limitDocs);
+    for (const f of byTag || []) {
+      if (!files.find((x: any) => x.id === f.id)) files.push(f);
+    }
+  }
+  if (files.length === 0) return [];
+
+  const fileIds = files.map((f: any) => f.id);
+  const { data: chunks } = await svc
+    .from("knowledge_chunks")
+    .select("chunk_text, chunk_index, file_id")
+    .in("file_id", fileIds)
+    .order("chunk_index", { ascending: true });
+
+  const fileMap = new Map(files.map((f: any) => [f.id, f]));
+  return (chunks || []).map((c: any) => {
+    const f: any = fileMap.get(c.file_id);
+    return {
+      chunk_text: c.chunk_text,
+      file_title: f.title,
+      file_collection: f.collection,
+      relevance: 0.6, // synthetic — flagged downstream
+      chunk_index: c.chunk_index,
+    };
+  });
+}
+
+// ── FIX 1 (v6.1) — raw_text fallback ──
+// When chunk search fails, synthesize a "raw_text" view by concatenating ALL chunks
+// of the most likely doc (resolved by intent → keywords/tags). This is functionally
+// equivalent to VantoOS's raw_text fallback because chunks ARE the document body.
+async function rawTextFallback(
+  svc: any,
+  intent: IntentResult,
+): Promise<{ chunks: KnowledgeChunk[]; titles: string[] }> {
+  const keywords: string[] = [];
+  const tags: string[] = [];
+
+  if (intent.topicCategory === "products" || intent.isPricing) {
+    keywords.push("product", "pricing", "reference", "guide", "catalog", "catalogue");
+    tags.push("product", "pricing", "wellness");
+  }
+  if (intent.topicCategory === "wellness") {
+    keywords.push("product", "reference", "wellness", "stick", "guide");
+    tags.push("product", "wellness");
+  }
+  if (intent.topicCategory === "compensation") {
+    keywords.push("compensation", "bonus", "rank", "comp plan", "marketing plan");
+    tags.push("compensation");
+  }
+  if (intent.topicCategory === "opportunity") {
+    keywords.push("opportunity", "joining", "register", "onboarding", "distributor");
+    tags.push("opportunity", "onboarding");
+  }
+  if (intent.detectedProduct) {
+    keywords.push(intent.detectedProduct.toLowerCase());
+  }
+  // Generic safety net so we never return nothing if approved books exist
+  if (keywords.length === 0) {
+    keywords.push("product", "reference", "guide");
+  }
+
+  const chunks = await loadDocsByKeywords(svc, keywords, tags, 3);
+  // Cap each doc's body to ~4000 chars worth (~10 chunks) to control prompt size
+  const byFile = new Map<string, KnowledgeChunk[]>();
+  for (const c of chunks) {
+    const arr = byFile.get(c.file_title) || [];
+    if (arr.length < 10) arr.push(c);
+    byFile.set(c.file_title, arr);
+  }
+  const capped: KnowledgeChunk[] = [];
+  for (const arr of byFile.values()) capped.push(...arr);
+  return {
+    chunks: capped,
+    titles: Array.from(byFile.keys()),
+  };
+}
+
 // ── Build Smart Next Steps ──────────────────────────────────────────────────
 function buildNextSteps(topicCategory: TopicCategory, detectedProduct: string | null): string {
   const links: string[] = [];
