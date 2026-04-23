@@ -615,9 +615,9 @@ ${contextSnippets}`;
   }
 }
 
-// ── Search Knowledge ─────────────────────────────────────────────────────────
+// ── Search Knowledge (v6.1: top-K up, tag/keyword forced inclusion, soft helper filter) ──
 async function searchKnowledge(
-  svc: any, queries: string[], collections: string[], intent: IntentResult, maxResults = 8,
+  svc: any, queries: string[], collections: string[], intent: IntentResult, maxResults = 12,
 ): Promise<KnowledgeChunk[]> {
   const results: KnowledgeChunk[] = [];
   const seen = new Set<string>();
@@ -635,12 +635,15 @@ async function searchKnowledge(
     }
   };
 
+  // FIX 5: per-query top-K bumped (was 8, now 12 for strict-likely intents)
+  const perQueryK = STRICT_COLLECTIONS.has(intent.collections[0] || "") || intent.isPricing ? 12 : 8;
+
   for (const query of queries) {
     for (const col of searchCollections) {
       const { data } = await svc.rpc("search_knowledge", {
         query_text: query,
         collection_filter: col,
-        max_results: maxResults,
+        max_results: perQueryK,
       });
       collectRows(data);
     }
@@ -648,20 +651,35 @@ async function searchKnowledge(
 
   if (results.length === 0) {
     for (const query of queries) {
-      const { data } = await svc.rpc("search_knowledge", { query_text: query, max_results: maxResults });
+      const { data } = await svc.rpc("search_knowledge", { query_text: query, max_results: perQueryK });
       collectRows(data);
     }
   }
 
-  // Wellness/product freeform: also pull canonical "Product Reference" doc by title
-  // so it can outrank generic ts_rank winners like Topics-and-Links.
+  // FIX 4: keyword/tag-based forced inclusion (replaces brittle exact-title match).
+  // Pulls candidate docs by title-ILIKE keyword set + tag overlap, so books titled
+  // "APLGO Wellness Catalogue 2026" or "Stick Range Overview" are no longer invisible.
   if (
     intent.topicCategory === "wellness" ||
     intent.topicCategory === "products" ||
+    intent.topicCategory === "compensation" ||
     intent.detectedProduct
   ) {
-    const refChunks = await loadFileChunksByTitle(svc, "Product Reference");
-    for (const c of refChunks) {
+    const forcedKeywords: string[] = [];
+    const forcedTags: string[] = [];
+    if (intent.topicCategory === "wellness" || intent.topicCategory === "products") {
+      forcedKeywords.push("product", "reference", "guide", "pricing", "catalog", "catalogue", "wellness", "stick");
+      forcedTags.push("product", "wellness", "pricing");
+    }
+    if (intent.topicCategory === "compensation") {
+      forcedKeywords.push("compensation", "comp plan", "marketing plan", "bonus", "rank");
+      forcedTags.push("compensation");
+    }
+    if (intent.detectedProduct) {
+      forcedKeywords.push(intent.detectedProduct.toLowerCase());
+    }
+    const forced = await loadDocsByKeywords(svc, forcedKeywords, forcedTags, 3);
+    for (const c of forced) {
       const key = `${c.file_title}:${c.chunk_index}:${c.chunk_text.slice(0, 120)}`;
       if (!seen.has(key)) {
         seen.add(key);
@@ -670,13 +688,37 @@ async function searchKnowledge(
     }
   }
 
-  // Filter helper/meta files OUT of answer chunks — they may only feed link extraction
-  const answerable = results.filter((r) => !isHelperFile(r.file_title));
-
-  return answerable
+  // v6.1: helpers no longer hard-filtered (penalty -10 in scorer keeps them
+  // demoted but allows last-resort surfacing if they're the only source).
+  return results
     .sort((a, b) => scoreKnowledgeChunk(b, intent) - scoreKnowledgeChunk(a, intent))
     .slice(0, maxResults);
 }
+
+// ── FIX 6 (v6.1) — Conversational memory ──
+// Pull last 3 inbound + 3 outbound messages so follow-ups like "and the price?"
+// retain context. Returned in chronological order, ready for AI prompt.
+async function loadConversationMemory(
+  svc: any, conversationId: string, currentInboundId: string | null,
+): Promise<{ role: "user" | "assistant"; content: string }[]> {
+  const { data } = await svc
+    .from("messages")
+    .select("id, content, is_outbound, created_at")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: false })
+    .limit(8);
+  if (!data || data.length === 0) return [];
+  const msgs = data
+    .filter((m: any) => m.id !== currentInboundId)
+    .slice(0, 6)
+    .reverse()
+    .map((m: any) => ({
+      role: m.is_outbound ? ("assistant" as const) : ("user" as const),
+      content: String(m.content || "").slice(0, 600),
+    }));
+  return msgs;
+}
+
 
 // ── Also search "Topics and Links" for relevant URLs ────────────────────────
 async function searchTopicsAndLinks(
