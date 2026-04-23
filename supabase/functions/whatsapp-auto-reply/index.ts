@@ -842,9 +842,9 @@ Deno.serve(async (req) => {
         diag.fallback_reason = chunks.length === 0 ? "no_chunks" : "low_relevance_strict";
         diag.answer_source = "honest_fallback";
         const honest = chunks.length === 0
-          ? `I couldn't find that in our approved knowledge yet.`
-          : `I couldn't verify a confident answer from our approved knowledge for "${searchQuery.slice(0, 60)}".`;
-        replyContent = `${honest}\n\nCould you rephrase, or name the specific product / topic? Otherwise Vanto Vanto can help directly:\n📲 https://wa.me/27790831530\n📞 +27 79 083 1530\n\n_Reply *CALL ME* or *WHATSAPP ME* for personal follow-up._`;
+          ? `I don't have a verified answer for that yet 🤔`
+          : `I couldn't confidently verify that from our approved info.`;
+        replyContent = `${honest}\n\nCould you give me a bit more detail — a specific product, price, or topic? Or I can connect you straight to Vanto: 📲 https://wa.me/27790831530`;
         shouldAssignHuman = chunks.length === 0;
         actionTaken = "human_handover";
       }
