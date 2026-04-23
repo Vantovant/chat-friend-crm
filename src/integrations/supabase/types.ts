@@ -701,6 +701,60 @@ export type Database = {
           },
         ]
       }
+      missed_inquiries: {
+        Row: {
+          attempts: Json
+          channel: string
+          contact_id: string
+          conversation_id: string | null
+          created_at: string
+          current_step: number
+          flagged_at: string
+          flagged_reason: string
+          id: string
+          last_error: string | null
+          last_inbound_at: string | null
+          last_inbound_snippet: string | null
+          next_send_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: Json
+          channel?: string
+          contact_id: string
+          conversation_id?: string | null
+          created_at?: string
+          current_step?: number
+          flagged_at?: string
+          flagged_reason?: string
+          id?: string
+          last_error?: string | null
+          last_inbound_at?: string | null
+          last_inbound_snippet?: string | null
+          next_send_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: Json
+          channel?: string
+          contact_id?: string
+          conversation_id?: string | null
+          created_at?: string
+          current_step?: number
+          flagged_at?: string
+          flagged_reason?: string
+          id?: string
+          last_error?: string | null
+          last_inbound_at?: string | null
+          last_inbound_snippet?: string | null
+          next_send_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       pipeline_stages: {
         Row: {
           color: string | null

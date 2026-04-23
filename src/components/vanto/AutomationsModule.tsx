@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
-import { Plus, Zap, Clock, BarChart2, ChevronRight, Loader2, Pause, Play, X, Trash2 } from 'lucide-react';
+import { Plus, Zap, Clock, BarChart2, ChevronRight, Loader2, Pause, Play, X, Trash2, LifeBuoy } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { RecoveryPanel } from './RecoveryPanel';
 
 type Automation = {
   id: string;
@@ -46,6 +47,7 @@ const TEMPLATES = [
 ];
 
 export function AutomationsModule() {
+  const [tab, setTab] = useState<'rules' | 'recovery'>('rules');
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -105,107 +107,128 @@ export function AutomationsModule() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
+      <div className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between shrink-0 gap-3 flex-wrap">
         <div>
           <h2 className="text-lg font-bold text-foreground">Automations</h2>
           <p className="text-sm text-muted-foreground">Automate repetitive tasks and follow-ups</p>
         </div>
-        <button onClick={() => { setCreateDefaults({}); setShowCreate(true); }} className="flex items-center gap-2 px-4 py-2 rounded-lg vanto-gradient text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity">
-          <Plus size={16} />
-          New Automation
+        {tab === 'rules' && (
+          <button onClick={() => { setCreateDefaults({}); setShowCreate(true); }} className="flex items-center gap-2 px-4 py-2 rounded-lg vanto-gradient text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity">
+            <Plus size={16} />
+            New Automation
+          </button>
+        )}
+      </div>
+
+      <div className="px-4 md:px-6 border-b border-border flex items-center gap-1 shrink-0">
+        <button
+          onClick={() => setTab('rules')}
+          className={cn('px-4 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center gap-2', tab === 'rules' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}
+        >
+          <Zap size={14} /> Rules
+        </button>
+        <button
+          onClick={() => setTab('recovery')}
+          className={cn('px-4 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center gap-2', tab === 'recovery' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}
+        >
+          <LifeBuoy size={14} /> Recovery
         </button>
       </div>
 
-      <div className="px-4 md:px-6 py-4 border-b border-border grid grid-cols-3 gap-2 md:gap-4 shrink-0">
-        {[
-          { label: 'Active', value: activeCount, icon: Zap, color: 'text-primary' },
-          { label: 'Total Runs', value: totalRuns, icon: BarChart2, color: 'text-amber-400' },
-          { label: 'Total', value: automations.length, icon: Clock, color: 'text-blue-400' },
-        ].map(stat => {
-          const Icon = stat.icon;
-          return (
-            <div key={stat.label} className="vanto-card p-4 flex items-center gap-3">
-              <Icon size={22} className={stat.color} />
-              <div>
-                <p className={cn('text-2xl font-bold', stat.color)}>{stat.value}</p>
-                <p className="text-xs text-muted-foreground">{stat.label}</p>
+      {tab === 'recovery' ? <RecoveryPanel /> : (
+        <>
+          <div className="px-4 md:px-6 py-4 border-b border-border grid grid-cols-3 gap-2 md:gap-4 shrink-0">
+            {[
+              { label: 'Active', value: activeCount, icon: Zap, color: 'text-primary' },
+              { label: 'Total Runs', value: totalRuns, icon: BarChart2, color: 'text-amber-400' },
+              { label: 'Total', value: automations.length, icon: Clock, color: 'text-blue-400' },
+            ].map(stat => {
+              const Icon = stat.icon;
+              return (
+                <div key={stat.label} className="vanto-card p-4 flex items-center gap-3">
+                  <Icon size={22} className={stat.color} />
+                  <div>
+                    <p className={cn('text-2xl font-bold', stat.color)}>{stat.value}</p>
+                    <p className="text-xs text-muted-foreground">{stat.label}</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-6 space-y-3">
+            {loading ? (
+              <div className="flex items-center justify-center h-32 gap-2 text-muted-foreground text-sm">
+                <Loader2 size={14} className="animate-spin" /> Loading automations...
+              </div>
+            ) : automations.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-32 text-muted-foreground text-sm gap-2">
+                <Zap size={24} className="opacity-40" />
+                <p>No automations yet — create your first one!</p>
+              </div>
+            ) : (
+              automations.map(auto => (
+                <div key={auto.id} className="vanto-card p-4 flex items-center gap-4 hover:border-primary/30 transition-colors group">
+                  <button
+                    onClick={() => toggleActive(auto)}
+                    className={cn('w-10 h-6 rounded-full flex items-center transition-colors shrink-0', auto.active ? 'bg-primary justify-end' : 'bg-secondary justify-start')}
+                  >
+                    <div className="w-5 h-5 rounded-full bg-foreground m-0.5 shadow-sm"></div>
+                  </button>
+
+                  <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', auto.active ? 'bg-primary/15' : 'bg-secondary')}>
+                    <Zap size={18} className={auto.active ? 'text-primary' : 'text-muted-foreground'} />
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <p className="font-semibold text-sm text-foreground">{auto.name}</p>
+                      {auto.active && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/15 text-primary border border-primary/30">ACTIVE</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+                      <span className="px-2 py-0.5 rounded bg-secondary border border-border">When: {auto.trigger_condition}</span>
+                      <ChevronRight size={12} />
+                      <span className="px-2 py-0.5 rounded bg-secondary border border-border">Then: {auto.action_description}</span>
+                    </div>
+                  </div>
+
+                  <div className="text-right shrink-0">
+                    <p className="text-sm font-bold text-foreground">{auto.run_count} runs</p>
+                    <p className="text-xs text-muted-foreground">Last: {formatLastRun(auto.last_run_at)}</p>
+                  </div>
+
+                  <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={() => toggleActive(auto)} className={cn('p-2 rounded-lg transition-colors', auto.active ? 'text-amber-400 hover:bg-amber-500/15' : 'text-primary hover:bg-primary/15')}>
+                      {auto.active ? <Pause size={15} /> : <Play size={15} />}
+                    </button>
+                    <button onClick={() => deleteAutomation(auto.id)} className="p-2 rounded-lg text-destructive/60 hover:text-destructive hover:bg-destructive/10 transition-colors">
+                      <Trash2 size={15} />
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+
+            <div className="mt-6">
+              <p className="text-sm font-semibold text-muted-foreground mb-3">🧩 Quick Templates</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {TEMPLATES.map(tpl => (
+                  <button key={tpl.name} onClick={() => useTemplate(tpl)} className="vanto-card p-3 text-left hover:border-primary/30 transition-colors">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Zap size={14} className="text-primary" />
+                      <p className="text-sm font-medium text-foreground">{tpl.name}</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{tpl.trigger} → {tpl.action}</p>
+                    <span className="mt-2 text-xs text-primary font-medium">Use template →</span>
+                  </button>
+                ))}
               </div>
             </div>
-          );
-        })}
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-6 space-y-3">
-        {loading ? (
-          <div className="flex items-center justify-center h-32 gap-2 text-muted-foreground text-sm">
-            <Loader2 size={14} className="animate-spin" /> Loading automations...
           </div>
-        ) : automations.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-32 text-muted-foreground text-sm gap-2">
-            <Zap size={24} className="opacity-40" />
-            <p>No automations yet — create your first one!</p>
-          </div>
-        ) : (
-          automations.map(auto => (
-            <div key={auto.id} className="vanto-card p-4 flex items-center gap-4 hover:border-primary/30 transition-colors group">
-              <button
-                onClick={() => toggleActive(auto)}
-                className={cn('w-10 h-6 rounded-full flex items-center transition-colors shrink-0', auto.active ? 'bg-primary justify-end' : 'bg-secondary justify-start')}
-              >
-                <div className="w-5 h-5 rounded-full bg-foreground m-0.5 shadow-sm"></div>
-              </button>
-
-              <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', auto.active ? 'bg-primary/15' : 'bg-secondary')}>
-                <Zap size={18} className={auto.active ? 'text-primary' : 'text-muted-foreground'} />
-              </div>
-
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <p className="font-semibold text-sm text-foreground">{auto.name}</p>
-                  {auto.active && (
-                    <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-primary/15 text-primary border border-primary/30">ACTIVE</span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
-                  <span className="px-2 py-0.5 rounded bg-secondary border border-border">When: {auto.trigger_condition}</span>
-                  <ChevronRight size={12} />
-                  <span className="px-2 py-0.5 rounded bg-secondary border border-border">Then: {auto.action_description}</span>
-                </div>
-              </div>
-
-              <div className="text-right shrink-0">
-                <p className="text-sm font-bold text-foreground">{auto.run_count} runs</p>
-                <p className="text-xs text-muted-foreground">Last: {formatLastRun(auto.last_run_at)}</p>
-              </div>
-
-              <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={() => toggleActive(auto)} className={cn('p-2 rounded-lg transition-colors', auto.active ? 'text-amber-400 hover:bg-amber-500/15' : 'text-primary hover:bg-primary/15')}>
-                  {auto.active ? <Pause size={15} /> : <Play size={15} />}
-                </button>
-                <button onClick={() => deleteAutomation(auto.id)} className="p-2 rounded-lg text-destructive/60 hover:text-destructive hover:bg-destructive/10 transition-colors">
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            </div>
-          ))
-        )}
-
-        <div className="mt-6">
-          <p className="text-sm font-semibold text-muted-foreground mb-3">🧩 Quick Templates</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {TEMPLATES.map(tpl => (
-              <button key={tpl.name} onClick={() => useTemplate(tpl)} className="vanto-card p-3 text-left hover:border-primary/30 transition-colors">
-                <div className="flex items-center gap-2 mb-1">
-                  <Zap size={14} className="text-primary" />
-                  <p className="text-sm font-medium text-foreground">{tpl.name}</p>
-                </div>
-                <p className="text-xs text-muted-foreground">{tpl.trigger} → {tpl.action}</p>
-                <span className="mt-2 text-xs text-primary font-medium">Use template →</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+        </>
+      )}
 
       {showCreate && (
         <CreateAutomationDialog
