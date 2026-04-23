@@ -1,15 +1,15 @@
 /**
- * Vanto CRM — whatsapp-auto-reply Edge Function v5.0
- * ONE-SHOT AI-First Auto-Reply with Knowledge Vault RAG
+ * Vanto CRM — whatsapp-auto-reply Edge Function v6.0
+ * Two-Layer System: TRUTH LAYER (knowledge grounding) + SALES INTELLIGENCE LAYER
  *
- * v5.0 changes:
- * - ONE-SHOT design: first reply is a complete, high-value response
- * - 3-part structure: Direct Answer → Smart Next Steps → Human Contact
- * - Topic-to-link routing from "Topics and Links" knowledge document
- * - Pricing priority: product/price questions search products collection first
- * - "CALL ME" / "WHATSAPP ME" intent detection for human handoff
- * - Product alias recognition (NRM, HTR, ICE, PWR, etc.)
- * - Always includes human contact options in every response
+ * v6.0 — Sales Intelligence Upgrade (truth layer preserved from v5.3):
+ * - Elite WhatsApp sales-consultant persona, African market aware
+ * - Response-mode policy: GREETING / DIRECT_FACT / CLARIFY / RECOMMEND / SALES_ADVANCE / HANDOFF
+ * - Light, warm greeting (no giant menu dump)
+ * - Smart context-aware next-step (not heavy footer on every reply)
+ * - AI must always end factual answers with one sharp follow-up question
+ * - Truth layer (v5.3): helper-file demotion, strict-collection scoring boost,
+ *   Product Reference forced inclusion, deterministic pricing extractor preserved
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
