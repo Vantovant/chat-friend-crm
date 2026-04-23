@@ -343,10 +343,14 @@ function extractDirectPricingAnswer(chunks: KnowledgeChunk[], detectedProduct: s
 
 // ── Deterministic loader: fetch canonical pricing doc chunks by title ────────
 async function loadPricingDocChunks(svc: any): Promise<KnowledgeChunk[]> {
+  return await loadFileChunksByTitle(svc, PRICING_DOC_TITLE);
+}
+
+async function loadFileChunksByTitle(svc: any, title: string): Promise<KnowledgeChunk[]> {
   const { data: file } = await svc
     .from("knowledge_files")
     .select("id, title, collection")
-    .eq("title", PRICING_DOC_TITLE)
+    .eq("title", title)
     .eq("status", "approved")
     .maybeSingle();
   if (!file) return [];
