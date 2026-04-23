@@ -746,14 +746,18 @@ Deno.serve(async (req) => {
         const body = aiAnswer?.trim() || pricingChunks[0].chunk_text.slice(0, 600);
         replyContent = `${intro}\n\n${body}\n\n_Reply with a product code (e.g. NRM, RLX, GRW) for full details, or ask "How much is [product]?"._${HUMAN_CONTACT_FOOTER}`;
         actionTaken = intent.intent === "menu_1" ? "menu_sent" : "knowledge_strict";
+        diag.answer_source = "knowledge_pricing_doc";
+        diag.source_files = [PRICING_DOC_TITLE];
       } else {
         replyContent = NO_ANSWER_FALLBACK;
         shouldAssignHuman = true;
         actionTaken = "human_handover";
+        diag.answer_source = "fallback_no_pricing_doc";
       }
     } else if (!searchQuery || searchQuery.length < 2) {
       replyContent = GREETING_REPLY;
       actionTaken = "greeting_sent";
+      diag.answer_source = "static_greeting";
     } else {
       const searchQueries = buildSearchQueries(rawInput, intent);
       diag.search_queries = searchQueries.slice(0, 5);
@@ -766,12 +770,14 @@ Deno.serve(async (req) => {
       chunksCount = chunks.length;
       diag.chunks_found = chunksCount;
       diag.topic_links_found = topicChunks.length;
+      diag.source_files = chunks.slice(0, 5).map((c) => `${c.file_title} (${c.file_collection})`);
 
       const matchedCol = chunks[0]?.file_collection || "";
       const effectiveMode: "strict" | "assisted" = STRICT_COLLECTIONS.has(matchedCol) ? "strict" : intent.mode;
       const topRelevance = chunks[0]?.relevance || 0;
       diag.top_relevance = topRelevance;
       diag.effective_mode = effectiveMode;
+      diag.top_chunk_title = chunks[0]?.file_title || null;
 
       // Strict-mode min-relevance gate: refuse to bluff on weak retrieval.
       const passesRelevanceGate = effectiveMode !== "strict" || topRelevance >= STRICT_MIN_RELEVANCE;
@@ -795,14 +801,17 @@ Deno.serve(async (req) => {
           fullReply += HUMAN_CONTACT_FOOTER;
           replyContent = fullReply;
           actionTaken = directPricingAnswer ? "knowledge_strict" : "one_shot_reply";
+          diag.answer_source = directPricingAnswer ? "deterministic_extract" : "ai_grounded_chunks";
         } else {
           const snippets = chunks.slice(0, 2).map((r: any) => `📌 *${r.file_title}*\n${r.chunk_text.slice(0, 250)}`).join("\n\n");
           replyContent = `Here's what I found:\n\n${snippets}${buildNextSteps(intent.topicCategory, intent.detectedProduct)}${HUMAN_CONTACT_FOOTER}`;
           actionTaken = "knowledge_reply";
+          diag.answer_source = "raw_chunk_snippets";
         }
       } else {
         // Honest fallback: zero chunks OR strict-mode chunks below relevance threshold.
         diag.fallback_reason = chunks.length === 0 ? "no_chunks" : "low_relevance_strict";
+        diag.answer_source = "honest_fallback";
         const honest = chunks.length === 0
           ? `I couldn't find that in our approved knowledge yet.`
           : `I couldn't verify a confident answer from our approved knowledge for "${searchQuery.slice(0, 60)}".`;
