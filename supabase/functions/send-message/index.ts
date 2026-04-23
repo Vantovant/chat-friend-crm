@@ -155,6 +155,20 @@ Deno.serve(async (req) => {
 
   const trimmed = String(content).trim();
 
+  // ── Detect preferred provider based on most recent inbound message ──
+  // STABILIZATION v5.1: route replies via the same provider the user used (Twilio or Maytapi)
+  const { data: lastInboundMsg } = await serviceClient
+    .from("messages")
+    .select("provider")
+    .eq("conversation_id", conversation_id)
+    .eq("is_outbound", false)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const preferredProvider = (lastInboundMsg?.provider === "maytapi") ? "maytapi" : "twilio";
+  console.log("[send-message] preferredProvider:", preferredProvider, "for conv:", conversation_id);
+
   // ── Insert message (queued) ──
   const { data: msg, error: msgErr } = await serviceClient
     .from("messages")
@@ -166,7 +180,7 @@ Deno.serve(async (req) => {
       sent_by: userId,
       status: "queued",
       status_raw: "queued",
-      provider: "twilio",
+      provider: preferredProvider,
     })
     .select()
     .single();
@@ -175,6 +189,57 @@ Deno.serve(async (req) => {
     console.error("[send-message] Insert error:", msgErr?.message);
     return jsonRes({ ok: false, code: "DB_ERROR", message: msgErr?.message || "Insert failed" }, 500);
   }
+
+  // ── ROUTE: Maytapi 1-on-1 send ──
+  if (preferredProvider === "maytapi") {
+    try {
+      const maytapiRes = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE_ANON_KEY,
+          Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        },
+        body: JSON.stringify({ to_number: phoneE164, message: trimmed }),
+      });
+      const maytapiData = await maytapiRes.json().catch(() => ({}));
+
+      if (!maytapiRes.ok || !maytapiData?.success) {
+        const errStr = `[MAYTAPI_SEND_FAILED] ${maytapiData?.error || "Unknown"}`;
+        await serviceClient.from("messages").update({
+          status: "failed", status_raw: "failed", error: errStr,
+        }).eq("id", msg.id);
+        return jsonRes({
+          ok: false, code: "MAYTAPI_SEND_FAILED",
+          message: maytapiData?.error || "Maytapi send failed",
+          details: maytapiData,
+        }, 502);
+      }
+
+      const maytapiMsgId = maytapiData?.message_id || null;
+      await serviceClient.from("messages").update({
+        status: "sent", status_raw: "sent", provider_message_id: maytapiMsgId,
+      }).eq("id", msg.id);
+
+      await serviceClient.from("conversations").update({
+        last_message: trimmed.length > 200 ? trimmed.slice(0, 200) + "…" : trimmed,
+        last_message_at: new Date().toISOString(),
+        last_outbound_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq("id", conversation_id);
+
+      return jsonRes({
+        ok: true, success: true,
+        message: { ...msg, status: "sent", status_raw: "sent", provider_message_id: maytapiMsgId, provider: "maytapi" },
+      });
+    } catch (e: any) {
+      await serviceClient.from("messages").update({
+        status: "failed", status_raw: "failed", error: e?.message || "Network error reaching Maytapi",
+      }).eq("id", msg.id);
+      return jsonRes({ ok: false, code: "NETWORK_ERROR", message: e?.message || "Maytapi send failed" }, 503);
+    }
+  }
+
 
   // ── Twilio secrets — MessagingServiceSid ONLY (no From fallback) ──
   const TWILIO_ACCOUNT_SID = Deno.env.get("TWILIO_ACCOUNT_SID");
