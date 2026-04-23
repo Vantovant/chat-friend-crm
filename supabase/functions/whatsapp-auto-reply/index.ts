@@ -1070,7 +1070,7 @@ Deno.serve(async (req) => {
         // Try deterministic pricing extractor first (no AI, no hallucination risk).
         const directPricingAnswer = extractDirectPricingAnswer(chunks, intent.detectedProduct);
         const aiAnswer = directPricingAnswer
-          || await generateAIAnswer(searchQuery, chunks, effectiveMode, intent.topicCategory, intent.detectedProduct, memory);
+          || await generateAIAnswer(searchQuery, chunks, effectiveMode, intent.topicCategory, intent.detectedProduct, memory, matchedTrainerRules);
 
         if (aiAnswer) {
           let fullReply = aiAnswer.trim();
