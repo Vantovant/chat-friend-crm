@@ -22,6 +22,27 @@ function normalizePhoneToE164(raw: string): string {
   return cleaned.startsWith("+") ? cleaned : "+" + d;
 }
 
+function getInboundText(message: any): string {
+  if (!message) return "";
+  if (typeof message.text === "string") return message.text;
+  if (typeof message.body === "string") return message.body;
+  if (typeof message.caption === "string") return message.caption;
+  if (typeof message.message === "string") return message.message;
+  if (typeof message?.text?.body === "string") return message.text.body;
+  if (typeof message?.extendedTextMessage?.text === "string") return message.extendedTextMessage.text;
+  if (typeof message?.conversation === "string") return message.conversation;
+  return "";
+}
+
+function getInboundPhone(payload: any, message: any): string {
+  return payload?.user?.phone
+    || payload?.conversation
+    || message?.from
+    || message?.chatId
+    || payload?.from
+    || "";
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -84,23 +105,26 @@ Deno.serve(async (req) => {
 
     // ── BRANCH 2: Inbound 1-on-1 message (NEW) ──
     // Maytapi inbound message shape: { type: "message", message: { fromMe, text, id, ... }, user: { phone, name }, conversation: "..." }
+    const message = payload.message || payload.data || {};
+    const rawConversation = String(payload.conversation || message.chatId || message.from || "");
+    const rawText = getInboundText(message);
+    const isFromMe = message.fromMe === true || payload.fromMe === true;
     const isInboundMessage =
-      payload.type === "message" &&
-      payload.message &&
-      payload.message.fromMe === false &&
+      (payload.type === "message" || payload.type === "text" || (!!rawText && !!rawConversation)) &&
+      !isFromMe &&
       // Skip group messages — only 1-on-1
-      !(payload.conversation && String(payload.conversation).includes("@g.us"));
+      !rawConversation.includes("@g.us");
 
     if (isInboundMessage) {
-      const msg = payload.message;
+      const msg = message;
       const user = payload.user || {};
-      const rawPhone = user.phone || payload.conversation || msg.from || "";
+      const rawPhone = getInboundPhone(payload, msg);
       const phoneE164 = normalizePhoneToE164(rawPhone);
-      const text = msg.text || msg.body || msg.caption || "";
+      const text = rawText;
       const providerMessageId = msg.id || null;
       const senderName = user.name || msg.notifyName || phoneE164;
 
-      console.log("[maytapi-inbound] message from:", phoneE164, "text:", text.slice(0, 80));
+      console.log("[maytapi-inbound] message from:", phoneE164, "text:", text.slice(0, 80), "type:", payload.type || "unknown");
 
       if (!phoneE164 || !text) {
         return new Response(JSON.stringify({ ok: true, ignored: true, reason: "no_phone_or_text" }), {

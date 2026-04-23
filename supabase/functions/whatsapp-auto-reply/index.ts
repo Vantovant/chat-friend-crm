@@ -97,7 +97,7 @@ const TOPIC_LINKS = {
 
 // ── Menu Backward Compatibility ─────────────────────────────────────────────
 const MENU_QUERY_MAP: Record<string, { query: string; collections: string[] }> = {
-  "1": { query: "prices product information cost aplgo products pricing membership joining GO-Status", collections: ["products", "opportunity", "general"] },
+  "1": { query: "APLGO product prices South Africa VAT PV daily collection member prices", collections: ["products", "general"] },
   "2": { query: "how to use benefits product usage wellness health benefits dosage drops", collections: ["products", "general"] },
 };
 
@@ -195,6 +195,102 @@ function detectIntent(normalized: string): IntentResult {
     detectedProduct,
     availableTime: null,
   };
+}
+
+type KnowledgeChunk = {
+  chunk_text: string;
+  file_title: string;
+  file_collection: string;
+  relevance: number;
+  chunk_index?: number;
+};
+
+function uniqueQueries(values: string[]): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const value of values) {
+    const query = value.replace(/\s+/g, " ").trim();
+    if (query.length < 2) continue;
+    const key = query.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(query);
+  }
+  return output;
+}
+
+function buildSearchQueries(rawInput: string, intent: IntentResult): string[] {
+  const queries = [rawInput, intent.query];
+
+  if (intent.intent === "menu_1") {
+    queries.unshift(
+      "APLGO product pricing quick reference ZAR",
+      "product prices VAT PV South Africa",
+      "NRM GRW GTS PWR RLX price"
+    );
+  }
+
+  if (intent.intent === "menu_2") {
+    queries.unshift(
+      "APLGO product benefits and how to use",
+      "product benefits wellness usage drops"
+    );
+  }
+
+  if (intent.detectedProduct) {
+    queries.unshift(
+      `${intent.detectedProduct} price PV VAT`,
+      `${intent.detectedProduct} price`,
+      intent.detectedProduct
+    );
+  }
+
+  if (intent.isPricing && !intent.detectedProduct) {
+    queries.unshift(
+      "APLGO price list ZAR VAT PV",
+      "product price PV VAT"
+    );
+  }
+
+  return uniqueQueries(queries);
+}
+
+function scoreKnowledgeChunk(chunk: KnowledgeChunk, intent: IntentResult): number {
+  const title = chunk.file_title.toLowerCase();
+  const text = chunk.chunk_text.toLowerCase();
+  let score = Number(chunk.relevance || 0);
+
+  if (chunk.file_collection === "products") score += 3;
+  if (/price|pricing|quick reference/.test(title)) score += 4;
+  if (intent.isPricing && /(vat|pv|zar|r\d)/.test(text)) score += 1.5;
+  if (intent.detectedProduct && text.includes(intent.detectedProduct.toLowerCase())) score += 5;
+
+  return score;
+}
+
+function extractDirectPricingAnswer(chunks: KnowledgeChunk[], detectedProduct: string | null): string | null {
+  if (!detectedProduct) return null;
+
+  const escapedProduct = detectedProduct.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  for (const chunk of chunks) {
+    const productLineMatch = chunk.chunk_text.match(new RegExp(`(?:-|•)?\\s*${escapedProduct}\\s*\\(([^)]+)\\)\\s*:\\s*R\\s*([\\d.,]+)`, "i"));
+    if (productLineMatch) {
+      const [, benefit, price] = productLineMatch;
+      const pvMatch = chunk.chunk_text.match(/(\d+)\s*PV/i);
+      const pvText = pvMatch ? ` It carries *${pvMatch[1]} PV*.` : "";
+      return `*${detectedProduct}* is *R${price}* incl. VAT in South Africa.${pvText} It is listed for *${benefit.trim()}*.`;
+    }
+
+    const genericPriceMatch = chunk.chunk_text.match(new RegExp(`${escapedProduct}[\\s\\S]{0,120}?R\\s*([\\d.,]+)`, "i"));
+    if (genericPriceMatch) {
+      const pvMatch = chunk.chunk_text.match(/(\d+)\s*PV/i);
+      const pvText = pvMatch ? ` It carries *${pvMatch[1]} PV*.` : "";
+      return `*${detectedProduct}* is *R${genericPriceMatch[1]}* incl. VAT in South Africa.${pvText}`;
+    }
+  }
+
+  return null;
 }
 
 // ── Build Smart Next Steps ──────────────────────────────────────────────────
@@ -308,14 +404,45 @@ ${contextSnippets}`;
 
 // ── Search Knowledge ─────────────────────────────────────────────────────────
 async function searchKnowledge(
-  svc: any, query: string, collections: string[], maxResults = 8,
-): Promise<{ chunk_text: string; file_title: string; file_collection: string; relevance: number }[]> {
-  for (const col of collections) {
-    const { data } = await svc.rpc("search_knowledge", { query_text: query, collection_filter: col, max_results: maxResults });
-    if (data && data.length > 0) return data;
+  svc: any, queries: string[], collections: string[], intent: IntentResult, maxResults = 8,
+): Promise<KnowledgeChunk[]> {
+  const results: KnowledgeChunk[] = [];
+  const seen = new Set<string>();
+  const searchCollections = uniqueQueries([
+    ...(intent.isPricing ? ["products"] : []),
+    ...collections,
+  ]);
+
+  const collectRows = (rows: any[] | null | undefined) => {
+    for (const row of rows || []) {
+      const key = `${row.file_title}:${row.chunk_index}:${row.chunk_text.slice(0, 120)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      results.push(row as KnowledgeChunk);
+    }
+  };
+
+  for (const query of queries) {
+    for (const col of searchCollections) {
+      const { data } = await svc.rpc("search_knowledge", {
+        query_text: query,
+        collection_filter: col,
+        max_results: maxResults,
+      });
+      collectRows(data);
+    }
   }
-  const { data } = await svc.rpc("search_knowledge", { query_text: query, max_results: maxResults });
-  return data || [];
+
+  if (results.length === 0) {
+    for (const query of queries) {
+      const { data } = await svc.rpc("search_knowledge", { query_text: query, max_results: maxResults });
+      collectRows(data);
+    }
+  }
+
+  return results
+    .sort((a, b) => scoreKnowledgeChunk(b, intent) - scoreKnowledgeChunk(a, intent))
+    .slice(0, maxResults);
 }
 
 // ── Also search "Topics and Links" for relevant URLs ────────────────────────
@@ -406,6 +533,26 @@ Deno.serve(async (req) => {
     return jsonRes({ ok: true, auto_reply: false, reason: "TEMPLATE_REQUIRED", window_expired: true });
   }
 
+   // ── Message dedupe ──
+  if (inbound_message_id) {
+    const { count: existingInboundCount } = await svc
+      .from("auto_reply_events")
+      .select("id", { count: "exact", head: true })
+      .eq("conversation_id", conversation_id)
+      .eq("inbound_message_id", inbound_message_id);
+
+    if ((existingInboundCount || 0) > 0) {
+      diag.result = "duplicate_inbound_ignored";
+      console.log("[auto-reply] DIAG:", JSON.stringify(diag));
+      return jsonRes({ ok: true, auto_reply: false, reason: "Inbound already processed" });
+    }
+  }
+
+  // ── Normalize & detect intent ──
+  const rawInput = (inbound_content || "").trim();
+  const normalized = rawInput.toLowerCase().replace(/\s+/g, " ").trim();
+  const intent = detectIntent(normalized);
+
   // ── Rate limiting ──
   const cooldownAgo = new Date(Date.now() - RATE_LIMIT_COOLDOWN_MS).toISOString();
   const { count: recentCount } = await svc.from("auto_reply_events").select("id", { count: "exact", head: true })
@@ -413,7 +560,8 @@ Deno.serve(async (req) => {
     .in("action_taken", ["one_shot_reply", "menu_sent", "knowledge_strict", "knowledge_assisted", "ai_knowledge_reply", "knowledge_reply", "greeting_sent", "human_handover", "call_me", "whatsapp_me", "available_at"])
     .gte("created_at", cooldownAgo);
 
-  if ((recentCount || 0) >= 1) {
+  const shouldBypassCooldown = intent.intent !== "greeting";
+  if (!shouldBypassCooldown && (recentCount || 0) >= 1) {
     diag.result = "rate_limited_cooldown";
     console.log("[auto-reply] DIAG:", JSON.stringify(diag));
     return jsonRes({ ok: true, auto_reply: false, reason: "Cooldown active (15s)" });
@@ -430,11 +578,6 @@ Deno.serve(async (req) => {
     console.log("[auto-reply] DIAG:", JSON.stringify(diag));
     return jsonRes({ ok: true, auto_reply: false, reason: "Daily limit reached (40)" });
   }
-
-  // ── Normalize & detect intent ──
-  const rawInput = (inbound_content || "").trim();
-  const normalized = rawInput.toLowerCase().replace(/\s+/g, " ").trim();
-  const intent = detectIntent(normalized);
 
   diag.normalized = normalized.slice(0, 100);
   diag.intent = intent.intent;
@@ -478,9 +621,12 @@ Deno.serve(async (req) => {
       replyContent = GREETING_REPLY;
       actionTaken = "greeting_sent";
     } else {
+      const searchQueries = buildSearchQueries(rawInput, intent);
+      diag.search_queries = searchQueries.slice(0, 5);
+
       // Search knowledge + topics-and-links in parallel
       const [chunks, topicChunks] = await Promise.all([
-        searchKnowledge(svc, searchQuery, intent.collections, 8),
+        searchKnowledge(svc, searchQueries, intent.collections, intent, 8),
         searchTopicsAndLinks(svc, searchQuery),
       ]);
 
@@ -492,8 +638,9 @@ Deno.serve(async (req) => {
         knowledgeFound = true;
         const matchedCol = chunks[0]?.file_collection || "";
         const effectiveMode = STRICT_COLLECTIONS.has(matchedCol) ? "strict" : intent.mode;
+        const directPricingAnswer = extractDirectPricingAnswer(chunks, intent.detectedProduct);
 
-        const aiAnswer = await generateAIAnswer(searchQuery, chunks, effectiveMode, intent.topicCategory, intent.detectedProduct);
+        const aiAnswer = directPricingAnswer || await generateAIAnswer(searchQuery, chunks, effectiveMode, intent.topicCategory, intent.detectedProduct);
 
         if (aiAnswer) {
           // Build the one-shot 3-part response

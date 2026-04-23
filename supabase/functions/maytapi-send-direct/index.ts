@@ -15,9 +15,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    const PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID");
-    const PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID");
-    const TOKEN = Deno.env.get("MAYTAPI_API_TOKEN");
+    const PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID")?.trim();
+    const PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID")?.trim();
+    const TOKEN = Deno.env.get("MAYTAPI_API_TOKEN")?.trim();
 
     if (!PRODUCT_ID || !PHONE_ID || !TOKEN) {
       return new Response(JSON.stringify({ error: "Maytapi credentials not configured" }), {
