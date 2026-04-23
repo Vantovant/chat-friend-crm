@@ -817,20 +817,23 @@ Deno.serve(async (req) => {
 
         if (aiAnswer) {
           let fullReply = aiAnswer.trim();
-          const dynamicLinks = extractLinksFromChunks(topicChunks, intent.detectedProduct);
-          if (dynamicLinks.length > 0) {
-            topicsLinksUsed = true;
-            fullReply += `\n\n📌 *Helpful next steps:*\n${dynamicLinks.join("\n")}`;
+          // v6.0 — attach at most ONE relevant product/topic link, not the giant block.
+          // The AI's own follow-up question carries the conversation forward.
+          if (intent.detectedProduct && PRODUCT_LINKS[intent.detectedProduct]) {
+            fullReply += `\n\n📖 More on ${intent.detectedProduct}: ${PRODUCT_LINKS[intent.detectedProduct]}`;
           } else {
-            fullReply += buildNextSteps(intent.topicCategory, intent.detectedProduct);
+            const dynamicLinks = extractLinksFromChunks(topicChunks, intent.detectedProduct);
+            if (dynamicLinks.length > 0) {
+              topicsLinksUsed = true;
+              fullReply += `\n\n${dynamicLinks[0]}`;
+            }
           }
-          fullReply += HUMAN_CONTACT_FOOTER;
           replyContent = fullReply;
           actionTaken = directPricingAnswer ? "knowledge_strict" : "one_shot_reply";
           diag.answer_source = directPricingAnswer ? "deterministic_extract" : "ai_grounded_chunks";
         } else {
-          const snippets = chunks.slice(0, 2).map((r: any) => `📌 *${r.file_title}*\n${r.chunk_text.slice(0, 250)}`).join("\n\n");
-          replyContent = `Here's what I found:\n\n${snippets}${buildNextSteps(intent.topicCategory, intent.detectedProduct)}${HUMAN_CONTACT_FOOTER}`;
+          const snippets = chunks.slice(0, 1).map((r: any) => r.chunk_text.slice(0, 280)).join("\n\n");
+          replyContent = `${snippets}\n\n_Want me to dig deeper on this, or speak to Vanto directly?_`;
           actionTaken = "knowledge_reply";
           diag.answer_source = "raw_chunk_snippets";
         }
