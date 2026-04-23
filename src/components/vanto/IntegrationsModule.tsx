@@ -84,6 +84,8 @@ function ResultBadge({ result }: { result: SyncResult }) {
 export function IntegrationsModule({ userId = '' }: { userId?: string }) {
   const [showExtensionModal, setShowExtensionModal] = useState(false);
   const { toast } = useToast();
+  const currentUser = useCurrentUser();
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
   // Settings from DB
   const [settings, setSettings] = useState<Record<string, string>>({});
