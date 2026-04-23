@@ -282,23 +282,53 @@ function extractDirectPricingAnswer(chunks: KnowledgeChunk[], detectedProduct: s
   const escapedProduct = detectedProduct.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   for (const chunk of chunks) {
-    const productLineMatch = chunk.chunk_text.match(new RegExp(`(?:-|•)?\\s*${escapedProduct}\\s*\\(([^)]+)\\)\\s*:\\s*R\\s*([\\d.,]+)`, "i"));
+    // Format: "- NRM (Blood sugar balance): R433.13"
+    const productLineMatch = chunk.chunk_text.match(
+      new RegExp(`(?:[-•*]\\s*)?${escapedProduct}\\b\\s*\\(([^)]+)\\)\\s*:\\s*R\\s*([\\d.,]+)`, "i"),
+    );
     if (productLineMatch) {
       const [, benefit, price] = productLineMatch;
-      const pvMatch = chunk.chunk_text.match(/(\d+)\s*PV/i);
-      const pvText = pvMatch ? ` It carries *${pvMatch[1]} PV*.` : "";
-      return `*${detectedProduct}* is *R${price}* incl. VAT in South Africa.${pvText} It is listed for *${benefit.trim()}*.`;
+      // Look for collection-level PV (e.g. "DAILY COLLECTION (20 PV each, R433.13)")
+      const collectionPvMatch = chunk.chunk_text.match(
+        new RegExp(`(?:DAILY|PREMIUM|ELITE|SPECIALTY)[^\\n]*?\\((\\d+)\\s*PV[^)]*\\)[\\s\\S]{0,1500}?${escapedProduct}\\b`, "i"),
+      );
+      const pvText = collectionPvMatch ? ` It carries *${collectionPvMatch[1]} PV*.` : "";
+      return `*${detectedProduct}* is *R${price}* incl. VAT (member price) in South Africa.${pvText} Listed for *${benefit.trim()}*.`;
     }
 
-    const genericPriceMatch = chunk.chunk_text.match(new RegExp(`${escapedProduct}[\\s\\S]{0,120}?R\\s*([\\d.,]+)`, "i"));
+    // Fallback: any "NRM ... R<num>" within 200 chars
+    const genericPriceMatch = chunk.chunk_text.match(
+      new RegExp(`${escapedProduct}\\b[\\s\\S]{0,200}?R\\s*([\\d.,]+)`, "i"),
+    );
     if (genericPriceMatch) {
-      const pvMatch = chunk.chunk_text.match(/(\d+)\s*PV/i);
-      const pvText = pvMatch ? ` It carries *${pvMatch[1]} PV*.` : "";
-      return `*${detectedProduct}* is *R${genericPriceMatch[1]}* incl. VAT in South Africa.${pvText}`;
+      return `*${detectedProduct}* is *R${genericPriceMatch[1]}* incl. VAT (member price) in South Africa.`;
     }
   }
 
   return null;
+}
+
+// ── Deterministic loader: fetch canonical pricing doc chunks by title ────────
+async function loadPricingDocChunks(svc: any): Promise<KnowledgeChunk[]> {
+  const { data: file } = await svc
+    .from("knowledge_files")
+    .select("id, title, collection")
+    .eq("title", PRICING_DOC_TITLE)
+    .eq("status", "approved")
+    .maybeSingle();
+  if (!file) return [];
+  const { data: chunks } = await svc
+    .from("knowledge_chunks")
+    .select("chunk_text, chunk_index, file_id")
+    .eq("file_id", file.id)
+    .order("chunk_index", { ascending: true });
+  return (chunks || []).map((c: any) => ({
+    chunk_text: c.chunk_text,
+    file_title: file.title,
+    file_collection: file.collection,
+    relevance: 1,
+    chunk_index: c.chunk_index,
+  }));
 }
 
 // ── Build Smart Next Steps ──────────────────────────────────────────────────
