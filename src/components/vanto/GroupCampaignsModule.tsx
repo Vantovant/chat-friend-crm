@@ -113,6 +113,8 @@ export function GroupCampaignsModule() {
           connected: data?.connected ?? false,
           status: data?.status ?? null,
           checking: false,
+          // SECURITY: number is only present in the response for admins.
+          // Non-admins will receive null and the UI will hide the field.
           number: data?.number ?? null,
         });
       }
