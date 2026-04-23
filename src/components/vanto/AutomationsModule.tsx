@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
-import { Plus, Zap, Clock, BarChart2, ChevronRight, Loader2, Pause, Play, X, Trash2 } from 'lucide-react';
+import { Plus, Zap, Clock, BarChart2, ChevronRight, Loader2, Pause, Play, X, Trash2, LifeBuoy } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import { RecoveryPanel } from './RecoveryPanel';
 
 type Automation = {
   id: string;
@@ -46,6 +47,7 @@ const TEMPLATES = [
 ];
 
 export function AutomationsModule() {
+  const [tab, setTab] = useState<'rules' | 'recovery'>('rules');
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -105,16 +107,37 @@ export function AutomationsModule() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
+      <div className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between shrink-0 gap-3 flex-wrap">
         <div>
           <h2 className="text-lg font-bold text-foreground">Automations</h2>
           <p className="text-sm text-muted-foreground">Automate repetitive tasks and follow-ups</p>
         </div>
-        <button onClick={() => { setCreateDefaults({}); setShowCreate(true); }} className="flex items-center gap-2 px-4 py-2 rounded-lg vanto-gradient text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity">
-          <Plus size={16} />
-          New Automation
+        {tab === 'rules' && (
+          <button onClick={() => { setCreateDefaults({}); setShowCreate(true); }} className="flex items-center gap-2 px-4 py-2 rounded-lg vanto-gradient text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity">
+            <Plus size={16} />
+            New Automation
+          </button>
+        )}
+      </div>
+
+      <div className="px-4 md:px-6 border-b border-border flex items-center gap-1 shrink-0">
+        <button
+          onClick={() => setTab('rules')}
+          className={cn('px-4 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center gap-2', tab === 'rules' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}
+        >
+          <Zap size={14} /> Rules
+        </button>
+        <button
+          onClick={() => setTab('recovery')}
+          className={cn('px-4 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center gap-2', tab === 'recovery' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}
+        >
+          <LifeBuoy size={14} /> Recovery
         </button>
       </div>
+
+      {tab === 'recovery' ? <RecoveryPanel /> : (<>
+      </>)}
+      {tab === 'rules' && (<></>)}
 
       <div className="px-4 md:px-6 py-4 border-b border-border grid grid-cols-3 gap-2 md:gap-4 shrink-0">
         {[
