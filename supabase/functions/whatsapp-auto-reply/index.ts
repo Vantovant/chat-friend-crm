@@ -1028,9 +1028,9 @@ Deno.serve(async (req) => {
         diag.fallback_reason = chunks.length === 0 ? "no_chunks_after_raw_text" : "low_relevance_after_raw_text";
         diag.answer_source = "honest_fallback";
         const honest = chunks.length === 0
-          ? `I don't have a verified answer for that yet 🤔`
-          : `I couldn't confidently verify that from our approved info.`;
-        replyContent = `${honest}\n\nCould you give me a bit more detail — a specific product, price, or topic? Or I can connect you straight to Vanto: 📲 https://wa.me/27790831530`;
+          ? `Hmm, I don't have that one in our approved info just yet.`
+          : `Let me get that one straight from Vanto so you get the right answer.`;
+        replyContent = `${honest}\n\nWant me to share our product menu, or connect you with Vanto directly? 📲 https://wa.me/27790831530`;
         shouldAssignHuman = chunks.length === 0;
         actionTaken = "human_handover";
       }
