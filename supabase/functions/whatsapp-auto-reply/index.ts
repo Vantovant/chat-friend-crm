@@ -428,7 +428,7 @@ Deno.serve(async (req) => {
   if ((dailyCount || 0) >= MAX_AUTO_REPLIES_PER_DAY) {
     diag.result = "rate_limited_daily";
     console.log("[auto-reply] DIAG:", JSON.stringify(diag));
-    return jsonRes({ ok: true, auto_reply: false, reason: "Daily limit reached (20)" });
+    return jsonRes({ ok: true, auto_reply: false, reason: "Daily limit reached (40)" });
   }
 
   // ── Normalize & detect intent ──
