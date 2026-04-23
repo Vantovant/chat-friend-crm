@@ -263,15 +263,45 @@ function buildSearchQueries(rawInput: string, intent: IntentResult): string[] {
   return uniqueQueries(queries);
 }
 
+// Files that must NEVER be the primary answer source (helpers/meta only).
+// They may still be used for next-step links via Topics-and-Links extractor.
+const HELPER_FILE_TITLES = new Set([
+  "topics and links",
+  "zazi crm",
+  "zazi final override - whatsapp auto-reply ai rules",
+  "bank code",
+  "backoffice training",
+]);
+
+function isHelperFile(title: string): boolean {
+  return HELPER_FILE_TITLES.has(title.toLowerCase().trim());
+}
+
 function scoreKnowledgeChunk(chunk: KnowledgeChunk, intent: IntentResult): number {
   const title = chunk.file_title.toLowerCase();
   const text = chunk.chunk_text.toLowerCase();
   let score = Number(chunk.relevance || 0);
 
-  if (chunk.file_collection === "products") score += 3;
-  if (/price|pricing|quick reference/.test(title)) score += 4;
-  if (intent.isPricing && /(vat|pv|zar|r\d)/.test(text)) score += 1.5;
-  if (intent.detectedProduct && text.includes(intent.detectedProduct.toLowerCase())) score += 5;
+  // STRICT collection boosts (approved books are primary source of truth)
+  if (chunk.file_collection === "products") score += 4;
+  if (chunk.file_collection === "compensation") score += 4;
+  if (chunk.file_collection === "orders") score += 4;
+  if (chunk.file_collection === "opportunity") score += 3;
+
+  // Approved reference / guide / pricing docs always outrank generic files
+  if (/price|pricing|quick reference/.test(title)) score += 5;
+  if (/product reference|product guide/.test(title)) score += 5;
+  if (/compensation|onboarding|joining|distributor guide/.test(title)) score += 3;
+
+  // Pricing/product specificity
+  if (intent.isPricing && /(vat|pv|zar|r\d)/.test(text)) score += 2;
+  if (intent.detectedProduct && text.includes(intent.detectedProduct.toLowerCase())) score += 6;
+
+  // Wellness questions: prefer chunks that mention products/symptoms together
+  if (intent.topicCategory === "wellness" && /(stress|sleep|sugar|digest|immune|energy|detox|skin|breath)/.test(text)) score += 2;
+
+  // Heavy penalty: helper/meta files must not be primary answer source
+  if (isHelperFile(chunk.file_title)) score -= 100;
 
   return score;
 }
@@ -313,10 +343,14 @@ function extractDirectPricingAnswer(chunks: KnowledgeChunk[], detectedProduct: s
 
 // ── Deterministic loader: fetch canonical pricing doc chunks by title ────────
 async function loadPricingDocChunks(svc: any): Promise<KnowledgeChunk[]> {
+  return await loadFileChunksByTitle(svc, PRICING_DOC_TITLE);
+}
+
+async function loadFileChunksByTitle(svc: any, title: string): Promise<KnowledgeChunk[]> {
   const { data: file } = await svc
     .from("knowledge_files")
     .select("id, title, collection")
-    .eq("title", PRICING_DOC_TITLE)
+    .eq("title", title)
     .eq("status", "approved")
     .maybeSingle();
   if (!file) return [];
@@ -482,7 +516,27 @@ async function searchKnowledge(
     }
   }
 
-  return results
+  // Wellness/product freeform: also pull canonical "Product Reference" doc by title
+  // so it can outrank generic ts_rank winners like Topics-and-Links.
+  if (
+    intent.topicCategory === "wellness" ||
+    intent.topicCategory === "products" ||
+    intent.detectedProduct
+  ) {
+    const refChunks = await loadFileChunksByTitle(svc, "Product Reference");
+    for (const c of refChunks) {
+      const key = `${c.file_title}:${c.chunk_index}:${c.chunk_text.slice(0, 120)}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        results.push(c);
+      }
+    }
+  }
+
+  // Filter helper/meta files OUT of answer chunks — they may only feed link extraction
+  const answerable = results.filter((r) => !isHelperFile(r.file_title));
+
+  return answerable
     .sort((a, b) => scoreKnowledgeChunk(b, intent) - scoreKnowledgeChunk(a, intent))
     .slice(0, maxResults);
 }
@@ -639,21 +693,26 @@ Deno.serve(async (req) => {
     replyContent = HUMAN_HANDOVER;
     shouldAssignHuman = true;
     actionTaken = "human_handover";
+    diag.answer_source = "static_handoff";
   } else if (intent.intent === "call_me") {
     replyContent = CALL_ME_RESPONSE;
     shouldAssignHuman = true;
     actionTaken = "call_me";
+    diag.answer_source = "static_handoff";
   } else if (intent.intent === "whatsapp_me") {
     replyContent = HUMAN_HANDOVER;
     shouldAssignHuman = true;
     actionTaken = "whatsapp_me";
+    diag.answer_source = "static_handoff";
   } else if (intent.intent === "available_at") {
     replyContent = AVAILABLE_AT_RESPONSE(intent.availableTime || "your preferred time");
     shouldAssignHuman = true;
     actionTaken = "available_at";
+    diag.answer_source = "static_handoff";
   } else if (intent.intent === "greeting") {
     replyContent = GREETING_REPLY;
     actionTaken = "greeting_sent";
+    diag.answer_source = "static_greeting";
   } else {
     // ── Knowledge-grounded path ──
     const searchQuery = intent.query;
@@ -687,14 +746,18 @@ Deno.serve(async (req) => {
         const body = aiAnswer?.trim() || pricingChunks[0].chunk_text.slice(0, 600);
         replyContent = `${intro}\n\n${body}\n\n_Reply with a product code (e.g. NRM, RLX, GRW) for full details, or ask "How much is [product]?"._${HUMAN_CONTACT_FOOTER}`;
         actionTaken = intent.intent === "menu_1" ? "menu_sent" : "knowledge_strict";
+        diag.answer_source = "knowledge_pricing_doc";
+        diag.source_files = [PRICING_DOC_TITLE];
       } else {
         replyContent = NO_ANSWER_FALLBACK;
         shouldAssignHuman = true;
         actionTaken = "human_handover";
+        diag.answer_source = "fallback_no_pricing_doc";
       }
     } else if (!searchQuery || searchQuery.length < 2) {
       replyContent = GREETING_REPLY;
       actionTaken = "greeting_sent";
+      diag.answer_source = "static_greeting";
     } else {
       const searchQueries = buildSearchQueries(rawInput, intent);
       diag.search_queries = searchQueries.slice(0, 5);
@@ -707,12 +770,14 @@ Deno.serve(async (req) => {
       chunksCount = chunks.length;
       diag.chunks_found = chunksCount;
       diag.topic_links_found = topicChunks.length;
+      diag.source_files = chunks.slice(0, 5).map((c) => `${c.file_title} (${c.file_collection})`);
 
       const matchedCol = chunks[0]?.file_collection || "";
       const effectiveMode: "strict" | "assisted" = STRICT_COLLECTIONS.has(matchedCol) ? "strict" : intent.mode;
       const topRelevance = chunks[0]?.relevance || 0;
       diag.top_relevance = topRelevance;
       diag.effective_mode = effectiveMode;
+      diag.top_chunk_title = chunks[0]?.file_title || null;
 
       // Strict-mode min-relevance gate: refuse to bluff on weak retrieval.
       const passesRelevanceGate = effectiveMode !== "strict" || topRelevance >= STRICT_MIN_RELEVANCE;
@@ -736,14 +801,17 @@ Deno.serve(async (req) => {
           fullReply += HUMAN_CONTACT_FOOTER;
           replyContent = fullReply;
           actionTaken = directPricingAnswer ? "knowledge_strict" : "one_shot_reply";
+          diag.answer_source = directPricingAnswer ? "deterministic_extract" : "ai_grounded_chunks";
         } else {
           const snippets = chunks.slice(0, 2).map((r: any) => `📌 *${r.file_title}*\n${r.chunk_text.slice(0, 250)}`).join("\n\n");
           replyContent = `Here's what I found:\n\n${snippets}${buildNextSteps(intent.topicCategory, intent.detectedProduct)}${HUMAN_CONTACT_FOOTER}`;
           actionTaken = "knowledge_reply";
+          diag.answer_source = "raw_chunk_snippets";
         }
       } else {
         // Honest fallback: zero chunks OR strict-mode chunks below relevance threshold.
         diag.fallback_reason = chunks.length === 0 ? "no_chunks" : "low_relevance_strict";
+        diag.answer_source = "honest_fallback";
         const honest = chunks.length === 0
           ? `I couldn't find that in our approved knowledge yet.`
           : `I couldn't verify a confident answer from our approved knowledge for "${searchQuery.slice(0, 60)}".`;
