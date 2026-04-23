@@ -380,7 +380,7 @@ function buildNextSteps(topicCategory: TopicCategory, detectedProduct: string | 
   }
 
   // Topic-based links
-  const topicSpecific = TOPIC_LINKS[topicCategory] || TOPIC_LINKS.products;
+  const topicSpecific = (TOPIC_LINKS as Record<string, { label: string; url: string }[]>)[topicCategory] || TOPIC_LINKS.products;
   for (const tl of topicSpecific) {
     if (links.length >= 4) break;
     links.push(`• 🔗 ${tl.label}: ${tl.url}`);
