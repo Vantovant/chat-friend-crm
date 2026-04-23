@@ -1,38 +1,33 @@
 ---
-name: WhatsApp Auto-Reply v6.0
-description: Two-layer system — TRUTH LAYER (knowledge grounding) + SALES INTELLIGENCE LAYER (elite WA consultant persona)
+name: WhatsApp Auto-Reply v6.1
+description: Two-layer system — TRUTH LAYER (hybrid retrieval + raw_text fallback + memory) + SALES INTELLIGENCE LAYER
 type: feature
 ---
-v6.0 Sales Intelligence Upgrade (2026-04-23):
-- Two-layer architecture: TRUTH LAYER (v5.3 grounding preserved) + SALES INTELLIGENCE LAYER on top.
-- Upgraded system prompt: elite WhatsApp sales consultant for *Online Course For MLM* (APLGO ZA), African market aware, warm + sharp + concise + persuasive. Speaks on behalf of Vanto Vanto.
-- Response-mode policy baked into prompt: DIRECT_FACT / CLARIFY / RECOMMEND / SALES_ADVANCE / HONEST_FALLBACK. AI must pick one mode per reply.
-- AI must always end with one short, natural follow-up question (sales advance) — except in pure fallback.
-- Model upgraded to `google/gemini-2.5-pro` (temperature 0.6) for stronger reasoning + persona fidelity.
-- Static greeting slimmed dramatically: "Hey 👋 Vanto here from Online Course For MLM. What can I help you with — a product, a price, or the business opportunity?" — no menu dump.
-- Heavy `HUMAN_CONTACT_FOOTER` block REMOVED from grounded factual replies. Only ONE relevant product link is appended (or one Topics-and-Links link). Footer is now a slim single-line WA fallback only.
-- Menu_1 / menu_2: still deterministic-loaded from canonical pricing doc, but AI now ends with a sales-advance question ("Which one would you like more info on?").
-- Honest fallback shortened and warmer — invites rephrasing or handoff in 2 lines, not a 5-line link block.
+v6.1 Knowledge Grounding Hardening (2026-04-23) — applied per VantoOS Fix Report:
 
-TRUTH LAYER (preserved from v5.3):
-- HELPER_FILE_TITLES filtered out of answer chunks (Topics and Links, ZAZI CRM, ZAZI Final Override, Bank Code, Backoffice training).
-- scoreKnowledgeChunk: products/compensation/orders +4, Product Reference/Guide +5, helpers -100.
-- Wellness/products queries always force-load canonical "Product Reference" doc by title.
-- STRICT_MIN_RELEVANCE = 0.05 gate for strict collections.
-- extractDirectPricingAnswer regex matches `- NRM (Blood sugar balance): R433.13` and reads PV from collection header.
-- Diag fields: `answer_source` (static_greeting | static_handoff | knowledge_pricing_doc | deterministic_extract | ai_grounded_chunks | raw_chunk_snippets | honest_fallback), `source_files`, `top_chunk_title`.
+TRUTH LAYER upgrades (file: supabase/functions/whatsapp-auto-reply/index.ts):
+- FIX 1 — `rawTextFallback()`: when chunk search returns 0 hits OR top relevance < STRICT_MIN_RELEVANCE (0.05), the function now pulls full bodies (concatenated chunks, capped ~10 per doc) of the most likely doc(s) by keyword + tag match. Bypasses the strict gate because we have the actual doc body. New diag fields: `retrieval_path`, `raw_text_fallback_attempted`, `forced_doc_titles`. New `answer_source`: `ai_grounded_raw_text`.
+- FIX 3 — Helper-file penalty softened from -100 to -10. Helpers (Topics and Links, Bank Code, ZAZI CRM, etc.) stay demoted but can now surface as last-resort sources instead of being mathematically invisible.
+- FIX 4 — `loadDocsByKeywords()`: forced inclusion no longer depends on exact title strings ("Product Reference"). Now resolves docs by `title.ilike.%kw%` keyword set + `tags` array overlap. Books titled "APLGO Wellness Catalogue 2026" or "Stick Range Overview" are now reachable.
+- FIX 5 — top-K bumped 8 → 12 for strict-likely queries (products/compensation/orders/pricing). Gemini 2.5 Pro re-ranks in-context. New diag: `top_k_used`.
+- FIX 6 — `loadConversationMemory()`: pulls last 6 turns (3 inbound + 3 outbound) from `messages` table and injects them as chat history before the current user message. Follow-ups like "and the price?" now retain product context. New diag: `memory_turns`.
+- FIX 7 — Expanded diagnostics on every reply: `retrieval_path`, `raw_text_fallback_attempted`, `forced_doc_titles`, `memory_turns`, `top_k_used`, plus existing `answer_source`, `source_files`, `top_chunk_title`, `top_relevance`, `effective_mode`, `fallback_reason`.
 
-Source-priority order (factual answers, unchanged):
-1. Deterministic extract from approved doc (e.g. NRM price)
-2. AI grounded on STRICT collection chunks (products/compensation/orders) — boosted scoring
-3. AI grounded on Product Reference (forced-included for wellness/products)
-4. AI grounded on opportunity/general chunks (assisted mode)
-5. Honest fallback — never bluff, never use helper files as primary source
+Source-priority order (factual answers, v6.1):
+1. Static greeting / handoff (deterministic)
+2. Deterministic price extract from approved doc (NRM regex)
+3. AI grounded on chunk-search hits (boosted strict-collection scoring)
+4. AI grounded on **raw_text fallback** (full doc body via keyword/tag match) ← NEW
+5. Honest fallback — only after raw_text path also empty
 
-Sales-layer behaviors (new in v6.0):
-- "Hi" → short warm greeting + one open question, no menu dump
-- "1" → 4-5 product/price lines + "Which one would you like more info on?"
-- "How much is NRM?" → exact deterministic price + "Want the order link?" follow-up
-- "What helps with stress?" → grounded RLX recommendation from Product Reference + next-step Q
-- "I want to join" → grounded onboarding answer + "Want the registration link or quick explanation first?"
-- Fallback ("Tell me about Bitcoin") → honest, warm, offers rephrase or handoff in 2 lines
+SALES INTELLIGENCE LAYER (preserved from v6.0):
+- Model `google/gemini-2.5-pro`, temperature 0.6, persona "Vanto's WhatsApp sales assistant".
+- Response-mode policy: DIRECT_FACT / CLARIFY / RECOMMEND / SALES_ADVANCE / HONEST_FALLBACK.
+- Always ends factual replies with one short follow-up question.
+- Slim warm greeting; no menu dump.
+- One contextual product/topic link appended; no heavy footer.
+
+Preserved deterministic behaviors:
+- "1" / "2" load canonical pricing doc by exact title and AI-summarise to ≤ 5 lines.
+- NRM-style price regex still primary for explicit product+price questions.
+- Strict no-hallucination contract still enforced — but raw_text fallback feeds the model enough evidence to honor it without false silence.

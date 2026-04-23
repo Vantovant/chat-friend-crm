@@ -1,15 +1,22 @@
 /**
- * Vanto CRM — whatsapp-auto-reply Edge Function v6.0
- * Two-Layer System: TRUTH LAYER (knowledge grounding) + SALES INTELLIGENCE LAYER
+ * Vanto CRM — whatsapp-auto-reply Edge Function v6.1
+ * Two-Layer System: TRUTH LAYER (hybrid retrieval) + SALES INTELLIGENCE LAYER
  *
- * v6.0 — Sales Intelligence Upgrade (truth layer preserved from v5.3):
- * - Elite WhatsApp sales-consultant persona, African market aware
- * - Response-mode policy: GREETING / DIRECT_FACT / CLARIFY / RECOMMEND / SALES_ADVANCE / HANDOFF
- * - Light, warm greeting (no giant menu dump)
- * - Smart context-aware next-step (not heavy footer on every reply)
- * - AI must always end factual answers with one sharp follow-up question
- * - Truth layer (v5.3): helper-file demotion, strict-collection scoring boost,
- *   Product Reference forced inclusion, deterministic pricing extractor preserved
+ * v6.1 — Knowledge Grounding Hardening (per VantoOS Fix Report 2026-04-23):
+ * - FIX 1: raw_text fallback — if chunk search returns 0 hits or top relevance < gate,
+ *   pull full document bodies (concatenated chunks) by keyword/tag/topic match before
+ *   honest fallback. Eliminates "AI ignores my books" failures.
+ * - FIX 3: helper-file penalty softened from -100 → -10 (still demoted, never invisible).
+ * - FIX 4: forced inclusion now uses tags + title-ILIKE keyword set (product, pricing,
+ *   wellness, compensation), no longer dependent on exact "Product Reference" string.
+ * - FIX 5: top-K raised from 3/8 → 12 for strict collections (Gemini re-ranks in-context).
+ * - FIX 6: conversational memory — last 6 turns of the conversation are injected so
+ *   "and the price?" follow-ups keep context.
+ * - FIX 7: expanded diagnostics: retrieval_path, raw_text_fallback_used, memory_turns,
+ *   top_k_used, forced_doc_titles, fallback_reason.
+ *
+ * v6.0 features preserved: persona, response-mode policy, deterministic menu/pricing,
+ *   strict no-hallucination contract, slim greeting, contextual next-step links.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -302,8 +309,9 @@ function scoreKnowledgeChunk(chunk: KnowledgeChunk, intent: IntentResult): numbe
   // Wellness questions: prefer chunks that mention products/symptoms together
   if (intent.topicCategory === "wellness" && /(stress|sleep|sugar|digest|immune|energy|detox|skin|breath)/.test(text)) score += 2;
 
-  // Heavy penalty: helper/meta files must not be primary answer source
-  if (isHelperFile(chunk.file_title)) score -= 100;
+  // FIX 3 (v6.1): softened penalty -100 → -10. Helpers stay demoted but can still
+  // surface when they are the only source of a piece of knowledge.
+  if (isHelperFile(chunk.file_title)) score -= 10;
 
   return score;
 }
@@ -370,6 +378,109 @@ async function loadFileChunksByTitle(svc: any, title: string): Promise<Knowledge
   }));
 }
 
+// ── FIX 4 (v6.1) — Tag/keyword-based forced inclusion (replaces brittle title match) ──
+// Resolves docs by tags array OR title-ILIKE keyword match, returns ALL approved chunks.
+async function loadDocsByKeywords(
+  svc: any,
+  keywords: string[],
+  tags: string[],
+  limitDocs = 3,
+): Promise<KnowledgeChunk[]> {
+  // Build OR filter: title ILIKE %kw% OR tag overlap
+  const titleOr = keywords.map((k) => `title.ilike.%${k}%`).join(",");
+  let q = svc
+    .from("knowledge_files")
+    .select("id, title, collection, tags")
+    .eq("status", "approved")
+    .or(titleOr)
+    .limit(limitDocs);
+  const { data: byTitle } = await q;
+
+  let files = byTitle || [];
+  if (tags.length > 0) {
+    const { data: byTag } = await svc
+      .from("knowledge_files")
+      .select("id, title, collection, tags")
+      .eq("status", "approved")
+      .overlaps("tags", tags)
+      .limit(limitDocs);
+    for (const f of byTag || []) {
+      if (!files.find((x: any) => x.id === f.id)) files.push(f);
+    }
+  }
+  if (files.length === 0) return [];
+
+  const fileIds = files.map((f: any) => f.id);
+  const { data: chunks } = await svc
+    .from("knowledge_chunks")
+    .select("chunk_text, chunk_index, file_id")
+    .in("file_id", fileIds)
+    .order("chunk_index", { ascending: true });
+
+  const fileMap = new Map(files.map((f: any) => [f.id, f]));
+  return (chunks || []).map((c: any) => {
+    const f: any = fileMap.get(c.file_id);
+    return {
+      chunk_text: c.chunk_text,
+      file_title: f.title,
+      file_collection: f.collection,
+      relevance: 0.6, // synthetic — flagged downstream
+      chunk_index: c.chunk_index,
+    };
+  });
+}
+
+// ── FIX 1 (v6.1) — raw_text fallback ──
+// When chunk search fails, synthesize a "raw_text" view by concatenating ALL chunks
+// of the most likely doc (resolved by intent → keywords/tags). This is functionally
+// equivalent to VantoOS's raw_text fallback because chunks ARE the document body.
+async function rawTextFallback(
+  svc: any,
+  intent: IntentResult,
+): Promise<{ chunks: KnowledgeChunk[]; titles: string[] }> {
+  const keywords: string[] = [];
+  const tags: string[] = [];
+
+  if (intent.topicCategory === "products" || intent.isPricing) {
+    keywords.push("product", "pricing", "reference", "guide", "catalog", "catalogue");
+    tags.push("product", "pricing", "wellness");
+  }
+  if (intent.topicCategory === "wellness") {
+    keywords.push("product", "reference", "wellness", "stick", "guide");
+    tags.push("product", "wellness");
+  }
+  if (intent.topicCategory === "compensation") {
+    keywords.push("compensation", "bonus", "rank", "comp plan", "marketing plan");
+    tags.push("compensation");
+  }
+  if (intent.topicCategory === "opportunity") {
+    keywords.push("opportunity", "joining", "register", "onboarding", "distributor");
+    tags.push("opportunity", "onboarding");
+  }
+  if (intent.detectedProduct) {
+    keywords.push(intent.detectedProduct.toLowerCase());
+  }
+  // Generic safety net so we never return nothing if approved books exist
+  if (keywords.length === 0) {
+    keywords.push("product", "reference", "guide");
+  }
+
+  const chunks = await loadDocsByKeywords(svc, keywords, tags, 3);
+  // Cap each doc's body to ~4000 chars worth (~10 chunks) to control prompt size
+  const byFile = new Map<string, KnowledgeChunk[]>();
+  for (const c of chunks) {
+    const arr = byFile.get(c.file_title) || [];
+    if (arr.length < 10) arr.push(c);
+    byFile.set(c.file_title, arr);
+  }
+  const capped: KnowledgeChunk[] = [];
+  for (const arr of byFile.values()) capped.push(...arr);
+  return {
+    chunks: capped,
+    titles: Array.from(byFile.keys()),
+  };
+}
+
 // ── Build Smart Next Steps ──────────────────────────────────────────────────
 function buildNextSteps(topicCategory: TopicCategory, detectedProduct: string | null): string {
   const links: string[] = [];
@@ -402,6 +513,7 @@ async function generateAIAnswer(
   mode: "strict" | "assisted",
   topicCategory: string,
   detectedProduct: string | null,
+  history: { role: "user" | "assistant"; content: string }[] = [],
 ): Promise<string | null> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) {
@@ -484,6 +596,7 @@ ${contextSnippets}`;
         model: "google/gemini-2.5-pro",
         messages: [
           { role: "system", content: systemPrompt },
+          ...history,
           { role: "user", content: question },
         ],
         temperature: 0.6,
@@ -504,9 +617,9 @@ ${contextSnippets}`;
   }
 }
 
-// ── Search Knowledge ─────────────────────────────────────────────────────────
+// ── Search Knowledge (v6.1: top-K up, tag/keyword forced inclusion, soft helper filter) ──
 async function searchKnowledge(
-  svc: any, queries: string[], collections: string[], intent: IntentResult, maxResults = 8,
+  svc: any, queries: string[], collections: string[], intent: IntentResult, maxResults = 12,
 ): Promise<KnowledgeChunk[]> {
   const results: KnowledgeChunk[] = [];
   const seen = new Set<string>();
@@ -524,12 +637,15 @@ async function searchKnowledge(
     }
   };
 
+  // FIX 5: per-query top-K bumped (was 8, now 12 for strict-likely intents)
+  const perQueryK = STRICT_COLLECTIONS.has(intent.collections[0] || "") || intent.isPricing ? 12 : 8;
+
   for (const query of queries) {
     for (const col of searchCollections) {
       const { data } = await svc.rpc("search_knowledge", {
         query_text: query,
         collection_filter: col,
-        max_results: maxResults,
+        max_results: perQueryK,
       });
       collectRows(data);
     }
@@ -537,20 +653,35 @@ async function searchKnowledge(
 
   if (results.length === 0) {
     for (const query of queries) {
-      const { data } = await svc.rpc("search_knowledge", { query_text: query, max_results: maxResults });
+      const { data } = await svc.rpc("search_knowledge", { query_text: query, max_results: perQueryK });
       collectRows(data);
     }
   }
 
-  // Wellness/product freeform: also pull canonical "Product Reference" doc by title
-  // so it can outrank generic ts_rank winners like Topics-and-Links.
+  // FIX 4: keyword/tag-based forced inclusion (replaces brittle exact-title match).
+  // Pulls candidate docs by title-ILIKE keyword set + tag overlap, so books titled
+  // "APLGO Wellness Catalogue 2026" or "Stick Range Overview" are no longer invisible.
   if (
     intent.topicCategory === "wellness" ||
     intent.topicCategory === "products" ||
+    intent.topicCategory === "compensation" ||
     intent.detectedProduct
   ) {
-    const refChunks = await loadFileChunksByTitle(svc, "Product Reference");
-    for (const c of refChunks) {
+    const forcedKeywords: string[] = [];
+    const forcedTags: string[] = [];
+    if (intent.topicCategory === "wellness" || intent.topicCategory === "products") {
+      forcedKeywords.push("product", "reference", "guide", "pricing", "catalog", "catalogue", "wellness", "stick");
+      forcedTags.push("product", "wellness", "pricing");
+    }
+    if (intent.topicCategory === "compensation") {
+      forcedKeywords.push("compensation", "comp plan", "marketing plan", "bonus", "rank");
+      forcedTags.push("compensation");
+    }
+    if (intent.detectedProduct) {
+      forcedKeywords.push(intent.detectedProduct.toLowerCase());
+    }
+    const forced = await loadDocsByKeywords(svc, forcedKeywords, forcedTags, 3);
+    for (const c of forced) {
       const key = `${c.file_title}:${c.chunk_index}:${c.chunk_text.slice(0, 120)}`;
       if (!seen.has(key)) {
         seen.add(key);
@@ -559,13 +690,37 @@ async function searchKnowledge(
     }
   }
 
-  // Filter helper/meta files OUT of answer chunks — they may only feed link extraction
-  const answerable = results.filter((r) => !isHelperFile(r.file_title));
-
-  return answerable
+  // v6.1: helpers no longer hard-filtered (penalty -10 in scorer keeps them
+  // demoted but allows last-resort surfacing if they're the only source).
+  return results
     .sort((a, b) => scoreKnowledgeChunk(b, intent) - scoreKnowledgeChunk(a, intent))
     .slice(0, maxResults);
 }
+
+// ── FIX 6 (v6.1) — Conversational memory ──
+// Pull last 3 inbound + 3 outbound messages so follow-ups like "and the price?"
+// retain context. Returned in chronological order, ready for AI prompt.
+async function loadConversationMemory(
+  svc: any, conversationId: string, currentInboundId: string | null,
+): Promise<{ role: "user" | "assistant"; content: string }[]> {
+  const { data } = await svc
+    .from("messages")
+    .select("id, content, is_outbound, created_at")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: false })
+    .limit(8);
+  if (!data || data.length === 0) return [];
+  const msgs = data
+    .filter((m: any) => m.id !== currentInboundId)
+    .slice(0, 6)
+    .reverse()
+    .map((m: any) => ({
+      role: m.is_outbound ? ("assistant" as const) : ("user" as const),
+      content: String(m.content || "").slice(0, 600),
+    }));
+  return msgs;
+}
+
 
 // ── Also search "Topics and Links" for relevant URLs ────────────────────────
 async function searchTopicsAndLinks(
@@ -788,37 +943,62 @@ Deno.serve(async (req) => {
       const searchQueries = buildSearchQueries(rawInput, intent);
       diag.search_queries = searchQueries.slice(0, 5);
 
-      const [chunks, topicChunks] = await Promise.all([
-        searchKnowledge(svc, searchQueries, intent.collections, intent, 8),
+      // FIX 6: pull last 6 turns so follow-ups keep context.
+      const memory = await loadConversationMemory(svc, conversation_id, inbound_message_id || null);
+      diag.memory_turns = memory.length;
+
+      const TOP_K = 12;
+      diag.top_k_used = TOP_K;
+
+      let [chunks, topicChunks] = await Promise.all([
+        searchKnowledge(svc, searchQueries, intent.collections, intent, TOP_K),
         searchTopicsAndLinks(svc, searchQuery),
       ]);
+
+      diag.retrieval_path = "chunk_search";
+      let topRelevance = chunks[0]?.relevance || 0;
+      let matchedCol = chunks[0]?.file_collection || "";
+      let effectiveMode: "strict" | "assisted" =
+        STRICT_COLLECTIONS.has(matchedCol) ? "strict" : intent.mode;
+      let passesRelevanceGate = effectiveMode !== "strict" || topRelevance >= STRICT_MIN_RELEVANCE;
+
+      // FIX 1: raw_text fallback BEFORE giving up. If chunk search produced nothing
+      // useful, synthesize a "raw_text" view by pulling full bodies of the most
+      // likely doc(s) by keyword/tag match. This is the single biggest unlock.
+      if (chunks.length === 0 || !passesRelevanceGate) {
+        const fallback = await rawTextFallback(svc, intent);
+        diag.raw_text_fallback_attempted = true;
+        diag.forced_doc_titles = fallback.titles;
+        if (fallback.chunks.length > 0) {
+          chunks = fallback.chunks
+            .sort((a, b) => scoreKnowledgeChunk(b, intent) - scoreKnowledgeChunk(a, intent))
+            .slice(0, TOP_K);
+          diag.retrieval_path = "raw_text_fallback";
+          topRelevance = chunks[0]?.relevance || 0;
+          matchedCol = chunks[0]?.file_collection || "";
+          effectiveMode = STRICT_COLLECTIONS.has(matchedCol) ? "strict" : intent.mode;
+          // raw_text fallback bypasses the strict relevance gate — we have the doc body
+          passesRelevanceGate = true;
+        }
+      }
 
       chunksCount = chunks.length;
       diag.chunks_found = chunksCount;
       diag.topic_links_found = topicChunks.length;
       diag.source_files = chunks.slice(0, 5).map((c) => `${c.file_title} (${c.file_collection})`);
-
-      const matchedCol = chunks[0]?.file_collection || "";
-      const effectiveMode: "strict" | "assisted" = STRICT_COLLECTIONS.has(matchedCol) ? "strict" : intent.mode;
-      const topRelevance = chunks[0]?.relevance || 0;
       diag.top_relevance = topRelevance;
       diag.effective_mode = effectiveMode;
       diag.top_chunk_title = chunks[0]?.file_title || null;
-
-      // Strict-mode min-relevance gate: refuse to bluff on weak retrieval.
-      const passesRelevanceGate = effectiveMode !== "strict" || topRelevance >= STRICT_MIN_RELEVANCE;
 
       if (chunks.length > 0 && passesRelevanceGate) {
         knowledgeFound = true;
         // Try deterministic pricing extractor first (no AI, no hallucination risk).
         const directPricingAnswer = extractDirectPricingAnswer(chunks, intent.detectedProduct);
         const aiAnswer = directPricingAnswer
-          || await generateAIAnswer(searchQuery, chunks, effectiveMode, intent.topicCategory, intent.detectedProduct);
+          || await generateAIAnswer(searchQuery, chunks, effectiveMode, intent.topicCategory, intent.detectedProduct, memory);
 
         if (aiAnswer) {
           let fullReply = aiAnswer.trim();
-          // v6.0 — attach at most ONE relevant product/topic link, not the giant block.
-          // The AI's own follow-up question carries the conversation forward.
           if (intent.detectedProduct && PRODUCT_LINKS[intent.detectedProduct]) {
             fullReply += `\n\n📖 More on ${intent.detectedProduct}: ${PRODUCT_LINKS[intent.detectedProduct]}`;
           } else {
@@ -830,7 +1010,9 @@ Deno.serve(async (req) => {
           }
           replyContent = fullReply;
           actionTaken = directPricingAnswer ? "knowledge_strict" : "one_shot_reply";
-          diag.answer_source = directPricingAnswer ? "deterministic_extract" : "ai_grounded_chunks";
+          diag.answer_source = directPricingAnswer
+            ? "deterministic_extract"
+            : (diag.retrieval_path === "raw_text_fallback" ? "ai_grounded_raw_text" : "ai_grounded_chunks");
         } else {
           const snippets = chunks.slice(0, 1).map((r: any) => r.chunk_text.slice(0, 280)).join("\n\n");
           replyContent = `${snippets}\n\n_Want me to dig deeper on this, or speak to Vanto directly?_`;
@@ -838,8 +1020,8 @@ Deno.serve(async (req) => {
           diag.answer_source = "raw_chunk_snippets";
         }
       } else {
-        // Honest fallback: zero chunks OR strict-mode chunks below relevance threshold.
-        diag.fallback_reason = chunks.length === 0 ? "no_chunks" : "low_relevance_strict";
+        // True last-resort fallback: even raw_text path produced nothing.
+        diag.fallback_reason = chunks.length === 0 ? "no_chunks_after_raw_text" : "low_relevance_after_raw_text";
         diag.answer_source = "honest_fallback";
         const honest = chunks.length === 0
           ? `I don't have a verified answer for that yet 🤔`
