@@ -41,6 +41,7 @@ Group Campaigns: Maytapi REST API (NOT Chrome Extension autoposter). Twilio stay
 - [Workflows & Automations](mem://features/workflows-and-automations) — Explicitly separate modules
 - [Phone Normalization](mem://technical/phone-normalization) — +E164 formatting, ZA default logic
 - [WhatsApp Auto Reply](mem://features/whatsapp-auto-reply) — Reply limits, prompt translation layer
+- [AI Trainer](mem://features/ai-trainer) — Admin correction rules injected into WhatsApp AI prompt (priority: advisory/strong/override)
 - [Knowledge Vault](mem://features/knowledge-vault) — Client-side chunking to bypass worker limits
 - [Zazi Copilot](mem://features/zazi-copilot) — Agentic inbox sidebar, Next Best Action
 - [Page-Aware Help](mem://features/page-aware-help) — Contextual AI assistance via global Ask AI interface

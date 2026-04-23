@@ -507,6 +507,69 @@ function buildNextSteps(topicCategory: TopicCategory, detectedProduct: string | 
 }
 
 // ── AI Answer Generation ────────────────────────────────────────────────────
+// ── Trainer Rules (admin-managed correction layer) ─────────────────────────
+type TrainerRule = {
+  id: string;
+  title: string;
+  triggers: string[];
+  product: string | null;
+  instruction: string;
+  priority: "advisory" | "strong" | "override";
+  enabled: boolean;
+};
+
+async function loadTrainerRules(svc: any): Promise<TrainerRule[]> {
+  try {
+    const { data, error } = await svc
+      .from("ai_trainer_rules")
+      .select("id,title,triggers,product,instruction,priority,enabled")
+      .eq("enabled", true);
+    if (error) {
+      console.error("[auto-reply] trainer rules load error:", error.message);
+      return [];
+    }
+    return (data || []) as TrainerRule[];
+  } catch (e: any) {
+    console.error("[auto-reply] trainer rules load failed:", e?.message);
+    return [];
+  }
+}
+
+export function matchTrainerRules(
+  rules: TrainerRule[],
+  userText: string,
+  detectedProduct: string | null,
+): TrainerRule[] {
+  const lc = (userText || "").toLowerCase();
+  const product = (detectedProduct || "").toUpperCase();
+  const matched = rules.filter((r) => {
+    if (!r.enabled) return false;
+    const productHit = r.product && product && r.product.toUpperCase() === product;
+    const triggerHit = (r.triggers || []).some((t) => {
+      const tt = (t || "").trim().toLowerCase();
+      return tt.length > 0 && lc.includes(tt);
+    });
+    return productHit || triggerHit;
+  });
+  // Priority order: override > strong > advisory
+  const weight = { override: 3, strong: 2, advisory: 1 } as const;
+  return matched.sort((a, b) => weight[b.priority] - weight[a.priority]);
+}
+
+function renderTrainerBlock(rules: TrainerRule[]): string {
+  if (rules.length === 0) return "";
+  const lines = rules.map((r) => {
+    const tag =
+      r.priority === "override"
+        ? "🛑 HARD OVERRIDE (must follow exactly, beats inference)"
+        : r.priority === "strong"
+        ? "⚠️ STRONG PREFERENCE (follow unless directly contradicted by knowledge)"
+        : "💡 ADVISORY (consider when relevant)";
+    return `• [${tag}] ${r.title}\n   → ${r.instruction}`;
+  });
+  return `\n═══ TRAINER RULES (admin corrections — APPLY BEFORE INFERENCE) ═══\n${lines.join("\n")}\n`;
+}
+
 async function generateAIAnswer(
   question: string,
   chunks: { chunk_text: string; file_title: string; file_collection: string }[],
@@ -514,6 +577,7 @@ async function generateAIAnswer(
   topicCategory: string,
   detectedProduct: string | null,
   history: { role: "user" | "assistant"; content: string }[] = [],
+  trainerRules: TrainerRule[] = [],
 ): Promise<string | null> {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
   if (!LOVABLE_API_KEY) {
@@ -550,6 +614,7 @@ You are an elite, warm, sharp sales consultant inside WhatsApp. African market a
 
 ${strictRule}
 ${pricingRule}
+${renderTrainerBlock(trainerRules)}
 
 ═══ KNOWLEDGE-FIRST RULE (NON-NEGOTIABLE) ═══
 If ANY relevant info exists in KNOWLEDGE CONTEXT — even partial, even just a benefit or category match — you MUST answer from it. Do NOT say "I don't have a verified answer" when context contains related material. Fallback is reserved for context that is truly empty on the subject.
@@ -951,6 +1016,12 @@ Deno.serve(async (req) => {
       const memory = await loadConversationMemory(svc, conversation_id, inbound_message_id || null);
       diag.memory_turns = memory.length;
 
+      // TRAINER LAYER: load admin-managed correction rules and match against this turn.
+      const allTrainerRules = await loadTrainerRules(svc);
+      const matchedTrainerRules = matchTrainerRules(allTrainerRules, rawInput, intent.detectedProduct);
+      diag.trainer_rules_loaded = allTrainerRules.length;
+      diag.trainer_rules_matched = matchedTrainerRules.map((r) => `${r.priority}:${r.title}`);
+
       const TOP_K = 12;
       diag.top_k_used = TOP_K;
 
@@ -999,7 +1070,7 @@ Deno.serve(async (req) => {
         // Try deterministic pricing extractor first (no AI, no hallucination risk).
         const directPricingAnswer = extractDirectPricingAnswer(chunks, intent.detectedProduct);
         const aiAnswer = directPricingAnswer
-          || await generateAIAnswer(searchQuery, chunks, effectiveMode, intent.topicCategory, intent.detectedProduct, memory);
+          || await generateAIAnswer(searchQuery, chunks, effectiveMode, intent.topicCategory, intent.detectedProduct, memory, matchedTrainerRules);
 
         if (aiAnswer) {
           let fullReply = aiAnswer.trim();

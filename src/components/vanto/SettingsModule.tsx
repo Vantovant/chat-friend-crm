@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { User, Bell, Shield, Users, ChevronRight, Mail, Loader2, CheckCircle, X, Clock, Edit2, Bot, Key, MessageSquare } from 'lucide-react';
+import { User, Bell, Shield, Users, ChevronRight, Mail, Loader2, CheckCircle, X, Clock, Edit2, Bot, Key, MessageSquare, Sparkles } from 'lucide-react';
+import AITrainerPanel from './AITrainerPanel';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
@@ -10,6 +11,7 @@ const settingSections = [
   { id: 'team', icon: Users, label: 'Team', description: 'Manage team members' },
   { id: 'ai-provider', icon: Bot, label: 'AI Provider', description: 'BYO API keys' },
   { id: 'auto-reply', icon: MessageSquare, label: 'Auto-Reply', description: 'WhatsApp auto-reply settings' },
+  { id: 'ai-trainer', icon: Sparkles, label: 'AI Trainer', description: 'Teach & correct the AI' },
   { id: 'notifications', icon: Bell, label: 'Notifications', description: 'Alert preferences' },
   { id: 'security', icon: Shield, label: 'Security', description: 'Password & 2FA' },
 ];
@@ -473,6 +475,8 @@ export function SettingsModule() {
 
         {/* Auto-Reply */}
         {activeSection === 'auto-reply' && <AutoReplySection />}
+
+        {activeSection === 'ai-trainer' && <AITrainerPanel />}
 
         {activeSection === 'notifications' && (
           <div>
