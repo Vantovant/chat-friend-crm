@@ -96,10 +96,18 @@ const TOPIC_LINKS = {
 };
 
 // ── Menu Backward Compatibility ─────────────────────────────────────────────
+// Deterministic menu routing — these queries match the canonical pricing doc.
 const MENU_QUERY_MAP: Record<string, { query: string; collections: string[] }> = {
-  "1": { query: "APLGO product prices South Africa VAT PV daily collection member prices", collections: ["products", "general"] },
-  "2": { query: "how to use benefits product usage wellness health benefits dosage drops", collections: ["products", "general"] },
+  "1": { query: "APLGO PRODUCT PRICING QUICK REFERENCE SOUTH AFRICA daily collection premium elite", collections: ["products"] },
+  "2": { query: "APLGO PRODUCT PRICING QUICK REFERENCE benefits immune support stress digestion", collections: ["products"] },
 };
+
+// Canonical doc title used as the source of truth for menu_1 / menu_2 grounding
+const PRICING_DOC_TITLE = "APLGO Product Pricing Quick Reference (ZAR)";
+
+// Minimum ts_rank relevance to consider a chunk usable for STRICT collections.
+// Below this the bot must give an honest "couldn't verify" fallback instead of bluffing.
+const STRICT_MIN_RELEVANCE = 0.05;
 
 // ── Intent Detection ────────────────────────────────────────────────────────
 const GREETING_PATTERNS = [
@@ -274,23 +282,56 @@ function extractDirectPricingAnswer(chunks: KnowledgeChunk[], detectedProduct: s
   const escapedProduct = detectedProduct.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   for (const chunk of chunks) {
-    const productLineMatch = chunk.chunk_text.match(new RegExp(`(?:-|•)?\\s*${escapedProduct}\\s*\\(([^)]+)\\)\\s*:\\s*R\\s*([\\d.,]+)`, "i"));
+    // Format: "- NRM (Blood sugar balance): R433.13"
+    const productLineMatch = chunk.chunk_text.match(
+      new RegExp(`(?:[-•*]\\s*)?${escapedProduct}\\b\\s*\\(([^)]+)\\)\\s*:\\s*R\\s*([\\d.,]+)`, "i"),
+    );
     if (productLineMatch) {
       const [, benefit, price] = productLineMatch;
-      const pvMatch = chunk.chunk_text.match(/(\d+)\s*PV/i);
-      const pvText = pvMatch ? ` It carries *${pvMatch[1]} PV*.` : "";
-      return `*${detectedProduct}* is *R${price}* incl. VAT in South Africa.${pvText} It is listed for *${benefit.trim()}*.`;
+      // Find PV from the nearest preceding "(N PV ...)" collection header.
+      const idx = chunk.chunk_text.search(new RegExp(`${escapedProduct}\\b\\s*\\(`, "i"));
+      let pvText = "";
+      if (idx > 0) {
+        const before = chunk.chunk_text.slice(0, idx);
+        const headers = [...before.matchAll(/\((\d+)\s*PV[^)]*\)/gi)];
+        if (headers.length) pvText = ` It carries *${headers[headers.length - 1][1]} PV*.`;
+      }
+      return `*${detectedProduct}* is *R${price}* incl. VAT (member price) in South Africa.${pvText} Listed for *${benefit.trim()}*.`;
     }
 
-    const genericPriceMatch = chunk.chunk_text.match(new RegExp(`${escapedProduct}[\\s\\S]{0,120}?R\\s*([\\d.,]+)`, "i"));
+    // Fallback: any "NRM ... R<num>" within 200 chars
+    const genericPriceMatch = chunk.chunk_text.match(
+      new RegExp(`${escapedProduct}\\b[\\s\\S]{0,200}?R\\s*([\\d.,]+)`, "i"),
+    );
     if (genericPriceMatch) {
-      const pvMatch = chunk.chunk_text.match(/(\d+)\s*PV/i);
-      const pvText = pvMatch ? ` It carries *${pvMatch[1]} PV*.` : "";
-      return `*${detectedProduct}* is *R${genericPriceMatch[1]}* incl. VAT in South Africa.${pvText}`;
+      return `*${detectedProduct}* is *R${genericPriceMatch[1]}* incl. VAT (member price) in South Africa.`;
     }
   }
 
   return null;
+}
+
+// ── Deterministic loader: fetch canonical pricing doc chunks by title ────────
+async function loadPricingDocChunks(svc: any): Promise<KnowledgeChunk[]> {
+  const { data: file } = await svc
+    .from("knowledge_files")
+    .select("id, title, collection")
+    .eq("title", PRICING_DOC_TITLE)
+    .eq("status", "approved")
+    .maybeSingle();
+  if (!file) return [];
+  const { data: chunks } = await svc
+    .from("knowledge_chunks")
+    .select("chunk_text, chunk_index, file_id")
+    .eq("file_id", file.id)
+    .order("chunk_index", { ascending: true });
+  return (chunks || []).map((c: any) => ({
+    chunk_text: c.chunk_text,
+    file_title: file.title,
+    file_collection: file.collection,
+    relevance: 1,
+    chunk_index: c.chunk_index,
+  }));
 }
 
 // ── Build Smart Next Steps ──────────────────────────────────────────────────
@@ -343,11 +384,16 @@ async function generateAIAnswer(
     .join("\n\n");
 
   const strictRule = mode === "strict"
-    ? "Answer ONLY from the provided knowledge chunks. Do NOT invent prices, benefits, or facts not in the chunks."
-    : "You may paraphrase and combine info from chunks naturally. Stay grounded in provided knowledge.";
+    ? `STRICT GROUNDING MODE — Answer ONLY using facts that appear verbatim or near-verbatim in the KNOWLEDGE CONTEXT below.
+- DO NOT invent prices, PV values, product names, benefits, ranks, bonuses, or rules.
+- DO NOT round, estimate, convert currency, or "fix" numbers.
+- If the specific fact is NOT in the context, you MUST reply exactly:
+  "I couldn't verify that from our approved knowledge right now."
+  Then suggest the user ask in another way or speak to Vanto Vanto.`
+    : "Stay grounded in the provided knowledge. You may paraphrase naturally but do not invent facts.";
 
   const pricingRule = detectedProduct
-    ? `The user is asking about "${detectedProduct}". If the price is in the chunks, state it clearly (e.g. "NRM costs R431.25 incl. VAT"). If the price is NOT found, say so honestly.`
+    ? `The user is asking about *${detectedProduct}*. Quote the price exactly as it appears (e.g. "R433.13"). If ${detectedProduct} is NOT in the context, say so honestly — do NOT guess.`
     : "";
 
   const systemPrompt = `You are a WhatsApp assistant for *Online Course For MLM*, representing Vanto Vanto (APLGO distributor).
@@ -355,19 +401,15 @@ async function generateAIAnswer(
 ${strictRule}
 ${pricingRule}
 
-YOUR TASK: Generate ONLY the direct answer part (Part 1). Do NOT add links, contact details, or footer — those are added automatically.
+YOUR TASK: Generate ONLY the direct answer (Part 1). Links and contact footer are added automatically — do NOT include them.
 
 RULES:
-- Answer the question directly and clearly FIRST.
-- If the answer is in the chunks, provide it naturally with specific details (prices, names, benefits).
-- If the answer is NOT in the chunks, say: "I don't have specific information on that right now."
-- Be warm, professional, concise (under 200 words).
+- Answer the exact question asked, in 2–5 short lines.
 - Use WhatsApp formatting: *bold*, • bullets.
-- Do NOT tell the user to upload documents or visit a website to find the answer.
-- Do NOT add registration links, phone numbers, or contact info (those are added separately).
-- Do NOT repeat menu options.
-- Do NOT add "Reply 3" or similar prompts.
-- For pricing: state the exact ZAR price with VAT if found. Include Activity PV if available.
+- No giant lists unless the user asked for "all" / "full list".
+- Do NOT tell the user to upload documents.
+- Do NOT add registration links, phone numbers, or "Reply 3" prompts.
+- For pricing: state the exact ZAR price + VAT note + PV if present in context.
 
 KNOWLEDGE CONTEXT:
 ${contextSnippets}`;
@@ -613,18 +655,50 @@ Deno.serve(async (req) => {
     replyContent = GREETING_REPLY;
     actionTaken = "greeting_sent";
   } else {
-    // ── AI-FIRST ONE-SHOT RESPONSE ──
+    // ── Knowledge-grounded path ──
     const searchQuery = intent.query;
     diag.search_query = searchQuery.slice(0, 100);
 
-    if (!searchQuery || searchQuery.length < 2) {
+    // Deterministic menu_1 / menu_2: load canonical pricing doc directly,
+    // skip ts_rank guessing, ground from verbatim source.
+    if (intent.intent === "menu_1" || intent.intent === "menu_2") {
+      const pricingChunks = await loadPricingDocChunks(svc);
+      diag.menu_loaded_pricing_doc = pricingChunks.length;
+
+      if (pricingChunks.length > 0) {
+        knowledgeFound = true;
+        chunksCount = pricingChunks.length;
+
+        const intro = intent.intent === "menu_1"
+          ? "Here's a quick view of our most popular APLGO products and prices (member, incl. VAT):"
+          : "Here are the APLGO products and what each is used for:";
+
+        // Use AI in strict mode to summarise from the canonical doc (≤ 5 lines).
+        const aiAnswer = await generateAIAnswer(
+          intent.intent === "menu_1"
+            ? "List 4-6 popular APLGO products with their member price (R) and one-line benefit. Be brief."
+            : "List 4-6 popular APLGO products with one-line benefit each. Brief, no prices.",
+          pricingChunks,
+          "strict",
+          "products",
+          null,
+        );
+
+        const body = aiAnswer?.trim() || pricingChunks[0].chunk_text.slice(0, 600);
+        replyContent = `${intro}\n\n${body}\n\n_Reply with a product code (e.g. NRM, RLX, GRW) for full details, or ask "How much is [product]?"._${HUMAN_CONTACT_FOOTER}`;
+        actionTaken = intent.intent === "menu_1" ? "menu_sent" : "knowledge_strict";
+      } else {
+        replyContent = NO_ANSWER_FALLBACK;
+        shouldAssignHuman = true;
+        actionTaken = "human_handover";
+      }
+    } else if (!searchQuery || searchQuery.length < 2) {
       replyContent = GREETING_REPLY;
       actionTaken = "greeting_sent";
     } else {
       const searchQueries = buildSearchQueries(rawInput, intent);
       diag.search_queries = searchQueries.slice(0, 5);
 
-      // Search knowledge + topics-and-links in parallel
       const [chunks, topicChunks] = await Promise.all([
         searchKnowledge(svc, searchQueries, intent.collections, intent, 8),
         searchTopicsAndLinks(svc, searchQuery),
@@ -634,19 +708,24 @@ Deno.serve(async (req) => {
       diag.chunks_found = chunksCount;
       diag.topic_links_found = topicChunks.length;
 
-      if (chunks.length > 0) {
-        knowledgeFound = true;
-        const matchedCol = chunks[0]?.file_collection || "";
-        const effectiveMode = STRICT_COLLECTIONS.has(matchedCol) ? "strict" : intent.mode;
-        const directPricingAnswer = extractDirectPricingAnswer(chunks, intent.detectedProduct);
+      const matchedCol = chunks[0]?.file_collection || "";
+      const effectiveMode: "strict" | "assisted" = STRICT_COLLECTIONS.has(matchedCol) ? "strict" : intent.mode;
+      const topRelevance = chunks[0]?.relevance || 0;
+      diag.top_relevance = topRelevance;
+      diag.effective_mode = effectiveMode;
 
-        const aiAnswer = directPricingAnswer || await generateAIAnswer(searchQuery, chunks, effectiveMode, intent.topicCategory, intent.detectedProduct);
+      // Strict-mode min-relevance gate: refuse to bluff on weak retrieval.
+      const passesRelevanceGate = effectiveMode !== "strict" || topRelevance >= STRICT_MIN_RELEVANCE;
+
+      if (chunks.length > 0 && passesRelevanceGate) {
+        knowledgeFound = true;
+        // Try deterministic pricing extractor first (no AI, no hallucination risk).
+        const directPricingAnswer = extractDirectPricingAnswer(chunks, intent.detectedProduct);
+        const aiAnswer = directPricingAnswer
+          || await generateAIAnswer(searchQuery, chunks, effectiveMode, intent.topicCategory, intent.detectedProduct);
 
         if (aiAnswer) {
-          // Build the one-shot 3-part response
           let fullReply = aiAnswer.trim();
-
-          // Part 2: Smart next steps (from topic links + detected product)
           const dynamicLinks = extractLinksFromChunks(topicChunks, intent.detectedProduct);
           if (dynamicLinks.length > 0) {
             topicsLinksUsed = true;
@@ -654,21 +733,22 @@ Deno.serve(async (req) => {
           } else {
             fullReply += buildNextSteps(intent.topicCategory, intent.detectedProduct);
           }
-
-          // Part 3: Human contact footer
           fullReply += HUMAN_CONTACT_FOOTER;
-
           replyContent = fullReply;
-          actionTaken = "one_shot_reply";
+          actionTaken = directPricingAnswer ? "knowledge_strict" : "one_shot_reply";
         } else {
-          // AI failed — raw snippets + footer
           const snippets = chunks.slice(0, 2).map((r: any) => `📌 *${r.file_title}*\n${r.chunk_text.slice(0, 250)}`).join("\n\n");
           replyContent = `Here's what I found:\n\n${snippets}${buildNextSteps(intent.topicCategory, intent.detectedProduct)}${HUMAN_CONTACT_FOOTER}`;
           actionTaken = "knowledge_reply";
         }
       } else {
-        replyContent = NO_ANSWER_FALLBACK;
-        shouldAssignHuman = true;
+        // Honest fallback: zero chunks OR strict-mode chunks below relevance threshold.
+        diag.fallback_reason = chunks.length === 0 ? "no_chunks" : "low_relevance_strict";
+        const honest = chunks.length === 0
+          ? `I couldn't find that in our approved knowledge yet.`
+          : `I couldn't verify a confident answer from our approved knowledge for "${searchQuery.slice(0, 60)}".`;
+        replyContent = `${honest}\n\nCould you rephrase, or name the specific product / topic? Otherwise Vanto Vanto can help directly:\n📲 https://wa.me/27790831530\n📞 +27 79 083 1530\n\n_Reply *CALL ME* or *WHATSAPP ME* for personal follow-up._`;
+        shouldAssignHuman = chunks.length === 0;
         actionTaken = "human_handover";
       }
     }
