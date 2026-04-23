@@ -755,14 +755,14 @@ Deno.serve(async (req) => {
         chunksCount = pricingChunks.length;
 
         const intro = intent.intent === "menu_1"
-          ? "Here's a quick view of our most popular APLGO products and prices (member, incl. VAT):"
-          : "Here are the APLGO products and what each is used for:";
+          ? "Sure 👌 our most popular APLGO products (member price, incl. VAT):"
+          : "Here's what each of our top APLGO products is used for:";
 
         // Use AI in strict mode to summarise from the canonical doc (≤ 5 lines).
         const aiAnswer = await generateAIAnswer(
           intent.intent === "menu_1"
-            ? "List 4-6 popular APLGO products with their member price (R) and one-line benefit. Be brief."
-            : "List 4-6 popular APLGO products with one-line benefit each. Brief, no prices.",
+            ? "List 4-5 popular APLGO products with their member price (R) on one short line each. End with: 'Which one would you like more info on?'"
+            : "List 4-5 popular APLGO products with one-line benefit each. No prices. End with: 'Want the price for any of these?'",
           pricingChunks,
           "strict",
           "products",
@@ -770,7 +770,7 @@ Deno.serve(async (req) => {
         );
 
         const body = aiAnswer?.trim() || pricingChunks[0].chunk_text.slice(0, 600);
-        replyContent = `${intro}\n\n${body}\n\n_Reply with a product code (e.g. NRM, RLX, GRW) for full details, or ask "How much is [product]?"._${HUMAN_CONTACT_FOOTER}`;
+        replyContent = `${intro}\n\n${body}`;
         actionTaken = intent.intent === "menu_1" ? "menu_sent" : "knowledge_strict";
         diag.answer_source = "knowledge_pricing_doc";
         diag.source_files = [PRICING_DOC_TITLE];
