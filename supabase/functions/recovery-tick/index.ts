@@ -9,22 +9,25 @@ const corsHeaders = {
 const STEP_DELAYS_HOURS = [24, 24 * 3, 24 * 7, 24 * 14, 24 * 30]; // Day 1, 3, 7, 14, 30
 const MAX_STEPS = 5;
 
+// IMPORTANT: These leads came from the Get Well Africa Facebook advert (mostly NRM / APLGO products),
+// replied via the Twilio business number, and DO NOT know "Vanto" personally. Every follow-up MUST
+// re-introduce who is messaging and remind them of the advert that started the conversation.
 const TEMPLATES = [
   // Step 1 — Day 1 soft re-open
   (name: string, snippet: string) =>
-    `Hi ${name} 👋\n\nI noticed we didn't get to finish our chat${snippet ? ` about "${snippet.slice(0, 80)}"` : ""}. I'm here if you'd still like to continue — happy to answer any question.\n\n— Vanto`,
+    `Hi ${name} 👋 It's Vanto from Get Well Africa (APLGO) — you replied to our Facebook advert a little while back${snippet ? ` and mentioned "${snippet.slice(0, 80)}"` : ""}. We didn't get to finish that chat. Would you still like the info?\n\n— Vanto`,
   // Step 2 — Day 3 add value
   (name: string) =>
-    `Hi ${name}, just checking back. A lot of people have the same questions you had — I'd love to give you a clear answer so you can decide what's best for you. Reply anytime 🙂\n\n— Vanto`,
+    `Hi ${name}, Vanto here from Get Well Africa 🌿 You enquired about APLGO (NRM / wellness) on our Facebook page. A lot of people had the same question you did — happy to give you a clear answer whenever you're ready.\n\n— Vanto`,
   // Step 3 — Day 7 direct ask
   (name: string) =>
-    `Hi ${name}, are you still interested? I don't want to keep messaging if it's no longer relevant — just send me a quick "yes" or "not now" and I'll respect it.\n\n— Vanto`,
+    `Hi ${name}, this is Vanto from Get Well Africa following up on the APLGO advert you responded to on Facebook. Are you still interested? Just a quick "yes" or "not now" is perfect — I'll respect it either way.\n\n— Vanto`,
   // Step 4 — Day 14 last call
   (name: string) =>
-    `Hi ${name}, just one more touch from me. If now isn't the right time that's totally fine — but if you'd like the info we discussed, reply and I'll send it through today.\n\n— Vanto`,
+    `Hi ${name}, Vanto from Get Well Africa again — just one more touch about the APLGO product you enquired about on Facebook. If now isn't the right time that's fine; if you'd still like the info, reply and I'll send it through today.\n\n— Vanto`,
   // Step 5 — Day 30 final
   (name: string) =>
-    `Hi ${name}, I'll be closing your file unless you'd like to continue. No pressure at all — just reply with anything and I'll pick it back up.\n\n— Vanto`,
+    `Hi ${name}, Vanto from Get Well Africa here. I'll be closing your enquiry from our Facebook APLGO advert unless you'd like to continue. No pressure at all — just reply with anything and I'll pick it up.\n\n— Vanto`,
 ];
 
 async function draftMessage(name: string, snippet: string, step: number): Promise<string> {
