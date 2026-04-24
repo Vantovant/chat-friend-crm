@@ -518,6 +518,20 @@ type TrainerRule = {
   enabled: boolean;
 };
 
+// Hard sunset for time-bounded promo rules. Belt-and-braces safeguard so that
+// even if the cron auto-disable fails or someone manually re-enables a sunset
+// rule, the AI will not mention an expired campaign.
+//   - "APRIL FLASH DEAL" expires at 23:59 SAST on 24 April 2026 (22:00 UTC).
+function isSunsetTrainerRule(rule: { title?: string }, nowMs: number): boolean {
+  const title = (rule.title || "").toUpperCase();
+  if (title.includes("APRIL FLASH DEAL")) {
+    // 2026-04-24T22:00:00Z = 2026-04-25T00:00:00+02:00 (SAST)
+    const sunset = Date.UTC(2026, 3, 24, 22, 0, 0); // month is 0-indexed
+    if (nowMs >= sunset) return true;
+  }
+  return false;
+}
+
 async function loadTrainerRules(svc: any): Promise<TrainerRule[]> {
   try {
     const { data, error } = await svc
@@ -528,7 +542,15 @@ async function loadTrainerRules(svc: any): Promise<TrainerRule[]> {
       console.error("[auto-reply] trainer rules load error:", error.message);
       return [];
     }
-    return (data || []) as TrainerRule[];
+    const now = Date.now();
+    const filtered = (data || []).filter((r: any) => {
+      if (isSunsetTrainerRule(r, now)) {
+        console.log(`[auto-reply] sunset filter dropped expired rule: ${r.title}`);
+        return false;
+      }
+      return true;
+    });
+    return filtered as TrainerRule[];
   } catch (e: any) {
     console.error("[auto-reply] trainer rules load failed:", e?.message);
     return [];
