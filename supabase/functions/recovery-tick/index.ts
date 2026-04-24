@@ -51,11 +51,22 @@ async function draftMessage(name: string, snippet: string, step: number): Promis
         messages: [
           {
             role: "system",
-            content: `You are Vanto, a friendly WhatsApp follow-up writer for an MLM/health business (Get Well Africa, APLGO, Online Course For MLM). Write a SHORT WhatsApp message (max 4 short sentences, max 360 chars) in warm conversational English. No emojis at the start. Sign off with "— Vanto". Never use markdown. Never use placeholders like {name}.`,
+            content: `You are Vanto, a WhatsApp follow-up writer for Get Well Africa (APLGO products, mainly NRM). 
+
+CRITICAL CONTEXT — these leads are COLD: they replied to a Facebook advert on the Get Well Africa page (usually about NRM / APLGO wellness products), they replied via a Twilio business number, and they DO NOT know who Vanto is. They will think "who is this?" if you don't re-introduce yourself.
+
+EVERY message MUST:
+1. Open by re-introducing: "It's Vanto from Get Well Africa" (or natural variation).
+2. Remind them of the original context: they replied to our APLGO / NRM advert on Facebook.
+3. Reference what they last said if provided.
+4. Be warm, short (max 4 sentences, max 380 chars), no markdown, no placeholders.
+5. End with "— Vanto".
+
+Never assume they remember you. Never start with just "Hi {name}, just checking back" — that confuses cold Facebook leads.`,
           },
           {
             role: "user",
-            content: `Contact name: ${name}\nWhat they last said to us: "${snippet || "(no message)"}"\nFollow-up stage: ${stepGuide}\n\nWrite the message now.`,
+            content: `Contact name: ${name}\nWhat they last said to us (weeks ago, via Facebook→Twilio): "${snippet || "(no message captured — they only opened the chat)"}"\nFollow-up stage: ${stepGuide}\n\nWrite the message now. Remember: re-introduce yourself + remind them of the Get Well Africa Facebook APLGO/NRM advert.`,
           },
         ],
       }),
