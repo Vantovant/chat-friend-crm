@@ -23,4 +23,14 @@ UI: Settings → AI Trainer (`src/components/vanto/AITrainerPanel.tsx`)
 - "Test Trainer" box: enter sample input → see matched rules + priority badge
 - Priority badges color-coded: advisory=muted, strong=amber, override=destructive
 
-Seed rule: PWR — never recommend alone, ask gender first (override). Triggers: tired, fatigue, low energy, energy, exhausted, no energy, always tired. Product: PWR. Instruction enforces gender-clarification question before recommending PWR Lemon (men) or PWR Apricot (women).
+CRITICAL PRODUCT FACTS (2026-04-24 corrections):
+- THERE IS NO PRODUCT CALLED "PWR". The line is split: PWR Lemon (men's health) and PWR Apricot (women's health).
+- PWR Lemon and PWR Apricot are NOT vitality/energy products — they are gender-specific hormonal/reproductive support.
+- Vitality / tiredness / fatigue / low energy → recommend GRW (immune+vitality) or GTS (strength+stamina), NEVER PWR.
+- Override rule "PWR — never recommend alone" enforces both: (a) always specify Lemon/Apricot, (b) route vitality questions to GRW/GTS.
+
+LINK POLICY (2026-04-24):
+- Joining as member (ONLY allowed link): https://backoffice.aplgo.com/register/?sp=787262
+- Ordering products (customer purchases): https://onlinecourseformlm.com/shop AND https://aplshop.com/j/787262
+- NEVER share the bare backoffice.aplgo.com without the /register/?sp=787262 suffix (strips sponsor code).
+- Override rule "LINK POLICY — Joining vs Ordering" enforces this separation in all auto-replies, flash-sale rules, and pricing rules.
