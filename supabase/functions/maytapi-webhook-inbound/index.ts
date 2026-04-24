@@ -227,6 +227,15 @@ Deno.serve(async (req) => {
         console.error("[maytapi-inbound] auto-reply trigger failed:", e instanceof Error ? e.message : e);
       }
 
+      // Phase 3: fire-and-forget intent detection (never blocks auto-reply)
+      try {
+        fetch(`${SUPABASE_URL}/functions/v1/phase3-detect`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
+          body: JSON.stringify({ conversation_id: conversation!.id, message_text: text }),
+        }).catch((e) => console.warn("[maytapi-inbound] phase3-detect fire-and-forget failed:", e));
+      } catch {}
+
       return new Response(JSON.stringify({ ok: true, processed: "inbound_message", conversation_id: conversation!.id }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

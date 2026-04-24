@@ -55,3 +55,4 @@ Group Campaigns: Maytapi REST API (NOT Chrome Extension autoposter). Twilio stay
 - [Sales Conversion Phase 2](mem://features/sales-conversion-phase2) — 8 trainer rules: objections, hesitation, trust, usage, matching, member upsell, joining hesitation, human handover
 - [Auto-Reply Branding](mem://features/auto-reply-branding) — Vanto Vanto's details only in auto-replies
 - [APLGO Pricing 15% VAT](mem://features/aplgo-pricing-15pct-vat) — Locked SA price list (Daily R431.25 member / R862.50 retail), supersedes 15.5% VAT
+- [Follow-Up Phase 3](mem://features/followup-phase3) — 6 intent states, 2h/24h/72h cadence, hybrid keyword+AI detect, hybrid auto/suggest send, do_not_contact STOP flag, 3-per-topic cap

@@ -49,11 +49,12 @@ Deno.serve(async (req) => {
       if (!c.last_outbound_at) reason = "unanswered";
       else if (hoursSinceInbound > 72) reason = "abandoned";
 
-      // Upsert
+      // Upsert — legacy 5-step lane only (do not touch Phase 3 rows)
       const { data: existing } = await supabase
         .from("missed_inquiries")
-        .select("id, status, current_step")
+        .select("id, status, current_step, cadence")
         .eq("contact_id", c.contact_id)
+        .eq("cadence", "legacy_5step")
         .maybeSingle();
 
       if (existing) {

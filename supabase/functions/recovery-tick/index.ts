@@ -97,6 +97,7 @@ Deno.serve(async (req) => {
       .from("missed_inquiries")
       .select("id, contact_id, conversation_id, current_step, last_inbound_snippet, attempts")
       .eq("status", "active")
+      .eq("cadence", "legacy_5step")
       .lte("next_send_at", nowIso)
       .limit(25);
 
