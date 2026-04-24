@@ -1222,6 +1222,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      disable_april_flash_sale_rule: { Args: never; Returns: undefined }
       get_user_role: {
         Args: never
         Returns: Database["public"]["Enums"]["user_role"]
