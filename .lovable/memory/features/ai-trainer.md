@@ -29,8 +29,10 @@ CRITICAL PRODUCT FACTS (2026-04-24 corrections):
 - Vitality / tiredness / fatigue / low energy → recommend GRW (immune+vitality) or GTS (strength+stamina), NEVER PWR.
 - Override rule "PWR — never recommend alone" enforces both: (a) always specify Lemon/Apricot, (b) route vitality questions to GRW/GTS.
 
-LINK POLICY (2026-04-24):
-- Joining as member (ONLY allowed link): https://backoffice.aplgo.com/register/?sp=787262
-- Ordering products (customer purchases): https://onlinecourseformlm.com/shop AND https://aplshop.com/j/787262
-- NEVER share the bare backoffice.aplgo.com without the /register/?sp=787262 suffix (strips sponsor code).
-- Override rule "LINK POLICY — Joining vs Ordering" enforces this separation in all auto-replies, flash-sale rules, and pricing rules.
+LINK POLICY (2026-04-24, sponsor code 787262):
+- JOIN as associate (ONLY): https://backoffice.aplgo.com/register/?sp=787262
+- ORDER products (customer): https://aplshop.com/j/787262 OR https://onlinecourseformlm.com/shop
+- BRAND/INFO site: https://aplgo.com/j/787262/
+- DIGITAL CATALOG (Acumullit SA): https://aplshop.com/j/787262/catalog/
+- NEVER share bare backoffice.aplgo.com, aplgo.com, or aplshop.com without sponsor suffix (strips 787262).
+- Override rule "LINK POLICY — Joining vs Ordering" enforces correct link per intent across all auto-replies, flash-sale rules, and pricing rules.
