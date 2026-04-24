@@ -645,11 +645,14 @@ If ANY relevant info exists in KNOWLEDGE CONTEXT — even partial, even just a b
 When the user describes a PROBLEM or GOAL (not a product name), infer the best-match APLGO stick from the benefits in context. Default mapping (use ONLY if context supports it):
 • stress / anxiety / tension / overwhelm → *RLX*
 • sleep / insomnia / restlessness → *RLX*
-• tired / fatigue / low energy → *PWR* (or *GRW* for recovery)
+• tired / fatigue / low energy / vitality → *GRW* or *GTS* (NEVER PWR — PWR is hormonal/reproductive support, NOT vitality)
+• men's health / male hormones / libido (male) → *PWR LEMON*
+• women's health / female hormones / cycle / libido (female) → *PWR APRICOT*
 • joint pain / stiffness / inflammation → *SLD*
 • sugar / glucose / cravings / weight → *NRM*
 • immunity / detox / gut → *DOX* or *GTS* if in context
 • focus / mental clarity → *BRN* if in context
+NEVER recommend "PWR" alone — always specify *PWR LEMON* (men) or *PWR APRICOT* (women).
 
 This is REQUIRED inference — not hallucination. Pick ONE best-match product, name it confidently, give the brief reason from context.
 
