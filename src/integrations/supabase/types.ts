@@ -325,6 +325,9 @@ export type Database = {
           created_at: string
           created_by: string | null
           deleted_at: string | null
+          do_not_contact: boolean
+          do_not_contact_at: string | null
+          do_not_contact_reason: string | null
           email: string | null
           id: string
           interest: Database["public"]["Enums"]["interest_level"]
@@ -348,6 +351,9 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           deleted_at?: string | null
+          do_not_contact?: boolean
+          do_not_contact_at?: string | null
+          do_not_contact_reason?: string | null
           email?: string | null
           id?: string
           interest?: Database["public"]["Enums"]["interest_level"]
@@ -371,6 +377,9 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           deleted_at?: string | null
+          do_not_contact?: boolean
+          do_not_contact_at?: string | null
+          do_not_contact_reason?: string | null
           email?: string | null
           id?: string
           interest?: Database["public"]["Enums"]["interest_level"]
@@ -461,6 +470,102 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      followup_logs: {
+        Row: {
+          contact_id: string
+          conversation_id: string | null
+          created_at: string
+          delivery: string
+          error: string | null
+          id: string
+          intent_state: string | null
+          message_text: string | null
+          missed_inquiry_id: string | null
+          outcome: string | null
+          phone: string | null
+          provider_message_id: string | null
+          send_mode: string
+          step_number: number | null
+          template_id: string | null
+          topic: string | null
+        }
+        Insert: {
+          contact_id: string
+          conversation_id?: string | null
+          created_at?: string
+          delivery?: string
+          error?: string | null
+          id?: string
+          intent_state?: string | null
+          message_text?: string | null
+          missed_inquiry_id?: string | null
+          outcome?: string | null
+          phone?: string | null
+          provider_message_id?: string | null
+          send_mode: string
+          step_number?: number | null
+          template_id?: string | null
+          topic?: string | null
+        }
+        Update: {
+          contact_id?: string
+          conversation_id?: string | null
+          created_at?: string
+          delivery?: string
+          error?: string | null
+          id?: string
+          intent_state?: string | null
+          message_text?: string | null
+          missed_inquiry_id?: string | null
+          outcome?: string | null
+          phone?: string | null
+          provider_message_id?: string | null
+          send_mode?: string
+          step_number?: number | null
+          template_id?: string | null
+          topic?: string | null
+        }
+        Relationships: []
+      }
+      followup_templates: {
+        Row: {
+          created_at: string
+          delay_hours: number
+          enabled: boolean
+          id: string
+          intent_state: string
+          notes: string | null
+          send_mode: string
+          step_number: number
+          template_text: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          delay_hours: number
+          enabled?: boolean
+          id?: string
+          intent_state: string
+          notes?: string | null
+          send_mode?: string
+          step_number: number
+          template_text: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          delay_hours?: number
+          enabled?: boolean
+          id?: string
+          intent_state?: string
+          notes?: string | null
+          send_mode?: string
+          step_number?: number
+          template_text?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       integration_settings: {
         Row: {
@@ -746,6 +851,8 @@ export type Database = {
       missed_inquiries: {
         Row: {
           attempts: Json
+          auto_followup_enabled: boolean
+          cadence: string
           channel: string
           contact_id: string
           conversation_id: string | null
@@ -754,15 +861,20 @@ export type Database = {
           flagged_at: string
           flagged_reason: string
           id: string
+          intent_state: string | null
           last_error: string | null
           last_inbound_at: string | null
           last_inbound_snippet: string | null
           next_send_at: string | null
+          send_mode: string
           status: string
+          topic: string | null
           updated_at: string
         }
         Insert: {
           attempts?: Json
+          auto_followup_enabled?: boolean
+          cadence?: string
           channel?: string
           contact_id: string
           conversation_id?: string | null
@@ -771,15 +883,20 @@ export type Database = {
           flagged_at?: string
           flagged_reason?: string
           id?: string
+          intent_state?: string | null
           last_error?: string | null
           last_inbound_at?: string | null
           last_inbound_snippet?: string | null
           next_send_at?: string | null
+          send_mode?: string
           status?: string
+          topic?: string | null
           updated_at?: string
         }
         Update: {
           attempts?: Json
+          auto_followup_enabled?: boolean
+          cadence?: string
           channel?: string
           contact_id?: string
           conversation_id?: string | null
@@ -788,11 +905,14 @@ export type Database = {
           flagged_at?: string
           flagged_reason?: string
           id?: string
+          intent_state?: string | null
           last_error?: string | null
           last_inbound_at?: string | null
           last_inbound_snippet?: string | null
           next_send_at?: string | null
+          send_mode?: string
           status?: string
+          topic?: string | null
           updated_at?: string
         }
         Relationships: []
