@@ -53,3 +53,4 @@ Group Campaigns: Maytapi REST API (NOT Chrome Extension autoposter). Twilio stay
 - [Missed Inquiry Recovery](mem://features/missed-inquiry-recovery) — 5-step Maytapi auto-follow-up for stalled inbox convos
 - [Technical Debt](mem://technical/debt) — Modules needing refactor, future backlog
 - [Auto-Reply Branding](mem://features/auto-reply-branding) — Vanto Vanto's details only in auto-replies
+- [APLGO Pricing 15% VAT](mem://features/aplgo-pricing-15pct-vat) — Locked SA price list (Daily R431.25 member / R862.50 retail), supersedes 15.5% VAT
