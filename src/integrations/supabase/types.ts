@@ -1292,6 +1292,72 @@ export type Database = {
           },
         ]
       }
+      zazi_actions: {
+        Row: {
+          action_type: string
+          auto_applied: boolean
+          confidence: number
+          contact_id: string | null
+          conversation_id: string | null
+          created_at: string
+          created_by: string | null
+          evidence: Json
+          id: string
+          message_id: string | null
+          phone_normalized: string | null
+          proposed_diff: Json
+          requires_review: boolean
+          review_notes: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          risk_level: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          action_type: string
+          auto_applied?: boolean
+          confidence?: number
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          evidence?: Json
+          id?: string
+          message_id?: string | null
+          phone_normalized?: string | null
+          proposed_diff?: Json
+          requires_review?: boolean
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          risk_level?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          action_type?: string
+          auto_applied?: boolean
+          confidence?: number
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          evidence?: Json
+          id?: string
+          message_id?: string | null
+          phone_normalized?: string | null
+          proposed_diff?: Json
+          requires_review?: boolean
+          review_notes?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          risk_level?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       zazi_sync_jobs: {
         Row: {
           attempts: number
