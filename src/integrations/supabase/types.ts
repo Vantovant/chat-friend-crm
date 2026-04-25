@@ -1301,6 +1301,7 @@ export type Database = {
           conversation_id: string | null
           created_at: string
           created_by: string | null
+          created_by_label: string
           evidence: Json
           id: string
           message_id: string | null
@@ -1322,6 +1323,7 @@ export type Database = {
           conversation_id?: string | null
           created_at?: string
           created_by?: string | null
+          created_by_label?: string
           evidence?: Json
           id?: string
           message_id?: string | null
@@ -1343,6 +1345,7 @@ export type Database = {
           conversation_id?: string | null
           created_at?: string
           created_by?: string | null
+          created_by_label?: string
           evidence?: Json
           id?: string
           message_id?: string | null
