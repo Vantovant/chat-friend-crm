@@ -157,10 +157,10 @@ async function processOne(supabase: any, args: {
 
   if ((existingCount ?? 0) >= 3) return { action: "topic_capped", state: intent.state };
 
-  // Find existing active phase3 row for same state+topic — refresh instead of duplicate
+  // Find existing active phase3 row for same state+topic — refresh ONLY if newer inbound
   const { data: existing } = await supabase
     .from("missed_inquiries")
-    .select("id, status, current_step")
+    .select("id, status, current_step, last_inbound_at, attempts")
     .eq("contact_id", contact_id)
     .eq("cadence", "phase3_2_24_72")
     .eq("intent_state", intent.state)
@@ -169,9 +169,28 @@ async function processOne(supabase: any, args: {
     .maybeSingle();
 
   const nextSendAt = new Date(Date.now() + delayHoursForStep0(intent.state) * 3600000).toISOString();
+  const incomingMs = new Date(inbound_at).getTime();
 
   if (existing) {
-    // Re-flag (user re-asked the same intent) — reset to step 0
+    // Idempotency guard #1: same or older inbound timestamp → skip
+    const existingInboundMs = existing.last_inbound_at ? new Date(existing.last_inbound_at).getTime() : 0;
+    if (incomingMs <= existingInboundMs) {
+      return { action: "skipped_same_inbound", state: intent.state, topic: intent.topic };
+    }
+
+    // Idempotency guard #2: row already advanced (current_step > 0) AND no inbound newer
+    // than the most recent attempt's sent_at → skip (user hasn't replied since our follow-up)
+    const attemptsArr: any[] = Array.isArray(existing.attempts) ? existing.attempts : [];
+    if ((existing.current_step ?? 0) > 0 && attemptsArr.length > 0) {
+      const lastAttemptMs = Math.max(
+        ...attemptsArr.map((a) => (a?.sent_at ? new Date(a.sent_at).getTime() : 0))
+      );
+      if (incomingMs <= lastAttemptMs) {
+        return { action: "skipped_after_attempt_no_new_reply", state: intent.state, topic: intent.topic };
+      }
+    }
+
+    // Genuinely newer inbound from the user → safe to refresh to step 0
     await supabase.from("missed_inquiries").update({
       flagged_at: new Date().toISOString(),
       flagged_reason: `phase3:${intent.state.toLowerCase()}`,
@@ -183,7 +202,7 @@ async function processOne(supabase: any, args: {
       attempts: [],
       last_error: null,
     }).eq("id", existing.id);
-    return { action: "refreshed", state: intent.state, topic: intent.topic };
+    return { action: "refreshed_new_inbound", state: intent.state, topic: intent.topic };
   }
 
   const { error: insErr } = await supabase.from("missed_inquiries").insert({
@@ -260,7 +279,9 @@ Deno.serve(async (req) => {
       unique.push(m);
     }
 
-    let flagged = 0, refreshed = 0, capped = 0, stopped = 0, no_intent = 0, skipped_dnc = 0;
+    let flagged = 0, refreshed_new_inbound = 0, skipped_same_inbound = 0,
+        skipped_after_attempt_no_new_reply = 0, capped = 0, stopped = 0,
+        no_intent = 0, skipped_dnc = 0;
 
     for (const m of unique) {
       const { data: convo } = await supabase
@@ -277,7 +298,9 @@ Deno.serve(async (req) => {
         inbound_at: m.created_at,
       });
       if (result.action === "flagged") flagged++;
-      else if (result.action === "refreshed") refreshed++;
+      else if (result.action === "refreshed_new_inbound") refreshed_new_inbound++;
+      else if (result.action === "skipped_same_inbound") skipped_same_inbound++;
+      else if (result.action === "skipped_after_attempt_no_new_reply") skipped_after_attempt_no_new_reply++;
       else if (result.action === "topic_capped") capped++;
       else if (result.action === "stopped") stopped++;
       else if (result.action === "no_intent") no_intent++;
@@ -286,7 +309,9 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({
       success: true, mode: "cron_sweep",
-      scanned: unique.length, flagged, refreshed, capped, stopped, no_intent, skipped_dnc,
+      scanned: unique.length, flagged, refreshed_new_inbound,
+      skipped_same_inbound, skipped_after_attempt_no_new_reply,
+      capped, stopped, no_intent, skipped_dnc,
     }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("phase3-detect error:", err);
