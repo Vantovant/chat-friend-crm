@@ -279,7 +279,9 @@ Deno.serve(async (req) => {
       unique.push(m);
     }
 
-    let flagged = 0, refreshed = 0, capped = 0, stopped = 0, no_intent = 0, skipped_dnc = 0;
+    let flagged = 0, refreshed_new_inbound = 0, skipped_same_inbound = 0,
+        skipped_after_attempt_no_new_reply = 0, capped = 0, stopped = 0,
+        no_intent = 0, skipped_dnc = 0;
 
     for (const m of unique) {
       const { data: convo } = await supabase
@@ -296,7 +298,9 @@ Deno.serve(async (req) => {
         inbound_at: m.created_at,
       });
       if (result.action === "flagged") flagged++;
-      else if (result.action === "refreshed") refreshed++;
+      else if (result.action === "refreshed_new_inbound") refreshed_new_inbound++;
+      else if (result.action === "skipped_same_inbound") skipped_same_inbound++;
+      else if (result.action === "skipped_after_attempt_no_new_reply") skipped_after_attempt_no_new_reply++;
       else if (result.action === "topic_capped") capped++;
       else if (result.action === "stopped") stopped++;
       else if (result.action === "no_intent") no_intent++;
@@ -305,7 +309,9 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({
       success: true, mode: "cron_sweep",
-      scanned: unique.length, flagged, refreshed, capped, stopped, no_intent, skipped_dnc,
+      scanned: unique.length, flagged, refreshed_new_inbound,
+      skipped_same_inbound, skipped_after_attempt_no_new_reply,
+      capped, stopped, no_intent, skipped_dnc,
     }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("phase3-detect error:", err);
