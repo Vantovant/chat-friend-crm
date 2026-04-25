@@ -203,7 +203,7 @@ async function processOne(supabase: any, args: {
     topic: intent.topic,
   });
   if (insErr) {
-    console.error("phase3 insert failed:", insErr, { contact_id, intent });
+    console.error("phase3 insert failed:", insErr.message, { contact_id, intent });
     return { action: "insert_failed", state: intent.state, topic: intent.topic, error: insErr.message };
   }
   return { action: "flagged", state: intent.state, topic: intent.topic };
