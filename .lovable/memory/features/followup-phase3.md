@@ -3,7 +3,11 @@ name: WhatsApp AI Phase 3 — Follow-Up Automation + Drop-Off Recovery
 description: Conversion-focused 2h/24h/72h follow-up cadence layered on top of the legacy 5-step missed-inquiry recovery. Hybrid keyword+AI intent detection, hybrid auto/suggest send mode, global do_not_contact STOP flag.
 type: feature
 ---
-**STATUS: PASSED QA — 2026-04-24 (8/8 dry-run scenarios).** Sits ON TOP of Phases 1 & 2 — none of those rules touched.
+**STATUS: PASSED QA — 2026-04-25.** 8/8 dry-run scenarios + live detect + duplicate refresh + STOP cascade all confirmed against internal test contact. Sits ON TOP of Phases 1 & 2 — none of those rules touched. **Live 2-hour auto-send is NOT enabled yet** (phase3-tick cron not scheduled).
+
+**Schema fix 2026-04-25**: dropped legacy `UNIQUE(missed_inquiries.contact_id)`, replaced with partial unique index `missed_inquiries_unique_active_cadence_intent_topic` on `(contact_id, cadence, COALESCE(intent_state,''), COALESCE(topic,''))` WHERE status IN ('active','paused'). This lets legacy 5-step + Phase 3 rows coexist for the same contact while still preventing duplicates per (cadence, intent, topic).
+
+**RecoveryPanel 2026-04-25**: extended with cadence filter (All / Legacy / Phase 3), intent_state + topic + send_mode + DNC badges, "Phase 3 Sweep" button (calls phase3-detect), per-row STOP/Resume toggle (writes contacts.do_not_contact + cascades stopped status to all that contact's missed_inquiries rows), pending suggestions block with "Send Now" button wired to phase3-send-suggested (blocked when DNC=true).
 
 ## Architecture
 Extends `missed_inquiries` (does NOT replace legacy 5-step). Two parallel lanes via `cadence` column:
