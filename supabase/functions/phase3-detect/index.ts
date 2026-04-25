@@ -186,7 +186,7 @@ async function processOne(supabase: any, args: {
     return { action: "refreshed", state: intent.state, topic: intent.topic };
   }
 
-  await supabase.from("missed_inquiries").insert({
+  const { error: insErr } = await supabase.from("missed_inquiries").insert({
     contact_id,
     conversation_id,
     flagged_reason: `phase3:${intent.state.toLowerCase()}`,
@@ -202,6 +202,10 @@ async function processOne(supabase: any, args: {
     intent_state: intent.state,
     topic: intent.topic,
   });
+  if (insErr) {
+    console.error("phase3 insert failed:", insErr.message, { contact_id, intent });
+    return { action: "insert_failed", state: intent.state, topic: intent.topic, error: insErr.message };
+  }
   return { action: "flagged", state: intent.state, topic: intent.topic };
 }
 
