@@ -471,7 +471,9 @@ Deno.serve(async (req) => {
   // must accept the proposal before contacts.lead_type changes.
   // Phase 4A remains asleep — no detectors, no auto-apply, no UI changes here.
   if (action === 'update_lead_type') {
-    const ALLOWED_LEAD_TYPES = ['prospect', 'registered', 'buyer', 'vip'] as const;
+    // Aligned with public.lead_type Postgres enum (5 values) and src/lib/vanto-data.ts.
+    // UI labels: Prospect, Registered_Nopurchase, Purchase_Nostatus, Purchase_Status, Expired.
+    const ALLOWED_LEAD_TYPES = ['prospect', 'registered', 'buyer', 'vip', 'expired'] as const;
     type AllowedLeadType = typeof ALLOWED_LEAD_TYPES[number];
 
     const requestedRaw = String(body.requested_lead_type ?? body.lead_type ?? '').toLowerCase().trim();
@@ -544,6 +546,23 @@ Deno.serve(async (req) => {
     const isHighConfidence = confidence >= HIGH_CONFIDENCE_THRESHOLD;
     const riskLevel = isHighConfidence ? 'medium' : 'low';
 
+    // ── Audit-trail guarantee (Step F follow-up): every successful proposal
+    // MUST have a contact_activity mirror. Resolve performed_by BEFORE writing
+    // the proposal. If unresolvable, refuse with 409 — do not create a
+    // half-audited proposal in zazi_actions.
+    const performedBy = user_id || contactRow.assigned_to || contactRow.created_by || null;
+    if (!performedBy) {
+      await markEvent('error', 'no_resolvable_owner_for_activity_mirror');
+      console.log('[crm-webhook] update_lead_type_rejected', {
+        reason: 'no_performed_by',
+        contact_id: contactRow.id,
+      });
+      return jsonRes({
+        error: 'Cannot create proposal: no resolvable owner for audit trail. Provide user_id in the request, or ensure the contact has an assigned_to or created_by.',
+        code: 'no_resolvable_owner',
+      }, 409);
+    }
+
     // Insert review-gated proposal — status stays 'pending', requires_review=true,
     // auto_applied=false. NO direct contacts.lead_type write.
     const { data: actionRow, error: actionErr } = await supabase
@@ -578,31 +597,36 @@ Deno.serve(async (req) => {
       return jsonRes({ error: actionErr?.message || 'failed to create proposal' }, 500);
     }
 
-    // Mirror to contact_activity. performed_by is NOT NULL → use user_id from
-    // body, else assigned_to, else created_by. If none, skip the activity row
-    // rather than fail the proposal.
-    const performedBy = user_id || contactRow.assigned_to || contactRow.created_by || null;
-    if (performedBy) {
-      await supabase.from('contact_activity').insert({
-        contact_id: contactRow.id,
-        performed_by: performedBy,
-        type: 'lead_type_proposal',
-        metadata: {
-          proposal_id: actionRow.id,
-          from: contactRow.lead_type,
-          to: requestedRaw,
-          confidence,
-          high_confidence: isHighConfidence,
-          evidence_summary: evidenceSummary,
-          next_action: 'review proposal',
-          source: 'crm-webhook',
-        },
-      });
-    } else {
-      console.log('[crm-webhook] update_lead_type_activity_skipped', {
-        reason: 'no_performed_by',
+    // Mirror to contact_activity (guaranteed — performedBy resolved above).
+    // If this insert fails, roll back the proposal so we never leave a
+    // proposal without its audit row.
+    const { error: activityErr } = await supabase.from('contact_activity').insert({
+      contact_id: contactRow.id,
+      performed_by: performedBy,
+      type: 'lead_type_proposal',
+      metadata: {
         proposal_id: actionRow.id,
+        from: contactRow.lead_type,
+        to: requestedRaw,
+        confidence,
+        high_confidence: isHighConfidence,
+        evidence_summary: evidenceSummary,
+        next_action: 'review proposal',
+        source: 'crm-webhook',
+      },
+    });
+    if (activityErr) {
+      // Compensating delete — keep audit invariant: no proposal without activity.
+      await supabase.from('zazi_actions').delete().eq('id', actionRow.id);
+      await markEvent('error', `activity_mirror_failed: ${activityErr.message}`);
+      console.log('[crm-webhook] update_lead_type_rolled_back', {
+        proposal_id: actionRow.id,
+        reason: 'activity_insert_failed',
       });
+      return jsonRes({
+        error: 'Failed to write audit trail; proposal rolled back.',
+        code: 'activity_mirror_failed',
+      }, 500);
     }
 
     console.log('[crm-webhook] update_lead_type_proposed', {
