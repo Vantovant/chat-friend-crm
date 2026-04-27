@@ -143,12 +143,25 @@ async function redactPayload(body: any): Promise<any> {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
 
-  // ── 1. Auth: verify webhook secret ─────────────────────────────────────────
-  const webhookSecret = req.headers.get('x-webhook-secret');
-  const expectedSecret = Deno.env.get('WEBHOOK_SECRET');
-  if (!webhookSecret || webhookSecret !== expectedSecret) {
+  // ── 1. Auth: verify webhook secret (STEP C — dual-secret rotation) ────────
+  // Accept either WEBHOOK_SECRET (primary) or WEBHOOK_SECRET_NEXT (rotation
+  // candidate). Use timing-safe comparison. Never log raw secret values.
+  const provided = req.headers.get('x-webhook-secret') ?? '';
+  const primary = Deno.env.get('WEBHOOK_SECRET') ?? '';
+  const next = Deno.env.get('WEBHOOK_SECRET_NEXT') ?? '';
+
+  const matchedSecret = timingSafeMatch(provided, primary, next);
+  if (!matchedSecret) {
+    console.log('[crm-webhook] auth_failed', {
+      reason: !provided ? 'missing_header' : (!primary ? 'no_primary_configured' : 'mismatch'),
+      next_configured: next.length > 0,
+    });
     return jsonRes({ error: 'Unauthorized — invalid webhook secret' }, 401);
   }
+  console.log('[crm-webhook] auth_ok', {
+    matched_secret: matchedSecret, // 'primary' | 'next' — never the value
+    next_configured: next.length > 0,
+  });
 
   // ── 2. Service-role client (server-to-server only) ─────────────────────────
   const supabase = createClient(
