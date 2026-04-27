@@ -15,6 +15,7 @@ interface NavItem {
   label: string;
   icon: React.ElementType;
   badge?: number;
+  adminOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
