@@ -255,7 +255,7 @@ Deno.serve(async (req) => {
           idempotency_key: idempotencyKey,
           action,
           user_identity: identity ?? '',
-          payload_hash: redactedPayloadHash(body),
+          payload_hash: await sha256Hex(JSON.stringify(body ?? {})),
           response,
           status_code: statusCode,
         });
