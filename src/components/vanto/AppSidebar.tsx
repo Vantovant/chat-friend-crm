@@ -49,6 +49,8 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
   const [userName, setUserName] = useState('');
   const [inboxUnread, setInboxUnread] = useState(0);
   const isMobile = useIsMobile();
+  const currentUser = useCurrentUser();
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
   useEffect(() => {
     const loadUser = async () => {
