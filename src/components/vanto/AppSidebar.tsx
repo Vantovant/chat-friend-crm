@@ -83,10 +83,10 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // Compute nav items with dynamic badge
-  const navItemsComputed = navItems.map(item =>
-    item.id === 'inbox' ? { ...item, badge: inboxUnread } : item
-  );
+  // Compute nav items: drop admin-only items for non-admins, then add dynamic badge
+  const navItemsComputed = navItems
+    .filter(item => !item.adminOnly || isAdmin)
+    .map(item => item.id === 'inbox' ? { ...item, badge: inboxUnread } : item);
 
   const handleModuleChange = (m: Module) => {
     onModuleChange(m);
