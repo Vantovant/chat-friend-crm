@@ -139,6 +139,31 @@ async function redactPayload(body: any): Promise<any> {
   return out;
 }
 
+// ─── Auth helper (STEP C — dual-secret rotation) ─────────────────────────────
+// Constant-time string compare. Returns true only when both strings are
+// non-empty and byte-for-byte equal. Always walks the full length of the
+// longer input to avoid early-exit timing leaks.
+function timingSafeEqual(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  const ae = new TextEncoder().encode(a);
+  const be = new TextEncoder().encode(b);
+  const len = Math.max(ae.length, be.length);
+  let diff = ae.length ^ be.length;
+  for (let i = 0; i < len; i++) {
+    diff |= (ae[i] ?? 0) ^ (be[i] ?? 0);
+  }
+  return diff === 0;
+}
+// Returns 'primary' | 'next' | null. Checks BOTH secrets even on early
+// match so request timing does not reveal which slot matched.
+function timingSafeMatch(provided: string, primary: string, next: string): 'primary' | 'next' | null {
+  const matchPrimary = primary ? timingSafeEqual(provided, primary) : false;
+  const matchNext = next ? timingSafeEqual(provided, next) : false;
+  if (matchPrimary) return 'primary';
+  if (matchNext) return 'next';
+  return null;
+}
+
 // ─── Main handler ─────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
