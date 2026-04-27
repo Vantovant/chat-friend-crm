@@ -243,6 +243,28 @@ Deno.serve(async (req) => {
     }
   }
 
+  // Cache the response under the idempotency key (only for idempotent actions
+  // with a key, only on success). Errors are intentionally NOT cached so the
+  // sender can retry after fixing the cause.
+  async function cacheIdempotent(response: Record<string, unknown>, statusCode = 200) {
+    if (!IDEMPOTENT_ACTIONS.has(action) || !idempotencyKey) return;
+    try {
+      await supabase
+        .from('webhook_idempotency_keys')
+        .insert({
+          idempotency_key: idempotencyKey,
+          action,
+          user_identity: identity ?? '',
+          payload_hash: redactedPayloadHash(body),
+          response,
+          status_code: statusCode,
+        });
+    } catch (e) {
+      // Unique violation on concurrent replay is fine — first writer wins.
+      console.log('[crm-webhook] idempotency_cache_skip', { action, reason: 'duplicate_or_error' });
+    }
+  }
+
 
   // ── 4. Log inbound event (PII-redacted — STEP D) ──────────────────────────
   const redacted = await redactPayload(body);
