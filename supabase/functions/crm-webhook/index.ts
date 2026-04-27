@@ -164,8 +164,17 @@ Deno.serve(async (req) => {
   const { action, user_id, contacts, contact, phone, name, message_preview } = body;
   if (!action) return jsonRes({ error: 'Missing action field' }, 400);
 
-  // ── 4. Log inbound event ───────────────────────────────────────────────────
-  const eventRow: any = { source: 'zazi', action, status: 'received', payload: body };
+  // ── 4. Log inbound event (PII-redacted — STEP D) ──────────────────────────
+  const redacted = await redactPayload(body);
+  // Safe console log — no raw phone/email/message/name
+  console.log('[crm-webhook] inbound', {
+    action: redacted.action,
+    has_user_id: redacted.has_user_id,
+    payload_hash: redacted.payload_hash,
+    contacts_count: redacted.contacts_count,
+    message_len: redacted.message_len,
+  });
+  const eventRow: any = { source: 'zazi', action, status: 'received', payload: redacted };
   const { data: eventData } = await supabase
     .from('webhook_events')
     .insert(eventRow)
