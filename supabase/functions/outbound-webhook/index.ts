@@ -278,9 +278,11 @@ Deno.serve(async (req) => {
     }
     const rawPayload = body?.payload ?? {};
     const summary = await summarizePayload(rawPayload);
+    const testUrlOverride: string | null = typeof body?._test_url_override === "string" ? body._test_url_override : null;
+    const effectiveTarget = resolveTargetUrl(testUrlOverride);
 
-    // If outbound URL not configured, persist as not_configured (no delivery attempt)
-    if (!OUTBOUND_WEBHOOK_URL) {
+    // If no effective target (no env URL and no allowed test override), persist as not_configured
+    if (!effectiveTarget) {
       const { data, error } = await supabase.from("webhook_events").insert({
         source: "vanto-crm",
         action: eventType,
