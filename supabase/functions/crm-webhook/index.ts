@@ -202,6 +202,70 @@ Deno.serve(async (req) => {
   const { action, user_id, contacts, contact, phone, name, message_preview } = body;
   if (!action) return jsonRes({ error: 'Missing action field' }, 400);
 
+  // ── 3.5 Idempotency check (STEP A) ─────────────────────────────────────────
+  // Applies to: upsert_contact, log_chat, update_lead_type.
+  // If the same x-idempotency-key + action + identity is replayed within 24h,
+  // we return the cached response and do NOT re-run any DB writes.
+  const IDEMPOTENT_ACTIONS = new Set(['upsert_contact', 'log_chat', 'update_lead_type']);
+  const idempotencyKey = req.headers.get('x-idempotency-key') ?? '';
+  const identity = String(
+    user_id ||
+    contact?.email || contact?.phone || contact?.phone_number ||
+    body?.email || body?.phone || ''
+  ).toLowerCase().trim() || null;
+
+  if (IDEMPOTENT_ACTIONS.has(action)) {
+    if (!idempotencyKey) {
+      // Backward-compat: allow but warn (no PII).
+      console.log('[crm-webhook] idempotency_missing_key', {
+        action,
+        has_identity: !!identity,
+        payload_hash: await sha256Hex(JSON.stringify(body ?? {})),
+      });
+    } else {
+      const { data: cached } = await supabase
+        .from('webhook_idempotency_keys')
+        .select('id, response, status_code, created_at')
+        .eq('idempotency_key', idempotencyKey)
+        .eq('action', action)
+        .eq('user_identity', identity ?? '')
+        .gt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+        .maybeSingle();
+      if (cached?.response) {
+        console.log('[crm-webhook] idempotency_replay', {
+          action,
+          status_code: cached.status_code,
+          first_seen_at: cached.created_at,
+        });
+        return jsonRes({ ...(cached.response as any), idempotent_replay: true }, cached.status_code ?? 200);
+      }
+      console.log('[crm-webhook] idempotency_first', { action });
+    }
+  }
+
+  // Cache the response under the idempotency key (only for idempotent actions
+  // with a key, only on success). Errors are intentionally NOT cached so the
+  // sender can retry after fixing the cause.
+  async function cacheIdempotent(response: Record<string, unknown>, statusCode = 200) {
+    if (!IDEMPOTENT_ACTIONS.has(action) || !idempotencyKey) return;
+    try {
+      await supabase
+        .from('webhook_idempotency_keys')
+        .insert({
+          idempotency_key: idempotencyKey,
+          action,
+          user_identity: identity ?? '',
+          payload_hash: await sha256Hex(JSON.stringify(body ?? {})),
+          response,
+          status_code: statusCode,
+        });
+    } catch (e) {
+      // Unique violation on concurrent replay is fine — first writer wins.
+      console.log('[crm-webhook] idempotency_cache_skip', { action, reason: 'duplicate_or_error' });
+    }
+  }
+
+
   // ── 4. Log inbound event (PII-redacted — STEP D) ──────────────────────────
   const redacted = await redactPayload(body);
   // Safe console log — no raw phone/email/message/name
@@ -331,7 +395,9 @@ Deno.serve(async (req) => {
     }
 
     await markEvent('success');
-    return jsonRes({ success: true, phone: phoneNorm });
+    const resp = { success: true, phone: phoneNorm };
+    await cacheIdempotent(resp, 200);
+    return jsonRes(resp);
   }
 
   // ─── action: log_chat ───────────────────────────────────────────────────────
@@ -393,7 +459,9 @@ Deno.serve(async (req) => {
     }
 
     await markEvent('success');
-    return jsonRes({ success: true, contact_id: contactId, conversation_id: conversationId });
+    const resp = { success: true, contact_id: contactId, conversation_id: conversationId };
+    await cacheIdempotent(resp, 200);
+    return jsonRes(resp);
   }
 
   await markEvent('error', `Unknown action: ${action}`);
