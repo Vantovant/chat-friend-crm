@@ -31,6 +31,7 @@ const navItems: NavItem[] = [
   { id: 'group-campaigns', label: 'Group Campaigns', icon: Megaphone },
   { id: 'integrations', label: 'Integrations', icon: Puzzle },
   { id: 'api-console', label: 'API Console', icon: Terminal },
+  { id: 'review-queue', label: 'Review Queue', icon: ShieldCheck, adminOnly: true },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
