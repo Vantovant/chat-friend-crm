@@ -104,12 +104,30 @@ interface DeliveryRow {
   payload: Record<string, unknown> | null;
 }
 
+// Allow infra smoke tests to point at safe public test hosts (httpbin/postman-echo)
+// without setting a real production secret. Only honored when the calling request
+// is authenticated (auth is enforced before attemptDelivery is invoked).
+const TEST_URL_HOSTS_ALLOWED = new Set(["httpbin.org", "postman-echo.com"]);
+function resolveTargetUrl(override?: string | null): string | null {
+  if (override) {
+    try {
+      const u = new URL(override);
+      if (u.protocol === "https:" && TEST_URL_HOSTS_ALLOWED.has(u.hostname)) {
+        return override;
+      }
+    } catch { /* ignore */ }
+  }
+  return OUTBOUND_WEBHOOK_URL || null;
+}
+
 async function attemptDelivery(
   supabase: ReturnType<typeof createClient>,
   row: DeliveryRow,
   rawPayloadForSend: unknown,
+  testUrlOverride?: string | null,
 ): Promise<{ delivered: boolean; status_code?: number; error?: string }> {
-  if (!OUTBOUND_WEBHOOK_URL) {
+  const target = resolveTargetUrl(testUrlOverride);
+  if (!target) {
     return { delivered: false, error: "not_configured" };
   }
 
@@ -129,7 +147,7 @@ async function attemptDelivery(
   try {
     const ctrl = new AbortController();
     const timeout = setTimeout(() => ctrl.abort(), 10_000);
-    const resp = await fetch(OUTBOUND_WEBHOOK_URL, {
+    const resp = await fetch(target, {
       method: "POST",
       headers,
       body: JSON.stringify({
