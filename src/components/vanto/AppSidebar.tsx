@@ -4,9 +4,10 @@ import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type { Module } from '@/lib/vanto-data';
 import logo from '@/assets/logo.jpg';
+import { useCurrentUser } from '@/hooks/use-current-user';
 import {
   LayoutDashboard, MessageSquare, Users, BarChart3, Zap, Bot, GitBranch,
-  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X, Megaphone
+  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X, Megaphone, ShieldCheck
 } from 'lucide-react';
 
 interface NavItem {
@@ -14,6 +15,7 @@ interface NavItem {
   label: string;
   icon: React.ElementType;
   badge?: number;
+  adminOnly?: boolean;
 }
 
 const navItems: NavItem[] = [
@@ -29,6 +31,7 @@ const navItems: NavItem[] = [
   { id: 'group-campaigns', label: 'Group Campaigns', icon: Megaphone },
   { id: 'integrations', label: 'Integrations', icon: Puzzle },
   { id: 'api-console', label: 'API Console', icon: Terminal },
+  { id: 'review-queue', label: 'Review Queue', icon: ShieldCheck, adminOnly: true },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
@@ -46,6 +49,8 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
   const [userName, setUserName] = useState('');
   const [inboxUnread, setInboxUnread] = useState(0);
   const isMobile = useIsMobile();
+  const currentUser = useCurrentUser();
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
 
   useEffect(() => {
     const loadUser = async () => {
@@ -78,10 +83,10 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // Compute nav items with dynamic badge
-  const navItemsComputed = navItems.map(item =>
-    item.id === 'inbox' ? { ...item, badge: inboxUnread } : item
-  );
+  // Compute nav items: drop admin-only items for non-admins, then add dynamic badge
+  const navItemsComputed = navItems
+    .filter(item => !item.adminOnly || isAdmin)
+    .map(item => item.id === 'inbox' ? { ...item, badge: inboxUnread } : item);
 
   const handleModuleChange = (m: Module) => {
     onModuleChange(m);

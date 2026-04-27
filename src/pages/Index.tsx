@@ -15,6 +15,7 @@ import { IntegrationsModule } from '@/components/vanto/IntegrationsModule';
 import { APIConsoleModule } from '@/components/vanto/APIConsoleModule';
 import { SettingsModule } from '@/components/vanto/SettingsModule';
 import { GroupCampaignsModule } from '@/components/vanto/GroupCampaignsModule';
+import { ReviewQueueModule } from '@/components/vanto/ReviewQueueModule';
 import { AuthPage } from '@/components/vanto/AuthPage';
 import { PageHelpButton } from '@/components/vanto/PageHelpButton';
 import type { Module } from '@/lib/vanto-data';
@@ -55,6 +56,7 @@ const Index = () => {
       case 'integrations': return <IntegrationsModule userId={session?.user?.id ?? ''} />;
       case 'api-console': return <APIConsoleModule />;
       case 'group-campaigns': return <GroupCampaignsModule />;
+      case 'review-queue': return <ReviewQueueModule />;
       case 'settings': return <SettingsModule />;
       default: return <InboxModule />;
     }
