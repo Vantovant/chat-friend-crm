@@ -395,7 +395,9 @@ Deno.serve(async (req) => {
     }
 
     await markEvent('success');
-    return jsonRes({ success: true, phone: phoneNorm });
+    const resp = { success: true, phone: phoneNorm };
+    await cacheIdempotent(resp, 200);
+    return jsonRes(resp);
   }
 
   // ─── action: log_chat ───────────────────────────────────────────────────────
@@ -457,7 +459,9 @@ Deno.serve(async (req) => {
     }
 
     await markEvent('success');
-    return jsonRes({ success: true, contact_id: contactId, conversation_id: conversationId });
+    const resp = { success: true, contact_id: contactId, conversation_id: conversationId };
+    await cacheIdempotent(resp, 200);
+    return jsonRes(resp);
   }
 
   await markEvent('error', `Unknown action: ${action}`);
