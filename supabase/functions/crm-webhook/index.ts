@@ -471,7 +471,9 @@ Deno.serve(async (req) => {
   // must accept the proposal before contacts.lead_type changes.
   // Phase 4A remains asleep — no detectors, no auto-apply, no UI changes here.
   if (action === 'update_lead_type') {
-    const ALLOWED_LEAD_TYPES = ['prospect', 'registered', 'buyer', 'vip'] as const;
+    // Aligned with public.lead_type Postgres enum (5 values) and src/lib/vanto-data.ts.
+    // UI labels: Prospect, Registered_Nopurchase, Purchase_Nostatus, Purchase_Status, Expired.
+    const ALLOWED_LEAD_TYPES = ['prospect', 'registered', 'buyer', 'vip', 'expired'] as const;
     type AllowedLeadType = typeof ALLOWED_LEAD_TYPES[number];
 
     const requestedRaw = String(body.requested_lead_type ?? body.lead_type ?? '').toLowerCase().trim();
