@@ -328,7 +328,7 @@ Deno.serve(async (req) => {
     }
 
     // Attempt 1 immediately
-    const result = await attemptDelivery(supabase, inserted as DeliveryRow, rawPayload);
+    const result = await attemptDelivery(supabase, inserted as DeliveryRow, rawPayload, testUrlOverride);
     console.log(JSON.stringify({
       fn: "outbound-webhook",
       event: "enqueue_attempt",
