@@ -202,6 +202,48 @@ Deno.serve(async (req) => {
   const { action, user_id, contacts, contact, phone, name, message_preview } = body;
   if (!action) return jsonRes({ error: 'Missing action field' }, 400);
 
+  // ── 3.5 Idempotency check (STEP A) ─────────────────────────────────────────
+  // Applies to: upsert_contact, log_chat, update_lead_type.
+  // If the same x-idempotency-key + action + identity is replayed within 24h,
+  // we return the cached response and do NOT re-run any DB writes.
+  const IDEMPOTENT_ACTIONS = new Set(['upsert_contact', 'log_chat', 'update_lead_type']);
+  const idempotencyKey = req.headers.get('x-idempotency-key') ?? '';
+  const identity = String(
+    user_id ||
+    contact?.email || contact?.phone || contact?.phone_number ||
+    body?.email || body?.phone || ''
+  ).toLowerCase().trim() || null;
+
+  if (IDEMPOTENT_ACTIONS.has(action)) {
+    if (!idempotencyKey) {
+      // Backward-compat: allow but warn (no PII).
+      console.log('[crm-webhook] idempotency_missing_key', {
+        action,
+        has_identity: !!identity,
+        payload_hash: redactedPayloadHash(body),
+      });
+    } else {
+      const { data: cached } = await supabase
+        .from('webhook_idempotency_keys')
+        .select('id, response, status_code, created_at')
+        .eq('idempotency_key', idempotencyKey)
+        .eq('action', action)
+        .eq('user_identity', identity ?? '')
+        .gt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+        .maybeSingle();
+      if (cached?.response) {
+        console.log('[crm-webhook] idempotency_replay', {
+          action,
+          status_code: cached.status_code,
+          first_seen_at: cached.created_at,
+        });
+        return jsonRes({ ...(cached.response as any), idempotent_replay: true }, cached.status_code ?? 200);
+      }
+      console.log('[crm-webhook] idempotency_first', { action });
+    }
+  }
+
+
   // ── 4. Log inbound event (PII-redacted — STEP D) ──────────────────────────
   const redacted = await redactPayload(body);
   // Safe console log — no raw phone/email/message/name
