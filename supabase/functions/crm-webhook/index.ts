@@ -55,6 +55,90 @@ function jsonRes(body: unknown, status = 200) {
   });
 }
 
+// ─── PII Redaction (STEP D) ───────────────────────────────────────────────────
+// Goal: never store raw phone, email, message content, names, or notes in
+// webhook_events.payload or in console logs. Keep enough metadata to debug.
+async function sha256Hex(input: string): Promise<string> {
+  const buf = new TextEncoder().encode(input);
+  const hash = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(hash))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+async function shortHash(input: string | null | undefined): Promise<string | null> {
+  if (!input) return null;
+  const h = await sha256Hex(String(input));
+  return h.slice(0, 12); // 12-char fingerprint, not reversible
+}
+function maskPhone(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const d = String(raw).replace(/\D/g, '');
+  if (d.length < 4) return '***';
+  return `***${d.slice(-4)}`; // last 4 only
+}
+function maskEmail(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const s = String(raw);
+  const at = s.indexOf('@');
+  if (at < 1) return '***';
+  const domain = s.slice(at + 1);
+  return `***@${domain}`;
+}
+function previewLen(raw: string | null | undefined): number {
+  return raw ? String(raw).length : 0;
+}
+
+async function redactContact(c: any): Promise<any> {
+  if (!c || typeof c !== 'object') return c;
+  const phoneRaw = c.phone_number || c.phone || '';
+  const email = c.email || '';
+  return {
+    phone_hash: await shortHash(phoneRaw),
+    phone_mask: maskPhone(phoneRaw),
+    email_hash: await shortHash(email),
+    email_mask: maskEmail(email),
+    name_hash: await shortHash(c.full_name || c.name || ''),
+    has_notes: !!(c.notes || c.additional_notes),
+    notes_len: previewLen(c.notes || c.additional_notes),
+    lead_temperature: c.lead_temperature || c.temperature || null,
+    lead_type: c.lead_type || c.type || null,
+    interest_level: c.interest_level || c.interest || null,
+    tag_count: Array.isArray(c.tags) ? c.tags.length : 0,
+  };
+}
+
+async function redactPayload(body: any): Promise<any> {
+  if (!body || typeof body !== 'object') return { _redacted: true };
+  const out: any = {
+    _redacted: true,
+    action: body.action ?? null,
+    has_user_id: !!body.user_id,
+    payload_hash: await shortHash(JSON.stringify(body)),
+  };
+  if (Array.isArray(body.contacts)) {
+    out.contacts_count = body.contacts.length;
+    // Redact at most first 3 to keep payload bounded
+    out.contacts_sample = await Promise.all(
+      body.contacts.slice(0, 3).map((c: any) => redactContact(c))
+    );
+  }
+  if (body.contact) {
+    out.contact = await redactContact(body.contact);
+  }
+  if (body.phone) {
+    out.phone_hash = await shortHash(body.phone);
+    out.phone_mask = maskPhone(body.phone);
+  }
+  if (body.name) {
+    out.name_hash = await shortHash(body.name);
+  }
+  if (typeof body.message_preview === 'string') {
+    out.message_len = body.message_preview.length;
+    out.message_hash = await shortHash(body.message_preview);
+  }
+  return out;
+}
+
 // ─── Main handler ─────────────────────────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
@@ -80,8 +164,17 @@ Deno.serve(async (req) => {
   const { action, user_id, contacts, contact, phone, name, message_preview } = body;
   if (!action) return jsonRes({ error: 'Missing action field' }, 400);
 
-  // ── 4. Log inbound event ───────────────────────────────────────────────────
-  const eventRow: any = { source: 'zazi', action, status: 'received', payload: body };
+  // ── 4. Log inbound event (PII-redacted — STEP D) ──────────────────────────
+  const redacted = await redactPayload(body);
+  // Safe console log — no raw phone/email/message/name
+  console.log('[crm-webhook] inbound', {
+    action: redacted.action,
+    has_user_id: redacted.has_user_id,
+    payload_hash: redacted.payload_hash,
+    contacts_count: redacted.contacts_count,
+    message_len: redacted.message_len,
+  });
+  const eventRow: any = { source: 'zazi', action, status: 'received', payload: redacted };
   const { data: eventData } = await supabase
     .from('webhook_events')
     .insert(eventRow)
