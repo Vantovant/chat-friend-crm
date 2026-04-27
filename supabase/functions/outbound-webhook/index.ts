@@ -353,6 +353,7 @@ Deno.serve(async (req) => {
     // Process up to N due retries. We do NOT store raw payloads, so re-delivery
     // sends only the redacted summary. This is acceptable for infra-only Step E.
     const limit = Math.min(Math.max(Number(body?.limit ?? 10), 1), 50);
+    const testUrlOverride: string | null = typeof body?._test_url_override === "string" ? body._test_url_override : null;
     const { data: due, error } = await supabase
       .from("webhook_events")
       .select("id, event_type, attempts, max_attempts, payload")
@@ -366,7 +367,7 @@ Deno.serve(async (req) => {
 
     const results: any[] = [];
     for (const row of due ?? []) {
-      const r = await attemptDelivery(supabase, row as DeliveryRow, row.payload ?? {});
+      const r = await attemptDelivery(supabase, row as DeliveryRow, row.payload ?? {}, testUrlOverride);
       results.push({ id: row.id, delivered: r.delivered, status_code: r.status_code ?? null, error: r.error ?? null });
     }
 
