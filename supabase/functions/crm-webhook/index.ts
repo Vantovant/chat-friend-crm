@@ -220,7 +220,7 @@ Deno.serve(async (req) => {
       console.log('[crm-webhook] idempotency_missing_key', {
         action,
         has_identity: !!identity,
-        payload_hash: redactedPayloadHash(body),
+        payload_hash: await sha256Hex(JSON.stringify(body ?? {})),
       });
     } else {
       const { data: cached } = await supabase
