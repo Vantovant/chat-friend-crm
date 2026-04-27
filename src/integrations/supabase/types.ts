@@ -1213,6 +1213,39 @@ export type Database = {
         }
         Relationships: []
       }
+      webhook_idempotency_keys: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          idempotency_key: string
+          payload_hash: string | null
+          response: Json | null
+          status_code: number | null
+          user_identity: string | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          idempotency_key: string
+          payload_hash?: string | null
+          response?: Json | null
+          status_code?: number | null
+          user_identity?: string | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          idempotency_key?: string
+          payload_hash?: string | null
+          response?: Json | null
+          status_code?: number | null
+          user_identity?: string | null
+        }
+        Relationships: []
+      }
       whatsapp_groups: {
         Row: {
           created_at: string
