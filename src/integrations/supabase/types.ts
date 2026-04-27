@@ -1183,30 +1183,57 @@ export type Database = {
       webhook_events: {
         Row: {
           action: string
+          attempts: number
           created_at: string
+          dead_lettered_at: string | null
+          delivered_at: string | null
+          direction: string
           error: string | null
+          event_type: string | null
           id: string
+          last_attempt_at: string | null
+          last_status_code: number | null
           last_synced_at: string | null
+          max_attempts: number
+          next_retry_at: string | null
           payload: Json | null
           source: string
           status: string
         }
         Insert: {
           action: string
+          attempts?: number
           created_at?: string
+          dead_lettered_at?: string | null
+          delivered_at?: string | null
+          direction?: string
           error?: string | null
+          event_type?: string | null
           id?: string
+          last_attempt_at?: string | null
+          last_status_code?: number | null
           last_synced_at?: string | null
+          max_attempts?: number
+          next_retry_at?: string | null
           payload?: Json | null
           source: string
           status?: string
         }
         Update: {
           action?: string
+          attempts?: number
           created_at?: string
+          dead_lettered_at?: string | null
+          delivered_at?: string | null
+          direction?: string
           error?: string | null
+          event_type?: string | null
           id?: string
+          last_attempt_at?: string | null
+          last_status_code?: number | null
           last_synced_at?: string | null
+          max_attempts?: number
+          next_retry_at?: string | null
           payload?: Json | null
           source?: string
           status?: string
