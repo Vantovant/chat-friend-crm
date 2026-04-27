@@ -464,6 +464,172 @@ Deno.serve(async (req) => {
     return jsonRes(resp);
   }
 
+  // ─── action: update_lead_type (STEP F — review-gated proposal) ──────────────
+  // SAFETY: This action NEVER directly updates contacts.lead_type.
+  // It writes a reviewable proposal to zazi_actions and mirrors a
+  // contact_activity audit row. A human (or an explicit approved apply path)
+  // must accept the proposal before contacts.lead_type changes.
+  // Phase 4A remains asleep — no detectors, no auto-apply, no UI changes here.
+  if (action === 'update_lead_type') {
+    const ALLOWED_LEAD_TYPES = ['prospect', 'registered', 'buyer', 'vip'] as const;
+    type AllowedLeadType = typeof ALLOWED_LEAD_TYPES[number];
+
+    const requestedRaw = String(body.requested_lead_type ?? body.lead_type ?? '').toLowerCase().trim();
+    const evidence = body.evidence;
+    const confidenceRaw = body.confidence;
+    const reqEmail = body.email || contact?.email || null;
+    const reqPhone = body.phone || contact?.phone || contact?.phone_number || null;
+
+    // Validation — fail safely with clear, non-PII errors
+    if (!reqEmail && !reqPhone) {
+      await markEvent('error', 'identity required: email or phone');
+      return jsonRes({ error: 'email or phone is required to identify the contact' }, 400);
+    }
+    if (!requestedRaw) {
+      await markEvent('error', 'requested_lead_type missing');
+      return jsonRes({ error: 'requested_lead_type is required' }, 400);
+    }
+    if (!ALLOWED_LEAD_TYPES.includes(requestedRaw as AllowedLeadType)) {
+      await markEvent('error', 'invalid lead_type');
+      return jsonRes({
+        error: `requested_lead_type must be one of: ${ALLOWED_LEAD_TYPES.join(', ')}`,
+      }, 400);
+    }
+    if (evidence === undefined || evidence === null ||
+        (typeof evidence === 'string' && evidence.trim() === '') ||
+        (typeof evidence === 'object' && Object.keys(evidence).length === 0)) {
+      await markEvent('error', 'evidence missing');
+      return jsonRes({ error: 'evidence is required (non-empty string or object)' }, 400);
+    }
+    const confidence = typeof confidenceRaw === 'number' ? confidenceRaw : Number(confidenceRaw);
+    if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+      await markEvent('error', 'confidence missing or invalid');
+      return jsonRes({ error: 'confidence is required and must be a number between 0 and 1' }, 400);
+    }
+
+    // Locate contact (do NOT create one — proposals must reference real records)
+    let contactRow: { id: string; lead_type: string | null; assigned_to: string | null; created_by: string | null } | null = null;
+    const phoneNorm = reqPhone ? normalizePhone(String(reqPhone)) : '';
+    if (phoneNorm) {
+      const { data } = await supabase
+        .from('contacts')
+        .select('id, lead_type, assigned_to, created_by')
+        .eq('phone_normalized', phoneNorm)
+        .eq('is_deleted', false)
+        .limit(1)
+        .maybeSingle();
+      if (data) contactRow = data as any;
+    }
+    if (!contactRow && reqEmail) {
+      const { data } = await supabase
+        .from('contacts')
+        .select('id, lead_type, assigned_to, created_by')
+        .eq('email', String(reqEmail).toLowerCase().trim())
+        .eq('is_deleted', false)
+        .limit(1)
+        .maybeSingle();
+      if (data) contactRow = data as any;
+    }
+    if (!contactRow) {
+      await markEvent('error', 'contact not found');
+      return jsonRes({ error: 'contact not found for provided identity' }, 404);
+    }
+
+    // Redacted evidence summary — never store raw PII inside zazi_actions
+    const evidenceSummary = typeof evidence === 'string'
+      ? { kind: 'text', length: evidence.length, hash: await shortHash(evidence) }
+      : { kind: 'object', keys: Object.keys(evidence).slice(0, 20), hash: await shortHash(JSON.stringify(evidence)) };
+
+    const HIGH_CONFIDENCE_THRESHOLD = 0.85;
+    const isHighConfidence = confidence >= HIGH_CONFIDENCE_THRESHOLD;
+    const riskLevel = isHighConfidence ? 'medium' : 'low';
+
+    // Insert review-gated proposal — status stays 'pending', requires_review=true,
+    // auto_applied=false. NO direct contacts.lead_type write.
+    const { data: actionRow, error: actionErr } = await supabase
+      .from('zazi_actions')
+      .insert({
+        action_type: 'update_lead_type',
+        contact_id: contactRow.id,
+        confidence,
+        risk_level: riskLevel,
+        requires_review: true,
+        auto_applied: false,
+        status: 'pending',
+        proposed_diff: {
+          field: 'lead_type',
+          from: contactRow.lead_type,
+          to: requestedRaw,
+        },
+        evidence: {
+          source: 'crm-webhook',
+          summary: evidenceSummary,
+          high_confidence: isHighConfidence,
+          received_at: new Date().toISOString(),
+        },
+        created_by_label: 'Zazi CRM Webhook',
+        ...(user_id ? { created_by: user_id } : {}),
+      })
+      .select('id')
+      .single();
+
+    if (actionErr || !actionRow) {
+      await markEvent('error', actionErr?.message || 'failed to create proposal');
+      return jsonRes({ error: actionErr?.message || 'failed to create proposal' }, 500);
+    }
+
+    // Mirror to contact_activity. performed_by is NOT NULL → use user_id from
+    // body, else assigned_to, else created_by. If none, skip the activity row
+    // rather than fail the proposal.
+    const performedBy = user_id || contactRow.assigned_to || contactRow.created_by || null;
+    if (performedBy) {
+      await supabase.from('contact_activity').insert({
+        contact_id: contactRow.id,
+        performed_by: performedBy,
+        type: 'lead_type_proposal',
+        metadata: {
+          proposal_id: actionRow.id,
+          from: contactRow.lead_type,
+          to: requestedRaw,
+          confidence,
+          high_confidence: isHighConfidence,
+          evidence_summary: evidenceSummary,
+          next_action: 'review proposal',
+          source: 'crm-webhook',
+        },
+      });
+    } else {
+      console.log('[crm-webhook] update_lead_type_activity_skipped', {
+        reason: 'no_performed_by',
+        proposal_id: actionRow.id,
+      });
+    }
+
+    console.log('[crm-webhook] update_lead_type_proposed', {
+      proposal_id: actionRow.id,
+      from: contactRow.lead_type,
+      to: requestedRaw,
+      confidence,
+      high_confidence: isHighConfidence,
+      requires_review: true,
+      auto_applied: false,
+    });
+
+    await markEvent('success');
+    const resp = {
+      success: true,
+      proposal_id: actionRow.id,
+      status: 'pending',
+      requires_review: true,
+      auto_applied: false,
+      high_confidence: isHighConfidence,
+      from: contactRow.lead_type,
+      to: requestedRaw,
+    };
+    await cacheIdempotent(resp, 200);
+    return jsonRes(resp);
+  }
+
   await markEvent('error', `Unknown action: ${action}`);
   return jsonRes({ error: `Unknown action: ${action}` }, 400);
 });
