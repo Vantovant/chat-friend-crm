@@ -107,6 +107,11 @@ export function ProposalsTable({ rows, loading, error, onSelect }: Props) {
                       {r.status}
                     </span>
                   </td>
+                  <td className="px-4 py-3">
+                    <span className={`text-xs px-2 py-0.5 rounded border ${triageBadgeClass(r.triage_state)}`}>
+                      {triageLabel(r.triage_state)}
+                    </span>
+                  </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
                     {r.created_by_label}
                   </td>
