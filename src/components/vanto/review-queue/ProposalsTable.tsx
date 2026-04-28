@@ -32,10 +32,10 @@ export function ProposalsTable({ rows, loading, error, onSelect }: Props) {
   if (rows.length === 0) {
     return (
       <div className="rounded-xl border border-border bg-card p-12 text-center">
-        <p className="text-sm font-medium text-foreground">No proposals match these filters.</p>
-        <p className="text-xs text-muted-foreground mt-2">
-          Proposals will appear here when external systems suggest changes (for
-          example, when the CRM webhook receives an <code className="text-foreground">update_lead_type</code> request).
+        <p className="text-sm font-medium text-foreground">No AI proposals yet.</p>
+        <p className="text-xs text-muted-foreground mt-2 max-w-md mx-auto">
+          This is expected while Phase 4A is asleep. When proposals are generated in a future
+          gated phase, they will appear here for human audit before any action is allowed.
         </p>
       </div>
     );
