@@ -145,6 +145,7 @@ export function ReviewQueueModule() {
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
         proposal={selected}
+        onChanged={refetch}
       />
     </div>
   );
