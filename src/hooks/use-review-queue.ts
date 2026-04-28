@@ -52,6 +52,7 @@ export const DEFAULT_FILTERS: ProposalFilters = {
   actionTypes: [],
   bands: [],
   risks: [],
+  triageStates: [],
   fromDate: null,
   toDate: null,
 };
