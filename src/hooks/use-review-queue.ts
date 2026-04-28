@@ -1,12 +1,14 @@
 // Read-only data hooks for the Review Queue.
 // IMPORTANT: This file MUST contain zero writes — no .insert / .update / .delete /
 // functions.invoke calls. Verified by the safety grep gate before merge.
+// Triage writes live in src/hooks/use-triage-action.ts.
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import {
   type ConfidenceBand,
   type ProposalStatus,
   type RiskLevel,
+  type TriageState,
   confidenceBand,
 } from '@/lib/review-queue-utils';
 
