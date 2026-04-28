@@ -25,11 +25,16 @@ export interface ProposalRow {
   created_at: string;
   requires_review: boolean;
   auto_applied: boolean;
+  triage_state: TriageState;
+  review_notes: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
   // joined / resolved
   contact_name: string | null;
   contact_phone_normalized: string | null;
   contact_email: string | null;
   contact_current_lead_type: string | null;
+  reviewed_by_name?: string | null;
 }
 
 export interface ProposalFilters {
@@ -37,6 +42,7 @@ export interface ProposalFilters {
   actionTypes: string[];
   bands: ConfidenceBand[];
   risks: RiskLevel[];
+  triageStates: TriageState[];
   fromDate: string | null;
   toDate: string | null;
 }
