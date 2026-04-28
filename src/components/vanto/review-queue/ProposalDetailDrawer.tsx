@@ -39,8 +39,16 @@ function KV({ k, v, mono = false }: { k: string; v: React.ReactNode; mono?: bool
   );
 }
 
-export function ProposalDetailDrawer({ open, onOpenChange, proposal }: Props) {
+export function ProposalDetailDrawer({ open, onOpenChange, proposal, onChanged }: Props) {
   const { detail, loading } = useProposalDetail(proposal);
+  const user = useCurrentUser();
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const { submit, saving, error: triageError } = useTriageAction();
+  const [note, setNote] = useState('');
+
+  useEffect(() => {
+    setNote(proposal?.review_notes ?? '');
+  }, [proposal?.id, proposal?.review_notes]);
 
   if (!proposal) return null;
   const band = confidenceBand(proposal.confidence);
@@ -48,7 +56,46 @@ export function ProposalDetailDrawer({ open, onOpenChange, proposal }: Props) {
     && proposal.proposed_diff?.from !== undefined
     && proposal.contact_current_lead_type !== proposal.proposed_diff?.from;
 
+  const runTriage = async (next: TriageState) => {
+    const ok = await submit({
+      proposalId: proposal.id,
+      contactId: proposal.contact_id,
+      triageState: next,
+      reviewNotes: note.trim() ? note.trim() : null,
+      previousTriageState: proposal.triage_state,
+    });
+    if (ok) {
+      toast({ title: 'Triage updated', description: `Marked as ${triageLabel(next)}.` });
+      onChanged?.();
+    } else {
+      toast({ title: 'Triage failed', description: triageError ?? 'See console', variant: 'destructive' });
+    }
+  };
+
+  const saveNote = async () => {
+    const ok = await submit({
+      proposalId: proposal.id,
+      contactId: proposal.contact_id,
+      triageState: proposal.triage_state,
+      reviewNotes: note.trim() ? note.trim() : null,
+      noteOnly: true,
+      previousTriageState: proposal.triage_state,
+    });
+    if (ok) {
+      toast({ title: 'Note saved' });
+      onChanged?.();
+    } else {
+      toast({ title: 'Save failed', description: triageError ?? 'See console', variant: 'destructive' });
+    }
+  };
+
   return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-full sm:max-w-xl overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle>Proposal detail</SheetTitle>
+          <SheetDescription className="font-mono text-xs">{proposal.id}</SheetDescription>
+        </SheetHeader>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-xl overflow-y-auto">
         <SheetHeader>
