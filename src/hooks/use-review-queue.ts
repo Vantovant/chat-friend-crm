@@ -75,13 +75,14 @@ export function useProposals(filters: ProposalFilters, pageSize = 25) {
       // SELECT-only query against zazi_actions.
       let q = supabase
         .from('zazi_actions')
-        .select('id, action_type, status, risk_level, confidence, contact_id, proposed_diff, evidence, created_by_label, created_at, requires_review, auto_applied')
+        .select('id, action_type, status, risk_level, confidence, contact_id, proposed_diff, evidence, created_by_label, created_at, requires_review, auto_applied, triage_state, review_notes, reviewed_at, reviewed_by')
         .order('created_at', { ascending: false })
         .limit(pageSize);
 
       if (filters.statuses.length > 0) q = q.in('status', filters.statuses);
       if (filters.actionTypes.length > 0) q = q.in('action_type', filters.actionTypes);
       if (filters.risks.length > 0) q = q.in('risk_level', filters.risks);
+      if (filters.triageStates.length > 0) q = q.in('triage_state', filters.triageStates);
       if (filters.fromDate) q = q.gte('created_at', filters.fromDate);
       if (filters.toDate) q = q.lte('created_at', filters.toDate);
 
