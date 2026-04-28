@@ -96,12 +96,6 @@ export function ProposalDetailDrawer({ open, onOpenChange, proposal, onChanged }
           <SheetTitle>Proposal detail</SheetTitle>
           <SheetDescription className="font-mono text-xs">{proposal.id}</SheetDescription>
         </SheetHeader>
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="w-full sm:max-w-xl overflow-y-auto">
-        <SheetHeader>
-          <SheetTitle>Proposal detail</SheetTitle>
-          <SheetDescription className="font-mono text-xs">{proposal.id}</SheetDescription>
-        </SheetHeader>
 
         <div className="space-y-4 mt-4">
           {/* 6.1 Summary */}
