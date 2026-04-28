@@ -54,6 +54,7 @@ export function ProposalsTable({ rows, loading, error, onSelect }: Props) {
               <th className="text-left px-4 py-3 font-medium">Confidence</th>
               <th className="text-left px-4 py-3 font-medium">Risk</th>
               <th className="text-left px-4 py-3 font-medium">Status</th>
+              <th className="text-left px-4 py-3 font-medium">Triage</th>
               <th className="text-left px-4 py-3 font-medium">Source</th>
               <th className="text-right px-4 py-3 font-medium"></th>
             </tr>
