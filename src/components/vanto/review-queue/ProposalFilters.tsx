@@ -1,9 +1,9 @@
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
-  ALL_BANDS, ALL_RISK_LEVELS, ALL_STATUSES,
-  type ConfidenceBand, type ProposalStatus, type RiskLevel,
+  ALL_BANDS, ALL_RISK_LEVELS, ALL_STATUSES, ALL_TRIAGE_STATES,
+  type ConfidenceBand, type ProposalStatus, type RiskLevel, type TriageState,
   bandBadgeClass, confidenceBandLabel, riskBadgeClass, statusBadgeClass,
+  triageBadgeClass, triageLabel,
 } from '@/lib/review-queue-utils';
 import type { ProposalFilters } from '@/hooks/use-review-queue';
 import { useDistinctActionTypes } from '@/hooks/use-review-queue';
