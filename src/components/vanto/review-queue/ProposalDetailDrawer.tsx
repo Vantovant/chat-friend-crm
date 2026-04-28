@@ -214,10 +214,57 @@ export function ProposalDetailDrawer({ open, onOpenChange, proposal, onChanged }
             )}
           </Section>
 
-          {/* Footer info */}
-          <div className="text-[11px] text-muted-foreground italic px-1">
-            Approve / Reject controls will be added in a future step pending approval. This view is read-only.
-          </div>
+          {/* Triage panel — admin-only, write path limited to triage_state + review_notes */}
+          {isAdmin && (
+            <Section title="Triage (Phase 4A Step 2)">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Current triage</span>
+                <span className={`text-xs px-2 py-0.5 rounded border ${triageBadgeClass(proposal.triage_state)}`}>
+                  {triageLabel(proposal.triage_state)}
+                </span>
+              </div>
+              {proposal.reviewed_at && (
+                <KV k="Last reviewed" v={format(new Date(proposal.reviewed_at), 'PPpp')} />
+              )}
+
+              <div className="space-y-2 pt-2">
+                <p className="text-xs font-medium text-muted-foreground">Review note</p>
+                <Textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Optional reviewer note (e.g. why this should be approved or rejected later)"
+                  rows={3}
+                  className="text-sm"
+                />
+                <div className="flex justify-end">
+                  <Button size="sm" variant="outline" onClick={saveNote} disabled={saving}>
+                    {saving ? <Loader2 size={14} className="animate-spin mr-1" /> : <Save size={14} className="mr-1" />}
+                    Save note only
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-3 border-t border-border">
+                <Button size="sm" variant="outline" onClick={() => runTriage('acknowledged')} disabled={saving}>
+                  <Eye size={14} className="mr-1" /> Acknowledge
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => runTriage('will_approve')} disabled={saving}>
+                  <ThumbsUp size={14} className="mr-1" /> Will approve later
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => runTriage('will_reject')} disabled={saving}>
+                  <ThumbsDown size={14} className="mr-1" /> Will reject
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => runTriage('untriaged')} disabled={saving}>
+                  <RotateCcw size={14} className="mr-1" /> Clear triage
+                </Button>
+              </div>
+
+              <p className="text-[10px] text-muted-foreground italic pt-2 border-t border-border">
+                Triage is an annotation only. It does NOT approve, reject, apply, or send anything.
+                The contact record and the proposal status are unchanged.
+              </p>
+            </Section>
+          )}
 
           <div className="flex justify-end pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
