@@ -3,7 +3,7 @@ import { ArrowRight, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   bandBadgeClass, confidenceBand, confidenceBandLabel, maskPhone,
-  riskBadgeClass, statusBadgeClass,
+  riskBadgeClass, statusBadgeClass, triageBadgeClass, triageLabel,
 } from '@/lib/review-queue-utils';
 import type { ProposalRow } from '@/hooks/use-review-queue';
 
