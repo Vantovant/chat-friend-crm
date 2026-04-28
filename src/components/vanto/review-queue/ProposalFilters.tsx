@@ -110,6 +110,25 @@ export function ProposalFilters({ filters, onChange, onReset }: Props) {
         </div>
       </div>
 
+      {/* Triage state */}
+      <div className="pt-2 border-t border-border">
+        <p className="text-xs font-medium text-muted-foreground mb-2">Triage state</p>
+        <div className="flex flex-wrap gap-1.5">
+          {ALL_TRIAGE_STATES.map(t => {
+            const active = filters.triageStates.includes(t);
+            return (
+              <button
+                key={t}
+                onClick={() => onChange({ ...filters, triageStates: toggle<TriageState>(filters.triageStates, t) })}
+                className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? triageBadgeClass(t) : 'border-border text-muted-foreground hover:text-foreground'}`}
+              >
+                {triageLabel(t)}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* Date range */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-border">
         <div>
