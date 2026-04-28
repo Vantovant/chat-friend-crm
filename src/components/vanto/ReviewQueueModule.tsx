@@ -22,7 +22,7 @@ export function ReviewQueueModule() {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
-  const { rows, loading, error } = useProposals(filters);
+  const { rows, loading, error, refetch } = useProposals(filters);
 
   const counts = useMemo(() => {
     const driftCount = rows.filter(r =>
@@ -34,6 +34,10 @@ export function ReviewQueueModule() {
       total: rows.length,
       pending: rows.filter(r => r.status === 'pending').length,
       drift: driftCount,
+      untriaged: rows.filter(r => r.triage_state === 'untriaged').length,
+      acknowledged: rows.filter(r => r.triage_state === 'acknowledged').length,
+      willApprove: rows.filter(r => r.triage_state === 'will_approve').length,
+      willReject: rows.filter(r => r.triage_state === 'will_reject').length,
     };
   }, [rows]);
 
