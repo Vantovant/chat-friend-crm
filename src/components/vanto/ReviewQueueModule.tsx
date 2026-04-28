@@ -22,7 +22,7 @@ export function ReviewQueueModule() {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
-  const { rows, loading, error } = useProposals(filters);
+  const { rows, loading, error, refetch } = useProposals(filters);
 
   const counts = useMemo(() => {
     const driftCount = rows.filter(r =>
@@ -34,6 +34,10 @@ export function ReviewQueueModule() {
       total: rows.length,
       pending: rows.filter(r => r.status === 'pending').length,
       drift: driftCount,
+      untriaged: rows.filter(r => r.triage_state === 'untriaged').length,
+      acknowledged: rows.filter(r => r.triage_state === 'acknowledged').length,
+      willApprove: rows.filter(r => r.triage_state === 'will_approve').length,
+      willReject: rows.filter(r => r.triage_state === 'will_reject').length,
     };
   }, [rows]);
 
@@ -71,6 +75,12 @@ export function ReviewQueueModule() {
         <div className="text-right text-xs text-muted-foreground shrink-0">
           <div>Showing <span className="text-foreground font-medium">{counts.total}</span> proposal{counts.total === 1 ? '' : 's'}</div>
           <div>{counts.pending} pending</div>
+          <div className="mt-1 flex flex-wrap gap-1.5 justify-end">
+            <span className="text-[10px] px-1.5 py-0.5 rounded border bg-muted text-muted-foreground border-border">{counts.untriaged} untriaged</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded border bg-sky-500/15 text-sky-400 border-sky-500/30">{counts.acknowledged} ack</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded border bg-emerald-500/15 text-emerald-400 border-emerald-500/30">{counts.willApprove} will approve</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded border bg-red-500/15 text-red-400 border-red-500/30">{counts.willReject} will reject</span>
+          </div>
         </div>
       </header>
 
@@ -135,6 +145,7 @@ export function ReviewQueueModule() {
         open={drawerOpen}
         onOpenChange={setDrawerOpen}
         proposal={selected}
+        onChanged={refetch}
       />
     </div>
   );

@@ -1,9 +1,9 @@
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
-  ALL_BANDS, ALL_RISK_LEVELS, ALL_STATUSES,
-  type ConfidenceBand, type ProposalStatus, type RiskLevel,
+  ALL_BANDS, ALL_RISK_LEVELS, ALL_STATUSES, ALL_TRIAGE_STATES,
+  type ConfidenceBand, type ProposalStatus, type RiskLevel, type TriageState,
   bandBadgeClass, confidenceBandLabel, riskBadgeClass, statusBadgeClass,
+  triageBadgeClass, triageLabel,
 } from '@/lib/review-queue-utils';
 import type { ProposalFilters } from '@/hooks/use-review-queue';
 import { useDistinctActionTypes } from '@/hooks/use-review-queue';
@@ -107,6 +107,25 @@ export function ProposalFilters({ filters, onChange, onReset }: Props) {
               );
             })}
           </div>
+        </div>
+      </div>
+
+      {/* Triage state */}
+      <div className="pt-2 border-t border-border">
+        <p className="text-xs font-medium text-muted-foreground mb-2">Triage state</p>
+        <div className="flex flex-wrap gap-1.5">
+          {ALL_TRIAGE_STATES.map(t => {
+            const active = filters.triageStates.includes(t);
+            return (
+              <button
+                key={t}
+                onClick={() => onChange({ ...filters, triageStates: toggle<TriageState>(filters.triageStates, t) })}
+                className={`text-xs px-2 py-1 rounded-md border transition-colors ${active ? triageBadgeClass(t) : 'border-border text-muted-foreground hover:text-foreground'}`}
+              >
+                {triageLabel(t)}
+              </button>
+            );
+          })}
         </div>
       </div>
 

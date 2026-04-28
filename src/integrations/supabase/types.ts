@@ -1373,6 +1373,7 @@ export type Database = {
           reviewed_by: string | null
           risk_level: string
           status: string
+          triage_state: string
           updated_at: string
         }
         Insert: {
@@ -1395,6 +1396,7 @@ export type Database = {
           reviewed_by?: string | null
           risk_level?: string
           status?: string
+          triage_state?: string
           updated_at?: string
         }
         Update: {
@@ -1417,6 +1419,7 @@ export type Database = {
           reviewed_by?: string | null
           risk_level?: string
           status?: string
+          triage_state?: string
           updated_at?: string
         }
         Relationships: []

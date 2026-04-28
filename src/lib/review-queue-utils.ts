@@ -37,9 +37,30 @@ export function confidenceBandLabel(band: ConfidenceBand): string {
 export const ALL_STATUSES = ['pending', 'accepted', 'rejected', 'expired'] as const;
 export const ALL_RISK_LEVELS = ['low', 'medium', 'high'] as const;
 export const ALL_BANDS: ConfidenceBand[] = ['low', 'medium', 'high'];
+export const ALL_TRIAGE_STATES = ['untriaged', 'acknowledged', 'will_approve', 'will_reject'] as const;
 
 export type ProposalStatus = typeof ALL_STATUSES[number];
 export type RiskLevel = typeof ALL_RISK_LEVELS[number];
+export type TriageState = typeof ALL_TRIAGE_STATES[number];
+
+export function triageLabel(t: TriageState): string {
+  switch (t) {
+    case 'untriaged':    return 'Untriaged';
+    case 'acknowledged': return 'Acknowledged';
+    case 'will_approve': return 'Will approve later';
+    case 'will_reject':  return 'Will reject';
+  }
+}
+
+export function triageBadgeClass(t: string): string {
+  switch (t) {
+    case 'acknowledged': return 'bg-sky-500/15 text-sky-400 border-sky-500/30';
+    case 'will_approve': return 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
+    case 'will_reject':  return 'bg-red-500/15 text-red-400 border-red-500/30';
+    case 'untriaged':
+    default:             return 'bg-muted text-muted-foreground border-border';
+  }
+}
 
 export function statusBadgeClass(status: string): string {
   switch (status) {

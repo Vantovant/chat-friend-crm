@@ -1,12 +1,14 @@
 // Read-only data hooks for the Review Queue.
 // IMPORTANT: This file MUST contain zero writes — no .insert / .update / .delete /
 // functions.invoke calls. Verified by the safety grep gate before merge.
+// Triage writes live in src/hooks/use-triage-action.ts.
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import {
   type ConfidenceBand,
   type ProposalStatus,
   type RiskLevel,
+  type TriageState,
   confidenceBand,
 } from '@/lib/review-queue-utils';
 
@@ -23,11 +25,16 @@ export interface ProposalRow {
   created_at: string;
   requires_review: boolean;
   auto_applied: boolean;
+  triage_state: TriageState;
+  review_notes: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
   // joined / resolved
   contact_name: string | null;
   contact_phone_normalized: string | null;
   contact_email: string | null;
   contact_current_lead_type: string | null;
+  reviewed_by_name?: string | null;
 }
 
 export interface ProposalFilters {
@@ -35,6 +42,7 @@ export interface ProposalFilters {
   actionTypes: string[];
   bands: ConfidenceBand[];
   risks: RiskLevel[];
+  triageStates: TriageState[];
   fromDate: string | null;
   toDate: string | null;
 }
@@ -44,6 +52,7 @@ export const DEFAULT_FILTERS: ProposalFilters = {
   actionTypes: [],
   bands: [],
   risks: [],
+  triageStates: [],
   fromDate: null,
   toDate: null,
 };
@@ -66,13 +75,14 @@ export function useProposals(filters: ProposalFilters, pageSize = 25) {
       // SELECT-only query against zazi_actions.
       let q = supabase
         .from('zazi_actions')
-        .select('id, action_type, status, risk_level, confidence, contact_id, proposed_diff, evidence, created_by_label, created_at, requires_review, auto_applied')
+        .select('id, action_type, status, risk_level, confidence, contact_id, proposed_diff, evidence, created_by_label, created_at, requires_review, auto_applied, triage_state, review_notes, reviewed_at, reviewed_by')
         .order('created_at', { ascending: false })
         .limit(pageSize);
 
       if (filters.statuses.length > 0) q = q.in('status', filters.statuses);
       if (filters.actionTypes.length > 0) q = q.in('action_type', filters.actionTypes);
       if (filters.risks.length > 0) q = q.in('risk_level', filters.risks);
+      if (filters.triageStates.length > 0) q = q.in('triage_state', filters.triageStates);
       if (filters.fromDate) q = q.gte('created_at', filters.fromDate);
       if (filters.toDate) q = q.lte('created_at', filters.toDate);
 

@@ -3,7 +3,7 @@ import { ArrowRight, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   bandBadgeClass, confidenceBand, confidenceBandLabel, maskPhone,
-  riskBadgeClass, statusBadgeClass,
+  riskBadgeClass, statusBadgeClass, triageBadgeClass, triageLabel,
 } from '@/lib/review-queue-utils';
 import type { ProposalRow } from '@/hooks/use-review-queue';
 
@@ -54,6 +54,7 @@ export function ProposalsTable({ rows, loading, error, onSelect }: Props) {
               <th className="text-left px-4 py-3 font-medium">Confidence</th>
               <th className="text-left px-4 py-3 font-medium">Risk</th>
               <th className="text-left px-4 py-3 font-medium">Status</th>
+              <th className="text-left px-4 py-3 font-medium">Triage</th>
               <th className="text-left px-4 py-3 font-medium">Source</th>
               <th className="text-right px-4 py-3 font-medium"></th>
             </tr>
@@ -104,6 +105,11 @@ export function ProposalsTable({ rows, loading, error, onSelect }: Props) {
                   <td className="px-4 py-3">
                     <span className={`text-xs px-2 py-0.5 rounded border ${statusBadgeClass(r.status)}`}>
                       {r.status}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={`text-xs px-2 py-0.5 rounded border ${triageBadgeClass(r.triage_state)}`}>
+                      {triageLabel(r.triage_state)}
                     </span>
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">

@@ -1,17 +1,24 @@
+import { useEffect, useState } from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, ExternalLink } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { AlertTriangle, ExternalLink, Eye, ThumbsUp, ThumbsDown, RotateCcw, Save, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
+import { toast } from '@/hooks/use-toast';
 import {
   bandBadgeClass, confidenceBand, confidenceBandLabel, evidenceShortLabel,
   maskEmail, maskPhone, riskBadgeClass, statusBadgeClass,
+  triageBadgeClass, triageLabel, type TriageState,
 } from '@/lib/review-queue-utils';
 import { useProposalDetail, type ProposalRow } from '@/hooks/use-review-queue';
+import { useTriageAction } from '@/hooks/use-triage-action';
+import { useCurrentUser } from '@/hooks/use-current-user';
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   proposal: ProposalRow | null;
+  onChanged?: () => void;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -32,14 +39,55 @@ function KV({ k, v, mono = false }: { k: string; v: React.ReactNode; mono?: bool
   );
 }
 
-export function ProposalDetailDrawer({ open, onOpenChange, proposal }: Props) {
+export function ProposalDetailDrawer({ open, onOpenChange, proposal, onChanged }: Props) {
   const { detail, loading } = useProposalDetail(proposal);
+  const user = useCurrentUser();
+  const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
+  const { submit, saving, error: triageError } = useTriageAction();
+  const [note, setNote] = useState('');
+
+  useEffect(() => {
+    setNote(proposal?.review_notes ?? '');
+  }, [proposal?.id, proposal?.review_notes]);
 
   if (!proposal) return null;
   const band = confidenceBand(proposal.confidence);
   const drift = proposal.contact_current_lead_type !== null
     && proposal.proposed_diff?.from !== undefined
     && proposal.contact_current_lead_type !== proposal.proposed_diff?.from;
+
+  const runTriage = async (next: TriageState) => {
+    const ok = await submit({
+      proposalId: proposal.id,
+      contactId: proposal.contact_id,
+      triageState: next,
+      reviewNotes: note.trim() ? note.trim() : null,
+      previousTriageState: proposal.triage_state,
+    });
+    if (ok) {
+      toast({ title: 'Triage updated', description: `Marked as ${triageLabel(next)}.` });
+      onChanged?.();
+    } else {
+      toast({ title: 'Triage failed', description: triageError ?? 'See console', variant: 'destructive' });
+    }
+  };
+
+  const saveNote = async () => {
+    const ok = await submit({
+      proposalId: proposal.id,
+      contactId: proposal.contact_id,
+      triageState: proposal.triage_state,
+      reviewNotes: note.trim() ? note.trim() : null,
+      noteOnly: true,
+      previousTriageState: proposal.triage_state,
+    });
+    if (ok) {
+      toast({ title: 'Note saved' });
+      onChanged?.();
+    } else {
+      toast({ title: 'Save failed', description: triageError ?? 'See console', variant: 'destructive' });
+    }
+  };
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -166,10 +214,57 @@ export function ProposalDetailDrawer({ open, onOpenChange, proposal }: Props) {
             )}
           </Section>
 
-          {/* Footer info */}
-          <div className="text-[11px] text-muted-foreground italic px-1">
-            Approve / Reject controls will be added in a future step pending approval. This view is read-only.
-          </div>
+          {/* Triage panel — admin-only, write path limited to triage_state + review_notes */}
+          {isAdmin && (
+            <Section title="Triage (Phase 4A Step 2)">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Current triage</span>
+                <span className={`text-xs px-2 py-0.5 rounded border ${triageBadgeClass(proposal.triage_state)}`}>
+                  {triageLabel(proposal.triage_state)}
+                </span>
+              </div>
+              {proposal.reviewed_at && (
+                <KV k="Last reviewed" v={format(new Date(proposal.reviewed_at), 'PPpp')} />
+              )}
+
+              <div className="space-y-2 pt-2">
+                <p className="text-xs font-medium text-muted-foreground">Review note</p>
+                <Textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Optional reviewer note (e.g. why this should be approved or rejected later)"
+                  rows={3}
+                  className="text-sm"
+                />
+                <div className="flex justify-end">
+                  <Button size="sm" variant="outline" onClick={saveNote} disabled={saving}>
+                    {saving ? <Loader2 size={14} className="animate-spin mr-1" /> : <Save size={14} className="mr-1" />}
+                    Save note only
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 pt-3 border-t border-border">
+                <Button size="sm" variant="outline" onClick={() => runTriage('acknowledged')} disabled={saving}>
+                  <Eye size={14} className="mr-1" /> Acknowledge
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => runTriage('will_approve')} disabled={saving}>
+                  <ThumbsUp size={14} className="mr-1" /> Will approve later
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => runTriage('will_reject')} disabled={saving}>
+                  <ThumbsDown size={14} className="mr-1" /> Will reject
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => runTriage('untriaged')} disabled={saving}>
+                  <RotateCcw size={14} className="mr-1" /> Clear triage
+                </Button>
+              </div>
+
+              <p className="text-[10px] text-muted-foreground italic pt-2 border-t border-border">
+                Triage is an annotation only. It does NOT approve, reject, apply, or send anything.
+                The contact record and the proposal status are unchanged.
+              </p>
+            </Section>
+          )}
 
           <div className="flex justify-end pt-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
