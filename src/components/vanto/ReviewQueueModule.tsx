@@ -75,6 +75,12 @@ export function ReviewQueueModule() {
         <div className="text-right text-xs text-muted-foreground shrink-0">
           <div>Showing <span className="text-foreground font-medium">{counts.total}</span> proposal{counts.total === 1 ? '' : 's'}</div>
           <div>{counts.pending} pending</div>
+          <div className="mt-1 flex flex-wrap gap-1.5 justify-end">
+            <span className="text-[10px] px-1.5 py-0.5 rounded border bg-muted text-muted-foreground border-border">{counts.untriaged} untriaged</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded border bg-sky-500/15 text-sky-400 border-sky-500/30">{counts.acknowledged} ack</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded border bg-emerald-500/15 text-emerald-400 border-emerald-500/30">{counts.willApprove} will approve</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded border bg-red-500/15 text-red-400 border-red-500/30">{counts.willReject} will reject</span>
+          </div>
         </div>
       </header>
 
