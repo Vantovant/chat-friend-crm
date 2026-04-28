@@ -1,17 +1,24 @@
+import { useEffect, useState } from 'react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, ExternalLink } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import { AlertTriangle, ExternalLink, Eye, ThumbsUp, ThumbsDown, RotateCcw, Save, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
+import { toast } from '@/hooks/use-toast';
 import {
   bandBadgeClass, confidenceBand, confidenceBandLabel, evidenceShortLabel,
   maskEmail, maskPhone, riskBadgeClass, statusBadgeClass,
+  triageBadgeClass, triageLabel, type TriageState,
 } from '@/lib/review-queue-utils';
 import { useProposalDetail, type ProposalRow } from '@/hooks/use-review-queue';
+import { useTriageAction } from '@/hooks/use-triage-action';
+import { useCurrentUser } from '@/hooks/use-current-user';
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   proposal: ProposalRow | null;
+  onChanged?: () => void;
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
