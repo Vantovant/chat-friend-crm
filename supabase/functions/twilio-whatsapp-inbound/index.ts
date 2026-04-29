@@ -132,6 +132,24 @@ Deno.serve(async (req) => {
   } else {
     // Auto-assign new inbound contacts to Vanto Vanto
     const VANTO_USER_ID = 'e336f0a0-ccf5-4992-9607-25c5bf590b11';
+
+    // Optional: tag new inbound leads as Facebook ad source when campaign is active.
+    // Toggle by setting integration_settings.key='facebook_ad_campaign_active' value='on'.
+    // Safe default: no extra tag.
+    let initialTags: string[] = [];
+    try {
+      const { data: fbFlag } = await svc
+        .from('integration_settings')
+        .select('value')
+        .eq('key', 'facebook_ad_campaign_active')
+        .maybeSingle();
+      if (fbFlag?.value === 'on') {
+        initialTags = ['source:facebook_ad'];
+      }
+    } catch (e: any) {
+      console.warn('[twilio-inbound] FB flag lookup failed (non-fatal):', e?.message);
+    }
+
     const { data: created, error: createErr } = await svc
       .from('contacts')
       .insert({
@@ -141,6 +159,7 @@ Deno.serve(async (req) => {
         phone_raw: phoneE164,
         whatsapp_id: phoneDigits,
         assigned_to: VANTO_USER_ID,
+        tags: initialTags,
       })
       .select('id')
       .single();
@@ -149,7 +168,7 @@ Deno.serve(async (req) => {
       return jsonRes({ error: 'Failed to create contact' }, 500);
     }
     contactId = created.id;
-    console.log('[twilio-inbound] Created contact:', contactId);
+    console.log('[twilio-inbound] Created contact:', contactId, 'tags:', initialTags);
   }
 
   // 2) Find or create conversation
