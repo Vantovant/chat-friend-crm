@@ -1138,9 +1138,8 @@ Deno.serve(async (req) => {
   diag.chunks_count = chunksCount;
   diag.topics_links_used = topicsLinksUsed;
 
-  // ── Trust-bridge prepend (first outbound only, kill-switch gated) ──
-  // Explains the +1 (USA) Twilio number and pre-announces Vanto's +27 SA number
-  // so Facebook-ad prospects don't bail thinking it's a scam.
+  // ── First-reply enrichments (APLGO header + trust-bridge + dual-intent merge) ──
+  // Only fires on the FIRST outbound message in the conversation. Kill-switch gated.
   try {
     const { data: tbFlag } = await svc
       .from("integration_settings")
@@ -1160,8 +1159,42 @@ Deno.serve(async (req) => {
       diag.trust_bridge_eligible = isFirstReply;
 
       if (isFirstReply) {
-        const TRUST_BRIDGE = `👋 Hi, this is *Vanto from Get Well Africa*. Quick heads-up — this WhatsApp replies from a +1 (USA) business number, but I'll personally follow up with you shortly from my *South African number +27 79 083 1530*. So when you see a +27 message or call from "Vanto", that's me 🙂\n\n---\n\n`;
-        replyContent = TRUST_BRIDGE + replyContent;
+        // (a) Look at the recent inbound history to detect dual intent
+        // (purchase/product interest AND distributor/joining interest within ~30 min).
+        const { data: recentInbound } = await svc
+          .from("messages")
+          .select("content, created_at")
+          .eq("conversation_id", conversation_id)
+          .eq("is_outbound", false)
+          .order("created_at", { ascending: false })
+          .limit(8);
+
+        const cutoff = Date.now() - 30 * 60 * 1000;
+        const inboundText = (recentInbound || [])
+          .filter((m: any) => new Date(m.created_at).getTime() >= cutoff)
+          .map((m: any) => (m.content || "").toLowerCase())
+          .join(" \n ");
+
+        const wantsBuy = /(price|cost|how much|buy|order|product|nrm|rlx|pwr|grw|sld|dox|gts|brn|chm|membership)/i.test(inboundText);
+        const wantsJoin = /(join|distribut|register|sign.?up|opportunity|business|income|mlm|enroll|associate)/i.test(inboundText);
+        const dualIntent = wantsBuy && wantsJoin;
+        diag.dual_intent_detected = dualIntent;
+
+        const APLGO_HEADER = `🌿 *APLGO Official Wellness Info*\nhttps://aplgo.com/j/787262\n\n`;
+        const TRUST_BRIDGE = `Hi, this is *Vanto from Get Well Africa*.\nQuick heads-up — this WhatsApp replies from our +1 business number, but I will also personally assist you from my *South African number +27 79 083 1530*.\n\n`;
+
+        if (dualIntent) {
+          // (b) Replace the AI-generated reply with ONE combined dual-intent reply
+          //     so we don't fire two separate first replies.
+          const DUAL_BODY = `Great — I can help you with both sides 🙂\n\n*🛒 Buying products:*\n• Customer store: https://aplshop.com/j/787262\n• Member pricing is available once you join — usually saves 25–40%.\n\n*🤝 Becoming a distributor:*\n• Income opportunity with retail margin + team commissions.\n• Associate enrollment: https://backoffice.aplgo.com/register/?sp=787262\n\nWould you like help first with *choosing the right product*, or *understanding how the distributor side works*?`;
+          replyContent = APLGO_HEADER + TRUST_BRIDGE + DUAL_BODY;
+          diag.dual_intent_merged = true;
+          actionTaken = "dual_intent_merged";
+        } else {
+          // (c) Standard first-reply: header + trust-bridge prepended to existing AI reply.
+          replyContent = APLGO_HEADER + TRUST_BRIDGE + replyContent;
+        }
+        diag.aplgo_header_prepended = true;
         diag.trust_bridge_prepended = true;
       }
     } else {
@@ -1170,7 +1203,7 @@ Deno.serve(async (req) => {
     }
   } catch (e: any) {
     // Non-fatal: never block the reply because of the trust-bridge check.
-    console.warn("[auto-reply] trust-bridge check failed (non-fatal):", e?.message);
+    console.warn("[auto-reply] first-reply enrichment failed (non-fatal):", e?.message);
     diag.trust_bridge_error = e?.message;
   }
 

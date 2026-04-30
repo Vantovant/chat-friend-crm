@@ -105,7 +105,26 @@ Deno.serve(async (req) => {
 
       const firstName = (contact.name || "there").split(" ")[0];
       const message = renderTemplate(tpl.template_text, { name: firstName, first_name: firstName, topic: row.topic || "" });
-      const isAuto = tpl.send_mode === "auto";
+      let isAuto = tpl.send_mode === "auto";
+
+      // ── Human-touch guard ──
+      // If a real human (sent_by IS NOT NULL) outbound message exists in the last 4h
+      // for this conversation, downgrade auto → suggest. Vanto is already handling it.
+      if (isAuto && row.conversation_id) {
+        const fourHrAgo = new Date(Date.now() - 4 * 3600000).toISOString();
+        const { data: humanTouch } = await supabase
+          .from("messages")
+          .select("id")
+          .eq("conversation_id", row.conversation_id)
+          .eq("is_outbound", true)
+          .not("sent_by", "is", null)
+          .gte("created_at", fourHrAgo)
+          .limit(1)
+          .maybeSingle();
+        if (humanTouch) {
+          isAuto = false; // downgrade to suggest-only
+        }
+      }
 
       const nextStep = stepIdx + 1;
       const isLast = nextStep >= MAX_STEPS;
