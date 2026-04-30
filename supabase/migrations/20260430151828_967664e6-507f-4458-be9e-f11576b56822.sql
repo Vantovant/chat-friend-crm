@@ -1,0 +1,1 @@
+UPDATE missed_inquiries SET send_mode='suggest', auto_followup_enabled=false WHERE contact_id IN (SELECT id FROM contacts WHERE name ILIKE '%bonn%') AND status='active';
