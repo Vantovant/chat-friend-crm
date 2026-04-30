@@ -1138,6 +1138,42 @@ Deno.serve(async (req) => {
   diag.chunks_count = chunksCount;
   diag.topics_links_used = topicsLinksUsed;
 
+  // ── Trust-bridge prepend (first outbound only, kill-switch gated) ──
+  // Explains the +1 (USA) Twilio number and pre-announces Vanto's +27 SA number
+  // so Facebook-ad prospects don't bail thinking it's a scam.
+  try {
+    const { data: tbFlag } = await svc
+      .from("integration_settings")
+      .select("value")
+      .eq("key", "vanto_trust_bridge_enabled")
+      .maybeSingle();
+    const trustBridgeOn = (tbFlag?.value || "off").toLowerCase() === "on";
+
+    if (trustBridgeOn) {
+      const { count: priorOutbound } = await svc
+        .from("messages")
+        .select("id", { count: "exact", head: true })
+        .eq("conversation_id", conversation_id)
+        .eq("is_outbound", true);
+
+      const isFirstReply = (priorOutbound || 0) === 0;
+      diag.trust_bridge_eligible = isFirstReply;
+
+      if (isFirstReply) {
+        const TRUST_BRIDGE = `👋 Hi, this is *Vanto from Get Well Africa*. Quick heads-up — this WhatsApp replies from a +1 (USA) business number, but I'll personally follow up with you shortly from my *South African number +27 79 083 1530*. So when you see a +27 message or call from "Vanto", that's me 🙂\n\n---\n\n`;
+        replyContent = TRUST_BRIDGE + replyContent;
+        diag.trust_bridge_prepended = true;
+      }
+    } else {
+      diag.trust_bridge_eligible = false;
+      diag.trust_bridge_disabled = true;
+    }
+  } catch (e: any) {
+    // Non-fatal: never block the reply because of the trust-bridge check.
+    console.warn("[auto-reply] trust-bridge check failed (non-fatal):", e?.message);
+    diag.trust_bridge_error = e?.message;
+  }
+
   // ── Dispatch via send-message ──
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
   const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
