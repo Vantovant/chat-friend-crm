@@ -1180,8 +1180,8 @@ Deno.serve(async (req) => {
         const dualIntent = wantsBuy && wantsJoin;
         diag.dual_intent_detected = dualIntent;
 
-        const APLGO_HEADER = `🌿 *APLGO Official Wellness Info*\nhttps://aplgo.com/j/787262\n\n`;
-        const TRUST_BRIDGE = `Hi, this is *Vanto from Get Well Africa*.\nQuick heads-up — this WhatsApp replies from our +1 business number, but I will also personally assist you from my *South African number +27 79 083 1530*.\n\n`;
+        const APLGO_HEADER = `🌿 *APLGO Official Wellness Info*\nDistributor: *Vanto — Get Well Africa*\nAPLGO Sponsor Code: *787262*\nOfficial APLGO info: https://aplgo.com/j/787262\n\n`;
+        const TRUST_BRIDGE = `Quick heads-up — this WhatsApp replies from our +1 business number, but I will also personally assist you from my *South African number +27 79 083 1530*.\n\n`;
 
         // Sister-site anchor — Daily product routing.
         // Brand domain ONLY. RLX remains default for sleep/stress/calm.
