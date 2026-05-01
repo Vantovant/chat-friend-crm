@@ -322,6 +322,8 @@ export type Database = {
         Row: {
           assigned_to: string | null
           avatar_url: string | null
+          contact_confidence: string
+          contact_source: string
           created_at: string
           created_by: string | null
           deleted_at: string | null
@@ -329,12 +331,15 @@ export type Database = {
           do_not_contact_at: string | null
           do_not_contact_reason: string | null
           email: string | null
+          first_name: string | null
           id: string
           interest: Database["public"]["Enums"]["interest_level"]
           is_deleted: boolean
+          last_name: string | null
           last_synced_at: string | null
           lead_type: Database["public"]["Enums"]["lead_type"]
           name: string
+          name_needs_confirmation: boolean
           notes: string | null
           phone: string
           phone_normalized: string | null
@@ -343,11 +348,14 @@ export type Database = {
           tags: string[] | null
           temperature: Database["public"]["Enums"]["lead_temperature"]
           updated_at: string
+          whatsapp_display_name: string | null
           whatsapp_id: string | null
         }
         Insert: {
           assigned_to?: string | null
           avatar_url?: string | null
+          contact_confidence?: string
+          contact_source?: string
           created_at?: string
           created_by?: string | null
           deleted_at?: string | null
@@ -355,12 +363,15 @@ export type Database = {
           do_not_contact_at?: string | null
           do_not_contact_reason?: string | null
           email?: string | null
+          first_name?: string | null
           id?: string
           interest?: Database["public"]["Enums"]["interest_level"]
           is_deleted?: boolean
+          last_name?: string | null
           last_synced_at?: string | null
           lead_type?: Database["public"]["Enums"]["lead_type"]
           name: string
+          name_needs_confirmation?: boolean
           notes?: string | null
           phone: string
           phone_normalized?: string | null
@@ -369,11 +380,14 @@ export type Database = {
           tags?: string[] | null
           temperature?: Database["public"]["Enums"]["lead_temperature"]
           updated_at?: string
+          whatsapp_display_name?: string | null
           whatsapp_id?: string | null
         }
         Update: {
           assigned_to?: string | null
           avatar_url?: string | null
+          contact_confidence?: string
+          contact_source?: string
           created_at?: string
           created_by?: string | null
           deleted_at?: string | null
@@ -381,12 +395,15 @@ export type Database = {
           do_not_contact_at?: string | null
           do_not_contact_reason?: string | null
           email?: string | null
+          first_name?: string | null
           id?: string
           interest?: Database["public"]["Enums"]["interest_level"]
           is_deleted?: boolean
+          last_name?: string | null
           last_synced_at?: string | null
           lead_type?: Database["public"]["Enums"]["lead_type"]
           name?: string
+          name_needs_confirmation?: boolean
           notes?: string | null
           phone?: string
           phone_normalized?: string | null
@@ -395,6 +412,7 @@ export type Database = {
           tags?: string[] | null
           temperature?: Database["public"]["Enums"]["lead_temperature"]
           updated_at?: string
+          whatsapp_display_name?: string | null
           whatsapp_id?: string | null
         }
         Relationships: [
@@ -1016,6 +1034,123 @@ export type Database = {
           last_synced_at?: string | null
           phone?: string | null
           updated_at?: string
+        }
+        Relationships: []
+      }
+      prospector_damage_audit: {
+        Row: {
+          contact_id: string
+          contact_name: string | null
+          contact_phone: string | null
+          contact_source: string | null
+          conversation_id: string
+          created_at: string
+          damage_score: string
+          duplicate_messages: boolean
+          duplicate_outbound: number
+          first_outbound_snippet: string | null
+          had_aplgo_header: boolean
+          had_local_number: boolean
+          had_proof_url: boolean
+          had_shop_link: boolean
+          id: string
+          inbound_total: number
+          intent: string
+          interest_topic: string | null
+          last_inbound_at: string | null
+          last_inbound_snippet: string | null
+          last_outbound_at: string | null
+          last_outbound_snippet: string | null
+          name_known: boolean
+          outbound_24h: number
+          outbound_total: number
+          premature_money_push: boolean
+          price_leak_detected: boolean
+          price_leak_text: string | null
+          recommended_action: string | null
+          recoverable: boolean
+          recovery_draft: string | null
+          scanned_at: string
+          temperature: string
+          updated_at: string
+          vanto_step_in: boolean
+          weak_first_touch: boolean
+        }
+        Insert: {
+          contact_id: string
+          contact_name?: string | null
+          contact_phone?: string | null
+          contact_source?: string | null
+          conversation_id: string
+          created_at?: string
+          damage_score?: string
+          duplicate_messages?: boolean
+          duplicate_outbound?: number
+          first_outbound_snippet?: string | null
+          had_aplgo_header?: boolean
+          had_local_number?: boolean
+          had_proof_url?: boolean
+          had_shop_link?: boolean
+          id?: string
+          inbound_total?: number
+          intent?: string
+          interest_topic?: string | null
+          last_inbound_at?: string | null
+          last_inbound_snippet?: string | null
+          last_outbound_at?: string | null
+          last_outbound_snippet?: string | null
+          name_known?: boolean
+          outbound_24h?: number
+          outbound_total?: number
+          premature_money_push?: boolean
+          price_leak_detected?: boolean
+          price_leak_text?: string | null
+          recommended_action?: string | null
+          recoverable?: boolean
+          recovery_draft?: string | null
+          scanned_at?: string
+          temperature?: string
+          updated_at?: string
+          vanto_step_in?: boolean
+          weak_first_touch?: boolean
+        }
+        Update: {
+          contact_id?: string
+          contact_name?: string | null
+          contact_phone?: string | null
+          contact_source?: string | null
+          conversation_id?: string
+          created_at?: string
+          damage_score?: string
+          duplicate_messages?: boolean
+          duplicate_outbound?: number
+          first_outbound_snippet?: string | null
+          had_aplgo_header?: boolean
+          had_local_number?: boolean
+          had_proof_url?: boolean
+          had_shop_link?: boolean
+          id?: string
+          inbound_total?: number
+          intent?: string
+          interest_topic?: string | null
+          last_inbound_at?: string | null
+          last_inbound_snippet?: string | null
+          last_outbound_at?: string | null
+          last_outbound_snippet?: string | null
+          name_known?: boolean
+          outbound_24h?: number
+          outbound_total?: number
+          premature_money_push?: boolean
+          price_leak_detected?: boolean
+          price_leak_text?: string | null
+          recommended_action?: string | null
+          recoverable?: boolean
+          recovery_draft?: string | null
+          scanned_at?: string
+          temperature?: string
+          updated_at?: string
+          vanto_step_in?: boolean
+          weak_first_touch?: boolean
         }
         Relationships: []
       }

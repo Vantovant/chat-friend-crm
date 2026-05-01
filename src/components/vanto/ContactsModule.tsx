@@ -12,6 +12,7 @@ import { useToast } from '@/hooks/use-toast';
 import { MergeContactsModal, DuplicateMergeModal, type IncomingContact } from './MergeContactsModal';
 import { useProfiles, profileLabel, type ProfileOption } from '@/hooks/use-profiles';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { downloadVCard, copyContactCard } from '@/lib/vcard';
 
 type Contact = {
   id: string;
@@ -32,6 +33,12 @@ type Contact = {
   updated_at: string;
   is_deleted: boolean;
   deleted_at: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  whatsapp_display_name?: string | null;
+  contact_source?: string | null;
+  contact_confidence?: string | null;
+  name_needs_confirmation?: boolean | null;
 };
 
 type ActivityEntry = {
@@ -382,6 +389,12 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
 
   const [form, setForm] = useState({
     name: contact.name,
+    first_name: contact.first_name || '',
+    last_name: contact.last_name || '',
+    whatsapp_display_name: contact.whatsapp_display_name || '',
+    contact_source: contact.contact_source || 'unknown',
+    contact_confidence: contact.contact_confidence || 'unknown',
+    name_needs_confirmation: !!contact.name_needs_confirmation,
     phone_raw: contact.phone_raw || contact.phone || '',
     email: contact.email || '',
     lead_type: contact.lead_type,
@@ -418,6 +431,12 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
 
     const updatePayload: Record<string, any> = {
       name: form.name.trim(),
+      first_name: form.first_name.trim() || null,
+      last_name: form.last_name.trim() || null,
+      whatsapp_display_name: form.whatsapp_display_name.trim() || null,
+      contact_source: form.contact_source,
+      contact_confidence: form.contact_confidence,
+      name_needs_confirmation: form.name_needs_confirmation,
       phone_raw: form.phone_raw.trim() || null,
       phone_normalized: phoneNorm || null,
       phone: phoneNorm || contact.phone,
@@ -491,6 +510,100 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
               <input type={f.type} value={(form as any)[f.key]} onChange={e => set(f.key, e.target.value)} className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 transition-colors" />
             </div>
           ))}
+
+          {/* ── Identity Bridge ─────────────────────────────────────────────── */}
+          <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-semibold text-foreground uppercase tracking-wider">Contact Identity Bridge</h4>
+              {form.name_needs_confirmation && (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-blue-500/15 text-blue-400 border-blue-500/30 uppercase">
+                  Name needs confirmation
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground mb-1">First Name</label>
+                <input type="text" value={form.first_name} onChange={e => set('first_name', e.target.value)}
+                  className="w-full bg-background border border-border rounded-md px-2 py-1.5 text-sm text-foreground outline-none focus:border-primary/50" />
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Last Name</label>
+                <input type="text" value={form.last_name} onChange={e => set('last_name', e.target.value)}
+                  className="w-full bg-background border border-border rounded-md px-2 py-1.5 text-sm text-foreground outline-none focus:border-primary/50" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-[10px] font-medium text-muted-foreground mb-1">WhatsApp Display Name</label>
+              <input type="text" value={form.whatsapp_display_name} onChange={e => set('whatsapp_display_name', e.target.value)}
+                placeholder="As shown on their WhatsApp profile"
+                className="w-full bg-background border border-border rounded-md px-2 py-1.5 text-sm text-foreground outline-none focus:border-primary/50" />
+              {form.whatsapp_display_name && form.name && form.whatsapp_display_name.trim().toLowerCase() !== form.name.trim().toLowerCase() && (
+                <div className="mt-1.5 rounded-md bg-amber-500/10 border border-amber-500/30 px-2 py-1.5 text-[11px] text-amber-300">
+                  ⚠ Name conflict — CRM: <strong>{form.name}</strong> · WhatsApp: <strong>{form.whatsapp_display_name}</strong>
+                  <div className="mt-1 flex gap-1">
+                    <button type="button" onClick={() => set('name', form.whatsapp_display_name)}
+                      className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 text-[10px]">Use WhatsApp name</button>
+                    <button type="button" onClick={() => set('whatsapp_display_name', form.name)}
+                      className="px-1.5 py-0.5 rounded bg-secondary text-foreground hover:bg-secondary/80 text-[10px]">Keep CRM name</button>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Source</label>
+                <select value={form.contact_source} onChange={e => set('contact_source', e.target.value)}
+                  className="w-full bg-background border border-border rounded-md px-2 py-1.5 text-sm text-foreground outline-none focus:border-primary/50">
+                  <option value="unknown">Unknown</option>
+                  <option value="facebook">Facebook</option>
+                  <option value="twilio">Twilio</option>
+                  <option value="maytapi">Maytapi</option>
+                  <option value="manual">Manual</option>
+                  <option value="google">Google Contacts</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-[10px] font-medium text-muted-foreground mb-1">Confidence</label>
+                <select value={form.contact_confidence} onChange={e => set('contact_confidence', e.target.value)}
+                  className="w-full bg-background border border-border rounded-md px-2 py-1.5 text-sm text-foreground outline-none focus:border-primary/50">
+                  <option value="confirmed">✓ Confirmed</option>
+                  <option value="guessed">~ Guessed</option>
+                  <option value="unknown">? Unknown</option>
+                </select>
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-[11px] text-foreground cursor-pointer">
+              <input type="checkbox" checked={form.name_needs_confirmation}
+                onChange={e => setForm(f => ({ ...f, name_needs_confirmation: e.target.checked }))}
+                className="rounded border-border" />
+              Ask person to confirm their name in next message
+            </label>
+            <div className="flex flex-wrap gap-1.5 pt-1 border-t border-border">
+              <button type="button" onClick={() => {
+                downloadVCard({
+                  name: form.name, first_name: form.first_name, last_name: form.last_name,
+                  phone: contact.phone, email: form.email,
+                  source: form.contact_source, crm_contact_id: contact.id,
+                });
+                toast({ title: 'vCard downloaded', description: 'Save it to your phone so WhatsApp shows the name.' });
+              }} className="flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25">
+                <Download size={11} /> Export vCard (.vcf)
+              </button>
+              <button type="button" onClick={async () => {
+                const text = copyContactCard({
+                  name: form.name, phone: contact.phone, email: form.email,
+                  source: form.contact_source, crm_contact_id: contact.id,
+                });
+                await navigator.clipboard.writeText(text);
+                toast({ title: 'Contact card copied' });
+              }} className="flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-secondary text-foreground border border-border hover:bg-secondary/80">
+                Copy contact card
+              </button>
+              <span className="text-[10px] text-muted-foreground self-center">Google Contacts sync — coming soon</span>
+            </div>
+          </div>
+
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-muted-foreground mb-1">Lead Type</label>
