@@ -135,6 +135,58 @@ export function InboxModule() {
   /* ── Initial load ── */
   useEffect(() => { fetchConversations(); }, []);
 
+  /* ── Fetch pipeline stages once ── */
+  useEffect(() => {
+    supabase.from('pipeline_stages').select('id, name, color, stage_order').order('stage_order').then(({ data }) => {
+      if (data) setStages(data as Stage[]);
+    });
+  }, []);
+
+  /* ── Update contact (from inline editor) ── */
+  const handleUpdateContact = useCallback(async (contactId: string, patch: Partial<Contact>) => {
+    const conv = conversations.find(c => c.contact_id === contactId);
+    const before = conv?.contact;
+    if (!before) return { ok: false, error: 'Contact not found' };
+
+    // Optimistic
+    setConversations(prev => prev.map(c =>
+      c.contact_id === contactId ? { ...c, contact: { ...c.contact, ...patch } } : c
+    ));
+
+    const { error } = await supabase.from('contacts').update(patch).eq('id', contactId);
+    if (error) {
+      // rollback
+      setConversations(prev => prev.map(c =>
+        c.contact_id === contactId ? { ...c, contact: before } : c
+      ));
+      toast({ title: 'Update failed', description: error.message, variant: 'destructive' });
+      return { ok: false, error: error.message };
+    }
+
+    // Activity log — stage change
+    if (patch.stage_id !== undefined && patch.stage_id !== before.stage_id) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('contact_activity').insert({
+          contact_id: contactId,
+          performed_by: user.id,
+          type: 'stage_changed',
+          metadata: {
+            from_stage: stages.find(s => s.id === before.stage_id)?.name || 'Unassigned',
+            to_stage: stages.find(s => s.id === patch.stage_id)?.name || 'Unassigned',
+            from_stage_id: before.stage_id,
+            to_stage_id: patch.stage_id,
+            source: 'inbox',
+          },
+        });
+      }
+    }
+
+    toast({ title: 'Contact updated' });
+    return { ok: true };
+  }, [conversations, stages]);
+
+
   /* ── Load messages on selection ── */
   useEffect(() => {
     if (selectedConvId) {
