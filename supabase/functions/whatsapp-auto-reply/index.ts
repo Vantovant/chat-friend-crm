@@ -1146,15 +1146,19 @@ Deno.serve(async (req) => {
   try {
     // Approved distributor-proof page (preview-card source). Override-able via
     // integration_settings key 'distributor_proof_url' for future custom domain.
-    const { data: proofRow } = await svc
+    const { data: settingRows } = await svc
       .from("integration_settings")
-      .select("value")
-      .eq("key", "distributor_proof_url")
-      .maybeSingle();
-    const PROOF_URL = (proofRow?.value || "https://vanto-zazi-bloom.lovable.app").trim();
+      .select("key,value")
+      .in("key", ["distributor_proof_url", "table_of_contents_url", "local_support_number"]);
+    const settingsMap: Record<string, string> = {};
+    for (const r of (settingRows || []) as any[]) settingsMap[r.key] = (r.value || "").trim();
+    const PROOF_URL = settingsMap.distributor_proof_url || "https://vanto-zazi-bloom.lovable.app";
     const SHOP_URL = "https://onlinecourseformlm.com/shop";
-    const LOCAL_NUMBER = "+27 79 083 1530";
-    const SUPPORT_MENU = "sleep, energy, cravings, joints, stomach, hormones, or immune support";
+    const TOC_URL = settingsMap.table_of_contents_url || SHOP_URL;
+    const LOCAL_NUMBER = settingsMap.local_support_number || "+27 79 083 1530";
+    const CUSTOMER_STORE = "https://aplshop.com/j/787262";
+    const ASSOCIATE_ENROLL = "https://backoffice.aplgo.com/register/?sp=787262";
+    const SUPPORT_MENU = "sleep, energy, cravings, joints, stomach, hormones, immune support, or business information";
 
     // Detect channel from last inbound message provider (twilio | maytapi | other)
     const { data: lastInbound } = await svc
