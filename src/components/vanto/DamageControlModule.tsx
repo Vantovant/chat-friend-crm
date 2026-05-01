@@ -45,6 +45,8 @@ interface AuditRow {
   last_outbound_snippet: string | null;
   last_inbound_snippet: string | null;
   scanned_at: string;
+  last_inbound_at?: string | null;
+  last_outbound_at?: string | null;
   recovery_status?: string | null;
   reviewed_at?: string | null;
   handled_at?: string | null;
