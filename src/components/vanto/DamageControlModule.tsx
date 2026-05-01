@@ -60,6 +60,8 @@ export function DamageControlModule() {
   const [scoreFilter, setScoreFilter] = useState<Score | 'all'>('all');
   const [stepInOnly, setStepInOnly] = useState(false);
   const [openDraft, setOpenDraft] = useState<string | null>(null);
+  const [dictateOpen, setDictateOpen] = useState<string | null>(null);
+  const [personalDrafts, setPersonalDrafts] = useState<Record<string, string>>({});
 
   const fetchRows = async () => {
     setLoading(true);
