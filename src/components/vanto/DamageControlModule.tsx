@@ -4,9 +4,10 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
 import {
   Loader2, RefreshCw, ShieldAlert, CheckCircle2, AlertTriangle, Flame,
-  UserX, MessageSquare, Copy, Download,
+  UserX, MessageSquare, Copy, Download, Mic,
 } from 'lucide-react';
 import { downloadVCard, copyContactCard } from '@/lib/vcard';
+import { DictateMessage } from './DictateMessage';
 
 type Score = 'green' | 'yellow' | 'orange' | 'red';
 
