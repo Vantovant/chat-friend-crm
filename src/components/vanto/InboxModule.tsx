@@ -26,12 +26,15 @@ type Contact = {
   phone: string;
   email: string | null;
   temperature: LeadTemperature;
-  lead_type: string;
+  lead_type: LeadType;
   interest: string;
   tags: string[] | null;
   notes: string | null;
   assigned_to: string | null;
+  stage_id: string | null;
 };
+
+type Stage = { id: string; name: string; color: string | null; stage_order: number };
 
 type Conversation = {
   id: string;
