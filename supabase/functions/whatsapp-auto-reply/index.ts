@@ -1138,102 +1138,117 @@ Deno.serve(async (req) => {
   diag.chunks_count = chunksCount;
   diag.topics_links_used = topicsLinksUsed;
 
-  // ── First-reply enrichments (APLGO header + trust-bridge + dual-intent merge) ──
-  // Only fires on the FIRST outbound message in the conversation. Kill-switch gated.
+  // ── EMERGENCY FIRST-TOUCH TRUST PATCH (2026-05-01) ──
+  // First line MUST be the approved distributor-proof URL so WhatsApp generates a
+  // branded preview card BEFORE any text. Channel-aware (Twilio vs Maytapi).
+  // Replaces the AI body on first-touch with the approved trust-first script.
+  // Also rewrites "product info" and "price-no-context" fallbacks at any turn.
   try {
-    const { data: tbFlag } = await svc
+    // Approved distributor-proof page (preview-card source). Override-able via
+    // integration_settings key 'distributor_proof_url' for future custom domain.
+    const { data: proofRow } = await svc
       .from("integration_settings")
       .select("value")
-      .eq("key", "vanto_trust_bridge_enabled")
+      .eq("key", "distributor_proof_url")
       .maybeSingle();
-    const trustBridgeOn = (tbFlag?.value || "off").toLowerCase() === "on";
+    const PROOF_URL = (proofRow?.value || "https://vanto-zazi-bloom.lovable.app").trim();
+    const SHOP_URL = "https://onlinecourseformlm.com/shop";
+    const LOCAL_NUMBER = "+27 79 083 1530";
+    const SUPPORT_MENU = "sleep, energy, cravings, joints, stomach, hormones, or immune support";
 
-    if (trustBridgeOn) {
-      const { count: priorOutbound } = await svc
+    // Detect channel from last inbound message provider (twilio | maytapi | other)
+    const { data: lastInbound } = await svc
+      .from("messages")
+      .select("provider")
+      .eq("conversation_id", conversation_id)
+      .eq("is_outbound", false)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const channel = (lastInbound?.provider || "").toLowerCase();
+    const isTwilio = channel === "twilio";
+    const isMaytapi = channel === "maytapi";
+    diag.channel_detected = channel || "unknown";
+
+    // Is this the first outbound in the thread?
+    const { count: priorOutbound } = await svc
+      .from("messages")
+      .select("id", { count: "exact", head: true })
+      .eq("conversation_id", conversation_id)
+      .eq("is_outbound", true);
+    const isFirstReply = (priorOutbound || 0) === 0;
+    diag.first_touch = isFirstReply;
+
+    // Build trust-first first-touch script (channel-aware)
+    const TRUST_BRIDGE_TWILIO =
+      `This WhatsApp may appear from our campaign/system number, but I'll guide you personally from my local South African number as well.\n\n`;
+    const buildFirstTouch = (twilioStyle: boolean) => {
+      const bridge = twilioStyle ? TRUST_BRIDGE_TWILIO : "";
+      const intro = twilioStyle
+        ? `You can first browse the product shop here:`
+        : `Before I recommend anything, you can see the product shop here:`;
+      return (
+        `${PROOF_URL}\n\n` +
+        `🌿 *APLGO Official Wellness Info*\n\n` +
+        `Hi, I'm *Vanto from Get Well Africa* — an accredited APLGO distributor.\n\n` +
+        `${bridge}` +
+        `${intro}\n${SHOP_URL}\n\n` +
+        (twilioStyle
+          ? `What would you like support with most — ${SUPPORT_MENU}?\n\n`
+          : `Tell me what you want support with most — ${SUPPORT_MENU}?\n\n`) +
+        `— Vanto\nLocal support: ${LOCAL_NUMBER}`
+      );
+    };
+
+    // ── Detect message-class fallbacks (apply at any turn, not only first) ──
+    const lastInTextRaw = (
+      await svc
         .from("messages")
-        .select("id", { count: "exact", head: true })
+        .select("content")
         .eq("conversation_id", conversation_id)
-        .eq("is_outbound", true);
+        .eq("is_outbound", false)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    ).data?.content || "";
+    const lastIn = lastInTextRaw.toLowerCase().trim();
 
-      const isFirstReply = (priorOutbound || 0) === 0;
-      diag.trust_bridge_eligible = isFirstReply;
+    const isProductInfoReq =
+      /\b(product info( please)?|send (me )?info|i want to know more|tell me about (the )?products?|more info|info please|product information)\b/i.test(lastIn);
 
-      if (isFirstReply) {
-        // (a) Look at the recent inbound history to detect dual intent
-        // (purchase/product interest AND distributor/joining interest within ~30 min).
-        const { data: recentInbound } = await svc
-          .from("messages")
-          .select("content, created_at")
-          .eq("conversation_id", conversation_id)
-          .eq("is_outbound", false)
-          .order("created_at", { ascending: false })
-          .limit(8);
+    // Price-asked-but-no-product-context: mentions price but no product token
+    const mentionsPrice = /\b(price|cost|how much|pricing|how much is)\b/i.test(lastIn);
+    const productTokens = /(ice|nrm|rlx|pwr|grw|sld|dox|gts|brn|chm|stp|hpr|mnd|skn|lemon|apricot|daily|premium|elite|pendant|pft|status)/i;
+    const hasProductContext = productTokens.test(lastIn);
+    const isPriceNoContext = mentionsPrice && !hasProductContext;
 
-        const cutoff = Date.now() - 30 * 60 * 1000;
-        const inboundText = (recentInbound || [])
-          .filter((m: any) => new Date(m.created_at).getTime() >= cutoff)
-          .map((m: any) => (m.content || "").toLowerCase())
-          .join(" \n ");
-
-        const wantsBuy = /(price|cost|how much|buy|order|product|nrm|rlx|pwr|grw|sld|dox|gts|brn|chm|membership)/i.test(inboundText);
-        const wantsJoin = /(join|distribut|register|sign.?up|opportunity|business|income|mlm|enroll|associate)/i.test(inboundText);
-        const dualIntent = wantsBuy && wantsJoin;
-        diag.dual_intent_detected = dualIntent;
-
-        const APLGO_HEADER = `🌿 *APLGO Official Wellness Info*\nDistributor: *Vanto — Get Well Africa*\nAPLGO Sponsor Code: *787262*\nOfficial APLGO info: https://aplgo.com/j/787262\n\n`;
-        const TRUST_BRIDGE = `Quick heads-up — this WhatsApp replies from our +1 business number, but I will also personally assist you from my *South African number +27 79 083 1530*.\n\n`;
-
-        // Sister-site anchor — Daily product routing.
-        // Brand domain ONLY. RLX remains default for sleep/stress/calm.
-        // One link per reply (low-pressure read).
-        const lc = inboundText.toLowerCase();
-        const BRAND = "https://onlinecourseformlm.com";
-        let anchorPath = "/shop";
-        let anchorKey: string = "shop";
-        // Order matters: most specific intents first; RLX wins on sleep/stress per spec.
-        if (/(rlx|sleep|insomnia|stress|anx|calm|relax|wind ?down|switch off|overwhelm|tension)/i.test(lc)) {
-          anchorPath = "/shop/rlx"; anchorKey = "rlx";
-        } else if (/(nrm|sugar|craving|appetite|weight|metabol|gut reset|reset)/i.test(lc)) {
-          anchorPath = "/shop/nrm"; anchorKey = "nrm";
-        } else if (/(sld|joint|knee|back pain|shoulder|stiff|mobility|arthrit)/i.test(lc)) {
-          anchorPath = "/shop/sld"; anchorKey = "sld";
-        } else if (/(stp|digest|cleanse|stomach|bloat|bowel)/i.test(lc)) {
-          anchorPath = "/shop/stp"; anchorKey = "stp";
-        } else if (/(pwr ?lemon|men'?s vitality|men'?s energy|men hormonal|male hormon)/i.test(lc)) {
-          anchorPath = "/shop/pwr-lemon"; anchorKey = "pwr-lemon";
-        } else if (/(pwr ?apricot|women'?s|female hormon|cycle|menstrual|menopaus)/i.test(lc)) {
-          anchorPath = "/shop/pwr-apricot"; anchorKey = "pwr-apricot";
-        } else if (/(immun|cellular|recovery|gts)/i.test(lc)) {
-          anchorPath = "/shop/gts"; anchorKey = "gts";
-        } else if (/(tired|fatigue|low energy|vitality|exhaust|burnout|grw)/i.test(lc)) {
-          anchorPath = "/shop/grw"; anchorKey = "grw";
-        }
-        const SISTER_ANCHOR = `📖 If you'd like to read first (no pressure):\n${BRAND}${anchorPath}\n\n`;
-        diag.sister_anchor_used = anchorKey;
-        diag.sister_anchor_url = `${BRAND}${anchorPath}`;
-
-        if (dualIntent) {
-          // (b) Replace the AI-generated reply with ONE combined dual-intent reply
-          //     so we don't fire two separate first replies.
-          const DUAL_BODY = `Great — I can help you with both sides 🙂\n\n*🛒 Buying products:*\n• Customer store: https://aplshop.com/j/787262\n• Member pricing is available once you join — usually saves 25–40%.\n\n*🤝 Becoming a distributor:*\n• Income opportunity with retail margin + team commissions.\n• Associate enrollment: https://backoffice.aplgo.com/register/?sp=787262\n\nWould you like help first with *choosing the right product*, or *understanding how the distributor side works*?`;
-          replyContent = APLGO_HEADER + TRUST_BRIDGE + SISTER_ANCHOR + DUAL_BODY;
-          diag.dual_intent_merged = true;
-          actionTaken = "dual_intent_merged";
-        } else {
-          // (c) Standard first-reply: header + trust-bridge + sister anchor + AI reply.
-          replyContent = APLGO_HEADER + TRUST_BRIDGE + SISTER_ANCHOR + replyContent;
-        }
-        diag.aplgo_header_prepended = true;
-        diag.trust_bridge_prepended = true;
-      }
-    } else {
-      diag.trust_bridge_eligible = false;
-      diag.trust_bridge_disabled = true;
+    if (isFirstReply) {
+      // Override the AI body — first-touch must be the trust-first script.
+      replyContent = buildFirstTouch(isTwilio || !isMaytapi);
+      diag.first_touch_template = isTwilio ? "twilio" : (isMaytapi ? "maytapi" : "default_twilio_style");
+      diag.proof_url_first_line = true;
+      actionTaken = "first_touch_trust_message";
+    } else if (isProductInfoReq) {
+      replyContent =
+        `${PROOF_URL}\n\n` +
+        `Of course. Start here so you can see the full APLGO product shop:\n${SHOP_URL}\n\n` +
+        `Then tell me what you want support with most — ${SUPPORT_MENU} — and I'll point you to the right product.\n\n` +
+        `— Vanto`;
+      diag.product_info_fallback = true;
+      actionTaken = "product_info_trust_reply";
+    } else if (isPriceNoContext) {
+      replyContent =
+        `${PROOF_URL}\n\n` +
+        `I can help with price. Which product are you asking about?\n\n` +
+        `You can browse the full shop here first:\n${SHOP_URL}\n\n` +
+        `— Vanto`;
+      diag.price_no_context_fallback = true;
+      actionTaken = "price_clarify_trust_reply";
     }
   } catch (e: any) {
-    // Non-fatal: never block the reply because of the trust-bridge check.
-    console.warn("[auto-reply] first-reply enrichment failed (non-fatal):", e?.message);
-    diag.trust_bridge_error = e?.message;
+    // Non-fatal: never block the reply because of the trust patch.
+    console.warn("[auto-reply] first-touch trust patch failed (non-fatal):", e?.message);
+    diag.first_touch_error = e?.message;
   }
 
   // ── PRICE SAFETY VALIDATOR (Emergency patch 2026-05-01) ──
