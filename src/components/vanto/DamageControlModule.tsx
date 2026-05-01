@@ -378,6 +378,7 @@ export function DamageControlModule() {
         </div>
       </div>
 
+      <div className="px-4 md:px-6 py-4 border-b border-border grid grid-cols-3 md:grid-cols-6 gap-2 shrink-0">
         {[
           { label: 'Total', value: stats.total, icon: MessageSquare, color: 'text-foreground' },
           { label: 'Green', value: stats.green, icon: CheckCircle2, color: 'text-emerald-400', f: 'green' as const },
