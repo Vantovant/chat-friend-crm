@@ -70,6 +70,9 @@ export function DamageControlModule() {
   const [openDraft, setOpenDraft] = useState<string | null>(null);
   const [dictateOpen, setDictateOpen] = useState<string | null>(null);
   const [personalDrafts, setPersonalDrafts] = useState<Record<string, string>>({});
+  const [packOpen, setPackOpen] = useState<string | null>(null);
+  const [queue, setQueue] = useState<Queue>('all');
+  const [hideHandled, setHideHandled] = useState(true);
 
   const fetchRows = async () => {
     setLoading(true);
