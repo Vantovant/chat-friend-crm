@@ -5,6 +5,7 @@ import { toast } from '@/hooks/use-toast';
 import {
   Loader2, RefreshCw, ShieldAlert, CheckCircle2, AlertTriangle, Flame,
   UserX, MessageSquare, Copy, Download, Mic, ClipboardCheck, UserCheck, FileText, Phone,
+  Lock, Bot, User as UserIcon, Clock,
 } from 'lucide-react';
 import { downloadVCard, copyContactCard } from '@/lib/vcard';
 import { DictateMessage } from './DictateMessage';
@@ -87,6 +88,77 @@ function ageColor(hrs: number): string {
   return 'text-destructive';
 }
 
+type Recency =
+  | 'all'
+  | 'replied_today'
+  | 'replied_yesterday'
+  | 'under_24h'
+  | '1_3d'
+  | '4_14d'
+  | 'older_14d'
+  | 'no_inbound'
+  | 'sent_today'
+  | 'no_reply_after_outbound';
+
+function hoursAgo(iso?: string | null): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return null;
+  return (Date.now() - t) / 3_600_000;
+}
+
+function isSameLocalDay(iso?: string | null, dayOffset = 0): boolean {
+  if (!iso) return false;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return false;
+  const ref = new Date();
+  ref.setDate(ref.getDate() - dayOffset);
+  return d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth() && d.getDate() === ref.getDate();
+}
+
+function matchesRecency(r: { last_inbound_at?: string | null; last_outbound_at?: string | null }, rec: Recency): boolean {
+  if (rec === 'all') return true;
+  const inH = hoursAgo(r.last_inbound_at);
+  const outH = hoursAgo(r.last_outbound_at);
+  switch (rec) {
+    case 'replied_today': return isSameLocalDay(r.last_inbound_at, 0);
+    case 'replied_yesterday': return isSameLocalDay(r.last_inbound_at, 1);
+    case 'under_24h': return inH !== null && inH < 24;
+    case '1_3d': return inH !== null && inH >= 24 && inH < 72;
+    case '4_14d': return inH !== null && inH >= 96 && inH < 24 * 14;
+    case 'older_14d': return inH !== null && inH >= 24 * 14;
+    case 'no_inbound': return inH === null;
+    case 'sent_today': return isSameLocalDay(r.last_outbound_at, 0);
+    case 'no_reply_after_outbound':
+      if (outH === null) return false;
+      if (inH === null) return true;
+      return new Date(r.last_outbound_at!).getTime() > new Date(r.last_inbound_at!).getTime();
+  }
+}
+
+interface OverdueFlags {
+  overdue: boolean;
+  hot_reply_soon: boolean;
+  red_handle: boolean;
+  orange_review: boolean;
+  needs_name: boolean;
+  needs_vanto: boolean;
+}
+
+function computeOverdue(r: AuditRow): OverdueFlags {
+  const inH = hoursAgo(r.last_inbound_at);
+  const outH = hoursAgo(r.last_outbound_at);
+  const repliedRecently = inH !== null && inH < 24;
+  const noHumanResponse = inH !== null && (outH === null || new Date(r.last_outbound_at!).getTime() < new Date(r.last_inbound_at!).getTime());
+  const hot_reply_soon = r.temperature === 'hot' && repliedRecently && noHumanResponse;
+  const red_handle = r.damage_score === 'red' && r.recovery_status !== 'handled';
+  const orange_review = r.damage_score === 'orange' && !r.reviewed_at && r.recovery_status !== 'handled';
+  const needs_name = !r.name_known && r.recovery_status !== 'handled';
+  const needs_vanto = r.vanto_step_in && r.recovery_status !== 'handled';
+  const overdue = hot_reply_soon || red_handle || orange_review || (needs_name && repliedRecently);
+  return { overdue, hot_reply_soon, red_handle, orange_review, needs_name, needs_vanto };
+}
+
 export function DamageControlModule() {
   const [rows, setRows] = useState<AuditRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,6 +171,8 @@ export function DamageControlModule() {
   const [packOpen, setPackOpen] = useState<string | null>(null);
   const [queue, setQueue] = useState<Queue>('all');
   const [hideHandled, setHideHandled] = useState(true);
+  const [recency, setRecency] = useState<Recency>('all');
+  const [overdueOnly, setOverdueOnly] = useState(false);
 
   const fetchRows = async () => {
     setLoading(true);
@@ -206,7 +280,29 @@ export function DamageControlModule() {
         return false;
       }
     }
+    if (!matchesRecency(r, recency)) return false;
+    if (overdueOnly && !computeOverdue(r).overdue) return false;
     return true;
+  });
+
+  // Priority sort: RED+recent → HOT+recent → ORANGE → YELLOW HOT → name needed → cold older
+  const priority = (r: AuditRow): number => {
+    const inH = hoursAgo(r.last_inbound_at);
+    const recent = inH !== null && inH < 24;
+    if (r.damage_score === 'red' && recent) return 0;
+    if (r.temperature === 'hot' && recent) return 1;
+    if (r.damage_score === 'red') return 2;
+    if (r.damage_score === 'orange') return 3;
+    if (r.damage_score === 'yellow' && r.temperature === 'hot') return 4;
+    if (!r.name_known) return 5;
+    return 6;
+  };
+  filtered.sort((a, b) => {
+    const pa = priority(a); const pb = priority(b);
+    if (pa !== pb) return pa - pb;
+    const ai = a.last_inbound_at ? new Date(a.last_inbound_at).getTime() : 0;
+    const bi = b.last_inbound_at ? new Date(b.last_inbound_at).getTime() : 0;
+    return bi - ai;
   });
 
   const stats = {
@@ -221,6 +317,7 @@ export function DamageControlModule() {
     weakTouch: rows.filter(r => r.weak_first_touch).length,
     yellowHot: rows.filter(r => r.damage_score === 'yellow' && r.temperature === 'hot').length,
     handled: rows.filter(r => r.recovery_status === 'handled').length,
+    overdue: rows.filter(r => computeOverdue(r).overdue).length,
   };
 
   return (
@@ -243,6 +340,42 @@ export function DamageControlModule() {
           {scanning ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
           Run Damage Audit
         </button>
+      </div>
+
+      {/* Locked Level 1 status panel — informational, not a toggle */}
+      <div className="px-4 md:px-6 py-3 border-b border-border bg-secondary/30 shrink-0">
+        <div className="flex items-start gap-3 flex-wrap">
+          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-semibold">
+            <Lock size={14} />
+            Master Prospector Mode: Level 1 — Draft Only
+          </div>
+          <p className="text-[11px] text-muted-foreground flex-1 min-w-[220px] self-center">
+            Master Prospector is awake in Level 1 Damage-Control Mode. It prepares intelligence and drafts only. Vanto sends manually.
+          </p>
+        </div>
+        <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+          <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-2">
+            <p className="font-semibold text-emerald-300 mb-1 flex items-center gap-1"><Bot size={12} /> Prospector CAN</p>
+            <ul className="text-muted-foreground space-y-0.5">
+              <li>✅ Read leads</li>
+              <li>✅ Score damage</li>
+              <li>✅ Classify intent &amp; temperature</li>
+              <li>✅ Prepare recovery drafts</li>
+              <li>✅ Polish dictated messages</li>
+              <li>✅ Flag VANTO STEP IN leads</li>
+            </ul>
+          </div>
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 p-2">
+            <p className="font-semibold text-destructive mb-1 flex items-center gap-1"><Lock size={12} /> Blocked</p>
+            <ul className="text-muted-foreground space-y-0.5">
+              <li>❌ Auto-send</li>
+              <li>❌ Bulk send / Send All</li>
+              <li>❌ Queue recovery messages</li>
+              <li>❌ Bypass human approval</li>
+              <li>❌ Publish Vanto OS events</li>
+            </ul>
+          </div>
+        </div>
       </div>
 
       <div className="px-4 md:px-6 py-4 border-b border-border grid grid-cols-3 md:grid-cols-6 gap-2 shrink-0">
@@ -329,10 +462,51 @@ export function DamageControlModule() {
         >
           <Flame size={12} /> Vanto step-in only
         </button>
+        <button
+          onClick={() => setOverdueOnly(v => !v)}
+          className={cn(
+            'px-2 py-1 rounded flex items-center gap-1 border',
+            overdueOnly ? 'bg-destructive/15 text-destructive border-destructive/30' : 'border-border text-muted-foreground hover:text-foreground'
+          )}
+          title="Show only overdue leads (hot replied no-response, RED unhandled, ORANGE unreviewed, name-needed recent)"
+        >
+          <AlertTriangle size={12} /> Show overdue ({stats.overdue})
+        </button>
         <span className="ml-auto text-muted-foreground">
           Duplicates: <strong className="text-amber-400">{stats.duplicates}</strong> · Weak first-touch: <strong className="text-orange-400">{stats.weakTouch}</strong> · Names needed: <strong className="text-blue-400">{stats.nameNeeded}</strong>
         </span>
       </div>
+
+      {/* Recency filter chips */}
+      <div className="px-4 md:px-6 py-2 border-b border-border flex items-center gap-2 text-xs shrink-0 flex-wrap">
+        <span className="text-muted-foreground font-semibold uppercase tracking-wide flex items-center gap-1">
+          <Clock size={12} /> Recency:
+        </span>
+        {([
+          { id: 'all', label: 'All' },
+          { id: 'replied_today', label: 'Replied today' },
+          { id: 'replied_yesterday', label: 'Replied yesterday' },
+          { id: 'under_24h', label: 'Last reply <24h' },
+          { id: '1_3d', label: '1–3 days' },
+          { id: '4_14d', label: '4–14 days' },
+          { id: 'older_14d', label: '>14 days' },
+          { id: 'no_inbound', label: 'No inbound yet' },
+          { id: 'sent_today', label: 'We sent today' },
+          { id: 'no_reply_after_outbound', label: 'No reply after our last send' },
+        ] as const).map(o => (
+          <button
+            key={o.id}
+            onClick={() => setRecency(o.id as Recency)}
+            className={cn(
+              'px-2 py-1 rounded border',
+              recency === o.id ? 'bg-primary/15 border-primary/40 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
+            )}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+
 
       <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-2">
         {loading ? (
@@ -345,12 +519,15 @@ export function DamageControlModule() {
             <p>No audit rows match. Click "Run Damage Audit" to scan all conversations.</p>
           </div>
         ) : (
-          filtered.map(r => (
+          filtered.map(r => {
+            const od = computeOverdue(r);
+            return (
             <div key={r.id} className={cn(
               'vanto-card p-3 md:p-4 flex flex-col gap-2',
               r.damage_score === 'red' && 'border-l-4 border-l-destructive',
               r.damage_score === 'orange' && 'border-l-4 border-l-orange-500',
               r.damage_score === 'yellow' && 'border-l-4 border-l-amber-500',
+              od.overdue && 'ring-1 ring-destructive/40',
             )}>
               <div className="flex items-start gap-3 flex-wrap">
                 <div className="flex-1 min-w-0">
@@ -384,6 +561,31 @@ export function DamageControlModule() {
                     {r.weak_first_touch && (
                       <span className="px-2 py-0.5 rounded text-[10px] border bg-orange-500/15 text-orange-400 border-orange-500/30 uppercase">
                         weak first-touch
+                      </span>
+                    )}
+                    {od.overdue && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-destructive/20 text-destructive border-destructive/40 uppercase animate-pulse">
+                        ⏰ overdue
+                      </span>
+                    )}
+                    {od.hot_reply_soon && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-red-500/15 text-red-400 border-red-500/30 uppercase">
+                        🔥 hot — reply soon
+                      </span>
+                    )}
+                    {od.red_handle && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-destructive/15 text-destructive border-destructive/30 uppercase">
+                        red — handle personally
+                      </span>
+                    )}
+                    {od.needs_vanto && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-red-500/15 text-red-400 border-red-500/30 uppercase">
+                        needs vanto
+                      </span>
+                    )}
+                    {od.needs_name && !r.name_known && (
+                      <span className="px-2 py-0.5 rounded text-[10px] border bg-blue-500/15 text-blue-300 border-blue-500/30 uppercase">
+                        needs name
                       </span>
                     )}
                     <span className="px-2 py-0.5 rounded text-[10px] border bg-secondary text-muted-foreground border-border uppercase">
@@ -470,6 +672,37 @@ export function DamageControlModule() {
                   >
                     <Copy size={12} /> Copy
                   </button>
+                </div>
+              </div>
+
+              {/* Owner vs Prospector responsibility split */}
+              <div className="mt-1 pt-2 border-t border-border grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+                <div className="rounded-md border border-primary/20 bg-primary/5 p-2">
+                  <p className="font-semibold text-primary mb-1 flex items-center gap-1">
+                    <Bot size={11} /> Prospector has done
+                  </p>
+                  <ul className="text-muted-foreground space-y-0.5">
+                    <li>✅ Damage score: <span className="text-foreground uppercase">{r.damage_score}</span></li>
+                    <li>✅ Intent: <span className="text-foreground">{r.intent}</span> · Temp: <span className="text-foreground">{r.temperature}</span></li>
+                    <li>✅ Duplicates: <span className="text-foreground">{r.duplicate_outbound}</span> · Weak first-touch: <span className="text-foreground">{r.weak_first_touch ? 'yes' : 'no'}</span></li>
+                    <li>✅ Price leak: <span className="text-foreground">{r.price_leak_detected ? 'yes' : 'no'}</span></li>
+                    <li>✅ Suggested action: <span className="text-foreground">{r.recommended_action || '—'}</span></li>
+                    <li>✅ Recovery draft: <span className="text-foreground">available below</span></li>
+                    <li>✅ Name confirmation flag: <span className="text-foreground">{r.name_known ? 'name known' : 'needed'}</span></li>
+                  </ul>
+                </div>
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2">
+                  <p className="font-semibold text-amber-300 mb-1 flex items-center gap-1">
+                    <UserIcon size={11} /> Vanto / Admin must do
+                  </p>
+                  <ul className="text-muted-foreground space-y-0.5">
+                    <li>{r.reviewed_at ? '✅' : '⬜'} Review lead</li>
+                    <li>{r.vcard_saved_at ? '✅' : '⬜'} Export vCard &amp; save to phone</li>
+                    <li>{r.name_known ? '✅' : '⬜'} Confirm or edit name</li>
+                    <li>⬜ Dictate personal message if needed</li>
+                    <li>⬜ Copy / send manually in WhatsApp</li>
+                    <li>{r.handled_at ? '✅' : '⬜'} Mark personally handled</li>
+                  </ul>
                 </div>
               </div>
 
@@ -663,7 +896,8 @@ export function DamageControlModule() {
                 })()}
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
