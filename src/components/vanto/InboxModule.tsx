@@ -82,6 +82,7 @@ export function InboxModule() {
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [stages, setStages] = useState<Stage[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [showInfo, setShowInfo] = useState(true);
   const [inputText, setInputText] = useState('');
@@ -94,6 +95,7 @@ export function InboxModule() {
   const [aiLoading, setAiLoading] = useState(false);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [showCopilot, setShowCopilot] = useState(false);
+  const [showMobileInfo, setShowMobileInfo] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
