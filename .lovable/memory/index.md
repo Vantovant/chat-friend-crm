@@ -52,6 +52,7 @@ Group Campaigns: Maytapi REST API (NOT Chrome Extension autoposter). Twilio stay
 - [Group Campaigns Maytapi](mem://features/group-campaigns-maytapi) — Maytapi REST API migration for group campaigns
 - [Missed Inquiry Recovery](mem://features/missed-inquiry-recovery) — 5-step Maytapi auto-follow-up for stalled inbox convos
 - [Technical Debt](mem://technical/debt) — Modules needing refactor, future backlog
+- [Daily Product Commerce Blueprint](mem://features/daily-product-commerce-blueprint) — Version B blueprint (R862/R431, R99 shipping, 3–7 days, 14-day returns) for GRW/GTS/SLD/STP/PWR Lemon/PWR Apricot — ON HOLD, awaiting named approval
 - [Sales Conversion Phase 2](mem://features/sales-conversion-phase2) — 8 trainer rules: objections, hesitation, trust, usage, matching, member upsell, joining hesitation, human handover
 - [Auto-Reply Branding](mem://features/auto-reply-branding) — Vanto Vanto's details only in auto-replies
 - [APLGO Pricing 15% VAT](mem://features/aplgo-pricing-15pct-vat) — Locked SA price list (Daily R431.25 member / R862.50 retail), supersedes 15.5% VAT
