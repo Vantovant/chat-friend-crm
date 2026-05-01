@@ -563,6 +563,31 @@ export function DamageControlModule() {
                         weak first-touch
                       </span>
                     )}
+                    {od.overdue && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-destructive/20 text-destructive border-destructive/40 uppercase animate-pulse">
+                        ⏰ overdue
+                      </span>
+                    )}
+                    {od.hot_reply_soon && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-red-500/15 text-red-400 border-red-500/30 uppercase">
+                        🔥 hot — reply soon
+                      </span>
+                    )}
+                    {od.red_handle && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-destructive/15 text-destructive border-destructive/30 uppercase">
+                        red — handle personally
+                      </span>
+                    )}
+                    {od.needs_vanto && (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-red-500/15 text-red-400 border-red-500/30 uppercase">
+                        needs vanto
+                      </span>
+                    )}
+                    {od.needs_name && !r.name_known && (
+                      <span className="px-2 py-0.5 rounded text-[10px] border bg-blue-500/15 text-blue-300 border-blue-500/30 uppercase">
+                        needs name
+                      </span>
+                    )}
                     <span className="px-2 py-0.5 rounded text-[10px] border bg-secondary text-muted-foreground border-border uppercase">
                       {r.intent}
                     </span>
