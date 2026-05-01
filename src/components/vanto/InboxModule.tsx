@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { temperatureBg, type LeadTemperature } from '@/lib/vanto-data';
+import { temperatureBg, leadTypeBg, leadTypeLabels, LEAD_TYPES, type LeadTemperature, type LeadType } from '@/lib/vanto-data';
 import {
   Search, Phone, Video, MoreVertical, Send, Bot, Brain,
-  Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare, AlertTriangle, RotateCcw, ArrowLeft,
+  Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare, AlertTriangle, RotateCcw, ArrowLeft, X, Save, Pencil,
 } from 'lucide-react';
 import { displayPhone } from '@/lib/phone-utils';
 import { useProfiles, profileLabel, type ProfileOption } from '@/hooks/use-profiles';
@@ -26,12 +26,15 @@ type Contact = {
   phone: string;
   email: string | null;
   temperature: LeadTemperature;
-  lead_type: string;
-  interest: string;
+  lead_type: LeadType;
+  interest: 'high' | 'medium' | 'low';
   tags: string[] | null;
   notes: string | null;
   assigned_to: string | null;
+  stage_id: string | null;
 };
+
+type Stage = { id: string; name: string; color: string | null; stage_order: number };
 
 type Conversation = {
   id: string;
@@ -79,6 +82,7 @@ export function InboxModule() {
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [stages, setStages] = useState<Stage[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [showInfo, setShowInfo] = useState(true);
   const [inputText, setInputText] = useState('');
@@ -91,6 +95,7 @@ export function InboxModule() {
   const [aiLoading, setAiLoading] = useState(false);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
   const [showCopilot, setShowCopilot] = useState(false);
+  const [showMobileInfo, setShowMobileInfo] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -129,6 +134,58 @@ export function InboxModule() {
 
   /* ── Initial load ── */
   useEffect(() => { fetchConversations(); }, []);
+
+  /* ── Fetch pipeline stages once ── */
+  useEffect(() => {
+    supabase.from('pipeline_stages').select('id, name, color, stage_order').order('stage_order').then(({ data }) => {
+      if (data) setStages(data as Stage[]);
+    });
+  }, []);
+
+  /* ── Update contact (from inline editor) ── */
+  const handleUpdateContact = useCallback(async (contactId: string, patch: Partial<Contact>) => {
+    const conv = conversations.find(c => c.contact_id === contactId);
+    const before = conv?.contact;
+    if (!before) return { ok: false, error: 'Contact not found' };
+
+    // Optimistic
+    setConversations(prev => prev.map(c =>
+      c.contact_id === contactId ? { ...c, contact: { ...c.contact, ...patch } } : c
+    ));
+
+    const { error } = await supabase.from('contacts').update(patch).eq('id', contactId);
+    if (error) {
+      // rollback
+      setConversations(prev => prev.map(c =>
+        c.contact_id === contactId ? { ...c, contact: before } : c
+      ));
+      toast({ title: 'Update failed', description: error.message, variant: 'destructive' });
+      return { ok: false, error: error.message };
+    }
+
+    // Activity log — stage change
+    if (patch.stage_id !== undefined && patch.stage_id !== before.stage_id) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('contact_activity').insert({
+          contact_id: contactId,
+          performed_by: user.id,
+          type: 'stage_changed',
+          metadata: {
+            from_stage: stages.find(s => s.id === before.stage_id)?.name || 'Unassigned',
+            to_stage: stages.find(s => s.id === patch.stage_id)?.name || 'Unassigned',
+            from_stage_id: before.stage_id,
+            to_stage_id: patch.stage_id,
+            source: 'inbox',
+          },
+        });
+      }
+    }
+
+    toast({ title: 'Contact updated' });
+    return { ok: true };
+  }, [conversations, stages]);
+
 
   /* ── Load messages on selection ── */
   useEffect(() => {
@@ -396,21 +453,113 @@ export function InboxModule() {
           {selected ? (
             <>
               {/* Header */}
-              <div className="flex items-center justify-between px-3 md:px-4 py-3 border-b border-border bg-card/20">
-                <div className="flex items-center gap-2 md:gap-3 min-w-0">
+              <div className="px-3 md:px-4 py-2.5 border-b border-border bg-card/20 space-y-2">
+                {/* Row 1: identity + actions */}
+                <div className="flex items-center gap-2 min-w-0">
                   {isMobile && (
                     <button onClick={() => setSelectedConvId(null)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 shrink-0">
                       <ArrowLeft size={18} />
                     </button>
                   )}
-                  <ContactAvatar name={selected.contact?.name || '?'} />
-                  <div>
-                    <p className="font-semibold text-sm text-foreground">{selected.contact?.name}</p>
-                    <p className="text-xs text-muted-foreground">{displayPhone(selected.contact?.phone || '')}</p>
+                  <ContactAvatar name={selected.contact?.name || '?'} size="sm" />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-sm text-foreground truncate">{selected.contact?.name}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">{displayPhone(selected.contact?.phone || '')}</p>
                   </div>
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <IconBtn
+                      icon={Phone}
+                      title="Call"
+                      onClick={() => {
+                        const phone = selected.contact?.phone;
+                        if (phone) window.open(`tel:${phone}`, '_blank');
+                        else toast({ title: 'No phone number', variant: 'destructive' });
+                      }}
+                    />
+                    {!isMobile && (
+                      <IconBtn
+                        icon={Video}
+                        title="Open in WhatsApp"
+                        onClick={() => {
+                          const phone = selected.contact?.phone;
+                          if (phone) window.open(`https://wa.me/${phone}?text=`, '_blank');
+                          else toast({ title: 'No phone number', variant: 'destructive' });
+                        }}
+                      />
+                    )}
+                    <button
+                      onClick={async () => {
+                        if (!selectedConvId || aiLoading) return;
+                        setAiLoading(true);
+                        try {
+                          const { data, error } = await supabase.functions.invoke('send-message', {
+                            body: {
+                              conversation_id: selectedConvId,
+                              content: `[AI suggested reply based on context]\n\nPlease follow up with ${selected.contact?.name} regarding their interest.`,
+                              message_type: 'ai',
+                            },
+                          });
+                          if (error) throw error;
+                          toast({ title: 'AI reply sent' });
+                          fetchMessages(selectedConvId);
+                        } catch (e: any) {
+                          toast({ title: 'AI Reply failed', description: e.message, variant: 'destructive' });
+                        } finally {
+                          setAiLoading(false);
+                        }
+                      }}
+                      disabled={aiLoading}
+                      title="AI Reply"
+                      className={cn(
+                        'flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] font-medium vanto-gradient text-primary-foreground hover:opacity-90 shrink-0',
+                        aiLoading && 'opacity-50 cursor-not-allowed'
+                      )}
+                    >
+                      {aiLoading ? <Loader2 size={13} className="animate-spin" /> : <Bot size={13} />}
+                      {!isMobile && <span>AI Reply</span>}
+                    </button>
+                    {!isMobile && (
+                      <button
+                        onClick={() => { setShowCopilot(!showCopilot); if (!showCopilot) setShowInfo(false); }}
+                        className={cn(
+                          'p-1.5 rounded-lg transition-colors',
+                          showCopilot ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
+                        )}
+                        title="Zazi Copilot"
+                      >
+                        <Brain size={16} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        if (isMobile) {
+                          setShowMobileInfo(true);
+                        } else {
+                          setShowInfo(!showInfo);
+                          if (!showInfo) setShowCopilot(false);
+                        }
+                      }}
+                      className={cn(
+                        'p-1.5 rounded-lg transition-colors',
+                        (showInfo && !isMobile) ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
+                      )}
+                      title="Contact details"
+                    >
+                      <Info size={16} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Row 2: chips */}
+                <div className="flex items-center gap-1.5 flex-wrap">
                   {selected.contact?.temperature && (
-                    <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-semibold border', temperatureBg[selected.contact.temperature])}>
+                    <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold border', temperatureBg[selected.contact.temperature])}>
                       {selected.contact.temperature.toUpperCase()}
+                    </span>
+                  )}
+                  {selected.contact?.lead_type && (
+                    <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold border', leadTypeBg[selected.contact.lead_type])}>
+                      {leadTypeLabels[selected.contact.lead_type]}
                     </span>
                   )}
                   {(() => {
@@ -420,13 +569,13 @@ export function InboxModule() {
                         <TooltipTrigger asChild>
                           <span
                             className={cn(
-                              'px-2 py-0.5 rounded-full text-[10px] font-semibold border cursor-help',
+                              'px-1.5 py-0.5 rounded text-[9px] font-semibold border cursor-help',
                               ws.open
                                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                                 : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
                             )}
                           >
-                            {ws.open ? `🟢 Window open · ${ws.hoursLeft}h left` : ws.never ? '🔒 Never replied' : '🔒 Window closed'}
+                            {ws.open ? `🟢 ${ws.hoursLeft}h left` : ws.never ? '🔒 Never replied' : '🔒 Closed'}
                           </span>
                         </TooltipTrigger>
                         <TooltipContent side="bottom" className="max-w-xs">
@@ -439,83 +588,15 @@ export function InboxModule() {
                       </Tooltip>
                     );
                   })()}
-                  <AssignmentControl
-                    assignedTo={selected.contact?.assigned_to ?? null}
-                    profiles={profiles}
-                    isAdmin={!!isAdmin}
-                    disabled={reassigning}
-                    onChange={val => handleReassign(selected.contact_id, val)}
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <ActionBtn
-                    icon={Phone}
-                    onClick={() => {
-                      const phone = selected.contact?.phone;
-                      if (phone) window.open(`tel:${phone}`, '_blank');
-                      else toast({ title: 'No phone number', variant: 'destructive' });
-                    }}
-                  />
-                  <ActionBtn
-                    icon={Video}
-                    onClick={() => {
-                      const phone = selected.contact?.phone;
-                      if (phone) window.open(`https://wa.me/${phone}?text=`, '_blank');
-                      else toast({ title: 'No phone number', variant: 'destructive' });
-                    }}
-                  />
-                  <ActionBtn
-                    icon={Bot}
-                    label="AI Reply"
-                    primary
-                    disabled={aiLoading}
-                    onClick={async () => {
-                      if (!selectedConvId || aiLoading) return;
-                      setAiLoading(true);
-                      try {
-                        const lastMsgs = messages.slice(-5).map(m => `${m.is_outbound ? 'Agent' : 'Contact'}: ${m.content}`).join('\n');
-                        const { data, error } = await supabase.functions.invoke('send-message', {
-                          body: {
-                            conversation_id: selectedConvId,
-                            content: `[AI suggested reply based on context]\n\nPlease follow up with ${selected.contact?.name} regarding their interest.`,
-                            message_type: 'ai',
-                          },
-                        });
-                        if (error) throw error;
-                        toast({ title: 'AI reply sent' });
-                        fetchMessages(selectedConvId);
-                      } catch (e: any) {
-                        toast({ title: 'AI Reply failed', description: e.message, variant: 'destructive' });
-                      } finally {
-                        setAiLoading(false);
-                      }
-                    }}
-                  />
-                  <button
-                    onClick={() => { setShowCopilot(!showCopilot); if (!showCopilot) setShowInfo(false); }}
-                    className={cn(
-                      'p-2 rounded-lg transition-colors cursor-pointer',
-                      showCopilot ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
-                    )}
-                    title="Zazi Copilot"
-                  >
-                    <Brain size={16} />
-                  </button>
-                  <button
-                    onClick={() => { setShowInfo(!showInfo); if (!showInfo) setShowCopilot(false); }}
-                    className={cn(
-                      'p-2 rounded-lg transition-colors cursor-pointer',
-                      showInfo ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
-                    )}
-                  >
-                    <Info size={16} />
-                  </button>
-                  <ActionBtn
-                    icon={MoreVertical}
-                    onClick={() => {
-                      toast({ title: 'More options coming soon', description: 'Archive, mark as read, etc.' });
-                    }}
-                  />
+                  <div className="ml-auto">
+                    <AssignmentControl
+                      assignedTo={selected.contact?.assigned_to ?? null}
+                      profiles={profiles}
+                      isAdmin={!!isAdmin}
+                      disabled={reassigning}
+                      onChange={val => handleReassign(selected.contact_id, val)}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -669,16 +750,44 @@ export function InboxModule() {
           )}
         </div>
 
-        {/* ── Contact Info Panel (hidden on mobile) ── */}
+        {/* ── Contact Info Panel (desktop) ── */}
         {selected?.contact && showInfo && !isMobile && (
-          <div className="w-72 shrink-0 border-l border-border overflow-y-auto bg-card/30">
+          <div className="w-80 shrink-0 border-l border-border overflow-y-auto bg-card/30">
             <ContactInfoPanel
               contact={selected.contact}
               profiles={profiles}
+              stages={stages}
               isAdmin={!!isAdmin}
               reassigning={reassigning}
               onReassign={val => handleReassign(selected.contact_id, val)}
+              onSave={(patch) => handleUpdateContact(selected.contact_id, patch)}
             />
+          </div>
+        )}
+
+        {/* ── Contact Info Panel (mobile slide-over) ── */}
+        {selected?.contact && isMobile && showMobileInfo && (
+          <div className="fixed inset-0 z-50 bg-black/60" onClick={() => setShowMobileInfo(false)}>
+            <div
+              className="absolute right-0 top-0 bottom-0 w-[92%] max-w-sm bg-background border-l border-border overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between p-3 border-b border-border sticky top-0 bg-background z-10">
+                <p className="text-sm font-semibold text-foreground">Contact Details</p>
+                <button onClick={() => setShowMobileInfo(false)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+                  <X size={18} />
+                </button>
+              </div>
+              <ContactInfoPanel
+                contact={selected.contact}
+                profiles={profiles}
+                stages={stages}
+                isAdmin={!!isAdmin}
+                reassigning={reassigning}
+                onReassign={val => handleReassign(selected.contact_id, val)}
+                onSave={(patch) => handleUpdateContact(selected.contact_id, patch)}
+              />
+            </div>
           </div>
         )}
 
@@ -869,6 +978,22 @@ function ContactAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md'
 }
 
 /* ── Action Button ── */
+function IconBtn({ icon: Icon, title, onClick, disabled }: { icon: React.ElementType; title?: string; onClick?: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={cn(
+        'p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors shrink-0',
+        disabled && 'opacity-50 cursor-not-allowed'
+      )}
+    >
+      <Icon size={16} />
+    </button>
+  );
+}
+
 function ActionBtn({ icon: Icon, label, primary, onClick, disabled }: { icon: React.ElementType; label?: string; primary?: boolean; onClick?: () => void; disabled?: boolean }) {
   return (
     <button
@@ -888,95 +1013,238 @@ function ActionBtn({ icon: Icon, label, primary, onClick, disabled }: { icon: Re
 }
 
 /* ── Contact Info Panel ── */
-function ContactInfoPanel({ contact, profiles, isAdmin, reassigning, onReassign }: {
-  contact: Contact; profiles: ProfileOption[]; isAdmin: boolean;
+function ContactInfoPanel({ contact, profiles, stages, isAdmin, reassigning, onReassign, onSave }: {
+  contact: Contact; profiles: ProfileOption[]; stages: Stage[]; isAdmin: boolean;
   reassigning: boolean; onReassign: (val: string | null) => void;
+  onSave: (patch: Partial<Contact>) => Promise<{ ok: boolean; error?: string }>;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    name: contact.name,
+    email: contact.email ?? '',
+    lead_type: contact.lead_type,
+    temperature: contact.temperature,
+    interest: contact.interest,
+    stage_id: contact.stage_id ?? '',
+    tags: (contact.tags ?? []).join(', '),
+    notes: contact.notes ?? '',
+  });
+
+  useEffect(() => {
+    setForm({
+      name: contact.name,
+      email: contact.email ?? '',
+      lead_type: contact.lead_type,
+      temperature: contact.temperature,
+      interest: contact.interest,
+      stage_id: contact.stage_id ?? '',
+      tags: (contact.tags ?? []).join(', '),
+      notes: contact.notes ?? '',
+    });
+    setEditing(false);
+  }, [contact.id]);
+
+  const set = <K extends keyof typeof form>(k: K, v: typeof form[K]) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = async () => {
+    setSaving(true);
+    const patch: Partial<Contact> = {
+      name: form.name.trim() || contact.name,
+      email: form.email.trim() || null,
+      lead_type: form.lead_type,
+      temperature: form.temperature,
+      interest: form.interest,
+      stage_id: form.stage_id || null,
+      tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
+      notes: form.notes.trim() || null,
+    };
+    const res = await onSave(patch);
+    setSaving(false);
+    if (res.ok) setEditing(false);
+  };
+
+  const currentStage = stages.find(s => s.id === contact.stage_id);
+
   return (
-    <div className="p-4 space-y-5">
-      <div className="text-center pt-2">
-        <div className="w-16 h-16 rounded-full vanto-gradient flex items-center justify-center text-2xl font-bold text-primary-foreground mx-auto mb-3">
+    <div className="p-4 space-y-4">
+      <div className="text-center pt-1">
+        <div className="w-14 h-14 rounded-full vanto-gradient flex items-center justify-center text-xl font-bold text-primary-foreground mx-auto mb-2">
           {contact.name[0]}
         </div>
-        <h3 className="font-semibold text-foreground">{contact.name}</h3>
+        <h3 className="font-semibold text-foreground text-sm">{contact.name}</h3>
         <p className="text-xs text-muted-foreground">{displayPhone(contact.phone)}</p>
-        {contact.temperature && (
-          <div className="flex justify-center gap-2 mt-2">
-            <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-semibold border', temperatureBg[contact.temperature])}>
+      </div>
+
+      {!editing ? (
+        <button
+          onClick={() => setEditing(true)}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-primary/10 text-primary border border-primary/20 hover:bg-primary/15 text-xs font-medium transition-colors"
+        >
+          <Pencil size={13} /> Edit & Add to CRM
+        </button>
+      ) : (
+        <div className="flex gap-2">
+          <button
+            onClick={() => setEditing(false)}
+            disabled={saving}
+            className="flex-1 px-3 py-2 rounded-lg border border-border text-muted-foreground hover:text-foreground text-xs font-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg vanto-gradient text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+            Save
+          </button>
+        </div>
+      )}
+
+      {/* CRM Pipeline */}
+      <div className="vanto-card p-3 space-y-2">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">CRM Pipeline Stage</p>
+        {editing ? (
+          <select
+            value={form.stage_id}
+            onChange={e => set('stage_id', e.target.value)}
+            className="w-full bg-secondary/60 border border-border rounded-lg px-2 py-1.5 text-xs text-foreground outline-none focus:border-primary/50"
+          >
+            <option value="">— Unassigned —</option>
+            {stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        ) : (
+          <div className="flex items-center gap-2 text-xs">
+            <div className="w-2 h-2 rounded-full" style={{ background: currentStage?.color || 'hsl(var(--muted-foreground))' }} />
+            <span className="text-foreground font-medium">{currentStage?.name || 'Not in pipeline'}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Assignment */}
+      <div className="vanto-card p-3 space-y-2">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Assignment</p>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">Assigned To</span>
+          <div className="relative">
+            <select
+              value={contact.assigned_to ?? ''}
+              disabled={reassigning}
+              onChange={e => onReassign(e.target.value || null)}
+              className={cn(
+                'appearance-none bg-secondary/60 border border-border rounded-lg pl-2 pr-6 py-1 text-xs font-medium text-foreground outline-none focus:border-primary/50',
+                reassigning && 'opacity-50 cursor-not-allowed'
+              )}
+            >
+              <option value="">Unassigned</option>
+              {profiles.map(p => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+            </select>
+            {reassigning && <Loader2 size={10} className="absolute right-1.5 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />}
+          </div>
+        </div>
+      </div>
+
+      {/* Lead details */}
+      <div className="vanto-card p-3 space-y-2.5">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Lead Details</p>
+
+        <EditableField label="Name" editing={editing}
+          render={() => <span className="text-foreground font-medium">{contact.name}</span>}
+          input={<input value={form.name} onChange={e => set('name', e.target.value)} className={inputCls} />}
+        />
+        <EditableField label="Email" editing={editing}
+          render={() => <span className="text-foreground font-medium truncate">{contact.email || 'Not set'}</span>}
+          input={<input value={form.email} onChange={e => set('email', e.target.value)} placeholder="email@example.com" className={inputCls} />}
+        />
+        <EditableField label="Lead Type" editing={editing}
+          render={() => (
+            <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-semibold border', leadTypeBg[contact.lead_type])}>
+              {leadTypeLabels[contact.lead_type]}
+            </span>
+          )}
+          input={
+            <select value={form.lead_type} onChange={e => set('lead_type', e.target.value as LeadType)} className={inputCls}>
+              {LEAD_TYPES.map(lt => <option key={lt.value} value={lt.value}>{lt.label}</option>)}
+            </select>
+          }
+        />
+        <EditableField label="Temperature" editing={editing}
+          render={() => (
+            <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-semibold border', temperatureBg[contact.temperature])}>
               {contact.temperature.toUpperCase()}
             </span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-secondary border border-border text-muted-foreground capitalize">
-              {contact.lead_type}
-            </span>
-          </div>
-        )}
+          )}
+          input={
+            <select value={form.temperature} onChange={e => set('temperature', e.target.value as LeadTemperature)} className={inputCls}>
+              <option value="cold">Cold</option>
+              <option value="warm">Warm</option>
+              <option value="hot">Hot</option>
+            </select>
+          }
+        />
+        <EditableField label="Interest" editing={editing}
+          render={() => <span className="text-foreground font-medium capitalize">{contact.interest}</span>}
+          input={
+            <select value={form.interest} onChange={e => set('interest', e.target.value as 'high' | 'medium' | 'low')} className={inputCls}>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          }
+        />
       </div>
 
-      {/* Assignment section */}
+      {/* Tags */}
       <div className="vanto-card p-3 space-y-2">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Assignment</p>
-        {isAdmin ? (
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Assigned To</span>
-            <div className="relative">
-              <select
-                value={contact.assigned_to ?? ''}
-                disabled={reassigning}
-                onChange={e => onReassign(e.target.value || null)}
-                className={cn(
-                  'appearance-none bg-secondary/60 border border-border rounded-lg pl-2 pr-6 py-1 text-xs font-medium text-foreground outline-none focus:border-primary/50 transition-colors cursor-pointer',
-                  reassigning && 'opacity-50 cursor-not-allowed'
-                )}
-              >
-                <option value="">Unassigned</option>
-                {profiles.map(p => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
-              </select>
-              {reassigning && <Loader2 size={10} className="absolute right-1.5 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />}
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-muted-foreground">Assigned To</span>
-            <span className="text-foreground font-medium">{profileLabel(profiles, contact.assigned_to)}</span>
-          </div>
-        )}
-      </div>
-
-      <div className="vanto-card p-3 space-y-2">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Contact Info</p>
-        <InfoRow label="Email" value={contact.email || 'Not set'} />
-        <InfoRow label="Interest" value={contact.interest} />
-        <InfoRow label="Lead Type" value={contact.lead_type} />
-      </div>
-
-      {contact.tags && contact.tags.length > 0 && (
-        <div className="vanto-card p-3">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Tags</p>
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Tags</p>
+        {editing ? (
+          <input
+            value={form.tags}
+            onChange={e => set('tags', e.target.value)}
+            placeholder="comma, separated, tags"
+            className={inputCls}
+          />
+        ) : contact.tags && contact.tags.length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {contact.tags.map(tag => (
-              <span key={tag} className="px-2 py-0.5 rounded-md text-xs bg-secondary text-muted-foreground border border-border">{tag}</span>
+              <span key={tag} className="px-2 py-0.5 rounded-md text-[10px] bg-secondary text-muted-foreground border border-border">{tag}</span>
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-xs text-muted-foreground italic">No tags</p>
+        )}
+      </div>
 
-      {contact.notes && (
-        <div className="vanto-card p-3">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Notes</p>
-          <p className="text-xs text-muted-foreground whitespace-pre-wrap">{contact.notes}</p>
-        </div>
-      )}
+      {/* Notes */}
+      <div className="vanto-card p-3 space-y-2">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Notes</p>
+        {editing ? (
+          <textarea
+            value={form.notes}
+            onChange={e => set('notes', e.target.value)}
+            rows={4}
+            placeholder="Add notes about this prospect..."
+            className={cn(inputCls, 'resize-y')}
+          />
+        ) : (
+          <p className="text-xs text-muted-foreground whitespace-pre-wrap">{contact.notes || <span className="italic">No notes</span>}</p>
+        )}
+      </div>
     </div>
   );
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+const inputCls = 'w-full bg-secondary/60 border border-border rounded-lg px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50';
+
+function EditableField({ label, editing, render, input }: { label: string; editing: boolean; render: () => React.ReactNode; input: React.ReactNode }) {
   return (
-    <div className="flex justify-between text-xs">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-foreground font-medium capitalize">{value}</span>
+    <div className={editing ? 'space-y-1' : 'flex items-center justify-between gap-2 text-xs'}>
+      <span className={cn('text-muted-foreground', editing ? 'text-[10px] font-medium block' : '')}>{label}</span>
+      {editing ? input : <div className="text-right min-w-0 truncate">{render()}</div>}
     </div>
   );
 }
