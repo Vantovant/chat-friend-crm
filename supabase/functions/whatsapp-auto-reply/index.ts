@@ -1183,13 +1183,34 @@ Deno.serve(async (req) => {
         const APLGO_HEADER = `🌿 *APLGO Official Wellness Info*\nhttps://aplgo.com/j/787262\n\n`;
         const TRUST_BRIDGE = `Hi, this is *Vanto from Get Well Africa*.\nQuick heads-up — this WhatsApp replies from our +1 business number, but I will also personally assist you from my *South African number +27 79 083 1530*.\n\n`;
 
-        // Sister-site anchor — RLX-aware. If the inbound mentions sleep/stress/calm or RLX,
-        // anchor to /shop/rlx; otherwise anchor to /shop. One link only (low-pressure read).
-        const wantsRlxTopic = /(rlx|sleep|insomnia|stress|anx|calm|relax|wind ?down|switch off|overwhelm|tension)/i.test(inboundText);
-        const SISTER_ANCHOR = wantsRlxTopic
-          ? `📖 If you'd like to read first (no pressure):\nhttps://onlinecourseformlm.com/shop/rlx\n\n`
-          : `📖 If you'd like to browse first (no pressure):\nhttps://onlinecourseformlm.com/shop\n\n`;
-        diag.sister_anchor_used = wantsRlxTopic ? "rlx" : "shop";
+        // Sister-site anchor — Daily product routing.
+        // Brand domain ONLY. RLX remains default for sleep/stress/calm.
+        // One link per reply (low-pressure read).
+        const lc = inboundText.toLowerCase();
+        const BRAND = "https://onlinecourseformlm.com";
+        let anchorPath = "/shop";
+        let anchorKey: string = "shop";
+        // Order matters: most specific intents first; RLX wins on sleep/stress per spec.
+        if (/(rlx|sleep|insomnia|stress|anx|calm|relax|wind ?down|switch off|overwhelm|tension)/i.test(lc)) {
+          anchorPath = "/shop/rlx"; anchorKey = "rlx";
+        } else if (/(nrm|sugar|craving|appetite|weight|metabol|gut reset|reset)/i.test(lc)) {
+          anchorPath = "/shop/nrm"; anchorKey = "nrm";
+        } else if (/(sld|joint|knee|back pain|shoulder|stiff|mobility|arthrit)/i.test(lc)) {
+          anchorPath = "/shop/sld"; anchorKey = "sld";
+        } else if (/(stp|digest|cleanse|stomach|bloat|bowel)/i.test(lc)) {
+          anchorPath = "/shop/stp"; anchorKey = "stp";
+        } else if (/(pwr ?lemon|men'?s vitality|men'?s energy|men hormonal|male hormon)/i.test(lc)) {
+          anchorPath = "/shop/pwr-lemon"; anchorKey = "pwr-lemon";
+        } else if (/(pwr ?apricot|women'?s|female hormon|cycle|menstrual|menopaus)/i.test(lc)) {
+          anchorPath = "/shop/pwr-apricot"; anchorKey = "pwr-apricot";
+        } else if (/(immun|cellular|recovery|gts)/i.test(lc)) {
+          anchorPath = "/shop/gts"; anchorKey = "gts";
+        } else if (/(tired|fatigue|low energy|vitality|exhaust|burnout|grw)/i.test(lc)) {
+          anchorPath = "/shop/grw"; anchorKey = "grw";
+        }
+        const SISTER_ANCHOR = `📖 If you'd like to read first (no pressure):\n${BRAND}${anchorPath}\n\n`;
+        diag.sister_anchor_used = anchorKey;
+        diag.sister_anchor_url = `${BRAND}${anchorPath}`;
 
         if (dualIntent) {
           // (b) Replace the AI-generated reply with ONE combined dual-intent reply
