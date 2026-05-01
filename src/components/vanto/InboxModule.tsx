@@ -950,6 +950,22 @@ function ContactAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md'
 }
 
 /* ── Action Button ── */
+function IconBtn({ icon: Icon, title, onClick, disabled }: { icon: React.ElementType; title?: string; onClick?: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={cn(
+        'p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-colors shrink-0',
+        disabled && 'opacity-50 cursor-not-allowed'
+      )}
+    >
+      <Icon size={16} />
+    </button>
+  );
+}
+
 function ActionBtn({ icon: Icon, label, primary, onClick, disabled }: { icon: React.ElementType; label?: string; primary?: boolean; onClick?: () => void; disabled?: boolean }) {
   return (
     <button
