@@ -521,7 +521,28 @@ export function DamageControlModule() {
       </div>
 
 
-      <div className="flex-1 md:overflow-y-auto p-3 md:p-4 space-y-2 pb-24 md:pb-4">
+      {/* Search bar — name or phone number */}
+      <div className="px-4 md:px-6 py-2 border-b border-border shrink-0 flex items-center gap-2">
+        <input
+          type="search"
+          inputMode="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name or number…"
+          className="flex-1 h-9 rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        />
+        {search && (
+          <button
+            onClick={() => setSearch('')}
+            className="px-2 py-1 text-xs rounded border border-border text-muted-foreground hover:text-foreground"
+          >
+            Clear
+          </button>
+        )}
+        <span className="text-[11px] text-muted-foreground whitespace-nowrap">{filtered.length} match{filtered.length === 1 ? '' : 'es'}</span>
+      </div>
+
+      <div className="flex-1 min-h-0 overflow-y-auto p-3 md:p-4 space-y-2 pb-24 md:pb-4">
         {loading ? (
           <div className="flex items-center justify-center h-32 gap-2 text-muted-foreground text-sm">
             <Loader2 size={14} className="animate-spin" /> Loading…
