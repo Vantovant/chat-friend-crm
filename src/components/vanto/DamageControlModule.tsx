@@ -88,6 +88,77 @@ function ageColor(hrs: number): string {
   return 'text-destructive';
 }
 
+type Recency =
+  | 'all'
+  | 'replied_today'
+  | 'replied_yesterday'
+  | 'under_24h'
+  | '1_3d'
+  | '4_14d'
+  | 'older_14d'
+  | 'no_inbound'
+  | 'sent_today'
+  | 'no_reply_after_outbound';
+
+function hoursAgo(iso?: string | null): number | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return null;
+  return (Date.now() - t) / 3_600_000;
+}
+
+function isSameLocalDay(iso?: string | null, dayOffset = 0): boolean {
+  if (!iso) return false;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return false;
+  const ref = new Date();
+  ref.setDate(ref.getDate() - dayOffset);
+  return d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth() && d.getDate() === ref.getDate();
+}
+
+function matchesRecency(r: { last_inbound_at?: string | null; last_outbound_at?: string | null }, rec: Recency): boolean {
+  if (rec === 'all') return true;
+  const inH = hoursAgo(r.last_inbound_at);
+  const outH = hoursAgo(r.last_outbound_at);
+  switch (rec) {
+    case 'replied_today': return isSameLocalDay(r.last_inbound_at, 0);
+    case 'replied_yesterday': return isSameLocalDay(r.last_inbound_at, 1);
+    case 'under_24h': return inH !== null && inH < 24;
+    case '1_3d': return inH !== null && inH >= 24 && inH < 72;
+    case '4_14d': return inH !== null && inH >= 96 && inH < 24 * 14;
+    case 'older_14d': return inH !== null && inH >= 24 * 14;
+    case 'no_inbound': return inH === null;
+    case 'sent_today': return isSameLocalDay(r.last_outbound_at, 0);
+    case 'no_reply_after_outbound':
+      if (outH === null) return false;
+      if (inH === null) return true;
+      return new Date(r.last_outbound_at!).getTime() > new Date(r.last_inbound_at!).getTime();
+  }
+}
+
+interface OverdueFlags {
+  overdue: boolean;
+  hot_reply_soon: boolean;
+  red_handle: boolean;
+  orange_review: boolean;
+  needs_name: boolean;
+  needs_vanto: boolean;
+}
+
+function computeOverdue(r: AuditRow): OverdueFlags {
+  const inH = hoursAgo(r.last_inbound_at);
+  const outH = hoursAgo(r.last_outbound_at);
+  const repliedRecently = inH !== null && inH < 24;
+  const noHumanResponse = inH !== null && (outH === null || new Date(r.last_outbound_at!).getTime() < new Date(r.last_inbound_at!).getTime());
+  const hot_reply_soon = r.temperature === 'hot' && repliedRecently && noHumanResponse;
+  const red_handle = r.damage_score === 'red' && r.recovery_status !== 'handled';
+  const orange_review = r.damage_score === 'orange' && !r.reviewed_at && r.recovery_status !== 'handled';
+  const needs_name = !r.name_known && r.recovery_status !== 'handled';
+  const needs_vanto = r.vanto_step_in && r.recovery_status !== 'handled';
+  const overdue = hot_reply_soon || red_handle || orange_review || (needs_name && repliedRecently);
+  return { overdue, hot_reply_soon, red_handle, orange_review, needs_name, needs_vanto };
+}
+
 export function DamageControlModule() {
   const [rows, setRows] = useState<AuditRow[]>([]);
   const [loading, setLoading] = useState(true);
