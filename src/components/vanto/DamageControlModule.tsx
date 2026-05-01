@@ -53,6 +53,9 @@ interface AuditRow {
   handled_at?: string | null;
   vcard_saved_at?: string | null;
   recovery_angle?: string | null;
+  name_confirmed_at?: string | null;
+  dictated_at?: string | null;
+  manually_sent_at?: string | null;
 }
 
 type Queue = 'all' | 'red' | 'orange' | 'yellow_hot' | 'name_needed' | 'clean';
