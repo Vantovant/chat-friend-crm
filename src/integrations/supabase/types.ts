@@ -1046,6 +1046,7 @@ export type Database = {
           conversation_id: string
           created_at: string
           damage_score: string
+          dictated_at: string | null
           duplicate_messages: boolean
           duplicate_outbound: number
           first_outbound_snippet: string | null
@@ -1063,6 +1064,8 @@ export type Database = {
           last_inbound_snippet: string | null
           last_outbound_at: string | null
           last_outbound_snippet: string | null
+          manually_sent_at: string | null
+          name_confirmed_at: string | null
           name_known: boolean
           outbound_24h: number
           outbound_total: number
@@ -1091,6 +1094,7 @@ export type Database = {
           conversation_id: string
           created_at?: string
           damage_score?: string
+          dictated_at?: string | null
           duplicate_messages?: boolean
           duplicate_outbound?: number
           first_outbound_snippet?: string | null
@@ -1108,6 +1112,8 @@ export type Database = {
           last_inbound_snippet?: string | null
           last_outbound_at?: string | null
           last_outbound_snippet?: string | null
+          manually_sent_at?: string | null
+          name_confirmed_at?: string | null
           name_known?: boolean
           outbound_24h?: number
           outbound_total?: number
@@ -1136,6 +1142,7 @@ export type Database = {
           conversation_id?: string
           created_at?: string
           damage_score?: string
+          dictated_at?: string | null
           duplicate_messages?: boolean
           duplicate_outbound?: number
           first_outbound_snippet?: string | null
@@ -1153,6 +1160,8 @@ export type Database = {
           last_inbound_snippet?: string | null
           last_outbound_at?: string | null
           last_outbound_snippet?: string | null
+          manually_sent_at?: string | null
+          name_confirmed_at?: string | null
           name_known?: boolean
           outbound_24h?: number
           outbound_total?: number

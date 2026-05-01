@@ -53,6 +53,9 @@ interface AuditRow {
   handled_at?: string | null;
   vcard_saved_at?: string | null;
   recovery_angle?: string | null;
+  name_confirmed_at?: string | null;
+  dictated_at?: string | null;
+  manually_sent_at?: string | null;
 }
 
 type Queue = 'all' | 'red' | 'orange' | 'yellow_hot' | 'name_needed' | 'clean';
@@ -693,16 +696,50 @@ export function DamageControlModule() {
                 </div>
                 <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2">
                   <p className="font-semibold text-amber-300 mb-1 flex items-center gap-1">
-                    <UserIcon size={11} /> Vanto / Admin must do
+                    <UserIcon size={11} /> Vanto / Admin checklist
+                    <span className="ml-auto text-[9px] uppercase text-muted-foreground tracking-wide">Click to toggle</span>
                   </p>
-                  <ul className="text-muted-foreground space-y-0.5">
-                    <li>{r.reviewed_at ? '✅' : '⬜'} Review lead</li>
-                    <li>{r.vcard_saved_at ? '✅' : '⬜'} Export vCard &amp; save to phone</li>
-                    <li>{r.name_known ? '✅' : '⬜'} Confirm or edit name</li>
-                    <li>⬜ Dictate personal message if needed</li>
-                    <li>⬜ Copy / send manually in WhatsApp</li>
-                    <li>{r.handled_at ? '✅' : '⬜'} Mark personally handled</li>
-                  </ul>
+                  <div className="grid grid-cols-1 gap-1">
+                    {([
+                      { key: 'reviewed_at', label: 'Reviewed lead', ts: r.reviewed_at, statusOnSet: 'reviewed' as const },
+                      { key: 'vcard_saved_at', label: 'Exported vCard / saved to phone', ts: r.vcard_saved_at },
+                      { key: 'name_confirmed_at', label: 'Confirmed / edited name', ts: r.name_confirmed_at },
+                      { key: 'dictated_at', label: 'Dictated personal message', ts: r.dictated_at },
+                      { key: 'manually_sent_at', label: 'Sent manually in WhatsApp', ts: r.manually_sent_at },
+                      { key: 'handled_at', label: 'Marked personally handled', ts: r.handled_at, statusOnSet: 'handled' as const },
+                    ] as const).map(item => {
+                      const done = !!item.ts;
+                      const tsRel = item.ts ? relTime(item.ts) : null;
+                      return (
+                        <button
+                          key={item.key}
+                          onClick={() => {
+                            const patch: any = { [item.key]: done ? null : new Date().toISOString() };
+                            // Also flip recovery_status when toggling reviewed/handled
+                            if (item.key === 'reviewed_at') {
+                              patch.recovery_status = done
+                                ? (r.handled_at ? 'handled' : 'open')
+                                : (r.recovery_status === 'handled' ? 'handled' : 'reviewed');
+                            } else if (item.key === 'handled_at') {
+                              patch.recovery_status = done ? (r.reviewed_at ? 'reviewed' : 'open') : 'handled';
+                            }
+                            updateRecovery(r, patch);
+                          }}
+                          className={cn(
+                            'flex items-center gap-2 px-2 py-1 rounded text-left text-[11px] border transition-colors',
+                            done
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200 hover:bg-emerald-500/15'
+                              : 'bg-background/40 border-border text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+                          )}
+                          title={done ? `Done ${tsRel?.abs ?? ''} — click to clear` : 'Click to mark done'}
+                        >
+                          <span className="text-sm leading-none w-4">{done ? '✅' : '⬜'}</span>
+                          <span className="flex-1">{item.label}</span>
+                          {tsRel && <span className="text-[10px] text-muted-foreground/80">{tsRel.rel}</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 
