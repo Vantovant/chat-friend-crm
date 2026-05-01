@@ -45,6 +45,8 @@ interface AuditRow {
   last_outbound_snippet: string | null;
   last_inbound_snippet: string | null;
   scanned_at: string;
+  last_inbound_at?: string | null;
+  last_outbound_at?: string | null;
   recovery_status?: string | null;
   reviewed_at?: string | null;
   handled_at?: string | null;
@@ -60,6 +62,30 @@ const SCORE_STYLES: Record<Score, string> = {
   orange: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
   red: 'bg-destructive/15 text-destructive border-destructive/30',
 };
+
+function relTime(iso?: string | null): { rel: string; abs: string; ageHrs: number } | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  const ms = Date.now() - d.getTime();
+  const hrs = ms / 3_600_000;
+  const days = hrs / 24;
+  let rel: string;
+  if (hrs < 1) rel = `${Math.max(1, Math.round(ms / 60_000))}m ago`;
+  else if (hrs < 24) rel = `${Math.round(hrs)}h ago`;
+  else if (days < 7) rel = `${Math.round(days)}d ago`;
+  else if (days < 30) rel = `${Math.round(days / 7)}w ago`;
+  else rel = `${Math.round(days / 30)}mo ago`;
+  const abs = d.toLocaleString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return { rel, abs, ageHrs: hrs };
+}
+
+function ageColor(hrs: number): string {
+  if (hrs < 24) return 'text-emerald-400';
+  if (hrs < 72) return 'text-amber-400';
+  if (hrs < 24 * 14) return 'text-orange-400';
+  return 'text-destructive';
+}
 
 export function DamageControlModule() {
   const [rows, setRows] = useState<AuditRow[]>([]);
@@ -81,6 +107,7 @@ export function DamageControlModule() {
       .select('*')
       .order('damage_score', { ascending: false })
       .order('vanto_step_in', { ascending: false })
+      .order('last_inbound_at', { ascending: false, nullsFirst: false })
       .order('scanned_at', { ascending: false })
       .limit(500);
     if (error) {
@@ -382,6 +409,38 @@ export function DamageControlModule() {
                       <span className={cn('ml-1', r.had_local_number ? 'text-emerald-400' : 'text-destructive')}>{r.had_local_number ? '✓' : '✗'}local#</span>
                     </span>
                   </div>
+                  {(() => {
+                    const inb = relTime(r.last_inbound_at);
+                    const outb = relTime(r.last_outbound_at);
+                    const scn = relTime(r.scanned_at);
+                    return (
+                      <div className="flex items-center gap-2 mt-2 flex-wrap text-[11px]">
+                        {inb ? (
+                          <span title={`Last reply: ${inb.abs}`}
+                            className={cn('px-2 py-0.5 rounded border bg-secondary/60 border-border flex items-center gap-1', ageColor(inb.ageHrs))}>
+                            ↘ Last reply: <strong>{inb.rel}</strong>
+                            <span className="text-muted-foreground/70">· {inb.abs}</span>
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded border bg-secondary/60 border-border text-muted-foreground">↘ No inbound yet</span>
+                        )}
+                        {outb ? (
+                          <span title={`Last we sent: ${outb.abs}`}
+                            className="px-2 py-0.5 rounded border bg-secondary/60 border-border text-muted-foreground flex items-center gap-1">
+                            ↗ Last we sent: <strong className="text-foreground/80">{outb.rel}</strong>
+                            <span className="text-muted-foreground/70">· {outb.abs}</span>
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded border bg-secondary/60 border-border text-muted-foreground">↗ Never sent</span>
+                        )}
+                        {scn && (
+                          <span title={`Audited: ${scn.abs}`} className="px-2 py-0.5 rounded border bg-secondary/30 border-border/60 text-muted-foreground/70">
+                            ⟳ audited {scn.rel}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {r.price_leak_text && (
                     <p className="text-xs text-destructive italic mt-1 line-clamp-2">⚠ Price leak: "{r.price_leak_text}"</p>
                   )}
