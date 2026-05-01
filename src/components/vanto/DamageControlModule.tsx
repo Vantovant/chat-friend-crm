@@ -4,9 +4,10 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
 import {
   Loader2, RefreshCw, ShieldAlert, CheckCircle2, AlertTriangle, Flame,
-  UserX, MessageSquare, Copy, Download,
+  UserX, MessageSquare, Copy, Download, Mic,
 } from 'lucide-react';
 import { downloadVCard, copyContactCard } from '@/lib/vcard';
+import { DictateMessage } from './DictateMessage';
 
 type Score = 'green' | 'yellow' | 'orange' | 'red';
 
@@ -59,6 +60,8 @@ export function DamageControlModule() {
   const [scoreFilter, setScoreFilter] = useState<Score | 'all'>('all');
   const [stepInOnly, setStepInOnly] = useState(false);
   const [openDraft, setOpenDraft] = useState<string | null>(null);
+  const [dictateOpen, setDictateOpen] = useState<string | null>(null);
+  const [personalDrafts, setPersonalDrafts] = useState<Record<string, string>>({});
 
   const fetchRows = async () => {
     setLoading(true);
@@ -359,6 +362,39 @@ export function DamageControlModule() {
                           Auto-send disabled in Level 1. Vanto sends manually after review.
                         </span>
                       </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {(r.damage_score === 'orange' || r.damage_score === 'red') && (
+                <div className="mt-1 pt-2 border-t border-border">
+                  <button
+                    onClick={() => setDictateOpen(dictateOpen === r.id ? null : r.id)}
+                    className="flex items-center gap-1 text-[11px] uppercase font-semibold text-primary hover:text-primary/80"
+                  >
+                    <Mic size={12} /> {dictateOpen === r.id ? 'Hide' : 'Dictate'} personal recovery message
+                  </button>
+                  {dictateOpen === r.id && (
+                    <div className="mt-2 rounded-lg bg-secondary/40 border border-border p-3 space-y-2">
+                      <DictateMessage
+                        size="compact"
+                        value={personalDrafts[r.id] || ''}
+                        onChange={(v) => setPersonalDrafts((prev) => ({ ...prev, [r.id]: v }))}
+                        warning={
+                          r.damage_score === 'red'
+                            ? 'VANTO STEP IN — personal message recommended. This lead has trust damage. Review carefully before sending.'
+                            : 'This lead has trust damage. Review carefully before sending.'
+                        }
+                        languageHint="South African English, may mix isiZulu / Sesotho / Setswana"
+                      />
+                      <textarea
+                        value={personalDrafts[r.id] || ''}
+                        onChange={(e) => setPersonalDrafts((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                        rows={4}
+                        placeholder="Your dictated/edited message will appear here. Send manually after review."
+                        className="w-full rounded-md bg-background/60 border border-border px-3 py-2 text-xs text-foreground outline-none focus:border-primary/50"
+                      />
                     </div>
                   )}
                 </div>

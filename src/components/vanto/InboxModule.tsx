@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { CopilotSidebar } from './CopilotSidebar';
+import { DictateMessage } from './DictateMessage';
 
 
 /* ── Types ── */
@@ -705,7 +706,8 @@ export function InboxModule() {
               </div>
 
               {/* Input */}
-              <div className="p-4 border-t border-border bg-card/20">
+              <div className="p-3 border-t border-border bg-card/20 space-y-2">
+                <DictateMessage value={inputText} onChange={setInputText} size="compact" />
                 <div className="flex items-end gap-2">
                   <button className="text-muted-foreground hover:text-foreground transition-colors p-2 shrink-0">
                     <Paperclip size={18} />
