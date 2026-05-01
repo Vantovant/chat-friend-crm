@@ -176,6 +176,7 @@ export function DamageControlModule() {
   const [hideHandled, setHideHandled] = useState(true);
   const [recency, setRecency] = useState<Recency>('all');
   const [overdueOnly, setOverdueOnly] = useState(false);
+  const [search, setSearch] = useState('');
 
   const fetchRows = async () => {
     setLoading(true);
