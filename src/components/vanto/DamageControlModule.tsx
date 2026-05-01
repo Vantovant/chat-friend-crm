@@ -280,7 +280,29 @@ export function DamageControlModule() {
         return false;
       }
     }
+    if (!matchesRecency(r, recency)) return false;
+    if (overdueOnly && !computeOverdue(r).overdue) return false;
     return true;
+  });
+
+  // Priority sort: RED+recent → HOT+recent → ORANGE → YELLOW HOT → name needed → cold older
+  const priority = (r: AuditRow): number => {
+    const inH = hoursAgo(r.last_inbound_at);
+    const recent = inH !== null && inH < 24;
+    if (r.damage_score === 'red' && recent) return 0;
+    if (r.temperature === 'hot' && recent) return 1;
+    if (r.damage_score === 'red') return 2;
+    if (r.damage_score === 'orange') return 3;
+    if (r.damage_score === 'yellow' && r.temperature === 'hot') return 4;
+    if (!r.name_known) return 5;
+    return 6;
+  };
+  filtered.sort((a, b) => {
+    const pa = priority(a); const pb = priority(b);
+    if (pa !== pb) return pa - pb;
+    const ai = a.last_inbound_at ? new Date(a.last_inbound_at).getTime() : 0;
+    const bi = b.last_inbound_at ? new Date(b.last_inbound_at).getTime() : 0;
+    return bi - ai;
   });
 
   const stats = {
@@ -295,6 +317,7 @@ export function DamageControlModule() {
     weakTouch: rows.filter(r => r.weak_first_touch).length,
     yellowHot: rows.filter(r => r.damage_score === 'yellow' && r.temperature === 'hot').length,
     handled: rows.filter(r => r.recovery_status === 'handled').length,
+    overdue: rows.filter(r => computeOverdue(r).overdue).length,
   };
 
   return (
