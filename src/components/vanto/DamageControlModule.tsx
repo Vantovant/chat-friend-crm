@@ -63,6 +63,30 @@ const SCORE_STYLES: Record<Score, string> = {
   red: 'bg-destructive/15 text-destructive border-destructive/30',
 };
 
+function relTime(iso?: string | null): { rel: string; abs: string; ageHrs: number } | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  const ms = Date.now() - d.getTime();
+  const hrs = ms / 3_600_000;
+  const days = hrs / 24;
+  let rel: string;
+  if (hrs < 1) rel = `${Math.max(1, Math.round(ms / 60_000))}m ago`;
+  else if (hrs < 24) rel = `${Math.round(hrs)}h ago`;
+  else if (days < 7) rel = `${Math.round(days)}d ago`;
+  else if (days < 30) rel = `${Math.round(days / 7)}w ago`;
+  else rel = `${Math.round(days / 30)}mo ago`;
+  const abs = d.toLocaleString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return { rel, abs, ageHrs: hrs };
+}
+
+function ageColor(hrs: number): string {
+  if (hrs < 24) return 'text-emerald-400';
+  if (hrs < 72) return 'text-amber-400';
+  if (hrs < 24 * 14) return 'text-orange-400';
+  return 'text-destructive';
+}
+
 export function DamageControlModule() {
   const [rows, setRows] = useState<AuditRow[]>([]);
   const [loading, setLoading] = useState(true);
