@@ -1053,6 +1053,8 @@ export type Database = {
           had_local_number: boolean
           had_proof_url: boolean
           had_shop_link: boolean
+          handled_at: string | null
+          handled_by: string | null
           id: string
           inbound_total: number
           intent: string
@@ -1069,11 +1071,16 @@ export type Database = {
           price_leak_text: string | null
           recommended_action: string | null
           recoverable: boolean
+          recovery_angle: string | null
           recovery_draft: string | null
+          recovery_status: string
+          reviewed_at: string | null
+          reviewed_by: string | null
           scanned_at: string
           temperature: string
           updated_at: string
           vanto_step_in: boolean
+          vcard_saved_at: string | null
           weak_first_touch: boolean
         }
         Insert: {
@@ -1091,6 +1098,8 @@ export type Database = {
           had_local_number?: boolean
           had_proof_url?: boolean
           had_shop_link?: boolean
+          handled_at?: string | null
+          handled_by?: string | null
           id?: string
           inbound_total?: number
           intent?: string
@@ -1107,11 +1116,16 @@ export type Database = {
           price_leak_text?: string | null
           recommended_action?: string | null
           recoverable?: boolean
+          recovery_angle?: string | null
           recovery_draft?: string | null
+          recovery_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           scanned_at?: string
           temperature?: string
           updated_at?: string
           vanto_step_in?: boolean
+          vcard_saved_at?: string | null
           weak_first_touch?: boolean
         }
         Update: {
@@ -1129,6 +1143,8 @@ export type Database = {
           had_local_number?: boolean
           had_proof_url?: boolean
           had_shop_link?: boolean
+          handled_at?: string | null
+          handled_by?: string | null
           id?: string
           inbound_total?: number
           intent?: string
@@ -1145,11 +1161,16 @@ export type Database = {
           price_leak_text?: string | null
           recommended_action?: string | null
           recoverable?: boolean
+          recovery_angle?: string | null
           recovery_draft?: string | null
+          recovery_status?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
           scanned_at?: string
           temperature?: string
           updated_at?: string
           vanto_step_in?: boolean
+          vcard_saved_at?: string | null
           weak_first_touch?: boolean
         }
         Relationships: []

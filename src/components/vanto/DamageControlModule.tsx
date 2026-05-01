@@ -4,10 +4,11 @@ import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
 import {
   Loader2, RefreshCw, ShieldAlert, CheckCircle2, AlertTriangle, Flame,
-  UserX, MessageSquare, Copy, Download, Mic,
+  UserX, MessageSquare, Copy, Download, Mic, ClipboardCheck, UserCheck, FileText, Phone,
 } from 'lucide-react';
 import { downloadVCard, copyContactCard } from '@/lib/vcard';
 import { DictateMessage } from './DictateMessage';
+import { buildRecoveryDraft } from '@/lib/recovery-drafts';
 
 type Score = 'green' | 'yellow' | 'orange' | 'red';
 
@@ -44,7 +45,14 @@ interface AuditRow {
   last_outbound_snippet: string | null;
   last_inbound_snippet: string | null;
   scanned_at: string;
+  recovery_status?: string | null;
+  reviewed_at?: string | null;
+  handled_at?: string | null;
+  vcard_saved_at?: string | null;
+  recovery_angle?: string | null;
 }
+
+type Queue = 'all' | 'red' | 'orange' | 'yellow_hot' | 'name_needed' | 'clean';
 
 const SCORE_STYLES: Record<Score, string> = {
   green: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
@@ -62,6 +70,9 @@ export function DamageControlModule() {
   const [openDraft, setOpenDraft] = useState<string | null>(null);
   const [dictateOpen, setDictateOpen] = useState<string | null>(null);
   const [personalDrafts, setPersonalDrafts] = useState<Record<string, string>>({});
+  const [packOpen, setPackOpen] = useState<string | null>(null);
+  const [queue, setQueue] = useState<Queue>('all');
+  const [hideHandled, setHideHandled] = useState(true);
 
   const fetchRows = async () => {
     setLoading(true);
@@ -135,9 +146,39 @@ export function DamageControlModule() {
     toast({ title: 'Contact card copied' });
   };
 
+  // Mark a row reviewed/handled/saved-to-phone — copy-only audit, no sending.
+  const updateRecovery = async (r: AuditRow, patch: Partial<AuditRow>) => {
+    const { error } = await supabase
+      .from('prospector_damage_audit' as any)
+      .update(patch as any)
+      .eq('id', r.id);
+    if (error) {
+      toast({ title: 'Save failed', description: error.message, variant: 'destructive' });
+      return;
+    }
+    setRows(prev => prev.map(x => (x.id === r.id ? { ...x, ...patch } : x)));
+    toast({ title: 'Saved' });
+  };
+
+  const queueOf = (r: AuditRow): Queue => {
+    if (r.damage_score === 'red') return 'red';
+    if (r.damage_score === 'orange') return 'orange';
+    if (r.damage_score === 'yellow' && r.temperature === 'hot') return 'yellow_hot';
+    if (!r.name_known) return 'name_needed';
+    return 'clean';
+  };
+
   const filtered = rows.filter(r => {
     if (scoreFilter !== 'all' && r.damage_score !== scoreFilter) return false;
     if (stepInOnly && !r.vanto_step_in) return false;
+    if (hideHandled && r.recovery_status === 'handled') return false;
+    if (queue !== 'all') {
+      if (queue === 'name_needed') {
+        if (r.name_known) return false;
+      } else if (queueOf(r) !== queue) {
+        return false;
+      }
+    }
     return true;
   });
 
@@ -151,6 +192,8 @@ export function DamageControlModule() {
     nameNeeded: rows.filter(r => !r.name_known).length,
     duplicates: rows.reduce((s, r) => s + r.duplicate_outbound, 0),
     weakTouch: rows.filter(r => r.weak_first_touch).length,
+    yellowHot: rows.filter(r => r.damage_score === 'yellow' && r.temperature === 'hot').length,
+    handled: rows.filter(r => r.recovery_status === 'handled').length,
   };
 
   return (
@@ -202,8 +245,42 @@ export function DamageControlModule() {
         })}
       </div>
 
+      {/* Stage 2 — Recovery Pack queue tabs (copy-only, no sending) */}
+      <div className="px-4 md:px-6 py-2 border-b border-border flex items-center gap-2 shrink-0 flex-wrap text-xs">
+        <span className="text-muted-foreground font-semibold uppercase tracking-wide">Recovery queue:</span>
+        {([
+          { id: 'all', label: `All (${stats.total})`, color: 'text-foreground' },
+          { id: 'red', label: `🔴 RED price/trust (${stats.red})`, color: 'text-destructive' },
+          { id: 'orange', label: `🟠 ORANGE duplicate/weak (${stats.orange})`, color: 'text-orange-400' },
+          { id: 'yellow_hot', label: `🔥 YELLOW HOT (${stats.yellowHot})`, color: 'text-amber-400' },
+          { id: 'name_needed', label: `👤 Name needed (${stats.nameNeeded})`, color: 'text-blue-400' },
+          { id: 'clean', label: `🟢 Clean follow-up`, color: 'text-emerald-400' },
+        ] as const).map(q => (
+          <button
+            key={q.id}
+            onClick={() => setQueue(q.id as Queue)}
+            className={cn(
+              'px-2.5 py-1 rounded-md border',
+              queue === q.id ? 'bg-primary/15 border-primary/40 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
+            )}
+          >
+            {q.label}
+          </button>
+        ))}
+        <button
+          onClick={() => setHideHandled(v => !v)}
+          className={cn(
+            'ml-auto px-2 py-1 rounded border flex items-center gap-1',
+            hideHandled ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300' : 'border-border text-muted-foreground'
+          )}
+          title="Hide leads already personally handled"
+        >
+          <CheckCircle2 size={12} /> Hide handled ({stats.handled})
+        </button>
+      </div>
+
       <div className="px-4 md:px-6 py-2 border-b border-border flex items-center gap-3 text-xs shrink-0 flex-wrap">
-        <span className="text-muted-foreground">Filters:</span>
+        <span className="text-muted-foreground">Score filter:</span>
         {(['all', 'green', 'yellow', 'orange', 'red'] as const).map(s => (
           <button
             key={s}
@@ -399,6 +476,133 @@ export function DamageControlModule() {
                   )}
                 </div>
               )}
+
+              {/* Stage 2 — Recovery Pack (copy-only, manual handling) */}
+              <div className="mt-1 pt-2 border-t border-border">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <button
+                    onClick={() => setPackOpen(packOpen === r.id ? null : r.id)}
+                    className="flex items-center gap-1 text-[11px] uppercase font-semibold text-primary hover:text-primary/80"
+                  >
+                    <FileText size={12} /> {packOpen === r.id ? 'Hide' : 'Open'} Recovery Pack
+                  </button>
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {r.reviewed_at && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] border bg-blue-500/15 text-blue-300 border-blue-500/30 flex items-center gap-1">
+                        <ClipboardCheck size={10} /> Reviewed
+                      </span>
+                    )}
+                    {r.vcard_saved_at && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] border bg-amber-500/15 text-amber-300 border-amber-500/30 flex items-center gap-1">
+                        <Phone size={10} /> Saved to phone
+                      </span>
+                    )}
+                    {r.handled_at && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] border bg-emerald-500/15 text-emerald-300 border-emerald-500/30 flex items-center gap-1">
+                        <UserCheck size={10} /> Personally handled
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {packOpen === r.id && (() => {
+                  const pack = buildRecoveryDraft({
+                    name: r.contact_name,
+                    damage_score: r.damage_score,
+                    duplicate_messages: r.duplicate_messages,
+                    price_leak_detected: r.price_leak_detected,
+                    weak_first_touch: r.weak_first_touch,
+                    temperature: r.temperature,
+                    name_known: r.name_known,
+                  });
+                  return (
+                    <div className="mt-2 rounded-lg bg-secondary/40 border border-border p-3 space-y-3">
+                      {r.damage_score === 'red' && (
+                        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive">
+                          ⚠️ VANTO STEP IN — RED lead. Review carefully. Personal message recommended.
+                        </div>
+                      )}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+                        <div><span className="text-muted-foreground">Cause:</span> <span className="text-foreground">{
+                          r.price_leak_detected ? 'Price leak (R<100 in outbound)'
+                          : r.duplicate_messages ? `${r.duplicate_outbound} duplicate outbound`
+                          : r.weak_first_touch ? 'Weak first-touch (no header/proof/shop)'
+                          : 'General trust damage'
+                        }</span></div>
+                        <div><span className="text-muted-foreground">Replied after damage:</span> <span className="text-foreground">{r.inbound_total > 0 ? 'Yes' : 'No'}</span></div>
+                        <div><span className="text-muted-foreground">Temperature:</span> <span className="text-foreground capitalize">{r.temperature}</span></div>
+                        <div><span className="text-muted-foreground">Interest:</span> <span className="text-foreground">{r.interest_topic || '—'}</span></div>
+                        {r.price_leak_text && (
+                          <div className="md:col-span-2"><span className="text-muted-foreground">Wrong message snippet:</span> <span className="text-destructive">"{r.price_leak_text}"</span></div>
+                        )}
+                        {r.last_inbound_snippet && (
+                          <div className="md:col-span-2"><span className="text-muted-foreground">Last inbound:</span> <span className="text-foreground">"{r.last_inbound_snippet.slice(0, 200)}"</span></div>
+                        )}
+                        {r.last_outbound_snippet && (
+                          <div className="md:col-span-2"><span className="text-muted-foreground">Last outbound:</span> <span className="text-foreground">"{r.last_outbound_snippet.slice(0, 200)}"</span></div>
+                        )}
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-[10px] uppercase font-semibold text-muted-foreground">
+                            Suggested angle: <span className="text-foreground">{pack.angle_label}</span>
+                          </p>
+                          <span className="text-[10px] text-muted-foreground">Copy-only · No queue · No send</span>
+                        </div>
+                        <pre className="text-xs text-foreground whitespace-pre-wrap font-sans rounded-md bg-background/60 border border-border p-3">{pack.text}</pre>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          onClick={async () => {
+                            await navigator.clipboard.writeText(pack.text);
+                            toast({ title: 'Recovery draft copied', description: 'Send manually in WhatsApp after review.' });
+                          }}
+                          className="flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-primary/15 text-primary border border-primary/30"
+                        >
+                          <Copy size={12} /> Copy draft
+                        </button>
+                        <button
+                          onClick={() => exportContact(r)}
+                          className="flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-secondary border border-border text-foreground"
+                        >
+                          <Download size={12} /> Export vCard
+                        </button>
+                        <button
+                          onClick={() => copyCard(r)}
+                          className="flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-secondary border border-border text-foreground"
+                        >
+                          <Copy size={12} /> Copy contact card
+                        </button>
+                        <button
+                          onClick={() => updateRecovery(r, { vcard_saved_at: new Date().toISOString() } as any)}
+                          disabled={!!r.vcard_saved_at}
+                          className="flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-amber-500/15 text-amber-300 border border-amber-500/30 disabled:opacity-50"
+                        >
+                          <Phone size={12} /> Mark saved to phone
+                        </button>
+                        <button
+                          onClick={() => updateRecovery(r, { reviewed_at: new Date().toISOString(), recovery_status: 'reviewed', recovery_angle: pack.angle } as any)}
+                          disabled={!!r.reviewed_at}
+                          className="flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-blue-500/15 text-blue-300 border border-blue-500/30 disabled:opacity-50"
+                        >
+                          <ClipboardCheck size={12} /> Mark reviewed
+                        </button>
+                        <button
+                          onClick={() => updateRecovery(r, { handled_at: new Date().toISOString(), recovery_status: 'handled', recovery_angle: pack.angle } as any)}
+                          disabled={!!r.handled_at}
+                          className="flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 disabled:opacity-50"
+                        >
+                          <UserCheck size={12} /> Mark personally handled
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">
+                        Stage 2 — Controlled Human Recovery Pack. Drafts are copy-only and never queued. Vanto sends manually after review. Duplicate guard and 24h window still apply on send.
+                      </p>
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
           ))
         )}
