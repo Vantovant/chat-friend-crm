@@ -1187,8 +1187,8 @@ Deno.serve(async (req) => {
         // anchor to /shop/rlx; otherwise anchor to /shop. One link only (low-pressure read).
         const wantsRlxTopic = /(rlx|sleep|insomnia|stress|anx|calm|relax|wind ?down|switch off|overwhelm|tension)/i.test(inboundText);
         const SISTER_ANCHOR = wantsRlxTopic
-          ? `📖 If you'd like to read first (no pressure):\nhttps://project-pal-glue.lovable.app/shop/rlx\n\n`
-          : `📖 If you'd like to browse first (no pressure):\nhttps://project-pal-glue.lovable.app/shop\n\n`;
+          ? `📖 If you'd like to read first (no pressure):\nhttps://onlinecourseformlm.com/shop/rlx\n\n`
+          : `📖 If you'd like to browse first (no pressure):\nhttps://onlinecourseformlm.com/shop\n\n`;
         diag.sister_anchor_used = wantsRlxTopic ? "rlx" : "shop";
 
         if (dualIntent) {
