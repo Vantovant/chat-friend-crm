@@ -644,7 +644,7 @@
 
   async function saveGroup() {
     if (!session.token) {
-      showStatus('Please log in first', 'error');
+      showStatus('Click the Vanto extension icon (top-right) and log in first', 'error');
       return;
     }
 
