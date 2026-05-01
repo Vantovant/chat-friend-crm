@@ -32,6 +32,12 @@ type Contact = {
   updated_at: string;
   is_deleted: boolean;
   deleted_at: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  whatsapp_display_name?: string | null;
+  contact_source?: string | null;
+  contact_confidence?: string | null;
+  name_needs_confirmation?: boolean | null;
 };
 
 type ActivityEntry = {
@@ -382,6 +388,12 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
 
   const [form, setForm] = useState({
     name: contact.name,
+    first_name: contact.first_name || '',
+    last_name: contact.last_name || '',
+    whatsapp_display_name: contact.whatsapp_display_name || '',
+    contact_source: contact.contact_source || 'unknown',
+    contact_confidence: contact.contact_confidence || 'unknown',
+    name_needs_confirmation: !!contact.name_needs_confirmation,
     phone_raw: contact.phone_raw || contact.phone || '',
     email: contact.email || '',
     lead_type: contact.lead_type,
@@ -418,6 +430,12 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
 
     const updatePayload: Record<string, any> = {
       name: form.name.trim(),
+      first_name: form.first_name.trim() || null,
+      last_name: form.last_name.trim() || null,
+      whatsapp_display_name: form.whatsapp_display_name.trim() || null,
+      contact_source: form.contact_source,
+      contact_confidence: form.contact_confidence,
+      name_needs_confirmation: form.name_needs_confirmation,
       phone_raw: form.phone_raw.trim() || null,
       phone_normalized: phoneNorm || null,
       phone: phoneNorm || contact.phone,
