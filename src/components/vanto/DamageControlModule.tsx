@@ -334,7 +334,7 @@ export function DamageControlModule() {
   };
 
   return (
-    <div className="flex flex-col min-h-full md:h-full">
+    <div className="flex flex-col h-full min-h-0">
       <div className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between shrink-0 gap-3 flex-wrap">
         <div>
           <h3 className="text-base font-bold text-foreground flex items-center gap-2">
