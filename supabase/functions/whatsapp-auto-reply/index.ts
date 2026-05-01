@@ -1241,7 +1241,9 @@ Deno.serve(async (req) => {
   // Approved APLGO SA prices are: Daily R431.25/R862.50, Premium R1,035/R1,293.75,
   // Elite R1,380+, PFT R1,552.50+, Pendant R1,725+. Anything <R100 is a hallucination.
   try {
-    const priceMatches = replyContent.match(/\bR\s?(\d{1,3}(?:[.,]\d{1,2})?)(?!\d)/gi) || [];
+    // Match R + amount, allowing thousand separators (comma/space) and decimals.
+    // Examples matched: "R15", "R15.5", "R431.25", "R1,035", "R1 035.50", "R1293.75".
+    const priceMatches = replyContent.match(/\bR\s?\d{1,3}(?:[ ,]\d{3})*(?:\.\d{1,2})?\b/g) || [];
     let badPrice: string | null = null;
     for (const raw of priceMatches) {
       const num = parseFloat(raw.replace(/[Rr\s,]/g, ""));
