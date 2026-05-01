@@ -57,3 +57,4 @@ Group Campaigns: Maytapi REST API (NOT Chrome Extension autoposter). Twilio stay
 - [Auto-Reply Branding](mem://features/auto-reply-branding) — Vanto Vanto's details only in auto-replies
 - [APLGO Pricing 15% VAT](mem://features/aplgo-pricing-15pct-vat) — Locked SA price list (Daily R431.25 member / R862.50 retail), supersedes 15.5% VAT
 - [Follow-Up Phase 3](mem://features/followup-phase3) — 6 intent states, 2h/24h/72h cadence, hybrid keyword+AI detect, hybrid auto/suggest send, do_not_contact STOP flag, 3-per-topic cap
+- [Unified Trust Entry Protocol](mem://features/unified-trust-entry-protocol) — First-touch trust-first script (proof URL, APLGO header, Vanto identity, shop, learning guide, local number, single support question) for Twilio + Maytapi + Prospector; buy/join intent handlers; STP digestive-only disabled; ICE = stomach lane; price-safety <R100 block; 24h duplicate guard
