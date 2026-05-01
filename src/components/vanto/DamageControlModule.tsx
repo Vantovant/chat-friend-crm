@@ -5,6 +5,7 @@ import { toast } from '@/hooks/use-toast';
 import {
   Loader2, RefreshCw, ShieldAlert, CheckCircle2, AlertTriangle, Flame,
   UserX, MessageSquare, Copy, Download, Mic, ClipboardCheck, UserCheck, FileText, Phone,
+  Lock, Bot, User as UserIcon, Clock,
 } from 'lucide-react';
 import { downloadVCard, copyContactCard } from '@/lib/vcard';
 import { DictateMessage } from './DictateMessage';
