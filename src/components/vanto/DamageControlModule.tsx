@@ -334,7 +334,7 @@ export function DamageControlModule() {
   };
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col h-full min-h-0 overflow-y-auto md:overflow-hidden">
       <div className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between shrink-0 gap-3 flex-wrap">
         <div>
           <h3 className="text-base font-bold text-foreground flex items-center gap-2">
@@ -542,7 +542,7 @@ export function DamageControlModule() {
         <span className="text-[11px] text-muted-foreground whitespace-nowrap">{filtered.length} match{filtered.length === 1 ? '' : 'es'}</span>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto p-3 md:p-4 space-y-2 pb-24 md:pb-4">
+      <div className="flex-1 min-h-0 md:overflow-y-auto p-3 md:p-4 space-y-2 pb-24 md:pb-4">
         {loading ? (
           <div className="flex items-center justify-center h-32 gap-2 text-muted-foreground text-sm">
             <Loader2 size={14} className="animate-spin" /> Loading…
