@@ -95,7 +95,44 @@ Deno.serve(async (req) => {
     `${m.is_outbound ? 'Agent' : contact?.name || 'Contact'}: ${m.content}`
   ).join('\n');
 
-  const systemPrompt = `You are Zazi Copilot, the AI sales assistant for Vanto CRM (MLM / WhatsApp CRM).
+  // ── Master Prospector — Level 1 (supervised, draft-only) ──
+  // Load wake state + trust-first config (best-effort; fail open as draft-only).
+  const settingsKeys = [
+    'zazi_prospector_enabled','zazi_prospector_level','zazi_prospector_mode',
+    'distributor_proof_url','table_of_contents_url','local_support_number',
+  ];
+  const { data: settingsRows } = await serviceClient
+    .from('integration_settings').select('key,value').in('key', settingsKeys);
+  const settings: Record<string,string> = {};
+  (settingsRows || []).forEach((r: any) => { settings[r.key] = r.value; });
+  const prospectorAwake = settings.zazi_prospector_enabled === 'true';
+  const prospectorLevel = settings.zazi_prospector_level || '1';
+  const prospectorMode  = settings.zazi_prospector_mode  || 'draft_only';
+  const proofUrl   = settings.distributor_proof_url   || 'https://vanto-zazi-bloom.lovable.app';
+  const tocUrl     = settings.table_of_contents_url   || 'https://onlinecourseformlm.com/shop';
+  const shopUrl    = 'https://onlinecourseformlm.com/shop';
+  const localSupport = settings.local_support_number || '+27 79 083 1530';
+  const isFirstTouch = (recentMsgs || []).filter((m: any) => m.is_outbound).length === 0;
+
+  const trustFirstBlock = `
+═══ MASTER PROSPECTOR — LEVEL ${prospectorLevel} (${prospectorMode}) ═══
+Awake: ${prospectorAwake}. NEVER auto-send. Drafts only. One-by-one approval required.
+First-touch detected: ${isFirstTouch ? 'YES' : 'NO'}
+${isFirstTouch ? `MANDATORY first-touch shape (in this exact order, line by line):
+1) ${proofUrl}
+2) 🌿 *APLGO Official Wellness Info*
+3) Hi, I'm *Vanto from Get Well Africa* — an accredited APLGO distributor.
+4) Shop: ${shopUrl}
+5) Learning guide: ${tocUrl}
+6) ONE simple question — which area can I help with: sleep, energy, cravings, joints, stomach, hormones, immune support, OR business information?
+7) — Vanto · Local support: ${localSupport}
+FORBIDDEN on first-touch: any price, retail-vs-member push, joining push, product recommendation before they pick an area.` : `Use trust-first tone. Never invent prices. Block any R<100 price as hallucination. Map intent → product (sleep→RLX, energy→GRW/GTS, cravings→NRM, joints→SLD, stomach→ICE, hormones→PWR Lemon/Apricot, immune→DOX/GTS, business→sponsor 787262). Always end with ONE next-step question.`}
+SAFETY: No cure/treat/guarantee language. No bulk send. No Send All. Sponsor 787262 untouched.
+═══════════════════════════════════════════════
+`;
+
+  const systemPrompt = `You are Zazi Copilot / Master Prospector (Level ${prospectorLevel}, supervised draft-only) for Vanto CRM (APLGO / Get Well Africa, WhatsApp).
+${trustFirstBlock}
 
 Contact: ${contact?.name || 'Unknown'} | Temperature: ${contact?.temperature || 'cold'} | Type: ${contact?.lead_type || 'prospect'} | Interest: ${contact?.interest || 'medium'}
 WhatsApp 24h Window: ${windowOpen ? 'OPEN (can send freeform)' : 'CLOSED (template only)'}
@@ -173,7 +210,19 @@ If no knowledge source covers the claim, set confidence below 0.3 and add a note
       parsed = { draft_reply: aiContent, reply_mode: 'guidance', confidence: 0.5 };
     }
 
-    // Store suggestion
+    // Stamp prospector context onto suggestion (visible reason for every recommendation)
+    parsed.prospector = {
+      awake: prospectorAwake,
+      level: Number(prospectorLevel) || 1,
+      mode: prospectorMode,
+      first_touch: isFirstTouch,
+      proof_url: proofUrl,
+      shop_url: shopUrl,
+      toc_url: tocUrl,
+      local_support: localSupport,
+    };
+
+    // Store suggestion (draft-only — never auto-sent)
     const { data: suggestion } = await serviceClient
       .from('ai_suggestions')
       .insert({
