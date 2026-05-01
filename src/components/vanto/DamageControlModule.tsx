@@ -171,6 +171,8 @@ export function DamageControlModule() {
   const [packOpen, setPackOpen] = useState<string | null>(null);
   const [queue, setQueue] = useState<Queue>('all');
   const [hideHandled, setHideHandled] = useState(true);
+  const [recency, setRecency] = useState<Recency>('all');
+  const [overdueOnly, setOverdueOnly] = useState(false);
 
   const fetchRows = async () => {
     setLoading(true);
