@@ -1236,6 +1236,70 @@ Deno.serve(async (req) => {
     diag.trust_bridge_error = e?.message;
   }
 
+  // ── PRICE SAFETY VALIDATOR (Emergency patch 2026-05-01) ──
+  // Block any obviously-broken price (sub-R100) before it leaves the system.
+  // Approved APLGO SA prices are: Daily R431.25/R862.50, Premium R1,035/R1,293.75,
+  // Elite R1,380+, PFT R1,552.50+, Pendant R1,725+. Anything <R100 is a hallucination.
+  try {
+    const priceMatches = replyContent.match(/\bR\s?(\d{1,3}(?:[.,]\d{1,2})?)(?!\d)/gi) || [];
+    let badPrice: string | null = null;
+    for (const raw of priceMatches) {
+      const num = parseFloat(raw.replace(/[Rr\s,]/g, ""));
+      if (!isNaN(num) && num > 0 && num < 100) {
+        badPrice = raw;
+        break;
+      }
+    }
+    if (badPrice) {
+      diag.price_safety_blocked = true;
+      diag.price_safety_value = badPrice;
+      console.warn(`[auto-reply] PRICE-SAFETY blocked reply containing ${badPrice}`);
+      replyContent =
+        `🌿 *APLGO Official Wellness Info*\nDistributor: *Vanto — Get Well Africa*\nAPLGO Sponsor Code: *787262*\n\n` +
+        `I don't want to misquote you. Let me confirm the official APLGO price for this product first.\n\n` +
+        `In the meantime you can browse the official catalogue here:\n` +
+        `📒 https://aplshop.com/j/787262/catalog/\n\n— Vanto`;
+      actionTaken = "price_safety_fallback";
+    }
+  } catch (e: any) {
+    console.warn("[auto-reply] price-safety validator error (non-fatal):", e?.message);
+  }
+
+  // ── 24h DUPLICATE OUTBOUND GUARD (Emergency patch 2026-05-01) ──
+  // Prevent sending the same (or near-identical) outbound message to the same
+  // conversation within 24 hours. Applies to AI replies, suggestions, recovery,
+  // and any other path that lands here.
+  try {
+    const norm = (s: string) => (s || "").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 400);
+    const candidate = norm(replyContent);
+    if (candidate.length > 20) {
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: recent } = await svc
+        .from("messages")
+        .select("id, content, created_at")
+        .eq("conversation_id", conversation_id)
+        .eq("is_outbound", true)
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      const dup = (recent || []).find((m: any) => norm(m.content) === candidate);
+      if (dup) {
+        diag.result = "skipped_duplicate_recent";
+        diag.duplicate_of_message_id = dup.id;
+        console.log("[auto-reply] DIAG:", JSON.stringify(diag));
+        await svc.from("auto_reply_events").insert({
+          conversation_id, inbound_message_id: inbound_message_id || null,
+          action_taken: "skipped_duplicate_recent",
+          reason: `Identical outbound sent within 24h (msg ${dup.id})`,
+          menu_option: intent.intent, knowledge_query: intent.query?.slice(0, 200) || null, knowledge_found: knowledgeFound,
+        });
+        return jsonRes({ ok: true, auto_reply: false, action: "skipped_duplicate_recent", duplicate_of: dup.id });
+      }
+    }
+  } catch (e: any) {
+    console.warn("[auto-reply] duplicate guard error (non-fatal):", e?.message);
+  }
+
   // ── Dispatch via send-message ──
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
   const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
