@@ -210,7 +210,19 @@ If no knowledge source covers the claim, set confidence below 0.3 and add a note
       parsed = { draft_reply: aiContent, reply_mode: 'guidance', confidence: 0.5 };
     }
 
-    // Store suggestion
+    // Stamp prospector context onto suggestion (visible reason for every recommendation)
+    parsed.prospector = {
+      awake: prospectorAwake,
+      level: Number(prospectorLevel) || 1,
+      mode: prospectorMode,
+      first_touch: isFirstTouch,
+      proof_url: proofUrl,
+      shop_url: shopUrl,
+      toc_url: tocUrl,
+      local_support: localSupport,
+    };
+
+    // Store suggestion (draft-only — never auto-sent)
     const { data: suggestion } = await serviceClient
       .from('ai_suggestions')
       .insert({
