@@ -1146,15 +1146,19 @@ Deno.serve(async (req) => {
   try {
     // Approved distributor-proof page (preview-card source). Override-able via
     // integration_settings key 'distributor_proof_url' for future custom domain.
-    const { data: proofRow } = await svc
+    const { data: settingRows } = await svc
       .from("integration_settings")
-      .select("value")
-      .eq("key", "distributor_proof_url")
-      .maybeSingle();
-    const PROOF_URL = (proofRow?.value || "https://vanto-zazi-bloom.lovable.app").trim();
+      .select("key,value")
+      .in("key", ["distributor_proof_url", "table_of_contents_url", "local_support_number"]);
+    const settingsMap: Record<string, string> = {};
+    for (const r of (settingRows || []) as any[]) settingsMap[r.key] = (r.value || "").trim();
+    const PROOF_URL = settingsMap.distributor_proof_url || "https://vanto-zazi-bloom.lovable.app";
     const SHOP_URL = "https://onlinecourseformlm.com/shop";
-    const LOCAL_NUMBER = "+27 79 083 1530";
-    const SUPPORT_MENU = "sleep, energy, cravings, joints, stomach, hormones, or immune support";
+    const TOC_URL = settingsMap.table_of_contents_url || SHOP_URL;
+    const LOCAL_NUMBER = settingsMap.local_support_number || "+27 79 083 1530";
+    const CUSTOMER_STORE = "https://aplshop.com/j/787262";
+    const ASSOCIATE_ENROLL = "https://backoffice.aplgo.com/register/?sp=787262";
+    const SUPPORT_MENU = "sleep, energy, cravings, joints, stomach, hormones, immune support, or business information";
 
     // Detect channel from last inbound message provider (twilio | maytapi | other)
     const { data: lastInbound } = await svc
@@ -1185,17 +1189,19 @@ Deno.serve(async (req) => {
     const buildFirstTouch = (twilioStyle: boolean) => {
       const bridge = twilioStyle ? TRUST_BRIDGE_TWILIO : "";
       const intro = twilioStyle
-        ? `You can first browse the product shop here:`
-        : `Before I recommend anything, you can see the product shop here:`;
+        ? `You can browse the full product shop here:`
+        : `Before I recommend anything, please feel free to browse first:\n\nProduct shop:`;
+      const tocLabel = twilioStyle
+        ? `You can also start with our learning guide here:`
+        : `Learning guide:`;
       return (
         `${PROOF_URL}\n\n` +
         `🌿 *APLGO Official Wellness Info*\n\n` +
         `Hi, I'm *Vanto from Get Well Africa* — an accredited APLGO distributor.\n\n` +
         `${bridge}` +
         `${intro}\n${SHOP_URL}\n\n` +
-        (twilioStyle
-          ? `What would you like support with most — ${SUPPORT_MENU}?\n\n`
-          : `Tell me what you want support with most — ${SUPPORT_MENU}?\n\n`) +
+        `${tocLabel}\n${TOC_URL}\n\n` +
+        `What would you like support with most — ${SUPPORT_MENU}?\n\n` +
         `— Vanto\nLocal support: ${LOCAL_NUMBER}`
       );
     };
@@ -1214,13 +1220,19 @@ Deno.serve(async (req) => {
     const lastIn = lastInTextRaw.toLowerCase().trim();
 
     const isProductInfoReq =
-      /\b(product info( please)?|send (me )?info|i want to know more|tell me about (the )?products?|more info|info please|product information)\b/i.test(lastIn);
+      /\b(product info( please)?|send (me )?info|i want to know more|tell me about (the )?products?|more info|info please|product information|what products do you have)\b/i.test(lastIn);
 
     // Price-asked-but-no-product-context: mentions price but no product token
     const mentionsPrice = /\b(price|cost|how much|pricing|how much is)\b/i.test(lastIn);
-    const productTokens = /(ice|nrm|rlx|pwr|grw|sld|dox|gts|brn|chm|stp|hpr|mnd|skn|lemon|apricot|daily|premium|elite|pendant|pft|status)/i;
+    const productTokens = /(ice|nrm|rlx|pwr|grw|sld|dox|gts|brn|chm|stp|hpr|mnd|skn|lemon|apricot|daily|premium|elite|pendant|pft|status|lft|alt|mls|hrt|air|hpy|bty)/i;
     const hasProductContext = productTokens.test(lastIn);
     const isPriceNoContext = mentionsPrice && !hasProductContext;
+
+    // Buy intent (no price asked, just ready to order)
+    const isBuyIntent = /\b(i want to buy|want to buy|send (me )?(the )?order link|order link|i'?m ready|i am ready|ready to order|how do i order|buy now|place (an )?order|how to buy)\b/i.test(lastIn);
+
+    // Join / business intent
+    const isJoinIntent = /\b(i want to join|want to join|how do i register|i want to become a member|become a member|business opportunity|i want member price|want member price|how to register|register me|sign up as (a )?member|how do i join|associate registration)\b/i.test(lastIn);
 
     if (isFirstReply) {
       // Override the AI body — first-touch must be the trust-first script.
@@ -1228,10 +1240,27 @@ Deno.serve(async (req) => {
       diag.first_touch_template = isTwilio ? "twilio" : (isMaytapi ? "maytapi" : "default_twilio_style");
       diag.proof_url_first_line = true;
       actionTaken = "first_touch_trust_message";
+    } else if (isJoinIntent) {
+      replyContent =
+        `Beautiful. The member route starts with registration.\n\n` +
+        `Associate enrollment:\n${ASSOCIATE_ENROLL}\n\n` +
+        `After registration, I can guide you step by step on your first order and starting GO-Status level.\n\n` +
+        `Would you like me to walk you through it now?\n\n— Vanto`;
+      diag.join_intent_reply = true;
+      actionTaken = "join_intent_trust_reply";
+    } else if (isBuyIntent) {
+      replyContent =
+        `Great — you have two simple routes.\n\n` +
+        `1️⃣ *Customer route*\nBuy once through the official customer store:\n${CUSTOMER_STORE}\n\n` +
+        `2️⃣ *Member route*\nRegister first and unlock member pricing:\n${ASSOCIATE_ENROLL}\n\n` +
+        `Would you like to buy once as a customer, or register for the member route?\n\n— Vanto`;
+      diag.buy_intent_reply = true;
+      actionTaken = "buy_intent_trust_reply";
     } else if (isProductInfoReq) {
       replyContent =
         `${PROOF_URL}\n\n` +
         `Of course. Start here so you can see the full APLGO product shop:\n${SHOP_URL}\n\n` +
+        `You can also use this learning guide:\n${TOC_URL}\n\n` +
         `Then tell me what you want support with most — ${SUPPORT_MENU} — and I'll point you to the right product.\n\n` +
         `— Vanto`;
       diag.product_info_fallback = true;
@@ -1240,7 +1269,8 @@ Deno.serve(async (req) => {
       replyContent =
         `${PROOF_URL}\n\n` +
         `I can help with price. Which product are you asking about?\n\n` +
-        `You can browse the full shop here first:\n${SHOP_URL}\n\n` +
+        `You can browse the full shop here:\n${SHOP_URL}\n\n` +
+        `And you can use the learning guide here:\n${TOC_URL}\n\n` +
         `— Vanto`;
       diag.price_no_context_fallback = true;
       actionTaken = "price_clarify_trust_reply";
