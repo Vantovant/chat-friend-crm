@@ -675,6 +675,37 @@ export function DamageControlModule() {
                 </div>
               </div>
 
+              {/* Owner vs Prospector responsibility split */}
+              <div className="mt-1 pt-2 border-t border-border grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+                <div className="rounded-md border border-primary/20 bg-primary/5 p-2">
+                  <p className="font-semibold text-primary mb-1 flex items-center gap-1">
+                    <Bot size={11} /> Prospector has done
+                  </p>
+                  <ul className="text-muted-foreground space-y-0.5">
+                    <li>✅ Damage score: <span className="text-foreground uppercase">{r.damage_score}</span></li>
+                    <li>✅ Intent: <span className="text-foreground">{r.intent}</span> · Temp: <span className="text-foreground">{r.temperature}</span></li>
+                    <li>✅ Duplicates: <span className="text-foreground">{r.duplicate_outbound}</span> · Weak first-touch: <span className="text-foreground">{r.weak_first_touch ? 'yes' : 'no'}</span></li>
+                    <li>✅ Price leak: <span className="text-foreground">{r.price_leak_detected ? 'yes' : 'no'}</span></li>
+                    <li>✅ Suggested action: <span className="text-foreground">{r.recommended_action || '—'}</span></li>
+                    <li>✅ Recovery draft: <span className="text-foreground">available below</span></li>
+                    <li>✅ Name confirmation flag: <span className="text-foreground">{r.name_known ? 'name known' : 'needed'}</span></li>
+                  </ul>
+                </div>
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2">
+                  <p className="font-semibold text-amber-300 mb-1 flex items-center gap-1">
+                    <UserIcon size={11} /> Vanto / Admin must do
+                  </p>
+                  <ul className="text-muted-foreground space-y-0.5">
+                    <li>{r.reviewed_at ? '✅' : '⬜'} Review lead</li>
+                    <li>{r.vcard_saved_at ? '✅' : '⬜'} Export vCard &amp; save to phone</li>
+                    <li>{r.name_known ? '✅' : '⬜'} Confirm or edit name</li>
+                    <li>⬜ Dictate personal message if needed</li>
+                    <li>⬜ Copy / send manually in WhatsApp</li>
+                    <li>{r.handled_at ? '✅' : '⬜'} Mark personally handled</li>
+                  </ul>
+                </div>
+              </div>
+
               {r.recovery_draft && (
                 <div className="mt-1 pt-2 border-t border-border">
                   <button
