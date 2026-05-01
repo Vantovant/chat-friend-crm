@@ -453,21 +453,113 @@ export function InboxModule() {
           {selected ? (
             <>
               {/* Header */}
-              <div className="flex items-center justify-between px-3 md:px-4 py-3 border-b border-border bg-card/20">
-                <div className="flex items-center gap-2 md:gap-3 min-w-0">
+              <div className="px-3 md:px-4 py-2.5 border-b border-border bg-card/20 space-y-2">
+                {/* Row 1: identity + actions */}
+                <div className="flex items-center gap-2 min-w-0">
                   {isMobile && (
                     <button onClick={() => setSelectedConvId(null)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 shrink-0">
                       <ArrowLeft size={18} />
                     </button>
                   )}
-                  <ContactAvatar name={selected.contact?.name || '?'} />
-                  <div>
-                    <p className="font-semibold text-sm text-foreground">{selected.contact?.name}</p>
-                    <p className="text-xs text-muted-foreground">{displayPhone(selected.contact?.phone || '')}</p>
+                  <ContactAvatar name={selected.contact?.name || '?'} size="sm" />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-sm text-foreground truncate">{selected.contact?.name}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">{displayPhone(selected.contact?.phone || '')}</p>
                   </div>
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    <IconBtn
+                      icon={Phone}
+                      title="Call"
+                      onClick={() => {
+                        const phone = selected.contact?.phone;
+                        if (phone) window.open(`tel:${phone}`, '_blank');
+                        else toast({ title: 'No phone number', variant: 'destructive' });
+                      }}
+                    />
+                    {!isMobile && (
+                      <IconBtn
+                        icon={Video}
+                        title="Open in WhatsApp"
+                        onClick={() => {
+                          const phone = selected.contact?.phone;
+                          if (phone) window.open(`https://wa.me/${phone}?text=`, '_blank');
+                          else toast({ title: 'No phone number', variant: 'destructive' });
+                        }}
+                      />
+                    )}
+                    <button
+                      onClick={async () => {
+                        if (!selectedConvId || aiLoading) return;
+                        setAiLoading(true);
+                        try {
+                          const { data, error } = await supabase.functions.invoke('send-message', {
+                            body: {
+                              conversation_id: selectedConvId,
+                              content: `[AI suggested reply based on context]\n\nPlease follow up with ${selected.contact?.name} regarding their interest.`,
+                              message_type: 'ai',
+                            },
+                          });
+                          if (error) throw error;
+                          toast({ title: 'AI reply sent' });
+                          fetchMessages(selectedConvId);
+                        } catch (e: any) {
+                          toast({ title: 'AI Reply failed', description: e.message, variant: 'destructive' });
+                        } finally {
+                          setAiLoading(false);
+                        }
+                      }}
+                      disabled={aiLoading}
+                      title="AI Reply"
+                      className={cn(
+                        'flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] font-medium vanto-gradient text-primary-foreground hover:opacity-90 shrink-0',
+                        aiLoading && 'opacity-50 cursor-not-allowed'
+                      )}
+                    >
+                      {aiLoading ? <Loader2 size={13} className="animate-spin" /> : <Bot size={13} />}
+                      {!isMobile && <span>AI Reply</span>}
+                    </button>
+                    {!isMobile && (
+                      <button
+                        onClick={() => { setShowCopilot(!showCopilot); if (!showCopilot) setShowInfo(false); }}
+                        className={cn(
+                          'p-1.5 rounded-lg transition-colors',
+                          showCopilot ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
+                        )}
+                        title="Zazi Copilot"
+                      >
+                        <Brain size={16} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => {
+                        if (isMobile) {
+                          setShowMobileInfo(true);
+                        } else {
+                          setShowInfo(!showInfo);
+                          if (!showInfo) setShowCopilot(false);
+                        }
+                      }}
+                      className={cn(
+                        'p-1.5 rounded-lg transition-colors',
+                        (showInfo && !isMobile) ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
+                      )}
+                      title="Contact details"
+                    >
+                      <Info size={16} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Row 2: chips */}
+                <div className="flex items-center gap-1.5 flex-wrap">
                   {selected.contact?.temperature && (
-                    <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-semibold border', temperatureBg[selected.contact.temperature])}>
+                    <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold border', temperatureBg[selected.contact.temperature])}>
                       {selected.contact.temperature.toUpperCase()}
+                    </span>
+                  )}
+                  {selected.contact?.lead_type && (
+                    <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold border', leadTypeBg[selected.contact.lead_type])}>
+                      {leadTypeLabels[selected.contact.lead_type]}
                     </span>
                   )}
                   {(() => {
@@ -477,13 +569,13 @@ export function InboxModule() {
                         <TooltipTrigger asChild>
                           <span
                             className={cn(
-                              'px-2 py-0.5 rounded-full text-[10px] font-semibold border cursor-help',
+                              'px-1.5 py-0.5 rounded text-[9px] font-semibold border cursor-help',
                               ws.open
                                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
                                 : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
                             )}
                           >
-                            {ws.open ? `🟢 Window open · ${ws.hoursLeft}h left` : ws.never ? '🔒 Never replied' : '🔒 Window closed'}
+                            {ws.open ? `🟢 ${ws.hoursLeft}h left` : ws.never ? '🔒 Never replied' : '🔒 Closed'}
                           </span>
                         </TooltipTrigger>
                         <TooltipContent side="bottom" className="max-w-xs">
@@ -496,83 +588,15 @@ export function InboxModule() {
                       </Tooltip>
                     );
                   })()}
-                  <AssignmentControl
-                    assignedTo={selected.contact?.assigned_to ?? null}
-                    profiles={profiles}
-                    isAdmin={!!isAdmin}
-                    disabled={reassigning}
-                    onChange={val => handleReassign(selected.contact_id, val)}
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <ActionBtn
-                    icon={Phone}
-                    onClick={() => {
-                      const phone = selected.contact?.phone;
-                      if (phone) window.open(`tel:${phone}`, '_blank');
-                      else toast({ title: 'No phone number', variant: 'destructive' });
-                    }}
-                  />
-                  <ActionBtn
-                    icon={Video}
-                    onClick={() => {
-                      const phone = selected.contact?.phone;
-                      if (phone) window.open(`https://wa.me/${phone}?text=`, '_blank');
-                      else toast({ title: 'No phone number', variant: 'destructive' });
-                    }}
-                  />
-                  <ActionBtn
-                    icon={Bot}
-                    label="AI Reply"
-                    primary
-                    disabled={aiLoading}
-                    onClick={async () => {
-                      if (!selectedConvId || aiLoading) return;
-                      setAiLoading(true);
-                      try {
-                        const lastMsgs = messages.slice(-5).map(m => `${m.is_outbound ? 'Agent' : 'Contact'}: ${m.content}`).join('\n');
-                        const { data, error } = await supabase.functions.invoke('send-message', {
-                          body: {
-                            conversation_id: selectedConvId,
-                            content: `[AI suggested reply based on context]\n\nPlease follow up with ${selected.contact?.name} regarding their interest.`,
-                            message_type: 'ai',
-                          },
-                        });
-                        if (error) throw error;
-                        toast({ title: 'AI reply sent' });
-                        fetchMessages(selectedConvId);
-                      } catch (e: any) {
-                        toast({ title: 'AI Reply failed', description: e.message, variant: 'destructive' });
-                      } finally {
-                        setAiLoading(false);
-                      }
-                    }}
-                  />
-                  <button
-                    onClick={() => { setShowCopilot(!showCopilot); if (!showCopilot) setShowInfo(false); }}
-                    className={cn(
-                      'p-2 rounded-lg transition-colors cursor-pointer',
-                      showCopilot ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
-                    )}
-                    title="Zazi Copilot"
-                  >
-                    <Brain size={16} />
-                  </button>
-                  <button
-                    onClick={() => { setShowInfo(!showInfo); if (!showInfo) setShowCopilot(false); }}
-                    className={cn(
-                      'p-2 rounded-lg transition-colors cursor-pointer',
-                      showInfo ? 'bg-primary/15 text-primary' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
-                    )}
-                  >
-                    <Info size={16} />
-                  </button>
-                  <ActionBtn
-                    icon={MoreVertical}
-                    onClick={() => {
-                      toast({ title: 'More options coming soon', description: 'Archive, mark as read, etc.' });
-                    }}
-                  />
+                  <div className="ml-auto">
+                    <AssignmentControl
+                      assignedTo={selected.contact?.assigned_to ?? null}
+                      profiles={profiles}
+                      isAdmin={!!isAdmin}
+                      disabled={reassigning}
+                      onChange={val => handleReassign(selected.contact_id, val)}
+                    />
+                  </div>
                 </div>
               </div>
 
