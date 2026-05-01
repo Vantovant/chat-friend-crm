@@ -519,12 +519,15 @@ export function DamageControlModule() {
             <p>No audit rows match. Click "Run Damage Audit" to scan all conversations.</p>
           </div>
         ) : (
-          filtered.map(r => (
+          filtered.map(r => {
+            const od = computeOverdue(r);
+            return (
             <div key={r.id} className={cn(
               'vanto-card p-3 md:p-4 flex flex-col gap-2',
               r.damage_score === 'red' && 'border-l-4 border-l-destructive',
               r.damage_score === 'orange' && 'border-l-4 border-l-orange-500',
               r.damage_score === 'yellow' && 'border-l-4 border-l-amber-500',
+              od.overdue && 'ring-1 ring-destructive/40',
             )}>
               <div className="flex items-start gap-3 flex-wrap">
                 <div className="flex-1 min-w-0">
