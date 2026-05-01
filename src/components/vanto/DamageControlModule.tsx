@@ -542,7 +542,7 @@ export function DamageControlModule() {
         <span className="text-[11px] text-muted-foreground whitespace-nowrap">{filtered.length} match{filtered.length === 1 ? '' : 'es'}</span>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto p-3 md:p-4 space-y-2 pb-24 md:pb-4">
+      <div className="flex-1 min-h-0 md:overflow-y-auto p-3 md:p-4 space-y-2 pb-24 md:pb-4">
         {loading ? (
           <div className="flex items-center justify-center h-32 gap-2 text-muted-foreground text-sm">
             <Loader2 size={14} className="animate-spin" /> Loading…
