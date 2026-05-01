@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { temperatureBg, type LeadTemperature } from '@/lib/vanto-data';
+import { temperatureBg, leadTypeBg, leadTypeLabels, LEAD_TYPES, type LeadTemperature, type LeadType } from '@/lib/vanto-data';
 import {
   Search, Phone, Video, MoreVertical, Send, Bot, Brain,
-  Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare, AlertTriangle, RotateCcw, ArrowLeft,
+  Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare, AlertTriangle, RotateCcw, ArrowLeft, X, Save, Pencil,
 } from 'lucide-react';
 import { displayPhone } from '@/lib/phone-utils';
 import { useProfiles, profileLabel, type ProfileOption } from '@/hooks/use-profiles';
