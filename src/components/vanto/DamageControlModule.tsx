@@ -324,7 +324,7 @@ export function DamageControlModule() {
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col min-h-full md:h-full">
       <div className="px-4 md:px-6 py-4 border-b border-border flex items-center justify-between shrink-0 gap-3 flex-wrap">
         <div>
           <h3 className="text-base font-bold text-foreground flex items-center gap-2">
@@ -511,7 +511,7 @@ export function DamageControlModule() {
       </div>
 
 
-      <div className="flex-1 overflow-y-auto p-3 md:p-4 space-y-2">
+      <div className="flex-1 md:overflow-y-auto p-3 md:p-4 space-y-2 pb-24 md:pb-4">
         {loading ? (
           <div className="flex items-center justify-center h-32 gap-2 text-muted-foreground text-sm">
             <Loader2 size={14} className="animate-spin" /> Loading…
