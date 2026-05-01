@@ -107,6 +107,7 @@ export function DamageControlModule() {
       .select('*')
       .order('damage_score', { ascending: false })
       .order('vanto_step_in', { ascending: false })
+      .order('last_inbound_at', { ascending: false, nullsFirst: false })
       .order('scanned_at', { ascending: false })
       .limit(500);
     if (error) {
