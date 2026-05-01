@@ -469,8 +469,9 @@
         <button class="vanto-close-btn" id="vanto-close">&times;</button>
       </div>
       <div id="vanto-auth-banner" class="vanto-auth-banner" style="display: none;">
-        <p>Please log in to save contacts</p>
-        <a href="${DASHBOARD_URL}" target="_blank">Open Dashboard</a>
+        <p><strong>Extension not logged in</strong></p>
+        <p style="font-size: 12px; margin: 6px 0; opacity: 0.9;">Logging into the web dashboard is separate from the extension. Click the Vanto extension icon in your Chrome toolbar (top-right) and sign in with the same email & password.</p>
+        <a href="${DASHBOARD_URL}" target="_blank" style="font-size: 12px;">Forgot password? Open Dashboard →</a>
       </div>
       <div class="vanto-contact-card">
         <div class="vanto-avatar" id="vanto-avatar">?</div>
