@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
 import {
   Loader2, RefreshCw, ShieldAlert, CheckCircle2, AlertTriangle, Flame,
-  UserX, MessageSquare, Copy, Download, Mic,
+  UserX, MessageSquare, Copy, Download, Mic, ClipboardCheck, UserCheck, FileText, Phone,
 } from 'lucide-react';
 import { downloadVCard, copyContactCard } from '@/lib/vcard';
 import { DictateMessage } from './DictateMessage';
+import { buildRecoveryDraft } from '@/lib/recovery-drafts';
 
 type Score = 'green' | 'yellow' | 'orange' | 'red';
 
@@ -44,7 +45,14 @@ interface AuditRow {
   last_outbound_snippet: string | null;
   last_inbound_snippet: string | null;
   scanned_at: string;
+  recovery_status?: string | null;
+  reviewed_at?: string | null;
+  handled_at?: string | null;
+  vcard_saved_at?: string | null;
+  recovery_angle?: string | null;
 }
+
+type Queue = 'all' | 'red' | 'orange' | 'yellow_hot' | 'name_needed' | 'clean';
 
 const SCORE_STYLES: Record<Score, string> = {
   green: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
