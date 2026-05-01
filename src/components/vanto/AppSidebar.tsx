@@ -7,7 +7,7 @@ import logo from '@/assets/logo.jpg';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import {
   LayoutDashboard, MessageSquare, Users, BarChart3, Zap, Bot, GitBranch,
-  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X, Megaphone, ShieldCheck
+  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X, Megaphone, ShieldCheck, ShieldAlert
 } from 'lucide-react';
 
 interface NavItem {
@@ -31,6 +31,7 @@ const navItems: NavItem[] = [
   { id: 'group-campaigns', label: 'Group Campaigns', icon: Megaphone },
   { id: 'integrations', label: 'Integrations', icon: Puzzle },
   { id: 'api-console', label: 'API Console', icon: Terminal },
+  { id: 'damage-control', label: 'Damage Control', icon: ShieldAlert, adminOnly: true },
   { id: 'review-queue', label: 'Review Queue', icon: ShieldCheck, adminOnly: true },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
