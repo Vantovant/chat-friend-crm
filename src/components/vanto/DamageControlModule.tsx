@@ -286,6 +286,15 @@ export function DamageControlModule() {
     }
     if (!matchesRecency(r, recency)) return false;
     if (overdueOnly && !computeOverdue(r).overdue) return false;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      const qDigits = q.replace(/\D/g, '');
+      const name = (r.contact_name || '').toLowerCase();
+      const phoneDigits = (r.contact_phone || '').replace(/\D/g, '');
+      const nameMatch = name.includes(q);
+      const phoneMatch = qDigits.length > 0 && phoneDigits.includes(qDigits);
+      if (!nameMatch && !phoneMatch) return false;
+    }
     return true;
   });
 
