@@ -750,16 +750,44 @@ export function InboxModule() {
           )}
         </div>
 
-        {/* ── Contact Info Panel (hidden on mobile) ── */}
+        {/* ── Contact Info Panel (desktop) ── */}
         {selected?.contact && showInfo && !isMobile && (
-          <div className="w-72 shrink-0 border-l border-border overflow-y-auto bg-card/30">
+          <div className="w-80 shrink-0 border-l border-border overflow-y-auto bg-card/30">
             <ContactInfoPanel
               contact={selected.contact}
               profiles={profiles}
+              stages={stages}
               isAdmin={!!isAdmin}
               reassigning={reassigning}
               onReassign={val => handleReassign(selected.contact_id, val)}
+              onSave={(patch) => handleUpdateContact(selected.contact_id, patch)}
             />
+          </div>
+        )}
+
+        {/* ── Contact Info Panel (mobile slide-over) ── */}
+        {selected?.contact && isMobile && showMobileInfo && (
+          <div className="fixed inset-0 z-50 bg-black/60" onClick={() => setShowMobileInfo(false)}>
+            <div
+              className="absolute right-0 top-0 bottom-0 w-[92%] max-w-sm bg-background border-l border-border overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between p-3 border-b border-border sticky top-0 bg-background z-10">
+                <p className="text-sm font-semibold text-foreground">Contact Details</p>
+                <button onClick={() => setShowMobileInfo(false)} className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60">
+                  <X size={18} />
+                </button>
+              </div>
+              <ContactInfoPanel
+                contact={selected.contact}
+                profiles={profiles}
+                stages={stages}
+                isAdmin={!!isAdmin}
+                reassigning={reassigning}
+                onReassign={val => handleReassign(selected.contact_id, val)}
+                onSave={(patch) => handleUpdateContact(selected.contact_id, patch)}
+              />
+            </div>
           </div>
         )}
 
