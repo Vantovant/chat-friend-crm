@@ -245,8 +245,42 @@ export function DamageControlModule() {
         })}
       </div>
 
+      {/* Stage 2 — Recovery Pack queue tabs (copy-only, no sending) */}
+      <div className="px-4 md:px-6 py-2 border-b border-border flex items-center gap-2 shrink-0 flex-wrap text-xs">
+        <span className="text-muted-foreground font-semibold uppercase tracking-wide">Recovery queue:</span>
+        {([
+          { id: 'all', label: `All (${stats.total})`, color: 'text-foreground' },
+          { id: 'red', label: `🔴 RED price/trust (${stats.red})`, color: 'text-destructive' },
+          { id: 'orange', label: `🟠 ORANGE duplicate/weak (${stats.orange})`, color: 'text-orange-400' },
+          { id: 'yellow_hot', label: `🔥 YELLOW HOT (${stats.yellowHot})`, color: 'text-amber-400' },
+          { id: 'name_needed', label: `👤 Name needed (${stats.nameNeeded})`, color: 'text-blue-400' },
+          { id: 'clean', label: `🟢 Clean follow-up`, color: 'text-emerald-400' },
+        ] as const).map(q => (
+          <button
+            key={q.id}
+            onClick={() => setQueue(q.id as Queue)}
+            className={cn(
+              'px-2.5 py-1 rounded-md border',
+              queue === q.id ? 'bg-primary/15 border-primary/40 text-primary' : 'border-border text-muted-foreground hover:text-foreground'
+            )}
+          >
+            {q.label}
+          </button>
+        ))}
+        <button
+          onClick={() => setHideHandled(v => !v)}
+          className={cn(
+            'ml-auto px-2 py-1 rounded border flex items-center gap-1',
+            hideHandled ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300' : 'border-border text-muted-foreground'
+          )}
+          title="Hide leads already personally handled"
+        >
+          <CheckCircle2 size={12} /> Hide handled ({stats.handled})
+        </button>
+      </div>
+
       <div className="px-4 md:px-6 py-2 border-b border-border flex items-center gap-3 text-xs shrink-0 flex-wrap">
-        <span className="text-muted-foreground">Filters:</span>
+        <span className="text-muted-foreground">Score filter:</span>
         {(['all', 'green', 'yellow', 'orange', 'red'] as const).map(s => (
           <button
             key={s}
