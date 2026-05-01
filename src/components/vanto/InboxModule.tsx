@@ -27,7 +27,7 @@ type Contact = {
   email: string | null;
   temperature: LeadTemperature;
   lead_type: LeadType;
-  interest: string;
+  interest: 'high' | 'medium' | 'low';
   tags: string[] | null;
   notes: string | null;
   assigned_to: string | null;
