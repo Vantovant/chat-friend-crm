@@ -840,7 +840,8 @@ export function DamageControlModule() {
                 })()}
               </div>
             </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
