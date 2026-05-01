@@ -342,7 +342,42 @@ export function DamageControlModule() {
         </button>
       </div>
 
-      <div className="px-4 md:px-6 py-4 border-b border-border grid grid-cols-3 md:grid-cols-6 gap-2 shrink-0">
+      {/* Locked Level 1 status panel — informational, not a toggle */}
+      <div className="px-4 md:px-6 py-3 border-b border-border bg-secondary/30 shrink-0">
+        <div className="flex items-start gap-3 flex-wrap">
+          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 text-amber-300 text-xs font-semibold">
+            <Lock size={14} />
+            Master Prospector Mode: Level 1 — Draft Only
+          </div>
+          <p className="text-[11px] text-muted-foreground flex-1 min-w-[220px] self-center">
+            Master Prospector is awake in Level 1 Damage-Control Mode. It prepares intelligence and drafts only. Vanto sends manually.
+          </p>
+        </div>
+        <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+          <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-2">
+            <p className="font-semibold text-emerald-300 mb-1 flex items-center gap-1"><Bot size={12} /> Prospector CAN</p>
+            <ul className="text-muted-foreground space-y-0.5">
+              <li>✅ Read leads</li>
+              <li>✅ Score damage</li>
+              <li>✅ Classify intent &amp; temperature</li>
+              <li>✅ Prepare recovery drafts</li>
+              <li>✅ Polish dictated messages</li>
+              <li>✅ Flag VANTO STEP IN leads</li>
+            </ul>
+          </div>
+          <div className="rounded-md border border-destructive/30 bg-destructive/5 p-2">
+            <p className="font-semibold text-destructive mb-1 flex items-center gap-1"><Lock size={12} /> Blocked</p>
+            <ul className="text-muted-foreground space-y-0.5">
+              <li>❌ Auto-send</li>
+              <li>❌ Bulk send / Send All</li>
+              <li>❌ Queue recovery messages</li>
+              <li>❌ Bypass human approval</li>
+              <li>❌ Publish Vanto OS events</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+
         {[
           { label: 'Total', value: stats.total, icon: MessageSquare, color: 'text-foreground' },
           { label: 'Green', value: stats.green, icon: CheckCircle2, color: 'text-emerald-400', f: 'green' as const },
