@@ -1183,16 +1183,24 @@ Deno.serve(async (req) => {
         const APLGO_HEADER = `🌿 *APLGO Official Wellness Info*\nhttps://aplgo.com/j/787262\n\n`;
         const TRUST_BRIDGE = `Hi, this is *Vanto from Get Well Africa*.\nQuick heads-up — this WhatsApp replies from our +1 business number, but I will also personally assist you from my *South African number +27 79 083 1530*.\n\n`;
 
+        // Sister-site anchor — RLX-aware. If the inbound mentions sleep/stress/calm or RLX,
+        // anchor to /shop/rlx; otherwise anchor to /shop. One link only (low-pressure read).
+        const wantsRlxTopic = /(rlx|sleep|insomnia|stress|anx|calm|relax|wind ?down|switch off|overwhelm|tension)/i.test(inboundText);
+        const SISTER_ANCHOR = wantsRlxTopic
+          ? `📖 If you'd like to read first (no pressure):\nhttps://project-pal-glue.lovable.app/shop/rlx\n\n`
+          : `📖 If you'd like to browse first (no pressure):\nhttps://project-pal-glue.lovable.app/shop\n\n`;
+        diag.sister_anchor_used = wantsRlxTopic ? "rlx" : "shop";
+
         if (dualIntent) {
           // (b) Replace the AI-generated reply with ONE combined dual-intent reply
           //     so we don't fire two separate first replies.
           const DUAL_BODY = `Great — I can help you with both sides 🙂\n\n*🛒 Buying products:*\n• Customer store: https://aplshop.com/j/787262\n• Member pricing is available once you join — usually saves 25–40%.\n\n*🤝 Becoming a distributor:*\n• Income opportunity with retail margin + team commissions.\n• Associate enrollment: https://backoffice.aplgo.com/register/?sp=787262\n\nWould you like help first with *choosing the right product*, or *understanding how the distributor side works*?`;
-          replyContent = APLGO_HEADER + TRUST_BRIDGE + DUAL_BODY;
+          replyContent = APLGO_HEADER + TRUST_BRIDGE + SISTER_ANCHOR + DUAL_BODY;
           diag.dual_intent_merged = true;
           actionTaken = "dual_intent_merged";
         } else {
-          // (c) Standard first-reply: header + trust-bridge prepended to existing AI reply.
-          replyContent = APLGO_HEADER + TRUST_BRIDGE + replyContent;
+          // (c) Standard first-reply: header + trust-bridge + sister anchor + AI reply.
+          replyContent = APLGO_HEADER + TRUST_BRIDGE + SISTER_ANCHOR + replyContent;
         }
         diag.aplgo_header_prepended = true;
         diag.trust_bridge_prepended = true;
