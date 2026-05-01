@@ -146,9 +146,39 @@ export function DamageControlModule() {
     toast({ title: 'Contact card copied' });
   };
 
+  // Mark a row reviewed/handled/saved-to-phone — copy-only audit, no sending.
+  const updateRecovery = async (r: AuditRow, patch: Partial<AuditRow>) => {
+    const { error } = await supabase
+      .from('prospector_damage_audit' as any)
+      .update(patch as any)
+      .eq('id', r.id);
+    if (error) {
+      toast({ title: 'Save failed', description: error.message, variant: 'destructive' });
+      return;
+    }
+    setRows(prev => prev.map(x => (x.id === r.id ? { ...x, ...patch } : x)));
+    toast({ title: 'Saved' });
+  };
+
+  const queueOf = (r: AuditRow): Queue => {
+    if (r.damage_score === 'red') return 'red';
+    if (r.damage_score === 'orange') return 'orange';
+    if (r.damage_score === 'yellow' && r.temperature === 'hot') return 'yellow_hot';
+    if (!r.name_known) return 'name_needed';
+    return 'clean';
+  };
+
   const filtered = rows.filter(r => {
     if (scoreFilter !== 'all' && r.damage_score !== scoreFilter) return false;
     if (stepInOnly && !r.vanto_step_in) return false;
+    if (hideHandled && r.recovery_status === 'handled') return false;
+    if (queue !== 'all') {
+      if (queue === 'name_needed') {
+        if (r.name_known) return false;
+      } else if (queueOf(r) !== queue) {
+        return false;
+      }
+    }
     return true;
   });
 
@@ -162,6 +192,8 @@ export function DamageControlModule() {
     nameNeeded: rows.filter(r => !r.name_known).length,
     duplicates: rows.reduce((s, r) => s + r.duplicate_outbound, 0),
     weakTouch: rows.filter(r => r.weak_first_touch).length,
+    yellowHot: rows.filter(r => r.damage_score === 'yellow' && r.temperature === 'hot').length,
+    handled: rows.filter(r => r.recovery_status === 'handled').length,
   };
 
   return (
