@@ -1013,95 +1013,238 @@ function ActionBtn({ icon: Icon, label, primary, onClick, disabled }: { icon: Re
 }
 
 /* ── Contact Info Panel ── */
-function ContactInfoPanel({ contact, profiles, isAdmin, reassigning, onReassign }: {
-  contact: Contact; profiles: ProfileOption[]; isAdmin: boolean;
+function ContactInfoPanel({ contact, profiles, stages, isAdmin, reassigning, onReassign, onSave }: {
+  contact: Contact; profiles: ProfileOption[]; stages: Stage[]; isAdmin: boolean;
   reassigning: boolean; onReassign: (val: string | null) => void;
+  onSave: (patch: Partial<Contact>) => Promise<{ ok: boolean; error?: string }>;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    name: contact.name,
+    email: contact.email ?? '',
+    lead_type: contact.lead_type,
+    temperature: contact.temperature,
+    interest: contact.interest,
+    stage_id: contact.stage_id ?? '',
+    tags: (contact.tags ?? []).join(', '),
+    notes: contact.notes ?? '',
+  });
+
+  useEffect(() => {
+    setForm({
+      name: contact.name,
+      email: contact.email ?? '',
+      lead_type: contact.lead_type,
+      temperature: contact.temperature,
+      interest: contact.interest,
+      stage_id: contact.stage_id ?? '',
+      tags: (contact.tags ?? []).join(', '),
+      notes: contact.notes ?? '',
+    });
+    setEditing(false);
+  }, [contact.id]);
+
+  const set = <K extends keyof typeof form>(k: K, v: typeof form[K]) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = async () => {
+    setSaving(true);
+    const patch: Partial<Contact> = {
+      name: form.name.trim() || contact.name,
+      email: form.email.trim() || null,
+      lead_type: form.lead_type,
+      temperature: form.temperature,
+      interest: form.interest,
+      stage_id: form.stage_id || null,
+      tags: form.tags.split(',').map(t => t.trim()).filter(Boolean),
+      notes: form.notes.trim() || null,
+    };
+    const res = await onSave(patch);
+    setSaving(false);
+    if (res.ok) setEditing(false);
+  };
+
+  const currentStage = stages.find(s => s.id === contact.stage_id);
+
   return (
-    <div className="p-4 space-y-5">
-      <div className="text-center pt-2">
-        <div className="w-16 h-16 rounded-full vanto-gradient flex items-center justify-center text-2xl font-bold text-primary-foreground mx-auto mb-3">
+    <div className="p-4 space-y-4">
+      <div className="text-center pt-1">
+        <div className="w-14 h-14 rounded-full vanto-gradient flex items-center justify-center text-xl font-bold text-primary-foreground mx-auto mb-2">
           {contact.name[0]}
         </div>
-        <h3 className="font-semibold text-foreground">{contact.name}</h3>
+        <h3 className="font-semibold text-foreground text-sm">{contact.name}</h3>
         <p className="text-xs text-muted-foreground">{displayPhone(contact.phone)}</p>
-        {contact.temperature && (
-          <div className="flex justify-center gap-2 mt-2">
-            <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-semibold border', temperatureBg[contact.temperature])}>
+      </div>
+
+      {!editing ? (
+        <button
+          onClick={() => setEditing(true)}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-primary/10 text-primary border border-primary/20 hover:bg-primary/15 text-xs font-medium transition-colors"
+        >
+          <Pencil size={13} /> Edit & Add to CRM
+        </button>
+      ) : (
+        <div className="flex gap-2">
+          <button
+            onClick={() => setEditing(false)}
+            disabled={saving}
+            className="flex-1 px-3 py-2 rounded-lg border border-border text-muted-foreground hover:text-foreground text-xs font-medium transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg vanto-gradient text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
+          >
+            {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+            Save
+          </button>
+        </div>
+      )}
+
+      {/* CRM Pipeline */}
+      <div className="vanto-card p-3 space-y-2">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">CRM Pipeline Stage</p>
+        {editing ? (
+          <select
+            value={form.stage_id}
+            onChange={e => set('stage_id', e.target.value)}
+            className="w-full bg-secondary/60 border border-border rounded-lg px-2 py-1.5 text-xs text-foreground outline-none focus:border-primary/50"
+          >
+            <option value="">— Unassigned —</option>
+            {stages.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+        ) : (
+          <div className="flex items-center gap-2 text-xs">
+            <div className="w-2 h-2 rounded-full" style={{ background: currentStage?.color || 'hsl(var(--muted-foreground))' }} />
+            <span className="text-foreground font-medium">{currentStage?.name || 'Not in pipeline'}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Assignment */}
+      <div className="vanto-card p-3 space-y-2">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Assignment</p>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">Assigned To</span>
+          <div className="relative">
+            <select
+              value={contact.assigned_to ?? ''}
+              disabled={reassigning}
+              onChange={e => onReassign(e.target.value || null)}
+              className={cn(
+                'appearance-none bg-secondary/60 border border-border rounded-lg pl-2 pr-6 py-1 text-xs font-medium text-foreground outline-none focus:border-primary/50',
+                reassigning && 'opacity-50 cursor-not-allowed'
+              )}
+            >
+              <option value="">Unassigned</option>
+              {profiles.map(p => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+            </select>
+            {reassigning && <Loader2 size={10} className="absolute right-1.5 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />}
+          </div>
+        </div>
+      </div>
+
+      {/* Lead details */}
+      <div className="vanto-card p-3 space-y-2.5">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Lead Details</p>
+
+        <EditableField label="Name" editing={editing}
+          render={() => <span className="text-foreground font-medium">{contact.name}</span>}
+          input={<input value={form.name} onChange={e => set('name', e.target.value)} className={inputCls} />}
+        />
+        <EditableField label="Email" editing={editing}
+          render={() => <span className="text-foreground font-medium truncate">{contact.email || 'Not set'}</span>}
+          input={<input value={form.email} onChange={e => set('email', e.target.value)} placeholder="email@example.com" className={inputCls} />}
+        />
+        <EditableField label="Lead Type" editing={editing}
+          render={() => (
+            <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-semibold border', leadTypeBg[contact.lead_type])}>
+              {leadTypeLabels[contact.lead_type]}
+            </span>
+          )}
+          input={
+            <select value={form.lead_type} onChange={e => set('lead_type', e.target.value as LeadType)} className={inputCls}>
+              {LEAD_TYPES.map(lt => <option key={lt.value} value={lt.value}>{lt.label}</option>)}
+            </select>
+          }
+        />
+        <EditableField label="Temperature" editing={editing}
+          render={() => (
+            <span className={cn('px-1.5 py-0.5 rounded text-[10px] font-semibold border', temperatureBg[contact.temperature])}>
               {contact.temperature.toUpperCase()}
             </span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-secondary border border-border text-muted-foreground capitalize">
-              {contact.lead_type}
-            </span>
-          </div>
-        )}
+          )}
+          input={
+            <select value={form.temperature} onChange={e => set('temperature', e.target.value as LeadTemperature)} className={inputCls}>
+              <option value="cold">Cold</option>
+              <option value="warm">Warm</option>
+              <option value="hot">Hot</option>
+            </select>
+          }
+        />
+        <EditableField label="Interest" editing={editing}
+          render={() => <span className="text-foreground font-medium capitalize">{contact.interest}</span>}
+          input={
+            <select value={form.interest} onChange={e => set('interest', e.target.value as 'high' | 'medium' | 'low')} className={inputCls}>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          }
+        />
       </div>
 
-      {/* Assignment section */}
+      {/* Tags */}
       <div className="vanto-card p-3 space-y-2">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Assignment</p>
-        {isAdmin ? (
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">Assigned To</span>
-            <div className="relative">
-              <select
-                value={contact.assigned_to ?? ''}
-                disabled={reassigning}
-                onChange={e => onReassign(e.target.value || null)}
-                className={cn(
-                  'appearance-none bg-secondary/60 border border-border rounded-lg pl-2 pr-6 py-1 text-xs font-medium text-foreground outline-none focus:border-primary/50 transition-colors cursor-pointer',
-                  reassigning && 'opacity-50 cursor-not-allowed'
-                )}
-              >
-                <option value="">Unassigned</option>
-                {profiles.map(p => (
-                  <option key={p.id} value={p.id}>{p.label}</option>
-                ))}
-              </select>
-              {reassigning && <Loader2 size={10} className="absolute right-1.5 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />}
-            </div>
-          </div>
-        ) : (
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-muted-foreground">Assigned To</span>
-            <span className="text-foreground font-medium">{profileLabel(profiles, contact.assigned_to)}</span>
-          </div>
-        )}
-      </div>
-
-      <div className="vanto-card p-3 space-y-2">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Contact Info</p>
-        <InfoRow label="Email" value={contact.email || 'Not set'} />
-        <InfoRow label="Interest" value={contact.interest} />
-        <InfoRow label="Lead Type" value={contact.lead_type} />
-      </div>
-
-      {contact.tags && contact.tags.length > 0 && (
-        <div className="vanto-card p-3">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Tags</p>
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Tags</p>
+        {editing ? (
+          <input
+            value={form.tags}
+            onChange={e => set('tags', e.target.value)}
+            placeholder="comma, separated, tags"
+            className={inputCls}
+          />
+        ) : contact.tags && contact.tags.length > 0 ? (
           <div className="flex flex-wrap gap-1">
             {contact.tags.map(tag => (
-              <span key={tag} className="px-2 py-0.5 rounded-md text-xs bg-secondary text-muted-foreground border border-border">{tag}</span>
+              <span key={tag} className="px-2 py-0.5 rounded-md text-[10px] bg-secondary text-muted-foreground border border-border">{tag}</span>
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-xs text-muted-foreground italic">No tags</p>
+        )}
+      </div>
 
-      {contact.notes && (
-        <div className="vanto-card p-3">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Notes</p>
-          <p className="text-xs text-muted-foreground whitespace-pre-wrap">{contact.notes}</p>
-        </div>
-      )}
+      {/* Notes */}
+      <div className="vanto-card p-3 space-y-2">
+        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Notes</p>
+        {editing ? (
+          <textarea
+            value={form.notes}
+            onChange={e => set('notes', e.target.value)}
+            rows={4}
+            placeholder="Add notes about this prospect..."
+            className={cn(inputCls, 'resize-y')}
+          />
+        ) : (
+          <p className="text-xs text-muted-foreground whitespace-pre-wrap">{contact.notes || <span className="italic">No notes</span>}</p>
+        )}
+      </div>
     </div>
   );
 }
 
-function InfoRow({ label, value }: { label: string; value: string }) {
+const inputCls = 'w-full bg-secondary/60 border border-border rounded-lg px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50';
+
+function EditableField({ label, editing, render, input }: { label: string; editing: boolean; render: () => React.ReactNode; input: React.ReactNode }) {
   return (
-    <div className="flex justify-between text-xs">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="text-foreground font-medium capitalize">{value}</span>
+    <div className={editing ? 'space-y-1' : 'flex items-center justify-between gap-2 text-xs'}>
+      <span className={cn('text-muted-foreground', editing ? 'text-[10px] font-medium block' : '')}>{label}</span>
+      {editing ? input : <div className="text-right min-w-0 truncate">{render()}</div>}
     </div>
   );
 }
