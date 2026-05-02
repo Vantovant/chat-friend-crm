@@ -8,6 +8,7 @@ import {
   Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare, AlertTriangle, RotateCcw, ArrowLeft, X, Save, Pencil,
 } from 'lucide-react';
 import { displayPhone } from '@/lib/phone-utils';
+import { isTestFixtureContact, type FixtureFilter } from '@/lib/test-fixture';
 import { useProfiles, profileLabel, type ProfileOption } from '@/hooks/use-profiles';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -92,6 +93,7 @@ export function InboxModule() {
   const [msgLoading, setMsgLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>('accessible');
+  const [fixtureFilter, setFixtureFilter] = useState<FixtureFilter>('live');
   const [reassigning, setReassigning] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
@@ -375,6 +377,10 @@ export function InboxModule() {
     const matchSearch = c.contact?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       c.contact?.phone?.includes(searchQuery);
     if (!matchSearch) return false;
+    // Test-fixture isolation (Norah Incident closure 2026-05-02): default to LIVE only.
+    const isFixture = isTestFixtureContact(c.contact);
+    if (fixtureFilter === 'live' && isFixture) return false;
+    if (fixtureFilter === 'test' && !isFixture) return false;
     if (inboxFilter === 'mine') return c.contact?.assigned_to === currentUser?.id;
     if (inboxFilter === 'unassigned') return !c.contact?.assigned_to;
     return true;
@@ -421,6 +427,25 @@ export function InboxModule() {
                   )}
                 >
                   {f === 'accessible' ? 'All' : f === 'mine' ? 'My Leads' : 'Unassigned'}
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-1 mt-2 items-center">
+              <span className="text-[9px] uppercase tracking-wider text-muted-foreground mr-1">View:</span>
+              {(['live', 'test', 'all'] as const).map(f => (
+                <button
+                  key={f}
+                  onClick={() => setFixtureFilter(f)}
+                  title={f === 'live' ? 'Real customer threads only (default)' : f === 'test' ? 'QA / Test fixtures only' : 'Show everything'}
+                  className={cn(
+                    'px-2 py-0.5 rounded-md text-[10px] font-semibold border transition-colors capitalize',
+                    fixtureFilter === f
+                      ? (f === 'test' ? 'bg-amber-500/15 text-amber-500 border-amber-500/30'
+                         : 'bg-primary/15 text-primary border-primary/30')
+                      : 'text-muted-foreground border-border hover:text-foreground hover:bg-secondary/60'
+                  )}
+                >
+                  {f === 'live' ? 'Live' : f === 'test' ? 'QA/Test' : 'All'}
                 </button>
               ))}
             </div>
@@ -925,7 +950,14 @@ function ConvListItem({ conv, active, onClick, profiles }: {
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-0.5">
-          <span className="text-sm font-medium text-foreground truncate">{conv.contact?.name || 'Unknown'}</span>
+          <span className="text-sm font-medium text-foreground truncate flex items-center gap-1.5">
+            {isTestFixtureContact(conv.contact) && (
+              <span className="px-1 py-0.5 rounded text-[8px] font-bold bg-amber-500/15 text-amber-500 border border-amber-500/30 shrink-0">
+                TEST
+              </span>
+            )}
+            {conv.contact?.name || 'Unknown'}
+          </span>
           <span className="text-[10px] text-muted-foreground shrink-0 ml-1">{formatTime(conv.last_message_at)}</span>
         </div>
         <p className="text-xs text-muted-foreground truncate">{conv.last_message || 'No messages yet'}</p>

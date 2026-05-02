@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from '@/hooks/use-toast';
 import { Brain, Send, X, Eye, RefreshCw, Loader2, Shield } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { isTestFixtureContact, isTestFixtureDraftContent, type FixtureFilter } from '@/lib/test-fixture';
 
 type Draft = {
   id: string;
@@ -19,6 +20,7 @@ type ContactInfo = {
   id: string;
   name: string | null;
   phone: string | null;
+  tags: string[] | null;
 };
 
 const maskPhone = (p?: string | null) => {
@@ -40,6 +42,7 @@ export function ProspectorDraftsModule() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [filter, setFilter] = useState<'pending' | 'all'>('pending');
+  const [fixtureFilter, setFixtureFilter] = useState<FixtureFilter>('live');
 
   const load = async () => {
     setLoading(true);
@@ -69,7 +72,7 @@ export function ProspectorDraftsModule() {
       const contactIds = Array.from(new Set((convs || []).map((c: any) => c.contact_id).filter(Boolean)));
       const { data: cs } = await supabase
         .from('contacts')
-        .select('id, name, phone')
+        .select('id, name, phone, tags')
         .in('id', contactIds);
       const convToContact: Record<string, string> = {};
       (convs || []).forEach((c: any) => { convToContact[c.id] = c.contact_id; });
@@ -134,13 +137,32 @@ export function ProspectorDraftsModule() {
             Master Prospector Level 2A — non-first-touch replies require human approval. No bulk send. No send-all.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button size="sm" variant={filter === 'pending' ? 'default' : 'outline'} onClick={() => setFilter('pending')}>
             Pending
           </Button>
           <Button size="sm" variant={filter === 'all' ? 'default' : 'outline'} onClick={() => setFilter('all')}>
             All
           </Button>
+          <div className="flex gap-1 items-center border-l border-border pl-2 ml-1">
+            <span className="text-[9px] uppercase tracking-wider text-muted-foreground mr-1">View:</span>
+            {(['live', 'test', 'all'] as const).map(f => (
+              <button
+                key={f}
+                onClick={() => setFixtureFilter(f)}
+                title={f === 'live' ? 'Real customer drafts only (default)' : f === 'test' ? 'QA / Test fixtures only' : 'Show everything'}
+                className={cn(
+                  'px-2 py-0.5 rounded-md text-[10px] font-semibold border transition-colors capitalize',
+                  fixtureFilter === f
+                    ? (f === 'test' ? 'bg-amber-500/15 text-amber-500 border-amber-500/30'
+                       : 'bg-primary/15 text-primary border-primary/30')
+                    : 'text-muted-foreground border-border hover:text-foreground hover:bg-secondary/60'
+                )}
+              >
+                {f === 'live' ? 'Live' : f === 'test' ? 'QA/Test' : 'All'}
+              </button>
+            ))}
+          </div>
           <Button size="sm" variant="outline" onClick={load} disabled={loading}>
             {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
           </Button>
@@ -158,24 +180,41 @@ export function ProspectorDraftsModule() {
         <div className="flex items-center justify-center py-12 text-muted-foreground">
           <Loader2 className="animate-spin mr-2" /> Loading drafts…
         </div>
-      ) : drafts.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground text-sm">
-          No {filter === 'pending' ? 'pending ' : ''}drafts. Master Prospector is monitoring inbound messages.
-        </div>
-      ) : (
+      ) : (() => {
+        const visible = drafts.filter(d => {
+          const c = contacts[d.conversation_id];
+          const isFixture = isTestFixtureContact(c) || isTestFixtureDraftContent(d.content);
+          if (fixtureFilter === 'live') return !isFixture;
+          if (fixtureFilter === 'test') return isFixture;
+          return true;
+        });
+        if (visible.length === 0) {
+          return (
+            <div className="text-center py-12 text-muted-foreground text-sm">
+              No {filter === 'pending' ? 'pending ' : ''}{fixtureFilter === 'test' ? 'test-fixture ' : fixtureFilter === 'live' ? 'live customer ' : ''}drafts.
+            </div>
+          );
+        }
+        return (
         <div className="space-y-3">
-          {drafts.map(d => {
+          {visible.map(d => {
             const c = contacts[d.conversation_id];
             const channel = d.content?.channel || 'unknown';
             const skipReason = d.content?.prospector?.skip_reason || '—';
             const intent = d.content?.response_type || '—';
             const firstTouch = !!d.content?.first_touch;
             const l3a = d.content?.level3a;
+            const isFixture = isTestFixtureContact(c) || isTestFixtureDraftContent(d.content);
             return (
-              <div key={d.id} className="vanto-card p-4 space-y-3">
+              <div key={d.id} className={cn('vanto-card p-4 space-y-3', isFixture && 'border-amber-500/40 bg-amber-500/5')}>
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="space-y-1">
                     <div className="font-semibold text-sm flex items-center gap-2">
+                      {isFixture && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/15 text-amber-500 border border-amber-500/30">
+                          TEST
+                        </span>
+                      )}
                       {c?.name || 'Unknown contact'}
                       <span className="text-xs font-mono text-muted-foreground">{maskPhone(c?.phone)}</span>
                     </div>
@@ -264,7 +303,8 @@ export function ProspectorDraftsModule() {
             );
           })}
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
