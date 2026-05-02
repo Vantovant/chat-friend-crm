@@ -377,6 +377,10 @@ export function InboxModule() {
     const matchSearch = c.contact?.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       c.contact?.phone?.includes(searchQuery);
     if (!matchSearch) return false;
+    // Test-fixture isolation (Norah Incident closure 2026-05-02): default to LIVE only.
+    const isFixture = isTestFixtureContact(c.contact);
+    if (fixtureFilter === 'live' && isFixture) return false;
+    if (fixtureFilter === 'test' && !isFixture) return false;
     if (inboxFilter === 'mine') return c.contact?.assigned_to === currentUser?.id;
     if (inboxFilter === 'unassigned') return !c.contact?.assigned_to;
     return true;
