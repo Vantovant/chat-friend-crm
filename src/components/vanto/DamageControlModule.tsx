@@ -293,7 +293,8 @@ export function DamageControlModule() {
   };
 
   const filtered = rows.filter(r => {
-    if (scoreFilter !== 'all' && r.damage_score !== scoreFilter) return false;
+    const eff = effectiveScore(r);
+    if (scoreFilter !== 'all' && eff !== scoreFilter) return false;
     if (stepInOnly && !r.vanto_step_in) return false;
     if (hideHandled && r.recovery_status === 'handled') return false;
     if (queue !== 'all') {
