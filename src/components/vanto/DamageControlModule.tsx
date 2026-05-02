@@ -340,16 +340,16 @@ export function DamageControlModule() {
 
   const stats = {
     total: rows.length,
-    green: rows.filter(r => r.damage_score === 'green').length,
-    yellow: rows.filter(r => r.damage_score === 'yellow').length,
-    orange: rows.filter(r => r.damage_score === 'orange').length,
-    red: rows.filter(r => r.damage_score === 'red').length,
-    stepIn: rows.filter(r => r.vanto_step_in).length,
+    green: rows.filter(r => effectiveScore(r) === 'green').length,
+    yellow: rows.filter(r => effectiveScore(r) === 'yellow').length,
+    orange: rows.filter(r => effectiveScore(r) === 'orange').length,
+    red: rows.filter(r => effectiveScore(r) === 'red').length,
+    stepIn: rows.filter(r => r.vanto_step_in && r.recovery_status !== 'recovered').length,
     nameNeeded: rows.filter(r => !r.name_known).length,
     duplicates: rows.reduce((s, r) => s + r.duplicate_outbound, 0),
     weakTouch: rows.filter(r => r.weak_first_touch).length,
     yellowHot: rows.filter(r => r.damage_score === 'yellow' && r.temperature === 'hot').length,
-    handled: rows.filter(r => r.recovery_status === 'handled').length,
+    handled: rows.filter(r => r.recovery_status === 'handled' || r.recovery_status === 'recovered').length,
     overdue: rows.filter(r => computeOverdue(r).overdue).length,
   };
 
