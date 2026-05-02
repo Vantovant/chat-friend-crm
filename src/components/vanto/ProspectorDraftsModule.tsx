@@ -42,6 +42,7 @@ export function ProspectorDraftsModule() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [filter, setFilter] = useState<'pending' | 'all'>('pending');
+  const [fixtureFilter, setFixtureFilter] = useState<FixtureFilter>('live');
 
   const load = async () => {
     setLoading(true);
