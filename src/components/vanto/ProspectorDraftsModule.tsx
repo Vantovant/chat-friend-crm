@@ -170,6 +170,7 @@ export function ProspectorDraftsModule() {
             const skipReason = d.content?.prospector?.skip_reason || '—';
             const intent = d.content?.response_type || '—';
             const firstTouch = !!d.content?.first_touch;
+            const l3a = d.content?.level3a;
             return (
               <div key={d.id} className="vanto-card p-4 space-y-3">
                 <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -185,9 +186,34 @@ export function ProspectorDraftsModule() {
                         {firstTouch ? 'first-touch' : 'follow-up'}
                       </Badge>
                       <Badge variant="outline" className={cn('text-[10px]', statusColor(d.status))}>{d.status}</Badge>
+                      {l3a && (
+                        <>
+                          <Badge variant="outline" className="text-[10px] border-primary/40 text-primary">
+                            L3A · {l3a.selected_angle}
+                          </Badge>
+                          {l3a.safety_checks?.escalation_triggered && (
+                            <Badge variant="outline" className="text-[10px] border-destructive/40 text-destructive">
+                              ESCALATE
+                            </Badge>
+                          )}
+                          {!l3a.safety_checks?.price_ok && (
+                            <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-500">
+                              PRICE FLAG
+                            </Badge>
+                          )}
+                          {!l3a.safety_checks?.link_ok && (
+                            <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-500">
+                              LINK FLAG
+                            </Badge>
+                          )}
+                        </>
+                      )}
                     </div>
                     <div className="text-[11px] text-muted-foreground">
                       {new Date(d.created_at).toLocaleString()} · skip: {skipReason}
+                      {l3a && (
+                        <> · angle: <span className="text-foreground">{l3a.selected_angle}</span> · conf: {(l3a.confidence * 100).toFixed(0)}%</>
+                      )}
                     </div>
                   </div>
                   {d.status === 'pending' && (
@@ -212,6 +238,27 @@ export function ProspectorDraftsModule() {
                 </pre>
                 {d.content?.reasoning && (
                   <p className="text-[11px] text-muted-foreground italic">{d.content.reasoning}</p>
+                )}
+                {l3a && (
+                  <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-1.5 text-[11px]">
+                    <div className="font-semibold text-primary flex items-center gap-1.5">
+                      <Brain size={11} /> Level 3A · {l3a.mode}
+                    </div>
+                    <div className="text-muted-foreground"><span className="text-foreground">Intent:</span> {l3a.detected_intent} → <span className="text-foreground">{l3a.selected_angle}</span></div>
+                    <div className="text-muted-foreground italic">{l3a.reasoning}</div>
+                    <div className="text-muted-foreground">
+                      <span className="text-foreground">Action:</span> {l3a.recommended_action}
+                    </div>
+                    {(l3a.safety_checks?.price_flags?.length > 0 || l3a.safety_checks?.link_issues?.length > 0) && (
+                      <div className="text-amber-500">
+                        {l3a.safety_checks.price_flags?.length > 0 && <div>Price flags: {l3a.safety_checks.price_flags.join(', ')}</div>}
+                        {l3a.safety_checks.link_issues?.length > 0 && <div>Link issues: {l3a.safety_checks.link_issues.join('; ')}</div>}
+                      </div>
+                    )}
+                    <div className="text-[10px] text-muted-foreground">
+                      Sponsor enforced: {l3a.safety_checks?.sponsor_enforced} · DNC: {String(l3a.safety_checks?.dnc)} · Quiet hours: {String(l3a.safety_checks?.quiet_hours)} · Auto-send blocked: {String(l3a.auto_send_blocked)}
+                    </div>
+                  </div>
                 )}
               </div>
             );

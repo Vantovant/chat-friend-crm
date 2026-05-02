@@ -12,6 +12,7 @@ import {
   PieChart, Pie, Cell, AreaChart, Area, CartesianGrid,
 } from 'recharts';
 import { ProspectorHealthCard } from './ProspectorHealthCard';
+import { GroupHealthCard } from './GroupHealthCard';
 
 type Stats = {
   totalContacts: number;
@@ -141,9 +142,10 @@ export function DashboardModule() {
         </div>
       </div>
 
-      {/* Master Prospector Level 2 Health */}
-      <div className="px-4 md:px-6 pt-4">
+      {/* Master Prospector Level 2A Health + Level 3A Group Intelligence */}
+      <div className="px-4 md:px-6 pt-4 grid gap-4 md:grid-cols-2">
         <ProspectorHealthCard />
+        <GroupHealthCard />
       </div>
 
       {/* Temperature breakdown */}
