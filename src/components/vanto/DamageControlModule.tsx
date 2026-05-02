@@ -991,6 +991,13 @@ export function DamageControlModule() {
           })
         )}
       </div>
+      <EditContactDrawer
+        contactId={editContactId}
+        onClose={() => setEditContactId(null)}
+        onSaved={(c) => {
+          setRows(prev => prev.map(x => x.contact_id === c.id ? { ...x, contact_name: c.name, contact_phone: c.phone } : x));
+        }}
+      />
     </div>
   );
 }
