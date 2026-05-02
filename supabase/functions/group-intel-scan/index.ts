@@ -32,31 +32,43 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const MAYTAPI_PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID");
-const MAYTAPI_PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID");
-const MAYTAPI_API_TOKEN = Deno.env.get("MAYTAPI_API_TOKEN");
+const MAYTAPI_PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID")?.trim();
+const MAYTAPI_PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID")?.trim();
+const MAYTAPI_API_TOKEN = Deno.env.get("MAYTAPI_API_TOKEN")?.trim();
 
 const ACTIVE_DAYS = 14;
 const WARM_DAYS = 60;
 const DORMANT_DAYS = 180;
 
-async function fetchGroupMembers(groupJid: string): Promise<string[]> {
-  if (!MAYTAPI_PRODUCT_ID || !MAYTAPI_PHONE_ID || !MAYTAPI_API_TOKEN) return [];
+// READ-ONLY: calls the documented per-group detail endpoint.
+// Returns { phones, raw } so caller can record evidence + diagnose shape if empty.
+async function fetchGroupMembers(groupJid: string): Promise<{ phones: string[]; source: string; sample_keys: string[]; http_status: number | null }> {
+  const empty = { phones: [], source: "no_credentials", sample_keys: [], http_status: null as number | null };
+  if (!MAYTAPI_PRODUCT_ID || !MAYTAPI_PHONE_ID || !MAYTAPI_API_TOKEN) return empty;
   try {
-    const url = `https://api.maytapi.com/api/${MAYTAPI_PRODUCT_ID}/${MAYTAPI_PHONE_ID}/getGroups`;
+    // Per Maytapi docs: GET /{phone_id}/getGroups/{conversation_id} returns specific group details (incl. participants).
+    const url = `https://api.maytapi.com/api/${MAYTAPI_PRODUCT_ID}/${MAYTAPI_PHONE_ID}/getGroups/${encodeURIComponent(groupJid)}`;
     const r = await fetch(url, { headers: { "x-maytapi-key": MAYTAPI_API_TOKEN } });
-    if (!r.ok) { await r.text(); return []; }
+    const status = r.status;
+    if (!r.ok) { await r.text(); return { ...empty, source: "http_error", http_status: status }; }
     const data = await r.json();
-    const groups = data?.data || [];
-    const grp = groups.find((g: any) => g.id === groupJid || g.jid === groupJid);
-    if (!grp) return [];
-    const participants: any[] = grp.participants || grp.members || [];
-    return participants
-      .map((p: any) => (typeof p === "string" ? p : p.id || p.phone || p.jid || ""))
-      .map((s: string) => s.replace(/@.*$/, "").replace(/\D/g, ""))
+    // Maytapi may wrap as { success, data: {...} } or return the group object directly.
+    const grp: any = data?.data ?? data ?? {};
+    const sample_keys = Object.keys(grp || {});
+    const participants: any[] =
+      grp.participants || grp.members || grp.contacts || grp?.data?.participants || [];
+    const phones = participants
+      .map((p: any) => (typeof p === "string" ? p : p?.id || p?.phone || p?.jid || p?.number || ""))
+      .map((s: string) => String(s).replace(/@.*$/, "").replace(/\D/g, ""))
       .filter(Boolean);
-  } catch (_) {
-    return [];
+    return {
+      phones,
+      source: phones.length > 0 ? "per_group_endpoint" : "endpoint_returned_no_participants",
+      sample_keys,
+      http_status: status,
+    };
+  } catch (e) {
+    return { ...empty, source: "exception:" + (e instanceof Error ? e.message : String(e)) };
   }
 }
 
@@ -85,7 +97,9 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
     return { group_id: group.id, group_name: group.group_name, error: "no_group_jid" };
   }
 
-  const memberPhones = await fetchGroupMembers(group.group_jid);
+  const fetched = await fetchGroupMembers(group.group_jid);
+  const memberPhones = fetched.phones;
+
   if (memberPhones.length === 0) {
     return {
       group_id: group.id,
@@ -93,9 +107,15 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
       group_name: group.group_name,
       member_count: 0,
       buckets: { active: 0, warm: 0, dormant: 0, ghost: 0, total: 0 },
-      suggested_action: "Leave alone — could not enumerate members (Maytapi read failed)",
+      enumeration_status: "unavailable",
+      enumeration_source: fetched.source,
+      enumeration_http_status: fetched.http_status,
+      enumeration_sample_keys: fetched.sample_keys,
+      suggested_action: "Member enumeration unavailable from Maytapi response",
       risk_notes: "no_members_returned",
       reconnect_shortlist: [],
+      auto_send_blocked: true,
+      mode: "audit_only",
       generated_at: new Date().toISOString(),
     };
   }
@@ -113,9 +133,8 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
     if (c.phone_normalized) contactByPhone[c.phone_normalized] = c;
   });
 
-  // Pull last_inbound_at per contact via conversations
   const contactIds = (contacts || []).map((c: any) => c.id);
-  let lastInboundByContact: Record<string, string> = {};
+  const lastInboundByContact: Record<string, string> = {};
   if (contactIds.length > 0) {
     const { data: convs } = await svc
       .from("conversations")
@@ -131,6 +150,7 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
 
   const buckets = { active: 0, warm: 0, dormant: 0, ghost: 0, total: 0 };
   const shortlist: any[] = [];
+  let dnc_excluded = 0;
 
   for (const phone of phonesNormalized) {
     buckets.total++;
@@ -138,6 +158,7 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
     const lastIn = c ? lastInboundByContact[c.id] || null : null;
     const cls = classify(lastIn, !!c);
     buckets[cls]++;
+    if (c?.do_not_contact) dnc_excluded++;
     if ((cls === "warm" || cls === "dormant") && c && !c.do_not_contact) {
       shortlist.push({
         contact_id: c.id,
@@ -160,6 +181,10 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
     group_name: group.group_name,
     member_count: buckets.total,
     buckets,
+    enumeration_status: "available",
+    enumeration_source: fetched.source,
+    enumeration_http_status: fetched.http_status,
+    dnc_excluded,
     suggested_action: sugg.action,
     risk_notes: sugg.risk,
     reconnect_shortlist: shortlist.slice(0, 25),
@@ -168,7 +193,6 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
     generated_at: new Date().toISOString(),
   };
 
-  // Persist to group_health_reports (best-effort; ignore if table missing)
   await svc.from("group_health_reports").insert({
     group_id: group.id,
     group_jid: group.group_jid,
