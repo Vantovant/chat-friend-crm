@@ -1433,7 +1433,7 @@ Deno.serve(async (req) => {
         : hourlyExceeded ? `hourly_cap_${hourlyCap}_exceeded`
         : "policy_block";
 
-      await svc.from("ai_suggestions").insert({
+      const { error: draftErr } = await svc.from("ai_suggestions").insert({
         conversation_id,
         suggestion_type: "draft_reply",
         status: "pending",
@@ -1458,12 +1458,16 @@ Deno.serve(async (req) => {
           reasoning: `Level 2A draft: ${skipReason}. Awaiting human approval in Prospector Drafts.`,
         },
       });
+      if (draftErr) {
+        console.error("[auto-reply] L2A draft insert FAILED:", draftErr.message, draftErr.details);
+        diag.l2_draft_insert_error = draftErr.message;
+      }
 
       await svc.from("auto_reply_events").insert({
         conversation_id,
         inbound_message_id: inbound_message_id || null,
-        action_taken: "drafted_for_review",
-        reason: `Level 2A: ${skipReason}`,
+        action_taken: draftErr ? "draft_insert_failed" : "drafted_for_review",
+        reason: draftErr ? `Level 2A draft insert error: ${draftErr.message}` : `Level 2A: ${skipReason}`,
         menu_option: intent.intent,
         knowledge_query: intent.query?.slice(0, 200) || null,
         knowledge_found: knowledgeFound,
