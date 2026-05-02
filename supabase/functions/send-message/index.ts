@@ -153,7 +153,82 @@ Deno.serve(async (req) => {
     }, 422);
   }
 
-  const trimmed = String(content).trim();
+  let trimmed = String(content).trim();
+
+  // ── TRACK B SHARED SAFETY VALIDATOR (2026-05-02) ──
+  // Mirror of sanitizeOutboundText() in whatsapp-auto-reply/index.ts.
+  // Blocks forbidden literals + sub-R100 + premium-tier-too-low; sanitises myaplworld links.
+  // Logs evidence to auto_reply_events.
+  {
+    const FORBIDDEN_LITERALS = [
+      "R549", "R649", "R433.13", "R866.25", "R15.5", "R15.50",
+      "R1,039.50", "R1039.50", "R1,386.00", "R1386.00", "R1,559.25", "R1559.25",
+    ];
+    const PREMIUM_RE = /\b(ICE|ALT|HPR|HRT|MLS|LFT)\b/i;
+    const SAFE_FALLBACK =
+      "I want to confirm the official APLGO price before quoting it. " +
+      "Browse the official catalogue here: https://aplshop.com/j/787262/catalog/\n\n— Vanto";
+
+    let safetyReasons: string[] = [];
+    let safetyBlocked = false;
+    let linksReplaced = 0;
+
+    trimmed = trimmed.replace(/https?:\/\/(?:www\.)?myaplworld\.com\/[^\s)]*/gi, () => {
+      linksReplaced++;
+      return "https://aplshop.com/j/787262/catalog/";
+    });
+    if (linksReplaced > 0) safetyReasons.push(`replaced_${linksReplaced}_myaplworld_link(s)`);
+
+    for (const lit of FORBIDDEN_LITERALS) {
+      const re = new RegExp(`(?<!\\d)${lit.replace(/[.$]/g, "\\$&")}(?!\\d)`, "i");
+      if (re.test(trimmed)) { safetyReasons.push(`forbidden_literal:${lit}`); safetyBlocked = true; }
+    }
+
+    const matches = trimmed.match(/\bR\s?\d{1,3}(?:[ ,]\d{3})*(?:\.\d{1,2})?\b/g) || [];
+    for (const raw of matches) {
+      const num = parseFloat(raw.replace(/[Rr\s,]/g, ""));
+      if (!isNaN(num) && num > 0 && num < 100) {
+        safetyReasons.push(`sub_R100_price:${raw}`); safetyBlocked = true; break;
+      }
+    }
+    if (PREMIUM_RE.test(trimmed)) {
+      for (const raw of matches) {
+        const num = parseFloat(raw.replace(/[Rr\s,]/g, ""));
+        if (!isNaN(num) && num > 0 && num < 900) {
+          safetyReasons.push(`premium_price_too_low:${raw}`); safetyBlocked = true; break;
+        }
+      }
+    }
+
+    if (safetyBlocked) {
+      console.warn("[send-message] SAFETY BLOCKED:", safetyReasons.join("; "));
+      try {
+        await serviceClient.from("auto_reply_events").insert({
+          conversation_id,
+          inbound_message_id: null,
+          action_taken: "send_blocked_price_safety",
+          reason: safetyReasons.join("; ").slice(0, 500),
+          template_used: `provider:pre-detect|original_blocked`,
+          knowledge_query: trimmed.slice(0, 500),
+          knowledge_found: false,
+        });
+      } catch (logErr: any) {
+        console.warn("[send-message] failed to log send_blocked_price_safety:", logErr?.message);
+      }
+      return jsonRes({
+        ok: false,
+        code: "PRICE_SAFETY_BLOCKED",
+        message: "Outbound message blocked by price/link safety validator.",
+        reasons: safetyReasons,
+        suggested_safe_text: SAFE_FALLBACK,
+        hint: "Confirm the price from the approved Knowledge Vault before sending. Use the catalogue link for now.",
+      }, 422);
+    }
+    if (linksReplaced > 0) {
+      console.log("[send-message] sanitised", linksReplaced, "myaplworld link(s)");
+    }
+  }
+
 
   // ── Detect preferred provider based on most recent inbound message ──
   // STABILIZATION v5.1: route replies via the same provider the user used (Twilio or Maytapi)

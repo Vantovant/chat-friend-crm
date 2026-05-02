@@ -62,57 +62,46 @@ const PRODUCT_ALIASES: Record<string, string> = {
   hpy: "HPY", brn: "BRN", pft: "PFT", terra: "TERRA",
 };
 
-// ── Topic-to-Link Map ───────────────────────────────────────────────────────
-// Product links from the "Topics and Links" document
+// ── Topic-to-Link Map (Track B 2026-05-02 — sponsor-safe only) ──────────────
+// All product "Learn more" links route to the sponsor-coded digital catalogue.
+// Legacy myaplworld.com links are NEVER emitted by auto-reply outbound text.
+const SAFE_CATALOG_URL = "https://aplshop.com/j/787262/catalog/";
 const PRODUCT_LINKS: Record<string, string> = {
-  GRW: "https://myaplworld.com/pages.cfm?p=05915D2C",
-  SLD: "https://myaplworld.com/pages.cfm?p=B279CC19",
-  STP: "https://myaplworld.com/pages.cfm?p=636072A2",
-  GTS: "https://myaplworld.com/pages.cfm?p=4BD6E64B",
-  NRM: "https://myaplworld.com/pages.cfm?p=E1733903",
-  RLX: "https://myaplworld.com/pages.cfm?p=16A575D1",
-  "PWR APRICOT": "https://myaplworld.com/pages.cfm?p=4626AFB1",
-  "PWR LEMON": "https://myaplworld.com/pages.cfm?p=74FFAD3F",
-  MLS: "https://myaplworld.com/pages.cfm?p=A2C6E598",
-  HRT: "https://myaplworld.com/pages.cfm?p=AE3FDA64",
-  HPR: "https://myaplworld.com/pages.cfm?p=00A46B24",
-  ICE: "https://myaplworld.com/pages.cfm?p=01039BAF",
-  ALT: "https://myaplworld.com/pages.cfm?p=F02175ED",
-  LFT: "https://myaplworld.com/pages.cfm?p=7396FFFF",
-  BRN: "https://myaplworld.com/pages.cfm?p=347BB05B",
-  PFT: "https://myaplworld.com/pages.cfm?p=08D34D48",
-  BTY: "https://myaplworld.com/pages.cfm?p=4E87459A",
-  AIR: "https://myaplworld.com/pages.cfm?p=57EFA6EB",
-  HPY: "https://myaplworld.com/pages.cfm?p=655B65CB",
-  TERRA: "https://myaplworld.com/pages.cfm?p=50AF319A",
+  GRW: SAFE_CATALOG_URL, SLD: SAFE_CATALOG_URL, STP: SAFE_CATALOG_URL,
+  GTS: SAFE_CATALOG_URL, NRM: SAFE_CATALOG_URL, RLX: SAFE_CATALOG_URL,
+  "PWR APRICOT": SAFE_CATALOG_URL, "PWR LEMON": SAFE_CATALOG_URL,
+  MLS: SAFE_CATALOG_URL, HRT: SAFE_CATALOG_URL, HPR: SAFE_CATALOG_URL,
+  ICE: SAFE_CATALOG_URL, ALT: SAFE_CATALOG_URL, LFT: SAFE_CATALOG_URL,
+  BRN: SAFE_CATALOG_URL, PFT: SAFE_CATALOG_URL, BTY: SAFE_CATALOG_URL,
+  AIR: SAFE_CATALOG_URL, HPY: SAFE_CATALOG_URL, TERRA: SAFE_CATALOG_URL,
 };
 
 const TOPIC_LINKS = {
   opportunity: [
     { label: "Register as APLGO Distributor", url: "https://backoffice.aplgo.com/register/?sp=787262" },
-    { label: "All Topics & Info", url: "https://myaplworld.com/pages.cfm?p=50717DB2" },
+    { label: "Brand site", url: "https://aplgo.com/j/787262/" },
   ],
   compensation: [
     { label: "Register as APLGO Distributor", url: "https://backoffice.aplgo.com/register/?sp=787262" },
-    { label: "All Topics & Info", url: "https://myaplworld.com/pages.cfm?p=50717DB2" },
+    { label: "Brand site", url: "https://aplgo.com/j/787262/" },
   ],
   products: [
-    { label: "Full Product & Topics Page", url: "https://myaplworld.com/pages.cfm?p=50717DB2" },
+    { label: "Full Product Catalogue", url: "https://aplshop.com/j/787262/catalog/" },
   ],
   wellness: [
-    { label: "Product Reference Guide", url: "https://myaplworld.com/pages.cfm?p=50717DB2" },
+    { label: "Product Catalogue", url: "https://aplshop.com/j/787262/catalog/" },
   ],
 };
 
 // ── Menu Backward Compatibility ─────────────────────────────────────────────
-// Deterministic menu routing — these queries match the canonical pricing doc.
+// Deterministic menu routing — these queries match the active 15% VAT pricing doc.
 const MENU_QUERY_MAP: Record<string, { query: string; collections: string[] }> = {
-  "1": { query: "APLGO PRODUCT PRICING QUICK REFERENCE SOUTH AFRICA daily collection premium elite", collections: ["products"] },
-  "2": { query: "APLGO PRODUCT PRICING QUICK REFERENCE benefits immune support stress digestion", collections: ["products"] },
+  "1": { query: "APLGO South Africa Price List 15% VAT daily premium elite member retail", collections: ["products"] },
+  "2": { query: "APLGO benefits immune support stress digestion price list", collections: ["products"] },
 };
 
 // Canonical doc title used as the source of truth for menu_1 / menu_2 grounding
-const PRICING_DOC_TITLE = "APLGO Product Pricing Quick Reference (ZAR)";
+const PRICING_DOC_TITLE = "APLGO SA Price List — 15% VAT (ACTIVE)";
 
 // Minimum ts_rank relevance to consider a chunk usable for STRICT collections.
 // Below this the bot must give an honest "couldn't verify" fallback instead of bluffing.
@@ -130,6 +119,79 @@ const PRICING_PATTERNS = [
 ];
 
 const STRICT_COLLECTIONS = new Set(["products", "compensation", "orders"]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TRACK B SHARED SAFETY HELPER (2026-05-02)
+// Used by this function AND mirrored inline in send-message/index.ts.
+// Detects:
+//   - Forbidden literal prices (R549, R649, R433.13, R866.25, R15.5, R15.50,
+//     R1,039.50, R1,386.00, R1,559.25)
+//   - Sub-R100 values that mention a Rand price (e.g. "R15.5")
+//   - Premium-tier prices that fall below R900 when the message names a
+//     Premium product (ICE/ALT/HPR/HRT/MLS/LFT — member floor R1,035 incl)
+// Sanitises:
+//   - All myaplworld.com links → sponsor-safe catalogue
+// ─────────────────────────────────────────────────────────────────────────────
+const FORBIDDEN_PRICE_LITERALS = [
+  "R549", "R649", "R433.13", "R866.25", "R15.5", "R15.50",
+  "R1,039.50", "R1039.50", "R1,386.00", "R1386.00", "R1,559.25", "R1559.25",
+];
+const PREMIUM_PRODUCTS_RE = /\b(ICE|ALT|HPR|HRT|MLS|LFT)\b/i;
+const SAFE_FALLBACK_BODY =
+  "I want to confirm the official APLGO price before quoting it. " +
+  "Browse the official catalogue here: https://aplshop.com/j/787262/catalog/\n\n— Vanto";
+
+function sanitizeOutboundText(input: string): {
+  safeText: string;
+  blocked: boolean;
+  reasons: string[];
+  replacedLinks: number;
+} {
+  const reasons: string[] = [];
+  let text = input || "";
+  let blocked = false;
+
+  let replacedLinks = 0;
+  text = text.replace(/https?:\/\/(?:www\.)?myaplworld\.com\/[^\s)]*/gi, () => {
+    replacedLinks++;
+    return "https://aplshop.com/j/787262/catalog/";
+  });
+  if (replacedLinks > 0) reasons.push(`replaced_${replacedLinks}_myaplworld_link(s)`);
+
+  for (const lit of FORBIDDEN_PRICE_LITERALS) {
+    const re = new RegExp(`(?<!\\d)${lit.replace(/[.$]/g, "\\$&")}(?!\\d)`, "i");
+    if (re.test(text)) {
+      reasons.push(`forbidden_literal:${lit}`);
+      blocked = true;
+    }
+  }
+
+  const priceMatches = text.match(/\bR\s?\d{1,3}(?:[ ,]\d{3})*(?:\.\d{1,2})?\b/g) || [];
+  for (const raw of priceMatches) {
+    const num = parseFloat(raw.replace(/[Rr\s,]/g, ""));
+    if (!isNaN(num) && num > 0 && num < 100) {
+      reasons.push(`sub_R100_price:${raw}`);
+      blocked = true;
+      break;
+    }
+  }
+
+  if (PREMIUM_PRODUCTS_RE.test(text)) {
+    for (const raw of priceMatches) {
+      const num = parseFloat(raw.replace(/[Rr\s,]/g, ""));
+      if (!isNaN(num) && num > 0 && num < 900) {
+        reasons.push(`premium_price_too_low:${raw}`);
+        blocked = true;
+        break;
+      }
+    }
+  }
+
+  if (blocked) {
+    return { safeText: SAFE_FALLBACK_BODY, blocked: true, reasons, replacedLinks };
+  }
+  return { safeText: text, blocked: false, reasons, replacedLinks };
+}
 
 type TopicCategory = "products" | "opportunity" | "compensation" | "wellness" | "general";
 
@@ -1281,35 +1343,40 @@ Deno.serve(async (req) => {
     diag.first_touch_error = e?.message;
   }
 
-  // ── PRICE SAFETY VALIDATOR (Emergency patch 2026-05-01) ──
-  // Block any obviously-broken price (sub-R100) before it leaves the system.
-  // Approved APLGO SA prices are: Daily R431.25/R862.50, Premium R1,035/R1,293.75,
-  // Elite R1,380+, PFT R1,552.50+, Pendant R1,725+. Anything <R100 is a hallucination.
+  // ── PRICE & LINK SAFETY (Track B 2026-05-02) ──
+  // Hardened validator: forbidden literals + sub-R100 + premium-tier floor + link sanitiser.
+  // Always logs evidence to auto_reply_events when blocked.
   try {
-    // Match R + amount, allowing thousand separators (comma/space) and decimals.
-    // Examples matched: "R15", "R15.5", "R431.25", "R1,035", "R1 035.50", "R1293.75".
-    const priceMatches = replyContent.match(/\bR\s?\d{1,3}(?:[ ,]\d{3})*(?:\.\d{1,2})?\b/g) || [];
-    let badPrice: string | null = null;
-    for (const raw of priceMatches) {
-      const num = parseFloat(raw.replace(/[Rr\s,]/g, ""));
-      if (!isNaN(num) && num > 0 && num < 100) {
-        badPrice = raw;
-        break;
-      }
+    const safety = sanitizeOutboundText(replyContent);
+    if (safety.replacedLinks > 0 && !safety.blocked) {
+      replyContent = safety.safeText;
+      diag.link_sanitised = safety.replacedLinks;
     }
-    if (badPrice) {
+    if (safety.blocked) {
       diag.price_safety_blocked = true;
-      diag.price_safety_value = badPrice;
-      console.warn(`[auto-reply] PRICE-SAFETY blocked reply containing ${badPrice}`);
+      diag.price_safety_reasons = safety.reasons;
+      console.warn(`[auto-reply] SAFETY BLOCKED: ${safety.reasons.join("; ")}`);
+      // Evidence row (best-effort, never crash the reply)
+      try {
+        await svc.from("auto_reply_events").insert({
+          conversation_id,
+          inbound_message_id: inbound_message_id || null,
+          action_taken: "price_safety_blocked",
+          reason: safety.reasons.join("; ").slice(0, 500),
+          template_used: "safe_catalogue_fallback",
+          knowledge_query: (replyContent || "").slice(0, 500),
+          knowledge_found: false,
+        });
+      } catch (logErr: any) {
+        console.warn("[auto-reply] failed to log price_safety_blocked event:", logErr?.message);
+      }
       replyContent =
         `🌿 *APLGO Official Wellness Info*\nDistributor: *Vanto — Get Well Africa*\nAPLGO Sponsor Code: *787262*\n\n` +
-        `I don't want to misquote you. Let me confirm the official APLGO price for this product first.\n\n` +
-        `In the meantime you can browse the official catalogue here:\n` +
-        `📒 https://aplshop.com/j/787262/catalog/\n\n— Vanto`;
+        safety.safeText;
       actionTaken = "price_safety_fallback";
     }
   } catch (e: any) {
-    console.warn("[auto-reply] price-safety validator error (non-fatal):", e?.message);
+    console.warn("[auto-reply] price/link safety validator error (non-fatal):", e?.message);
   }
 
   // ── 24h DUPLICATE OUTBOUND GUARD (Emergency patch 2026-05-01) ──
