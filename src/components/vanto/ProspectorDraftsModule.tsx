@@ -239,6 +239,27 @@ export function ProspectorDraftsModule() {
                 {d.content?.reasoning && (
                   <p className="text-[11px] text-muted-foreground italic">{d.content.reasoning}</p>
                 )}
+                {l3a && (
+                  <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-1.5 text-[11px]">
+                    <div className="font-semibold text-primary flex items-center gap-1.5">
+                      <Brain size={11} /> Level 3A · {l3a.mode}
+                    </div>
+                    <div className="text-muted-foreground"><span className="text-foreground">Intent:</span> {l3a.detected_intent} → <span className="text-foreground">{l3a.selected_angle}</span></div>
+                    <div className="text-muted-foreground italic">{l3a.reasoning}</div>
+                    <div className="text-muted-foreground">
+                      <span className="text-foreground">Action:</span> {l3a.recommended_action}
+                    </div>
+                    {(l3a.safety_checks?.price_flags?.length > 0 || l3a.safety_checks?.link_issues?.length > 0) && (
+                      <div className="text-amber-500">
+                        {l3a.safety_checks.price_flags?.length > 0 && <div>Price flags: {l3a.safety_checks.price_flags.join(', ')}</div>}
+                        {l3a.safety_checks.link_issues?.length > 0 && <div>Link issues: {l3a.safety_checks.link_issues.join('; ')}</div>}
+                      </div>
+                    )}
+                    <div className="text-[10px] text-muted-foreground">
+                      Sponsor enforced: {l3a.safety_checks?.sponsor_enforced} · DNC: {String(l3a.safety_checks?.dnc)} · Quiet hours: {String(l3a.safety_checks?.quiet_hours)} · Auto-send blocked: {String(l3a.auto_send_blocked)}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
