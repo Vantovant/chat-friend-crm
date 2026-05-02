@@ -62,29 +62,18 @@ const PRODUCT_ALIASES: Record<string, string> = {
   hpy: "HPY", brn: "BRN", pft: "PFT", terra: "TERRA",
 };
 
-// ── Topic-to-Link Map ───────────────────────────────────────────────────────
-// Product links from the "Topics and Links" document
+// ── Topic-to-Link Map (Track B 2026-05-02 — sponsor-safe only) ──────────────
+// All product "Learn more" links route to the sponsor-coded digital catalogue.
+// Legacy myaplworld.com links are NEVER emitted by auto-reply outbound text.
+const SAFE_CATALOG_URL = "https://aplshop.com/j/787262/catalog/";
 const PRODUCT_LINKS: Record<string, string> = {
-  GRW: "https://myaplworld.com/pages.cfm?p=05915D2C",
-  SLD: "https://myaplworld.com/pages.cfm?p=B279CC19",
-  STP: "https://myaplworld.com/pages.cfm?p=636072A2",
-  GTS: "https://myaplworld.com/pages.cfm?p=4BD6E64B",
-  NRM: "https://myaplworld.com/pages.cfm?p=E1733903",
-  RLX: "https://myaplworld.com/pages.cfm?p=16A575D1",
-  "PWR APRICOT": "https://myaplworld.com/pages.cfm?p=4626AFB1",
-  "PWR LEMON": "https://myaplworld.com/pages.cfm?p=74FFAD3F",
-  MLS: "https://myaplworld.com/pages.cfm?p=A2C6E598",
-  HRT: "https://myaplworld.com/pages.cfm?p=AE3FDA64",
-  HPR: "https://myaplworld.com/pages.cfm?p=00A46B24",
-  ICE: "https://myaplworld.com/pages.cfm?p=01039BAF",
-  ALT: "https://myaplworld.com/pages.cfm?p=F02175ED",
-  LFT: "https://myaplworld.com/pages.cfm?p=7396FFFF",
-  BRN: "https://myaplworld.com/pages.cfm?p=347BB05B",
-  PFT: "https://myaplworld.com/pages.cfm?p=08D34D48",
-  BTY: "https://myaplworld.com/pages.cfm?p=4E87459A",
-  AIR: "https://myaplworld.com/pages.cfm?p=57EFA6EB",
-  HPY: "https://myaplworld.com/pages.cfm?p=655B65CB",
-  TERRA: "https://myaplworld.com/pages.cfm?p=50AF319A",
+  GRW: SAFE_CATALOG_URL, SLD: SAFE_CATALOG_URL, STP: SAFE_CATALOG_URL,
+  GTS: SAFE_CATALOG_URL, NRM: SAFE_CATALOG_URL, RLX: SAFE_CATALOG_URL,
+  "PWR APRICOT": SAFE_CATALOG_URL, "PWR LEMON": SAFE_CATALOG_URL,
+  MLS: SAFE_CATALOG_URL, HRT: SAFE_CATALOG_URL, HPR: SAFE_CATALOG_URL,
+  ICE: SAFE_CATALOG_URL, ALT: SAFE_CATALOG_URL, LFT: SAFE_CATALOG_URL,
+  BRN: SAFE_CATALOG_URL, PFT: SAFE_CATALOG_URL, BTY: SAFE_CATALOG_URL,
+  AIR: SAFE_CATALOG_URL, HPY: SAFE_CATALOG_URL, TERRA: SAFE_CATALOG_URL,
 };
 
 const TOPIC_LINKS = {
