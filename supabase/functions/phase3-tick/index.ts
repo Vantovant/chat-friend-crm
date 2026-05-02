@@ -28,6 +28,17 @@ Deno.serve(async (req) => {
 
     const nowIso = new Date().toISOString();
 
+    // ── GOVERNANCE GATE (Level 2A lock) ──
+    // Phase 3 auto-send is gated by integration_settings.zazi_prospector_phase3_mode.
+    // Default = 'suggest_only'. Auto-send only when explicitly set to 'auto'.
+    const { data: phase3ModeRow } = await supabase
+      .from("integration_settings")
+      .select("value")
+      .eq("key", "zazi_prospector_phase3_mode")
+      .maybeSingle();
+    const phase3Mode = (phase3ModeRow?.value || "suggest_only").toLowerCase();
+    const autoSendAllowed = phase3Mode === "auto";
+
     const { data: due, error } = await supabase
       .from("missed_inquiries")
       .select("id, contact_id, conversation_id, current_step, last_inbound_snippet, attempts, intent_state, topic, auto_followup_enabled")
@@ -106,6 +117,11 @@ Deno.serve(async (req) => {
       const firstName = (contact.name || "there").split(" ")[0];
       const message = renderTemplate(tpl.template_text, { name: firstName, first_name: firstName, topic: row.topic || "" });
       let isAuto = tpl.send_mode === "auto";
+
+      // Governance downgrade — Phase 3 cannot auto-send unless flag explicitly = 'auto'
+      if (isAuto && !autoSendAllowed) {
+        isAuto = false;
+      }
 
       // ── Human-touch guard ──
       // If a real human (sent_by IS NOT NULL) outbound message exists in the last 4h
