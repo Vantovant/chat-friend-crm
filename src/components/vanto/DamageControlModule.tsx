@@ -182,6 +182,7 @@ export function DamageControlModule() {
   const [recency, setRecency] = useState<Recency>('all');
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [search, setSearch] = useState('');
+  const [editContactId, setEditContactId] = useState<string | null>(null);
 
   const fetchRows = async () => {
     setLoading(true);
