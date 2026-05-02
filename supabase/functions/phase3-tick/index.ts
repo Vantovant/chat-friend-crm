@@ -118,6 +118,11 @@ Deno.serve(async (req) => {
       const message = renderTemplate(tpl.template_text, { name: firstName, first_name: firstName, topic: row.topic || "" });
       let isAuto = tpl.send_mode === "auto";
 
+      // Governance downgrade — Phase 3 cannot auto-send unless flag explicitly = 'auto'
+      if (isAuto && !autoSendAllowed) {
+        isAuto = false;
+      }
+
       // ── Human-touch guard ──
       // If a real human (sent_by IS NOT NULL) outbound message exists in the last 4h
       // for this conversation, downgrade auto → suggest. Vanto is already handling it.
