@@ -5,11 +5,16 @@ import { toast } from '@/hooks/use-toast';
 import {
   Loader2, RefreshCw, ShieldAlert, CheckCircle2, AlertTriangle, Flame,
   UserX, MessageSquare, Copy, Download, Mic, ClipboardCheck, UserCheck, FileText, Phone,
-  Lock, Bot, User as UserIcon, Clock,
+  Lock, Bot, User as UserIcon, Clock, Pencil, X as XIcon, Save as SaveIcon,
 } from 'lucide-react';
 import { downloadVCard, copyContactCard } from '@/lib/vcard';
 import { DictateMessage } from './DictateMessage';
 import { buildRecoveryDraft } from '@/lib/recovery-drafts';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Button } from '@/components/ui/button';
+import { LEAD_TYPES } from '@/lib/vanto-data';
 
 type Score = 'green' | 'yellow' | 'orange' | 'red';
 
@@ -177,6 +182,7 @@ export function DamageControlModule() {
   const [recency, setRecency] = useState<Recency>('all');
   const [overdueOnly, setOverdueOnly] = useState(false);
   const [search, setSearch] = useState('');
+  const [editContactId, setEditContactId] = useState<string | null>(null);
 
   const fetchRows = async () => {
     setLoading(true);
@@ -942,11 +948,28 @@ export function DamageControlModule() {
                           <Phone size={12} /> Mark saved to phone
                         </button>
                         <button
-                          onClick={() => updateRecovery(r, { reviewed_at: new Date().toISOString(), recovery_status: 'reviewed', recovery_angle: pack.angle } as any)}
-                          disabled={!!r.reviewed_at}
-                          className="flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-blue-500/15 text-blue-300 border border-blue-500/30 disabled:opacity-50"
+                          onClick={() => setEditContactId(r.contact_id)}
+                          className="flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-primary/15 text-primary border border-primary/30"
+                          title="Edit this contact's details"
                         >
-                          <ClipboardCheck size={12} /> Mark reviewed
+                          <Pencil size={12} /> Edit contact
+                        </button>
+                        <button
+                          onClick={() => updateRecovery(
+                            r,
+                            r.reviewed_at
+                              ? ({ reviewed_at: null, recovery_status: r.handled_at ? r.recovery_status : null } as any)
+                              : ({ reviewed_at: new Date().toISOString(), recovery_status: 'reviewed', recovery_angle: pack.angle } as any)
+                          )}
+                          className={cn(
+                            'flex items-center gap-1 px-2 py-1 rounded text-[11px] border',
+                            r.reviewed_at
+                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                              : 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                          )}
+                          title={r.reviewed_at ? 'Click to clear "reviewed" mark' : 'Mark as reviewed'}
+                        >
+                          <ClipboardCheck size={12} /> {r.reviewed_at ? 'Reviewed ✓ (click to clear)' : 'Mark reviewed'}
                         </button>
                         <button
                           onClick={() => updateRecovery(r, { handled_at: new Date().toISOString(), recovery_status: 'handled', recovery_angle: pack.angle } as any)}
@@ -968,6 +991,162 @@ export function DamageControlModule() {
           })
         )}
       </div>
+      <EditContactDrawer
+        contactId={editContactId}
+        onClose={() => setEditContactId(null)}
+        onSaved={(c) => {
+          setRows(prev => prev.map(x => x.contact_id === c.id ? { ...x, contact_name: c.name, contact_phone: c.phone } : x));
+        }}
+      />
     </div>
+  );
+}
+
+type EditableContact = {
+  id: string;
+  name: string;
+  phone: string | null;
+  phone_raw: string | null;
+  email: string | null;
+  lead_type: string;
+  temperature: string;
+  notes: string | null;
+  tags: string[] | null;
+};
+
+function EditContactDrawer({
+  contactId, onClose, onSaved,
+}: {
+  contactId: string | null;
+  onClose: () => void;
+  onSaved: (c: EditableContact) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [contact, setContact] = useState<EditableContact | null>(null);
+  const [form, setForm] = useState<EditableContact | null>(null);
+
+  useEffect(() => {
+    if (!contactId) { setContact(null); setForm(null); return; }
+    setLoading(true);
+    supabase.from('contacts')
+      .select('id, name, phone, phone_raw, email, lead_type, temperature, notes, tags')
+      .eq('id', contactId)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (error) {
+          toast({ title: 'Failed to load contact', description: error.message, variant: 'destructive' });
+        } else if (data) {
+          const c = data as any as EditableContact;
+          setContact(c);
+          setForm(c);
+        }
+        setLoading(false);
+      });
+  }, [contactId]);
+
+  const set = <K extends keyof EditableContact>(k: K, v: EditableContact[K]) => {
+    setForm(f => (f ? { ...f, [k]: v } : f));
+  };
+
+  const save = async () => {
+    if (!form || !contact) return;
+    setSaving(true);
+    const patch: any = {
+      name: form.name?.trim() || contact.name,
+      phone_raw: form.phone_raw?.trim() || null,
+      email: form.email?.trim() || null,
+      lead_type: form.lead_type,
+      temperature: form.temperature,
+      notes: form.notes?.trim() || null,
+      tags: form.tags || [],
+      updated_at: new Date().toISOString(),
+    };
+    const { data, error } = await supabase.from('contacts').update(patch).eq('id', contact.id).select().single();
+    setSaving(false);
+    if (error) {
+      toast({ title: 'Save failed', description: error.message, variant: 'destructive' });
+      return;
+    }
+    toast({ title: 'Contact updated' });
+    onSaved(data as any);
+    onClose();
+  };
+
+  return (
+    <Sheet open={!!contactId} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+        <SheetHeader>
+          <SheetTitle>Edit contact</SheetTitle>
+          <SheetDescription className="font-mono text-xs">{contactId}</SheetDescription>
+        </SheetHeader>
+        {loading || !form ? (
+          <div className="flex items-center justify-center py-12 text-muted-foreground text-sm gap-2">
+            <Loader2 size={14} className="animate-spin" /> Loading…
+          </div>
+        ) : (
+          <div className="space-y-3 mt-4">
+            <div>
+              <label className="text-xs text-muted-foreground">Name</label>
+              <Input value={form.name || ''} onChange={(e) => set('name', e.target.value)} />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Phone</label>
+              <Input value={form.phone_raw || form.phone || ''} onChange={(e) => set('phone_raw', e.target.value)} placeholder="+27…" />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Email</label>
+              <Input value={form.email || ''} onChange={(e) => set('email', e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs text-muted-foreground">Lead type</label>
+                <select
+                  value={form.lead_type}
+                  onChange={(e) => set('lead_type', e.target.value)}
+                  className="w-full rounded-md border border-border bg-background text-foreground text-sm h-9 px-2"
+                >
+                  {LEAD_TYPES.map(lt => (
+                    <option key={lt.value} value={lt.value}>{lt.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground">Temperature</label>
+                <select
+                  value={form.temperature}
+                  onChange={(e) => set('temperature', e.target.value)}
+                  className="w-full rounded-md border border-border bg-background text-foreground text-sm h-9 px-2"
+                >
+                  <option value="hot">Hot</option>
+                  <option value="warm">Warm</option>
+                  <option value="cold">Cold</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Tags (comma-separated)</label>
+              <Input
+                value={(form.tags || []).join(', ')}
+                onChange={(e) => set('tags', e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground">Notes</label>
+              <Textarea rows={4} value={form.notes || ''} onChange={(e) => set('notes', e.target.value)} />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" size="sm" onClick={onClose} disabled={saving}>
+                <XIcon size={14} className="mr-1" /> Cancel
+              </Button>
+              <Button size="sm" onClick={save} disabled={saving}>
+                {saving ? <Loader2 size={14} className="animate-spin mr-1" /> : <SaveIcon size={14} className="mr-1" />}
+                Save changes
+              </Button>
+            </div>
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
   );
 }
