@@ -1,8 +1,15 @@
 ---
-name: Master Prospector — Level 2A (auto first-touch only)
-description: Promotes Prospector to Level 2 — auto-sends ONLY the Unified Trust Entry first-touch on Twilio + Maytapi; every other reply downgrades to ai_suggestions for one-by-one human approval in Prospector Drafts tab
+name: Master Prospector — Level 2A (auto first-touch + Twilio legacy KV)
+description: Auto-sends Unified Trust Entry first-touch on Twilio+Maytapi. Twilio non-first-touch keeps legacy Knowledge Vault auto-reply (post-incident hotfix 2026-05-02). Maytapi non-first-touch downgrades to Prospector Drafts for human approval.
 type: feature
 ---
+
+POST-INCIDENT HOTFIX 2026-05-02: An earlier Level 2A build downgraded ALL non-first-touch replies (including Twilio Facebook lead answers) into Prospector Drafts. This broke Twilio's previously working Knowledge Vault auto-reply and surfaced unsafe backfilled drafts containing invented RLX prices (R549/R649 — NOT in approved KV). Hotfix:
+- `whatsapp-auto-reply/index.ts` gate now has TWO autoAllowed paths: (A) Level 2A first-touch trust auto-send on both channels under safety locks, OR (B) Twilio non-first-touch passes through to legacy KV auto-reply (still gated by DNC + quiet hours).
+- Maytapi non-first-touch still downgrades to drafts (the unsafe channel that needs human approval).
+- Unsafe backfilled drafts containing R549/R649 deleted from `ai_suggestions`.
+- NEVER auto-generate placeholder pricing answers — drafts with missing original text must say "Original reply text was not captured. Please regenerate from Knowledge Vault before sending."
+
 Approved 2026-05-02.
 
 Wake flags in `integration_settings`:

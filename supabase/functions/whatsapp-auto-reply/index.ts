@@ -1400,15 +1400,33 @@ Deno.serve(async (req) => {
       hourlyExceeded = (recentAuto || 0) >= hourlyCap;
     }
 
+    // ── HOTFIX 2026-05-02 (post-incident): Twilio Facebook lead auto-reply
+    // must NOT be downgraded to drafts. Twilio's existing Knowledge Vault
+    // auto-reply path was working before Level 2A and must be preserved.
+    // Only Maytapi non-first-touch replies are downgraded to drafts (the
+    // unsafe channel that needs human approval). First-touch trust block
+    // still auto-sends on BOTH channels under Level 2A safety locks.
+    const isTwilioChannel = channel === "twilio";
+
     const autoAllowed =
-      enabled &&
-      level >= 2 &&
-      mode === "auto_first_touch" &&
-      isFirstTouch &&
-      autoChannels.includes(channel) &&
-      !dnc &&
-      !inQuietHours &&
-      !hourlyExceeded;
+      // Path A: Level 2A first-touch trust auto-send (both channels)
+      (
+        enabled &&
+        level >= 2 &&
+        mode === "auto_first_touch" &&
+        isFirstTouch &&
+        autoChannels.includes(channel) &&
+        !dnc &&
+        !inQuietHours &&
+        !hourlyExceeded
+      )
+      // Path B: Twilio non-first-touch — keep legacy KV auto-reply behaviour
+      || (
+        isTwilioChannel &&
+        !isFirstTouch &&
+        !dnc &&
+        !inQuietHours
+      );
 
     diag.l2_enabled = enabled;
     diag.l2_level = level;
@@ -1419,6 +1437,7 @@ Deno.serve(async (req) => {
     diag.l2_quiet_hours = inQuietHours;
     diag.l2_hourly_exceeded = hourlyExceeded;
     diag.l2_auto_allowed = autoAllowed;
+    diag.l2_twilio_legacy_path = isTwilioChannel && !isFirstTouch && !dnc && !inQuietHours;
 
     if (!autoAllowed) {
       // ── Downgrade to DRAFT (ai_suggestions) ──
