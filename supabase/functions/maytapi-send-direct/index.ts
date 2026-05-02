@@ -152,10 +152,20 @@ Deno.serve(async (req) => {
     }
 
     const url = `https://api.maytapi.com/api/${PRODUCT_ID}/${PHONE_ID}/sendMessage`;
+
+    // Detect a leading URL → send as a link preview so WhatsApp renders the OG card
+    // for the distributor-proof page (vanto-zazi-bloom.lovable.app, etc.).
+    // Maytapi link payload: { type: "link", message: "<url>", text: "<full body>" }
+    const leadingUrlMatch = finalMessage.trim().match(/^(https?:\/\/[^\s]+)/i);
+    const usePreview = !!leadingUrlMatch;
+    const payload: Record<string, unknown> = usePreview
+      ? { to_number: cleanNumber, type: "link", message: leadingUrlMatch![1], text: finalMessage }
+      : { to_number: cleanNumber, type: "text", message: finalMessage };
+
     const resp = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-maytapi-key": TOKEN },
-      body: JSON.stringify({ to_number: cleanNumber, type: "text", message: finalMessage }),
+      body: JSON.stringify(payload),
     });
 
     const data = await resp.json().catch(() => ({}));
@@ -173,6 +183,7 @@ Deno.serve(async (req) => {
         trust_header_applied,
         trust_skip_reason,
         sent_length: finalMessage.length,
+        link_preview: usePreview,
         raw: data,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
