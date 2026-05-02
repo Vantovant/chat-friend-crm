@@ -11,6 +11,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer,
   PieChart, Pie, Cell, AreaChart, Area, CartesianGrid,
 } from 'recharts';
+import { ProspectorHealthCard } from './ProspectorHealthCard';
 
 type Stats = {
   totalContacts: number;
