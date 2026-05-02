@@ -93,6 +93,7 @@ export function InboxModule() {
   const [msgLoading, setMsgLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [inboxFilter, setInboxFilter] = useState<InboxFilter>('accessible');
+  const [fixtureFilter, setFixtureFilter] = useState<FixtureFilter>('live');
   const [reassigning, setReassigning] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [templateModalOpen, setTemplateModalOpen] = useState(false);
