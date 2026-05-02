@@ -120,6 +120,79 @@ const PRICING_PATTERNS = [
 
 const STRICT_COLLECTIONS = new Set(["products", "compensation", "orders"]);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TRACK B SHARED SAFETY HELPER (2026-05-02)
+// Used by this function AND mirrored inline in send-message/index.ts.
+// Detects:
+//   - Forbidden literal prices (R549, R649, R433.13, R866.25, R15.5, R15.50,
+//     R1,039.50, R1,386.00, R1,559.25)
+//   - Sub-R100 values that mention a Rand price (e.g. "R15.5")
+//   - Premium-tier prices that fall below R900 when the message names a
+//     Premium product (ICE/ALT/HPR/HRT/MLS/LFT — member floor R1,035 incl)
+// Sanitises:
+//   - All myaplworld.com links → sponsor-safe catalogue
+// ─────────────────────────────────────────────────────────────────────────────
+const FORBIDDEN_PRICE_LITERALS = [
+  "R549", "R649", "R433.13", "R866.25", "R15.5", "R15.50",
+  "R1,039.50", "R1039.50", "R1,386.00", "R1386.00", "R1,559.25", "R1559.25",
+];
+const PREMIUM_PRODUCTS_RE = /\b(ICE|ALT|HPR|HRT|MLS|LFT)\b/i;
+const SAFE_FALLBACK_BODY =
+  "I want to confirm the official APLGO price before quoting it. " +
+  "Browse the official catalogue here: https://aplshop.com/j/787262/catalog/\n\n— Vanto";
+
+function sanitizeOutboundText(input: string): {
+  safeText: string;
+  blocked: boolean;
+  reasons: string[];
+  replacedLinks: number;
+} {
+  const reasons: string[] = [];
+  let text = input || "";
+  let blocked = false;
+
+  let replacedLinks = 0;
+  text = text.replace(/https?:\/\/(?:www\.)?myaplworld\.com\/[^\s)]*/gi, () => {
+    replacedLinks++;
+    return "https://aplshop.com/j/787262/catalog/";
+  });
+  if (replacedLinks > 0) reasons.push(`replaced_${replacedLinks}_myaplworld_link(s)`);
+
+  for (const lit of FORBIDDEN_PRICE_LITERALS) {
+    const re = new RegExp(`(?<!\\d)${lit.replace(/[.$]/g, "\\$&")}(?!\\d)`, "i");
+    if (re.test(text)) {
+      reasons.push(`forbidden_literal:${lit}`);
+      blocked = true;
+    }
+  }
+
+  const priceMatches = text.match(/\bR\s?\d{1,3}(?:[ ,]\d{3})*(?:\.\d{1,2})?\b/g) || [];
+  for (const raw of priceMatches) {
+    const num = parseFloat(raw.replace(/[Rr\s,]/g, ""));
+    if (!isNaN(num) && num > 0 && num < 100) {
+      reasons.push(`sub_R100_price:${raw}`);
+      blocked = true;
+      break;
+    }
+  }
+
+  if (PREMIUM_PRODUCTS_RE.test(text)) {
+    for (const raw of priceMatches) {
+      const num = parseFloat(raw.replace(/[Rr\s,]/g, ""));
+      if (!isNaN(num) && num > 0 && num < 900) {
+        reasons.push(`premium_price_too_low:${raw}`);
+        blocked = true;
+        break;
+      }
+    }
+  }
+
+  if (blocked) {
+    return { safeText: SAFE_FALLBACK_BODY, blocked: true, reasons, replacedLinks };
+  }
+  return { safeText: text, blocked: false, reasons, replacedLinks };
+}
+
 type TopicCategory = "products" | "opportunity" | "compensation" | "wellness" | "general";
 
 type IntentResult = {
