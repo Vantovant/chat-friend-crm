@@ -714,6 +714,19 @@ export function DamageControlModule() {
 
                 <div className="flex flex-col gap-1 shrink-0">
                   <button
+                    onClick={() => markRecovered(r)}
+                    title={r.recovery_status === 'recovered' ? 'Undo — restore original damage score' : 'Mark this lead as personally recovered (turns Green on the dashboard)'}
+                    className={cn(
+                      'flex items-center gap-1 px-2 py-1.5 rounded-md text-[11px] border font-semibold',
+                      r.recovery_status === 'recovered'
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30'
+                        : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                    )}
+                  >
+                    <CheckCircle2 size={12} />
+                    {r.recovery_status === 'recovered' ? 'Recovered ✓' : 'Mark recovered'}
+                  </button>
+                  <button
                     onClick={() => exportContact(r)}
                     title="Export vCard (.vcf) — save on phone so WhatsApp shows the name"
                     className="flex items-center gap-1 px-2 py-1.5 rounded-md text-[11px] bg-secondary hover:bg-secondary/80 text-foreground border border-border"
