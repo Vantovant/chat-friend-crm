@@ -950,7 +950,14 @@ function ConvListItem({ conv, active, onClick, profiles }: {
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-0.5">
-          <span className="text-sm font-medium text-foreground truncate">{conv.contact?.name || 'Unknown'}</span>
+          <span className="text-sm font-medium text-foreground truncate flex items-center gap-1.5">
+            {isTestFixtureContact(conv.contact) && (
+              <span className="px-1 py-0.5 rounded text-[8px] font-bold bg-amber-500/15 text-amber-500 border border-amber-500/30 shrink-0">
+                TEST
+              </span>
+            )}
+            {conv.contact?.name || 'Unknown'}
+          </span>
           <span className="text-[10px] text-muted-foreground shrink-0 ml-1">{formatTime(conv.last_message_at)}</span>
         </div>
         <p className="text-xs text-muted-foreground truncate">{conv.last_message || 'No messages yet'}</p>
