@@ -62,12 +62,9 @@ export function ProspectorHealthCard() {
         pendingDrafts: pending.count || 0,
       });
 
-      if (user?.id) {
-        const { data: r } = await supabase.from('user_roles').select('role').eq('user_id', user.id);
-        setIsAdmin((r || []).some((x: any) => x.role === 'admin' || x.role === 'super_admin'));
-      }
+      if (user?.role === 'admin' || user?.role === 'super_admin') setIsAdmin(true);
     })();
-  }, [user?.id]);
+  }, [user?.id, user?.role]);
 
   const rollbackSql =
     `UPDATE integration_settings SET value='1' WHERE key='zazi_prospector_level';\n` +
