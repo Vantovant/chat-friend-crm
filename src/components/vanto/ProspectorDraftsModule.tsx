@@ -20,6 +20,7 @@ type ContactInfo = {
   id: string;
   name: string | null;
   phone: string | null;
+  tags: string[] | null;
 };
 
 const maskPhone = (p?: string | null) => {
