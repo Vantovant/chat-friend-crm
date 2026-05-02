@@ -40,23 +40,35 @@ const ACTIVE_DAYS = 14;
 const WARM_DAYS = 60;
 const DORMANT_DAYS = 180;
 
-async function fetchGroupMembers(groupJid: string): Promise<string[]> {
-  if (!MAYTAPI_PRODUCT_ID || !MAYTAPI_PHONE_ID || !MAYTAPI_API_TOKEN) return [];
+// READ-ONLY: calls the documented per-group detail endpoint.
+// Returns { phones, raw } so caller can record evidence + diagnose shape if empty.
+async function fetchGroupMembers(groupJid: string): Promise<{ phones: string[]; source: string; sample_keys: string[]; http_status: number | null }> {
+  const empty = { phones: [], source: "no_credentials", sample_keys: [], http_status: null as number | null };
+  if (!MAYTAPI_PRODUCT_ID || !MAYTAPI_PHONE_ID || !MAYTAPI_API_TOKEN) return empty;
   try {
-    const url = `https://api.maytapi.com/api/${MAYTAPI_PRODUCT_ID}/${MAYTAPI_PHONE_ID}/getGroups`;
+    // Per Maytapi docs: GET /{phone_id}/getGroups/{conversation_id} returns specific group details (incl. participants).
+    const url = `https://api.maytapi.com/api/${MAYTAPI_PRODUCT_ID}/${MAYTAPI_PHONE_ID}/getGroups/${encodeURIComponent(groupJid)}`;
     const r = await fetch(url, { headers: { "x-maytapi-key": MAYTAPI_API_TOKEN } });
-    if (!r.ok) { await r.text(); return []; }
+    const status = r.status;
+    if (!r.ok) { await r.text(); return { ...empty, source: "http_error", http_status: status }; }
     const data = await r.json();
-    const groups = data?.data || [];
-    const grp = groups.find((g: any) => g.id === groupJid || g.jid === groupJid);
-    if (!grp) return [];
-    const participants: any[] = grp.participants || grp.members || [];
-    return participants
-      .map((p: any) => (typeof p === "string" ? p : p.id || p.phone || p.jid || ""))
-      .map((s: string) => s.replace(/@.*$/, "").replace(/\D/g, ""))
+    // Maytapi may wrap as { success, data: {...} } or return the group object directly.
+    const grp: any = data?.data ?? data ?? {};
+    const sample_keys = Object.keys(grp || {});
+    const participants: any[] =
+      grp.participants || grp.members || grp.contacts || grp?.data?.participants || [];
+    const phones = participants
+      .map((p: any) => (typeof p === "string" ? p : p?.id || p?.phone || p?.jid || p?.number || ""))
+      .map((s: string) => String(s).replace(/@.*$/, "").replace(/\D/g, ""))
       .filter(Boolean);
-  } catch (_) {
-    return [];
+    return {
+      phones,
+      source: phones.length > 0 ? "per_group_endpoint" : "endpoint_returned_no_participants",
+      sample_keys,
+      http_status: status,
+    };
+  } catch (e) {
+    return { ...empty, source: "exception:" + (e instanceof Error ? e.message : String(e)) };
   }
 }
 
