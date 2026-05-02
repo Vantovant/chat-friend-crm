@@ -8,7 +8,7 @@
   // =====================================================
   // CONFIGURATION - LOVABLE EDITION
   // =====================================================
-  const VERSION = '6.2.5 (Lovable)';
+  const VERSION = '6.2.6 (Lovable)';
   const DASHBOARD_URL = 'https://chat.onlinecourseformlm.com';
   const DETECTION_DEBOUNCE_MS = 600;
   const POLLING_INTERVAL_MS = 1500;
@@ -609,16 +609,44 @@
       return;
     }
 
+    // Force fresh detection right before save so we always pick up the
+    // currently-open chat's phone number, even if the user hits Save quickly.
+    const freshPhone = detectPhoneNumber();
+    if (freshPhone) {
+      lastDetectedPhone = freshPhone;
+      const phoneInput = document.getElementById('vanto-phone');
+      if (phoneInput && !phoneInput.value) {
+        phoneInput.value = freshPhone;
+      }
+    }
+    const freshName = detectContactName();
+    if (freshName) {
+      lastDetectedName = freshName;
+      const nameInput = document.getElementById('vanto-name');
+      if (nameInput && !nameInput.value) {
+        nameInput.value = freshName;
+      }
+    }
+
+    const phoneFieldVal = (document.getElementById('vanto-phone').value || '').trim();
+    const effectivePhone = phoneFieldVal || lastDetectedPhone || '';
+    const effectiveWaId = lastDetectedPhone || (phoneFieldVal ? phoneFieldVal.replace(/\D/g, '') : null);
+
+    if (!effectivePhone && !effectiveWaId) {
+      showStatus('Could not auto-detect phone — open the chat fully (click into it) and try again, or enter the number manually.', 'error');
+      return;
+    }
+
     const payload = {
       name: document.getElementById('vanto-name').value,
-      phone: document.getElementById('vanto-phone').value,
+      phone: effectivePhone,
       email: document.getElementById('vanto-email').value || null,
       lead_type: document.getElementById('vanto-lead-type').value,
       temperature: document.getElementById('vanto-temperature').value,
       assigned_to: document.getElementById('vanto-assigned-to').value || null,
       tags: document.getElementById('vanto-tags').value.split(',').map(t => t.trim()).filter(Boolean),
       notes: document.getElementById('vanto-notes').value || null,
-      whatsapp_id: lastDetectedPhone || null
+      whatsapp_id: effectiveWaId
     };
 
     log('Saving contact:', payload);
