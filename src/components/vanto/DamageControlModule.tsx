@@ -296,7 +296,7 @@ export function DamageControlModule() {
     const eff = effectiveScore(r);
     if (scoreFilter !== 'all' && eff !== scoreFilter) return false;
     if (stepInOnly && !r.vanto_step_in) return false;
-    if (hideHandled && r.recovery_status === 'handled') return false;
+    if (hideHandled && (r.recovery_status === 'handled' || r.recovery_status === 'recovered')) return false;
     if (queue !== 'all') {
       if (queue === 'name_needed') {
         if (r.name_known) return false;
