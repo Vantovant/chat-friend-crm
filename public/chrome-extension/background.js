@@ -223,7 +223,7 @@ async function handleResetPassword(email) {
 async function handleSaveContact(payload, token) {
   log('Saving contact:', payload.name);
   try {
-    const response = await fetch(`${SUPABASE_URL}/rest/v1/rpc/upsert-whatsapp-contact`, {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/upsert-whatsapp-contact`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
