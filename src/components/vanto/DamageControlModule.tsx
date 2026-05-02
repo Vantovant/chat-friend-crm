@@ -271,7 +271,20 @@ export function DamageControlModule() {
     toast({ title: 'Saved' });
   };
 
+  // Effective score — manual "recovered" override turns any row green on the dashboard.
+  const effectiveScore = (r: AuditRow): Score =>
+    r.recovery_status === 'recovered' ? 'green' : r.damage_score;
+
+  const markRecovered = async (r: AuditRow) => {
+    const isRecovered = r.recovery_status === 'recovered';
+    await updateRecovery(r, {
+      recovery_status: isRecovered ? (r.handled_at ? 'handled' : r.reviewed_at ? 'reviewed' : 'open') : 'recovered',
+      handled_at: isRecovered ? r.handled_at : (r.handled_at || new Date().toISOString()),
+    } as any);
+  };
+
   const queueOf = (r: AuditRow): Queue => {
+    if (effectiveScore(r) === 'green') return 'clean';
     if (r.damage_score === 'red') return 'red';
     if (r.damage_score === 'orange') return 'orange';
     if (r.damage_score === 'yellow' && r.temperature === 'hot') return 'yellow_hot';
