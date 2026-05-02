@@ -430,6 +430,25 @@ export function InboxModule() {
                 </button>
               ))}
             </div>
+            <div className="flex gap-1 mt-2 items-center">
+              <span className="text-[9px] uppercase tracking-wider text-muted-foreground mr-1">View:</span>
+              {(['live', 'test', 'all'] as const).map(f => (
+                <button
+                  key={f}
+                  onClick={() => setFixtureFilter(f)}
+                  title={f === 'live' ? 'Real customer threads only (default)' : f === 'test' ? 'QA / Test fixtures only' : 'Show everything'}
+                  className={cn(
+                    'px-2 py-0.5 rounded-md text-[10px] font-semibold border transition-colors capitalize',
+                    fixtureFilter === f
+                      ? (f === 'test' ? 'bg-amber-500/15 text-amber-500 border-amber-500/30'
+                         : 'bg-primary/15 text-primary border-primary/30')
+                      : 'text-muted-foreground border-border hover:text-foreground hover:bg-secondary/60'
+                  )}
+                >
+                  {f === 'live' ? 'Live' : f === 'test' ? 'QA/Test' : 'All'}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto">
             {loading ? (
