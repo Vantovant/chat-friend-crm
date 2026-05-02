@@ -137,13 +137,32 @@ export function ProspectorDraftsModule() {
             Master Prospector Level 2A — non-first-touch replies require human approval. No bulk send. No send-all.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Button size="sm" variant={filter === 'pending' ? 'default' : 'outline'} onClick={() => setFilter('pending')}>
             Pending
           </Button>
           <Button size="sm" variant={filter === 'all' ? 'default' : 'outline'} onClick={() => setFilter('all')}>
             All
           </Button>
+          <div className="flex gap-1 items-center border-l border-border pl-2 ml-1">
+            <span className="text-[9px] uppercase tracking-wider text-muted-foreground mr-1">View:</span>
+            {(['live', 'test', 'all'] as const).map(f => (
+              <button
+                key={f}
+                onClick={() => setFixtureFilter(f)}
+                title={f === 'live' ? 'Real customer drafts only (default)' : f === 'test' ? 'QA / Test fixtures only' : 'Show everything'}
+                className={cn(
+                  'px-2 py-0.5 rounded-md text-[10px] font-semibold border transition-colors capitalize',
+                  fixtureFilter === f
+                    ? (f === 'test' ? 'bg-amber-500/15 text-amber-500 border-amber-500/30'
+                       : 'bg-primary/15 text-primary border-primary/30')
+                    : 'text-muted-foreground border-border hover:text-foreground hover:bg-secondary/60'
+                )}
+              >
+                {f === 'live' ? 'Live' : f === 'test' ? 'QA/Test' : 'All'}
+              </button>
+            ))}
+          </div>
           <Button size="sm" variant="outline" onClick={load} disabled={loading}>
             {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
           </Button>
