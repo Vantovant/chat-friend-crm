@@ -208,7 +208,7 @@ Deno.serve(async (req) => {
           inbound_message_id: null,
           action_taken: "send_blocked_price_safety",
           reason: safetyReasons.join("; ").slice(0, 500),
-          template_used: `provider:${(lastInboundMsg?.provider || "twilio")}|original_blocked`,
+          template_used: `provider:pre-detect|original_blocked`,
           knowledge_query: trimmed.slice(0, 500),
           knowledge_found: false,
         });
