@@ -1400,16 +1400,21 @@ Deno.serve(async (req) => {
       hourlyExceeded = (recentAuto || 0) >= hourlyCap;
     }
 
-    // ── HOTFIX 2026-05-02 (post-incident): Twilio Facebook lead auto-reply
-    // must NOT be downgraded to drafts. Twilio's existing Knowledge Vault
-    // auto-reply path was working before Level 2A and must be preserved.
-    // Only Maytapi non-first-touch replies are downgraded to drafts (the
-    // unsafe channel that needs human approval). First-touch trust block
-    // still auto-sends on BOTH channels under Level 2A safety locks.
+    // ── HOTFIX 2026-05-02 (post-incident, v2): BOTH Twilio AND Maytapi
+    // inbound DMs must keep the legacy Knowledge Vault auto-reply path.
+    // Level 2A's draft-downgrade was overreach. Symmetric channel treatment:
+    //   Path A: first-touch trust block auto-sends on both channels
+    //           (under safety locks: enabled, level≥2, channel allowlist,
+    //            !DNC, !quiet-hours, under hourly cap)
+    //   Path B: any non-first-touch reply on Twilio OR Maytapi flows
+    //           through to dispatch (KV + AI Trainer + price-safety
+    //           validators), gated only by DNC + quiet hours.
+    // No reply is downgraded to Prospector Drafts by default.
     const isTwilioChannel = channel === "twilio";
+    const isMaytapiChannel = channel === "maytapi";
 
     const autoAllowed =
-      // Path A: Level 2A first-touch trust auto-send (both channels)
+      // Path A — Level 2A first-touch trust auto-send
       (
         enabled &&
         level >= 2 &&
@@ -1420,9 +1425,9 @@ Deno.serve(async (req) => {
         !inQuietHours &&
         !hourlyExceeded
       )
-      // Path B: Twilio non-first-touch — keep legacy KV auto-reply behaviour
+      // Path B — Legacy KV auto-reply for non-first-touch on either channel
       || (
-        isTwilioChannel &&
+        (isTwilioChannel || isMaytapiChannel) &&
         !isFirstTouch &&
         !dnc &&
         !inQuietHours
@@ -1437,7 +1442,7 @@ Deno.serve(async (req) => {
     diag.l2_quiet_hours = inQuietHours;
     diag.l2_hourly_exceeded = hourlyExceeded;
     diag.l2_auto_allowed = autoAllowed;
-    diag.l2_twilio_legacy_path = isTwilioChannel && !isFirstTouch && !dnc && !inQuietHours;
+    diag.l2_legacy_kv_path = (isTwilioChannel || isMaytapiChannel) && !isFirstTouch && !dnc && !inQuietHours;
 
     if (!autoAllowed) {
       // ── Downgrade to DRAFT (ai_suggestions) ──
