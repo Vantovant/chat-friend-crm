@@ -1547,8 +1547,10 @@ Deno.serve(async (req) => {
     });
 
     if (contact_id) {
+      const isFirstTouchSent = actionTaken === "first_touch_trust_message";
       await svc.from("contact_activity").insert({
-        contact_id, type: shouldAssignHuman ? "human_handover" : "auto_reply",
+        contact_id,
+        type: isFirstTouchSent ? "prospector_auto_first_touch" : (shouldAssignHuman ? "human_handover" : "auto_reply"),
         performed_by: "00000000-0000-0000-0000-000000000000",
         metadata: {
           action: actionTaken, intent: intent.intent, topic: intent.topicCategory,
@@ -1556,6 +1558,12 @@ Deno.serve(async (req) => {
           chunks_found: chunksCount, topics_links_used: topicsLinksUsed,
           assigned_human: shouldAssignHuman,
           twilio_sid: sentMessage?.provider_message_id || null,
+          ...(isFirstTouchSent ? {
+            auto_send_type: "first_touch_trust_entry",
+            zazi_prospector_level: 2,
+            zazi_prospector_mode: "auto_first_touch",
+            channel: diag.channel_detected || "unknown",
+          } : {}),
         },
       });
     }
