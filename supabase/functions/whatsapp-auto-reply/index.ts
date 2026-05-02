@@ -79,29 +79,29 @@ const PRODUCT_LINKS: Record<string, string> = {
 const TOPIC_LINKS = {
   opportunity: [
     { label: "Register as APLGO Distributor", url: "https://backoffice.aplgo.com/register/?sp=787262" },
-    { label: "All Topics & Info", url: "https://myaplworld.com/pages.cfm?p=50717DB2" },
+    { label: "Brand site", url: "https://aplgo.com/j/787262/" },
   ],
   compensation: [
     { label: "Register as APLGO Distributor", url: "https://backoffice.aplgo.com/register/?sp=787262" },
-    { label: "All Topics & Info", url: "https://myaplworld.com/pages.cfm?p=50717DB2" },
+    { label: "Brand site", url: "https://aplgo.com/j/787262/" },
   ],
   products: [
-    { label: "Full Product & Topics Page", url: "https://myaplworld.com/pages.cfm?p=50717DB2" },
+    { label: "Full Product Catalogue", url: "https://aplshop.com/j/787262/catalog/" },
   ],
   wellness: [
-    { label: "Product Reference Guide", url: "https://myaplworld.com/pages.cfm?p=50717DB2" },
+    { label: "Product Catalogue", url: "https://aplshop.com/j/787262/catalog/" },
   ],
 };
 
 // ── Menu Backward Compatibility ─────────────────────────────────────────────
-// Deterministic menu routing — these queries match the canonical pricing doc.
+// Deterministic menu routing — these queries match the active 15% VAT pricing doc.
 const MENU_QUERY_MAP: Record<string, { query: string; collections: string[] }> = {
-  "1": { query: "APLGO PRODUCT PRICING QUICK REFERENCE SOUTH AFRICA daily collection premium elite", collections: ["products"] },
-  "2": { query: "APLGO PRODUCT PRICING QUICK REFERENCE benefits immune support stress digestion", collections: ["products"] },
+  "1": { query: "APLGO South Africa Price List 15% VAT daily premium elite member retail", collections: ["products"] },
+  "2": { query: "APLGO benefits immune support stress digestion price list", collections: ["products"] },
 };
 
 // Canonical doc title used as the source of truth for menu_1 / menu_2 grounding
-const PRICING_DOC_TITLE = "APLGO Product Pricing Quick Reference (ZAR)";
+const PRICING_DOC_TITLE = "APLGO SA Price List — 15% VAT (ACTIVE)";
 
 // Minimum ts_rank relevance to consider a chunk usable for STRICT collections.
 // Below this the bot must give an honest "couldn't verify" fallback instead of bluffing.
