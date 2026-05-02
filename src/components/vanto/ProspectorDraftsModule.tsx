@@ -170,6 +170,7 @@ export function ProspectorDraftsModule() {
             const skipReason = d.content?.prospector?.skip_reason || '—';
             const intent = d.content?.response_type || '—';
             const firstTouch = !!d.content?.first_touch;
+            const l3a = d.content?.level3a;
             return (
               <div key={d.id} className="vanto-card p-4 space-y-3">
                 <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -185,9 +186,34 @@ export function ProspectorDraftsModule() {
                         {firstTouch ? 'first-touch' : 'follow-up'}
                       </Badge>
                       <Badge variant="outline" className={cn('text-[10px]', statusColor(d.status))}>{d.status}</Badge>
+                      {l3a && (
+                        <>
+                          <Badge variant="outline" className="text-[10px] border-primary/40 text-primary">
+                            L3A · {l3a.selected_angle}
+                          </Badge>
+                          {l3a.safety_checks?.escalation_triggered && (
+                            <Badge variant="outline" className="text-[10px] border-destructive/40 text-destructive">
+                              ESCALATE
+                            </Badge>
+                          )}
+                          {!l3a.safety_checks?.price_ok && (
+                            <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-500">
+                              PRICE FLAG
+                            </Badge>
+                          )}
+                          {!l3a.safety_checks?.link_ok && (
+                            <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-500">
+                              LINK FLAG
+                            </Badge>
+                          )}
+                        </>
+                      )}
                     </div>
                     <div className="text-[11px] text-muted-foreground">
                       {new Date(d.created_at).toLocaleString()} · skip: {skipReason}
+                      {l3a && (
+                        <> · angle: <span className="text-foreground">{l3a.selected_angle}</span> · conf: {(l3a.confidence * 100).toFixed(0)}%</>
+                      )}
                     </div>
                   </div>
                   {d.status === 'pending' && (
