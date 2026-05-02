@@ -948,11 +948,28 @@ export function DamageControlModule() {
                           <Phone size={12} /> Mark saved to phone
                         </button>
                         <button
-                          onClick={() => updateRecovery(r, { reviewed_at: new Date().toISOString(), recovery_status: 'reviewed', recovery_angle: pack.angle } as any)}
-                          disabled={!!r.reviewed_at}
-                          className="flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-blue-500/15 text-blue-300 border border-blue-500/30 disabled:opacity-50"
+                          onClick={() => setEditContactId(r.contact_id)}
+                          className="flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-primary/15 text-primary border border-primary/30"
+                          title="Edit this contact's details"
                         >
-                          <ClipboardCheck size={12} /> Mark reviewed
+                          <Pencil size={12} /> Edit contact
+                        </button>
+                        <button
+                          onClick={() => updateRecovery(
+                            r,
+                            r.reviewed_at
+                              ? ({ reviewed_at: null, recovery_status: r.handled_at ? r.recovery_status : null } as any)
+                              : ({ reviewed_at: new Date().toISOString(), recovery_status: 'reviewed', recovery_angle: pack.angle } as any)
+                          )}
+                          className={cn(
+                            'flex items-center gap-1 px-2 py-1 rounded text-[11px] border',
+                            r.reviewed_at
+                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                              : 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                          )}
+                          title={r.reviewed_at ? 'Click to clear "reviewed" mark' : 'Mark as reviewed'}
+                        >
+                          <ClipboardCheck size={12} /> {r.reviewed_at ? 'Reviewed ✓ (click to clear)' : 'Mark reviewed'}
                         </button>
                         <button
                           onClick={() => updateRecovery(r, { handled_at: new Date().toISOString(), recovery_status: 'handled', recovery_angle: pack.angle } as any)}
