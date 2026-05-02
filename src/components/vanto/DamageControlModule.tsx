@@ -589,8 +589,9 @@ export function DamageControlModule() {
                     <p className="font-semibold text-sm text-foreground truncate">
                       {r.contact_name || r.contact_phone || 'Unknown'}
                     </p>
-                    <span className={cn('px-2 py-0.5 rounded text-[10px] font-bold border uppercase', SCORE_STYLES[r.damage_score])}>
-                      {r.damage_score}
+                    <span className={cn('px-2 py-0.5 rounded text-[10px] font-bold border uppercase', SCORE_STYLES[effectiveScore(r)])}>
+                      {effectiveScore(r)}
+                      {r.recovery_status === 'recovered' && r.damage_score !== 'green' && ' (recovered)'}
                     </span>
                     {r.vanto_step_in && (
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-red-500/15 text-red-400 border-red-500/30 uppercase flex items-center gap-1">
