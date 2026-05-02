@@ -11,6 +11,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer,
   PieChart, Pie, Cell, AreaChart, Area, CartesianGrid,
 } from 'recharts';
+import { ProspectorHealthCard } from './ProspectorHealthCard';
 
 type Stats = {
   totalContacts: number;
@@ -138,6 +139,11 @@ export function DashboardModule() {
           <KPICard icon={Activity} label="Active Chats" value={stats.activeConversations} color="text-[hsl(43,96%,56%)]" />
           <KPICard icon={Clock} label="Unread" value={stats.unreadCount} color="text-destructive" highlight={stats.unreadCount > 0} />
         </div>
+      </div>
+
+      {/* Master Prospector Level 2 Health */}
+      <div className="px-4 md:px-6 pt-4">
+        <ProspectorHealthCard />
       </div>
 
       {/* Temperature breakdown */}

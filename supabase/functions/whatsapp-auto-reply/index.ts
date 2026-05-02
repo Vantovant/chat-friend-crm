@@ -1347,6 +1347,157 @@ Deno.serve(async (req) => {
     console.warn("[auto-reply] duplicate guard error (non-fatal):", e?.message);
   }
 
+  // ── MASTER PROSPECTOR LEVEL 2A — AUTO FIRST-TOUCH GATE (2026-05-02) ──
+  // Auto-send is allowed ONLY for the Unified Trust Entry first-touch.
+  // Every other reply path is downgraded to a draft in `ai_suggestions`
+  // for one-by-one human approval in the Prospector Drafts tab.
+  try {
+    const { data: psRows } = await svc
+      .from("integration_settings")
+      .select("key,value")
+      .in("key", [
+        "zazi_prospector_enabled",
+        "zazi_prospector_level",
+        "zazi_prospector_mode",
+        "zazi_prospector_auto_channels",
+        "zazi_prospector_max_auto_per_hour",
+        "zazi_prospector_quiet_hours",
+      ]);
+    const ps: Record<string, string> = {};
+    for (const r of (psRows || []) as any[]) ps[r.key] = (r.value || "").trim();
+
+    const enabled = (ps.zazi_prospector_enabled || "false").toLowerCase() === "true";
+    const level = parseInt(ps.zazi_prospector_level || "1", 10) || 1;
+    const mode = (ps.zazi_prospector_mode || "draft_only").toLowerCase();
+    const autoChannels = (ps.zazi_prospector_auto_channels || "twilio,maytapi")
+      .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+    const hourlyCap = parseInt(ps.zazi_prospector_max_auto_per_hour || "30", 10) || 30;
+
+    const channel = (diag.channel_detected || "").toLowerCase();
+    const isFirstTouch = actionTaken === "first_touch_trust_message";
+
+    // Quiet-hours check (22:00–06:00 SAST = UTC+2)
+    const nowUtc = new Date();
+    const sastHour = (nowUtc.getUTCHours() + 2) % 24;
+    const inQuietHours = sastHour >= 22 || sastHour < 6;
+
+    // DNC check
+    let dnc = false;
+    if (contact_id) {
+      const { data: c } = await svc.from("contacts").select("do_not_contact").eq("id", contact_id).maybeSingle();
+      dnc = !!c?.do_not_contact;
+    }
+
+    // Hourly auto-send cap
+    let hourlyExceeded = false;
+    if (isFirstTouch) {
+      const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const { count: recentAuto } = await svc
+        .from("auto_reply_events")
+        .select("id", { count: "exact", head: true })
+        .eq("action_taken", "first_touch_trust_message")
+        .gte("created_at", since);
+      hourlyExceeded = (recentAuto || 0) >= hourlyCap;
+    }
+
+    const autoAllowed =
+      enabled &&
+      level >= 2 &&
+      mode === "auto_first_touch" &&
+      isFirstTouch &&
+      autoChannels.includes(channel) &&
+      !dnc &&
+      !inQuietHours &&
+      !hourlyExceeded;
+
+    diag.l2_enabled = enabled;
+    diag.l2_level = level;
+    diag.l2_mode = mode;
+    diag.l2_channel = channel;
+    diag.l2_first_touch = isFirstTouch;
+    diag.l2_dnc = dnc;
+    diag.l2_quiet_hours = inQuietHours;
+    diag.l2_hourly_exceeded = hourlyExceeded;
+    diag.l2_auto_allowed = autoAllowed;
+
+    if (!autoAllowed) {
+      // ── Downgrade to DRAFT (ai_suggestions) ──
+      const skipReason = !isFirstTouch
+        ? "non_first_touch_requires_human_approval"
+        : !enabled ? "prospector_disabled"
+        : level < 2 ? "level_below_2"
+        : mode !== "auto_first_touch" ? "mode_not_auto_first_touch"
+        : !autoChannels.includes(channel) ? `channel_not_in_allowlist:${channel || "unknown"}`
+        : dnc ? "dnc_blocked"
+        : inQuietHours ? "quiet_hours_22_06_sast"
+        : hourlyExceeded ? `hourly_cap_${hourlyCap}_exceeded`
+        : "policy_block";
+
+      await svc.from("ai_suggestions").insert({
+        conversation_id,
+        suggestion_type: "draft_reply",
+        status: "pending",
+        confidence: 0.7,
+        mode: "guidance",
+        content: {
+          draft_reply: replyContent,
+          reply_mode: "guidance",
+          response_type: actionTaken,
+          channel,
+          first_touch: isFirstTouch,
+          contact_id: contact_id || null,
+          inbound_message_id: inbound_message_id || null,
+          prospector: {
+            awake: true,
+            level,
+            mode,
+            first_touch: isFirstTouch,
+            skip_reason: skipReason,
+            generated_at: new Date().toISOString(),
+          },
+          reasoning: `Level 2A draft: ${skipReason}. Awaiting human approval in Prospector Drafts.`,
+        },
+      });
+
+      await svc.from("auto_reply_events").insert({
+        conversation_id,
+        inbound_message_id: inbound_message_id || null,
+        action_taken: "drafted_for_review",
+        reason: `Level 2A: ${skipReason}`,
+        menu_option: intent.intent,
+        knowledge_query: intent.query?.slice(0, 200) || null,
+        knowledge_found: knowledgeFound,
+      });
+
+      if (contact_id) {
+        await svc.from("contact_activity").insert({
+          contact_id,
+          type: "prospector_draft",
+          performed_by: "00000000-0000-0000-0000-000000000000",
+          metadata: {
+            level, mode, channel, action: actionTaken,
+            skip_reason: skipReason,
+            first_touch: isFirstTouch,
+          },
+        });
+      }
+
+      diag.result = "drafted_for_review";
+      console.log("[auto-reply] DIAG:", JSON.stringify(diag));
+      return jsonRes({
+        ok: true,
+        auto_reply: false,
+        action: "drafted_for_review",
+        skip_reason: skipReason,
+        prospector: { level, mode, first_touch: isFirstTouch, channel },
+      });
+    }
+    // else: first-touch trust block — allowed to auto-send below
+  } catch (e: any) {
+    console.warn("[auto-reply] L2A gate error (non-fatal, falling through to dispatch):", e?.message);
+    diag.l2_gate_error = e?.message;
+  }
+
   // ── Dispatch via send-message ──
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
   const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
@@ -1396,8 +1547,10 @@ Deno.serve(async (req) => {
     });
 
     if (contact_id) {
+      const isFirstTouchSent = actionTaken === "first_touch_trust_message";
       await svc.from("contact_activity").insert({
-        contact_id, type: shouldAssignHuman ? "human_handover" : "auto_reply",
+        contact_id,
+        type: isFirstTouchSent ? "prospector_auto_first_touch" : (shouldAssignHuman ? "human_handover" : "auto_reply"),
         performed_by: "00000000-0000-0000-0000-000000000000",
         metadata: {
           action: actionTaken, intent: intent.intent, topic: intent.topicCategory,
@@ -1405,6 +1558,12 @@ Deno.serve(async (req) => {
           chunks_found: chunksCount, topics_links_used: topicsLinksUsed,
           assigned_human: shouldAssignHuman,
           twilio_sid: sentMessage?.provider_message_id || null,
+          ...(isFirstTouchSent ? {
+            auto_send_type: "first_touch_trust_entry",
+            zazi_prospector_level: 2,
+            zazi_prospector_mode: "auto_first_touch",
+            channel: diag.channel_detected || "unknown",
+          } : {}),
         },
       });
     }

@@ -17,6 +17,7 @@ import { SettingsModule } from '@/components/vanto/SettingsModule';
 import { GroupCampaignsModule } from '@/components/vanto/GroupCampaignsModule';
 import { ReviewQueueModule } from '@/components/vanto/ReviewQueueModule';
 import { DamageControlModule } from '@/components/vanto/DamageControlModule';
+import { ProspectorDraftsModule } from '@/components/vanto/ProspectorDraftsModule';
 import { AuthPage } from '@/components/vanto/AuthPage';
 import { PageHelpButton } from '@/components/vanto/PageHelpButton';
 import type { Module } from '@/lib/vanto-data';
@@ -59,6 +60,7 @@ const Index = () => {
       case 'group-campaigns': return <GroupCampaignsModule />;
       case 'review-queue': return <ReviewQueueModule />;
       case 'damage-control': return <DamageControlModule />;
+      case 'prospector-drafts': return <ProspectorDraftsModule />;
       case 'settings': return <SettingsModule />;
       default: return <InboxModule />;
     }
