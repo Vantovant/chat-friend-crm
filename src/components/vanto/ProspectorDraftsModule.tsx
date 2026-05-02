@@ -72,7 +72,7 @@ export function ProspectorDraftsModule() {
       const contactIds = Array.from(new Set((convs || []).map((c: any) => c.contact_id).filter(Boolean)));
       const { data: cs } = await supabase
         .from('contacts')
-        .select('id, name, phone')
+        .select('id, name, phone, tags')
         .in('id', contactIds);
       const convToContact: Record<string, string> = {};
       (convs || []).forEach((c: any) => { convToContact[c.id] = c.contact_id; });
