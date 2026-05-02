@@ -207,9 +207,13 @@ async function enrichOne(svc: any, suggestionId: string): Promise<any> {
     .maybeSingle();
   const contactId = conv?.contact_id || null;
 
+  // AUTHORITATIVE: use the channel the draft was created for (set by whatsapp-auto-reply).
+  // This is the firewall — never re-derive from messages where ordering may be ambiguous.
+  const channel: string = (sug.content?.channel || "unknown").toLowerCase();
+
   const { data: lastIn } = await svc
     .from("messages")
-    .select("content, provider, created_at")
+    .select("content, created_at")
     .eq("conversation_id", sug.conversation_id)
     .eq("is_outbound", false)
     .order("created_at", { ascending: false })
@@ -217,7 +221,6 @@ async function enrichOne(svc: any, suggestionId: string): Promise<any> {
     .maybeSingle();
 
   const inboundText: string = lastIn?.content || "";
-  const channel: string = (lastIn?.provider || sug.content?.channel || "unknown").toLowerCase();
 
   // ── FIREWALL: refuse to enrich Twilio drafts (Twilio KV path is sacred) ──
   if (channel === "twilio") {
