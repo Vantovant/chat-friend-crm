@@ -180,24 +180,41 @@ export function ProspectorDraftsModule() {
         <div className="flex items-center justify-center py-12 text-muted-foreground">
           <Loader2 className="animate-spin mr-2" /> Loading drafts…
         </div>
-      ) : drafts.length === 0 ? (
-        <div className="text-center py-12 text-muted-foreground text-sm">
-          No {filter === 'pending' ? 'pending ' : ''}drafts. Master Prospector is monitoring inbound messages.
-        </div>
-      ) : (
+      ) : (() => {
+        const visible = drafts.filter(d => {
+          const c = contacts[d.conversation_id];
+          const isFixture = isTestFixtureContact(c) || isTestFixtureDraftContent(d.content);
+          if (fixtureFilter === 'live') return !isFixture;
+          if (fixtureFilter === 'test') return isFixture;
+          return true;
+        });
+        if (visible.length === 0) {
+          return (
+            <div className="text-center py-12 text-muted-foreground text-sm">
+              No {filter === 'pending' ? 'pending ' : ''}{fixtureFilter === 'test' ? 'test-fixture ' : fixtureFilter === 'live' ? 'live customer ' : ''}drafts.
+            </div>
+          );
+        }
+        return (
         <div className="space-y-3">
-          {drafts.map(d => {
+          {visible.map(d => {
             const c = contacts[d.conversation_id];
             const channel = d.content?.channel || 'unknown';
             const skipReason = d.content?.prospector?.skip_reason || '—';
             const intent = d.content?.response_type || '—';
             const firstTouch = !!d.content?.first_touch;
             const l3a = d.content?.level3a;
+            const isFixture = isTestFixtureContact(c) || isTestFixtureDraftContent(d.content);
             return (
-              <div key={d.id} className="vanto-card p-4 space-y-3">
+              <div key={d.id} className={cn('vanto-card p-4 space-y-3', isFixture && 'border-amber-500/40 bg-amber-500/5')}>
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="space-y-1">
                     <div className="font-semibold text-sm flex items-center gap-2">
+                      {isFixture && (
+                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/15 text-amber-500 border border-amber-500/30">
+                          TEST
+                        </span>
+                      )}
                       {c?.name || 'Unknown contact'}
                       <span className="text-xs font-mono text-muted-foreground">{maskPhone(c?.phone)}</span>
                     </div>
