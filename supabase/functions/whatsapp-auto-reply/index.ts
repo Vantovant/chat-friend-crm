@@ -1343,35 +1343,40 @@ Deno.serve(async (req) => {
     diag.first_touch_error = e?.message;
   }
 
-  // ── PRICE SAFETY VALIDATOR (Emergency patch 2026-05-01) ──
-  // Block any obviously-broken price (sub-R100) before it leaves the system.
-  // Approved APLGO SA prices are: Daily R431.25/R862.50, Premium R1,035/R1,293.75,
-  // Elite R1,380+, PFT R1,552.50+, Pendant R1,725+. Anything <R100 is a hallucination.
+  // ── PRICE & LINK SAFETY (Track B 2026-05-02) ──
+  // Hardened validator: forbidden literals + sub-R100 + premium-tier floor + link sanitiser.
+  // Always logs evidence to auto_reply_events when blocked.
   try {
-    // Match R + amount, allowing thousand separators (comma/space) and decimals.
-    // Examples matched: "R15", "R15.5", "R431.25", "R1,035", "R1 035.50", "R1293.75".
-    const priceMatches = replyContent.match(/\bR\s?\d{1,3}(?:[ ,]\d{3})*(?:\.\d{1,2})?\b/g) || [];
-    let badPrice: string | null = null;
-    for (const raw of priceMatches) {
-      const num = parseFloat(raw.replace(/[Rr\s,]/g, ""));
-      if (!isNaN(num) && num > 0 && num < 100) {
-        badPrice = raw;
-        break;
-      }
+    const safety = sanitizeOutboundText(replyContent);
+    if (safety.replacedLinks > 0 && !safety.blocked) {
+      replyContent = safety.safeText;
+      diag.link_sanitised = safety.replacedLinks;
     }
-    if (badPrice) {
+    if (safety.blocked) {
       diag.price_safety_blocked = true;
-      diag.price_safety_value = badPrice;
-      console.warn(`[auto-reply] PRICE-SAFETY blocked reply containing ${badPrice}`);
+      diag.price_safety_reasons = safety.reasons;
+      console.warn(`[auto-reply] SAFETY BLOCKED: ${safety.reasons.join("; ")}`);
+      // Evidence row (best-effort, never crash the reply)
+      try {
+        await svc.from("auto_reply_events").insert({
+          conversation_id,
+          inbound_message_id: inbound_message_id || null,
+          action_taken: "price_safety_blocked",
+          reason: safety.reasons.join("; ").slice(0, 500),
+          template_used: "safe_catalogue_fallback",
+          knowledge_query: (replyContent || "").slice(0, 500),
+          knowledge_found: false,
+        });
+      } catch (logErr: any) {
+        console.warn("[auto-reply] failed to log price_safety_blocked event:", logErr?.message);
+      }
       replyContent =
         `🌿 *APLGO Official Wellness Info*\nDistributor: *Vanto — Get Well Africa*\nAPLGO Sponsor Code: *787262*\n\n` +
-        `I don't want to misquote you. Let me confirm the official APLGO price for this product first.\n\n` +
-        `In the meantime you can browse the official catalogue here:\n` +
-        `📒 https://aplshop.com/j/787262/catalog/\n\n— Vanto`;
+        safety.safeText;
       actionTaken = "price_safety_fallback";
     }
   } catch (e: any) {
-    console.warn("[auto-reply] price-safety validator error (non-fatal):", e?.message);
+    console.warn("[auto-reply] price/link safety validator error (non-fatal):", e?.message);
   }
 
   // ── 24h DUPLICATE OUTBOUND GUARD (Emergency patch 2026-05-01) ──
