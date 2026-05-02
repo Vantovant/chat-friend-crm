@@ -1524,7 +1524,7 @@ Deno.serve(async (req) => {
         : hourlyExceeded ? `hourly_cap_${hourlyCap}_exceeded`
         : "policy_block";
 
-      const { error: draftErr } = await svc.from("ai_suggestions").insert({
+      const { data: draftRow, error: draftErr } = await svc.from("ai_suggestions").insert({
         conversation_id,
         suggestion_type: "draft_reply",
         status: "pending",
@@ -1548,10 +1548,35 @@ Deno.serve(async (req) => {
           },
           reasoning: `Level 2A draft: ${skipReason}. Awaiting human approval in Prospector Drafts.`,
         },
-      });
+      }).select("id").maybeSingle();
       if (draftErr) {
         console.error("[auto-reply] L2A draft insert FAILED:", draftErr.message, draftErr.details);
         diag.l2_draft_insert_error = draftErr.message;
+      }
+
+      // ── LEVEL 3A INLINE ENRICH (suggest-only, never sends) ──
+      // Only fires for Maytapi non-first-touch drafts. Twilio drafts (if any future
+      // path creates one) are explicitly skipped inside closer-suggest-3a.
+      if (!draftErr && draftRow?.id && channel === "maytapi") {
+        try {
+          const SUPA_URL = Deno.env.get("SUPABASE_URL");
+          const SVC_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+          if (SUPA_URL && SVC_KEY) {
+            // Fire-and-forget — do NOT await; we never want this to block dispatch.
+            fetch(`${SUPA_URL}/functions/v1/closer-suggest-3a`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${SVC_KEY}`,
+                apikey: SVC_KEY,
+              },
+              body: JSON.stringify({ suggestion_id: draftRow.id }),
+            }).catch((e) => console.warn("[auto-reply] L3A enrich call failed (non-fatal):", e?.message));
+            diag.l3a_enrich_dispatched = true;
+          }
+        } catch (e: any) {
+          console.warn("[auto-reply] L3A enrich dispatch error (non-fatal):", e?.message);
+        }
       }
 
       await svc.from("auto_reply_events").insert({
