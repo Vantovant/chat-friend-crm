@@ -97,7 +97,9 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
     return { group_id: group.id, group_name: group.group_name, error: "no_group_jid" };
   }
 
-  const memberPhones = await fetchGroupMembers(group.group_jid);
+  const fetched = await fetchGroupMembers(group.group_jid);
+  const memberPhones = fetched.phones;
+
   if (memberPhones.length === 0) {
     return {
       group_id: group.id,
@@ -105,9 +107,15 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
       group_name: group.group_name,
       member_count: 0,
       buckets: { active: 0, warm: 0, dormant: 0, ghost: 0, total: 0 },
-      suggested_action: "Leave alone — could not enumerate members (Maytapi read failed)",
+      enumeration_status: "unavailable",
+      enumeration_source: fetched.source,
+      enumeration_http_status: fetched.http_status,
+      enumeration_sample_keys: fetched.sample_keys,
+      suggested_action: "Member enumeration unavailable from Maytapi response",
       risk_notes: "no_members_returned",
       reconnect_shortlist: [],
+      auto_send_blocked: true,
+      mode: "audit_only",
       generated_at: new Date().toISOString(),
     };
   }
@@ -125,9 +133,8 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
     if (c.phone_normalized) contactByPhone[c.phone_normalized] = c;
   });
 
-  // Pull last_inbound_at per contact via conversations
   const contactIds = (contacts || []).map((c: any) => c.id);
-  let lastInboundByContact: Record<string, string> = {};
+  const lastInboundByContact: Record<string, string> = {};
   if (contactIds.length > 0) {
     const { data: convs } = await svc
       .from("conversations")
@@ -143,6 +150,7 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
 
   const buckets = { active: 0, warm: 0, dormant: 0, ghost: 0, total: 0 };
   const shortlist: any[] = [];
+  let dnc_excluded = 0;
 
   for (const phone of phonesNormalized) {
     buckets.total++;
@@ -150,6 +158,7 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
     const lastIn = c ? lastInboundByContact[c.id] || null : null;
     const cls = classify(lastIn, !!c);
     buckets[cls]++;
+    if (c?.do_not_contact) dnc_excluded++;
     if ((cls === "warm" || cls === "dormant") && c && !c.do_not_contact) {
       shortlist.push({
         contact_id: c.id,
@@ -172,6 +181,10 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
     group_name: group.group_name,
     member_count: buckets.total,
     buckets,
+    enumeration_status: "available",
+    enumeration_source: fetched.source,
+    enumeration_http_status: fetched.http_status,
+    dnc_excluded,
     suggested_action: sugg.action,
     risk_notes: sugg.risk,
     reconnect_shortlist: shortlist.slice(0, 25),
@@ -180,7 +193,6 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
     generated_at: new Date().toISOString(),
   };
 
-  // Persist to group_health_reports (best-effort; ignore if table missing)
   await svc.from("group_health_reports").insert({
     group_id: group.id,
     group_jid: group.group_jid,
