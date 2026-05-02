@@ -8,6 +8,7 @@ import {
   Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare, AlertTriangle, RotateCcw, ArrowLeft, X, Save, Pencil,
 } from 'lucide-react';
 import { displayPhone } from '@/lib/phone-utils';
+import { isTestFixtureContact, type FixtureFilter } from '@/lib/test-fixture';
 import { useProfiles, profileLabel, type ProfileOption } from '@/hooks/use-profiles';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
