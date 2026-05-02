@@ -183,6 +183,7 @@ Deno.serve(async (req) => {
         trust_header_applied,
         trust_skip_reason,
         sent_length: finalMessage.length,
+        link_preview: usePreview,
         raw: data,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
