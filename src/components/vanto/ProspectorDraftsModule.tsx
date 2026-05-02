@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from '@/hooks/use-toast';
 import { Brain, Send, X, Eye, RefreshCw, Loader2, Shield } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { isTestFixtureContact, isTestFixtureDraftContent, type FixtureFilter } from '@/lib/test-fixture';
 
 type Draft = {
   id: string;
