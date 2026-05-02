@@ -585,6 +585,33 @@ export type Database = {
         }
         Relationships: []
       }
+      group_health_reports: {
+        Row: {
+          created_at: string
+          group_id: string | null
+          group_jid: string | null
+          group_name: string | null
+          id: string
+          report: Json
+        }
+        Insert: {
+          created_at?: string
+          group_id?: string | null
+          group_jid?: string | null
+          group_name?: string | null
+          id?: string
+          report?: Json
+        }
+        Update: {
+          created_at?: string
+          group_id?: string | null
+          group_jid?: string | null
+          group_name?: string | null
+          id?: string
+          report?: Json
+        }
+        Relationships: []
+      }
       integration_settings: {
         Row: {
           id: string
