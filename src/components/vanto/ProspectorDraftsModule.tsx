@@ -303,7 +303,8 @@ export function ProspectorDraftsModule() {
             );
           })}
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
