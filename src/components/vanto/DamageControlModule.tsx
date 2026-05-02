@@ -271,7 +271,20 @@ export function DamageControlModule() {
     toast({ title: 'Saved' });
   };
 
+  // Effective score — manual "recovered" override turns any row green on the dashboard.
+  const effectiveScore = (r: AuditRow): Score =>
+    r.recovery_status === 'recovered' ? 'green' : r.damage_score;
+
+  const markRecovered = async (r: AuditRow) => {
+    const isRecovered = r.recovery_status === 'recovered';
+    await updateRecovery(r, {
+      recovery_status: isRecovered ? (r.handled_at ? 'handled' : r.reviewed_at ? 'reviewed' : 'open') : 'recovered',
+      handled_at: isRecovered ? r.handled_at : (r.handled_at || new Date().toISOString()),
+    } as any);
+  };
+
   const queueOf = (r: AuditRow): Queue => {
+    if (effectiveScore(r) === 'green') return 'clean';
     if (r.damage_score === 'red') return 'red';
     if (r.damage_score === 'orange') return 'orange';
     if (r.damage_score === 'yellow' && r.temperature === 'hot') return 'yellow_hot';
@@ -280,9 +293,10 @@ export function DamageControlModule() {
   };
 
   const filtered = rows.filter(r => {
-    if (scoreFilter !== 'all' && r.damage_score !== scoreFilter) return false;
+    const eff = effectiveScore(r);
+    if (scoreFilter !== 'all' && eff !== scoreFilter) return false;
     if (stepInOnly && !r.vanto_step_in) return false;
-    if (hideHandled && r.recovery_status === 'handled') return false;
+    if (hideHandled && (r.recovery_status === 'handled' || r.recovery_status === 'recovered')) return false;
     if (queue !== 'all') {
       if (queue === 'name_needed') {
         if (r.name_known) return false;
@@ -326,16 +340,16 @@ export function DamageControlModule() {
 
   const stats = {
     total: rows.length,
-    green: rows.filter(r => r.damage_score === 'green').length,
-    yellow: rows.filter(r => r.damage_score === 'yellow').length,
-    orange: rows.filter(r => r.damage_score === 'orange').length,
-    red: rows.filter(r => r.damage_score === 'red').length,
-    stepIn: rows.filter(r => r.vanto_step_in).length,
+    green: rows.filter(r => effectiveScore(r) === 'green').length,
+    yellow: rows.filter(r => effectiveScore(r) === 'yellow').length,
+    orange: rows.filter(r => effectiveScore(r) === 'orange').length,
+    red: rows.filter(r => effectiveScore(r) === 'red').length,
+    stepIn: rows.filter(r => r.vanto_step_in && r.recovery_status !== 'recovered').length,
     nameNeeded: rows.filter(r => !r.name_known).length,
     duplicates: rows.reduce((s, r) => s + r.duplicate_outbound, 0),
     weakTouch: rows.filter(r => r.weak_first_touch).length,
     yellowHot: rows.filter(r => r.damage_score === 'yellow' && r.temperature === 'hot').length,
-    handled: rows.filter(r => r.recovery_status === 'handled').length,
+    handled: rows.filter(r => r.recovery_status === 'handled' || r.recovery_status === 'recovered').length,
     overdue: rows.filter(r => computeOverdue(r).overdue).length,
   };
 
@@ -575,8 +589,9 @@ export function DamageControlModule() {
                     <p className="font-semibold text-sm text-foreground truncate">
                       {r.contact_name || r.contact_phone || 'Unknown'}
                     </p>
-                    <span className={cn('px-2 py-0.5 rounded text-[10px] font-bold border uppercase', SCORE_STYLES[r.damage_score])}>
-                      {r.damage_score}
+                    <span className={cn('px-2 py-0.5 rounded text-[10px] font-bold border uppercase', SCORE_STYLES[effectiveScore(r)])}>
+                      {effectiveScore(r)}
+                      {r.recovery_status === 'recovered' && r.damage_score !== 'green' && ' (recovered)'}
                     </span>
                     {r.vanto_step_in && (
                       <span className="px-2 py-0.5 rounded text-[10px] font-bold border bg-red-500/15 text-red-400 border-red-500/30 uppercase flex items-center gap-1">
@@ -698,6 +713,19 @@ export function DamageControlModule() {
                 </div>
 
                 <div className="flex flex-col gap-1 shrink-0">
+                  <button
+                    onClick={() => markRecovered(r)}
+                    title={r.recovery_status === 'recovered' ? 'Undo — restore original damage score' : 'Mark this lead as personally recovered (turns Green on the dashboard)'}
+                    className={cn(
+                      'flex items-center gap-1 px-2 py-1.5 rounded-md text-[11px] border font-semibold',
+                      r.recovery_status === 'recovered'
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/30'
+                        : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20'
+                    )}
+                  >
+                    <CheckCircle2 size={12} />
+                    {r.recovery_status === 'recovered' ? 'Recovered ✓' : 'Mark recovered'}
+                  </button>
                   <button
                     onClick={() => exportContact(r)}
                     title="Export vCard (.vcf) — save on phone so WhatsApp shows the name"
