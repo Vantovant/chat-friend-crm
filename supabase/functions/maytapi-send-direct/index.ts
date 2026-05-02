@@ -113,12 +113,17 @@ Deno.serve(async (req) => {
                 .limit(1)
                 .maybeSingle();
               if (convRow?.id) {
-                // Has any prior outbound on this conversation already shown the proof URL or shop link?
+                // ⚠️ PER-CHANNEL trust check. The Twilio "campaign" number and the Maytapi
+                // local number show up as TWO DIFFERENT chats on the recipient's phone, so a
+                // trust header sent via Twilio is invisible from the Maytapi chat (and vice
+                // versa). Only count prior MAYTAPI outbounds when deciding if trust was
+                // already established on THIS channel.
                 const { data: priorOutbound } = await svc
                   .from("messages")
-                  .select("content")
+                  .select("content,provider")
                   .eq("conversation_id", convRow.id)
                   .eq("is_outbound", true)
+                  .eq("provider", "maytapi")
                   .order("created_at", { ascending: false })
                   .limit(20);
                 trustEverSent = !!(priorOutbound || []).find((m: any) => {
