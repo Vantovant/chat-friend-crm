@@ -141,6 +141,11 @@ export function DashboardModule() {
         </div>
       </div>
 
+      {/* Master Prospector Level 2 Health */}
+      <div className="px-4 md:px-6 pt-4">
+        <ProspectorHealthCard />
+      </div>
+
       {/* Temperature breakdown */}
       <div className="px-4 md:px-6 pt-4">
         <div className="grid grid-cols-3 gap-2 md:gap-3">
