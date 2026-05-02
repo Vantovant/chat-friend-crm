@@ -8,7 +8,7 @@ import { useCurrentUser } from '@/hooks/use-current-user';
 type Settings = Record<string, string>;
 
 export function ProspectorHealthCard() {
-  const { user } = useCurrentUser();
+  const user = useCurrentUser();
   const [settings, setSettings] = useState<Settings>({});
   const [metrics, setMetrics] = useState({
     autoFirstTouchToday: 0,
