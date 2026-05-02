@@ -32,9 +32,9 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const MAYTAPI_PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID");
-const MAYTAPI_PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID");
-const MAYTAPI_API_TOKEN = Deno.env.get("MAYTAPI_API_TOKEN");
+const MAYTAPI_PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID")?.trim();
+const MAYTAPI_PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID")?.trim();
+const MAYTAPI_API_TOKEN = Deno.env.get("MAYTAPI_API_TOKEN")?.trim();
 
 const ACTIVE_DAYS = 14;
 const WARM_DAYS = 60;
