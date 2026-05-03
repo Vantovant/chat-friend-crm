@@ -373,13 +373,19 @@ export function AIAgentModule() {
           </div>
 
           {/* Input */}
-          <div className="px-6 pb-6 shrink-0">
+          <div className="px-6 pb-6 shrink-0 space-y-2">
+            <DictateMessage
+              value={input}
+              onChange={setInput}
+              size="compact"
+              languageHint="English; may mix with isiZulu/Sesotho/Setswana"
+            />
             <div className="flex items-end gap-2 p-3 vanto-card">
               <textarea
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-                placeholder="Ask Vanto AI anything — products, pipeline, leads, or campaigns..."
+                placeholder="Ask Vanto AI anything — or tap Dictate above to speak..."
                 rows={2}
                 disabled={loading}
                 className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none disabled:opacity-50"
