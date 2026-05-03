@@ -109,9 +109,12 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
             </button>
             <img src={logo} alt="Vanto CRM" className="h-8 w-auto" />
           </div>
-          <span className="text-xs font-medium text-muted-foreground capitalize">
-            {navItems.find(n => n.id === activeModule)?.label}
-          </span>
+          <div className="flex items-center gap-2">
+            <InstallAppButton variant="compact" />
+            <span className="text-xs font-medium text-muted-foreground capitalize">
+              {navItems.find(n => n.id === activeModule)?.label}
+            </span>
+          </div>
         </div>
 
         {/* Mobile bottom nav */}
