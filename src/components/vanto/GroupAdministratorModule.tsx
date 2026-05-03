@@ -147,12 +147,23 @@ export function GroupAdministratorModule() {
     try {
       const { data, error } = await supabase.functions.invoke('group-intel-scan', { body: { group_jid: jid } });
       if (error) throw new Error(error.message);
-      if (!data?.ok) throw new Error(data?.reason || 'Scan failed');
-      toast({ title: '✅ Scan complete', description: `${data.scanned} group scanned (read-only).` });
+      const result = data as ScanResult;
+      setLastScan(result);
+
+      if (result.partial) {
+        toast({
+          title: '⚠️ Scan completed with warnings',
+          description: result.audit_error || result.warnings[0] || 'Persistence warning surfaced in the Group Administrator panel.',
+          variant: 'destructive',
+        });
+      } else {
+        toast({ title: '✅ Scan complete', description: `${result.scanned} group scanned (read-only).` });
+      }
+
       await loadAll();
       await loadMembers(jid);
     } catch (e: any) {
-      toast({ title: 'Scan failed', description: e.message, variant: 'destructive' });
+      toast({ title: 'Scan request failed', description: e.message, variant: 'destructive' });
     } finally { setScanning(null); }
   }
 
