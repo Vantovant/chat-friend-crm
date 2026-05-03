@@ -254,7 +254,18 @@ Deno.serve(async (req) => {
   let body: any = {};
   try { body = await req.json(); } catch (_) { body = {}; }
 
-  let q = svc.from("whatsapp_groups").select("id, group_jid, group_name").not("group_jid", "is", null);
+  // Identify caller for audit log
+  let performed_by: string | null = null;
+  try {
+    const authHeader = req.headers.get("Authorization") || "";
+    const token = authHeader.replace("Bearer ", "");
+    if (token) {
+      const { data: u } = await svc.auth.getUser(token);
+      performed_by = u?.user?.id ?? null;
+    }
+  } catch (_) { /* ignore */ }
+
+  let q = svc.from("whatsapp_groups").select("id, group_jid, group_name").not("group_jid", "is", null).eq("is_active", true);
   if (body?.group_jid) q = q.eq("group_jid", body.group_jid);
   const { data: groups, error } = await q.limit(50);
   if (error) {
@@ -263,10 +274,23 @@ Deno.serve(async (req) => {
     });
   }
 
+  const startedAt = new Date().toISOString();
   const reports: any[] = [];
   for (const g of groups || []) {
     reports.push(await scanGroup(svc, g));
   }
+
+  // Audit log entry
+  await svc.from("group_admin_actions").insert({
+    action_type: "manual_scan",
+    group_jid: body?.group_jid ?? null,
+    group_name: groups?.[0]?.group_name ?? null,
+    performed_by,
+    result: { scanned: reports.length, summaries: reports.map((r: any) => ({ group_jid: r.group_jid, member_count: r.member_count, buckets: r.buckets, enumeration_status: r.enumeration_status })) },
+    send_activity_attempted: false,
+    started_at: startedAt,
+    finished_at: new Date().toISOString(),
+  }).then(() => {}).catch(() => {});
 
   return new Response(JSON.stringify({
     ok: true,
