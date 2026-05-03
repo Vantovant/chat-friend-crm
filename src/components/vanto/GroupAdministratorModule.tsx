@@ -306,6 +306,32 @@ export function GroupAdministratorModule() {
                   <span>Last scan: <span className="text-foreground">{r.generated_at ? new Date(r.generated_at).toLocaleString() : '—'}</span></span>
                 </div>
 
+                {(r.persistence?.members_error || r.persistence?.report_error || r.ok === false) && (
+                  <div className="rounded border border-destructive/40 bg-destructive/10 p-3 space-y-1 text-xs">
+                    <div className="font-medium text-foreground">Persistence warning</div>
+                    {r.persistence?.members_error && <div className="text-destructive">Member upsert: {r.persistence.members_error}</div>}
+                    {r.persistence?.report_error && <div className="text-destructive">Report persistence: {r.persistence.report_error}</div>}
+                    {!r.persistence?.members_error && !r.persistence?.report_error && r.ok === false && (
+                      <div className="text-destructive">Scan completed with partial persistence. Review warnings above.</div>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-[11px]">
+                  <div className="rounded border border-border p-2">
+                    <div className="text-muted-foreground">Members persisted</div>
+                    <div className="font-medium">{r.persistence?.members_persisted ? 'YES' : 'NO'}</div>
+                  </div>
+                  <div className="rounded border border-border p-2">
+                    <div className="text-muted-foreground">Report persisted</div>
+                    <div className="font-medium">{r.persistence?.report_persisted ? 'YES' : 'NO'}</div>
+                  </div>
+                  <div className="rounded border border-border p-2">
+                    <div className="text-muted-foreground">Members attempted</div>
+                    <div className="font-medium">{r.persistence?.members_attempted ?? 0}</div>
+                  </div>
+                </div>
+
                 {/* Member list */}
                 {ml.length > 0 && (
                   <details open className="text-xs">
