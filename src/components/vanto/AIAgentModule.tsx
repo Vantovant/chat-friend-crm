@@ -49,7 +49,10 @@ export function AIAgentModule() {
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'chat' | 'config'>('chat');
   const [crmContext, setCrmContext] = useState('');
+  const [showDictate, setShowDictate] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const hasUserMessages = messages.some(m => m.role === 'user');
 
   useEffect(() => {
     const loadContext = async () => {
