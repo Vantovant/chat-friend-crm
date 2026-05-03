@@ -241,25 +241,25 @@ export function AIAgentModule() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl vanto-gradient flex items-center justify-center shadow-lg">
-            <Bot size={20} className="text-primary-foreground" />
+      <div className="px-3 sm:px-6 py-3 sm:py-4 border-b border-border flex items-center justify-between shrink-0 gap-2">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl vanto-gradient flex items-center justify-center shadow-lg shrink-0">
+            <Bot size={18} className="text-primary-foreground" />
           </div>
-          <div>
-            <h2 className="text-lg font-bold text-foreground">AI Agent</h2>
+          <div className="min-w-0">
+            <h2 className="text-base sm:text-lg font-bold text-foreground truncate">AI Agent</h2>
             <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-primary animate-pulse"></span>
-              <p className="text-xs text-muted-foreground">Streaming · RAG-enabled · Live</p>
+              <span className="w-2 h-2 rounded-full bg-primary animate-pulse shrink-0"></span>
+              <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Streaming · RAG · Live</p>
             </div>
           </div>
         </div>
-        <div className="flex gap-1">
+        <div className="flex gap-1 shrink-0">
           {(['chat', 'config'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={cn('px-3 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize', activeTab === tab ? 'bg-primary/15 text-primary border border-primary/30' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60')}
+              className={cn('px-2.5 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors capitalize', activeTab === tab ? 'bg-primary/15 text-primary border border-primary/30' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60')}
             >
               {tab === 'chat' ? '💬 Chat' : '⚙️ Config'}
             </button>
@@ -269,43 +269,49 @@ export function AIAgentModule() {
 
       {activeTab === 'chat' ? (
         <>
-          {/* Capabilities */}
-          <div className="px-6 py-3 border-b border-border shrink-0">
-            <div className="flex gap-2 overflow-x-auto pb-1">
-              {[
-                { icon: MessageSquare, label: 'Message Writer' },
-                { icon: Brain, label: 'Lead Analyzer' },
-                { icon: Sparkles, label: 'Campaign Builder' },
-                { icon: RefreshCw, label: 'Workflow Generator' },
-                { icon: BookOpen, label: 'Knowledge Vault' },
-              ].map(cap => {
-                const Icon = cap.icon;
-                return (
-                  <button key={cap.label} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-xs font-medium text-primary whitespace-nowrap hover:bg-primary/15 transition-colors shrink-0">
-                    <Icon size={12} />
-                    {cap.label}
-                  </button>
-                );
-              })}
+          {/* Capabilities — collapsible on mobile */}
+          <details className="sm:open border-b border-border shrink-0 group" open>
+            <summary className="px-3 sm:px-6 py-2 text-[11px] text-muted-foreground cursor-pointer select-none sm:hidden flex items-center justify-between">
+              <span>Capabilities</span>
+              <span className="group-open:rotate-180 transition-transform">▾</span>
+            </summary>
+            <div className="px-3 sm:px-6 pb-2 sm:py-3">
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {[
+                  { icon: MessageSquare, label: 'Message Writer' },
+                  { icon: Brain, label: 'Lead Analyzer' },
+                  { icon: Sparkles, label: 'Campaign Builder' },
+                  { icon: RefreshCw, label: 'Workflow Generator' },
+                  { icon: BookOpen, label: 'Knowledge Vault' },
+                ].map(cap => {
+                  const Icon = cap.icon;
+                  return (
+                    <button key={cap.label} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/10 border border-primary/20 text-xs font-medium text-primary whitespace-nowrap hover:bg-primary/15 transition-colors shrink-0">
+                      <Icon size={12} />
+                      {cap.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          </details>
 
-          {/* Chat messages */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {/* Chat messages — primary focus area */}
+          <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-4 min-h-0">
             {messages.map(msg => (
-              <div key={msg.id} className={cn('flex gap-3', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
+              <div key={msg.id} className={cn('flex gap-2 sm:gap-3', msg.role === 'user' ? 'justify-end' : 'justify-start')}>
                 {msg.role === 'assistant' && (
                   <div className="w-8 h-8 rounded-full vanto-gradient flex items-center justify-center shrink-0 mt-0.5">
                     <Bot size={14} className="text-primary-foreground" />
                   </div>
                 )}
-                <div className={cn('max-w-[75%] rounded-2xl px-4 py-3 text-sm', msg.role === 'assistant' ? 'message-bubble-in' : 'message-bubble-out')}>
+                <div className={cn('max-w-[88%] sm:max-w-[75%] rounded-2xl px-3 sm:px-4 py-2.5 sm:py-3 text-sm', msg.role === 'assistant' ? 'message-bubble-in' : 'message-bubble-out')}>
                   {msg.role === 'assistant' ? (
                     <div className="prose prose-sm prose-invert max-w-none [&_p]:mb-1.5 [&_ul]:mb-1.5 [&_ol]:mb-1.5 [&_li]:mb-0.5 [&_strong]:text-foreground [&_em]:text-muted-foreground">
                       <ReactMarkdown>{msg.content}</ReactMarkdown>
                     </div>
                   ) : (
-                    <span className="whitespace-pre-wrap">{msg.content}</span>
+                    <span className="whitespace-pre-wrap break-words">{msg.content}</span>
                   )}
 
                   {/* Citations */}
@@ -324,7 +330,7 @@ export function AIAgentModule() {
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between mt-1">
+                  <div className="flex items-center justify-between mt-1 gap-2">
                     <p className="text-[10px] text-muted-foreground">{msg.time}</p>
                     {msg.role === 'assistant' && msg.id !== 'welcome' && (
                       <div className="flex gap-1">
@@ -366,32 +372,65 @@ export function AIAgentModule() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Suggestions */}
-          <div className="px-6 pb-3 flex gap-2 flex-wrap shrink-0">
-            {suggestions.map(s => (
-              <button key={s} onClick={() => sendMessage(s)} disabled={loading} className="px-3 py-1.5 rounded-full border border-border text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors disabled:opacity-50">
-                {s}
-              </button>
-            ))}
-          </div>
+          {/* Suggestions — collapsible; auto-hide once chat starts on mobile */}
+          {showSuggestions && (
+            <div className="px-3 sm:px-6 pb-2 shrink-0 border-t border-border/40 pt-2">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Quick prompts</span>
+                <button
+                  onClick={() => setShowSuggestions(false)}
+                  className="text-[10px] text-muted-foreground hover:text-foreground"
+                >
+                  Hide
+                </button>
+              </div>
+              <div className={cn('flex gap-2 pb-1', hasUserMessages ? 'overflow-x-auto flex-nowrap' : 'flex-wrap')}>
+                {suggestions.map(s => (
+                  <button key={s} onClick={() => sendMessage(s)} disabled={loading} className="px-3 py-1.5 rounded-full border border-border text-xs text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors disabled:opacity-50 whitespace-nowrap shrink-0">
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {!showSuggestions && (
+            <button
+              onClick={() => setShowSuggestions(true)}
+              className="px-3 sm:px-6 py-1 text-[10px] text-muted-foreground hover:text-foreground text-left shrink-0"
+            >
+              + Show quick prompts
+            </button>
+          )}
 
-          {/* Input */}
-          <div className="px-6 pb-6 shrink-0 space-y-2">
-            <DictateMessage
-              value={input}
-              onChange={setInput}
-              size="compact"
-              languageHint="English; may mix with isiZulu/Sesotho/Setswana"
-            />
-            <div className="flex items-end gap-2 p-3 vanto-card">
+          {/* Input area */}
+          <div className="px-3 sm:px-6 pb-3 sm:pb-6 pt-2 shrink-0 space-y-2 border-t border-border">
+            {showDictate && (
+              <DictateMessage
+                value={input}
+                onChange={setInput}
+                size="compact"
+                languageHint="English; may mix with isiZulu/Sesotho/Setswana"
+              />
+            )}
+            <div className="flex items-end gap-2 p-2 sm:p-3 vanto-card">
+              <button
+                type="button"
+                onClick={() => setShowDictate(s => !s)}
+                className={cn('p-2 rounded-lg shrink-0 transition-colors',
+                  showDictate ? 'bg-primary/15 text-primary border border-primary/30' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60 border border-transparent'
+                )}
+                title="Toggle dictation tools"
+              >
+                🎙
+              </button>
               <textarea
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-                placeholder="Ask Vanto AI anything — or tap Dictate above to speak..."
-                rows={2}
+                placeholder="Ask Vanto AI anything..."
+                rows={1}
                 disabled={loading}
-                className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none disabled:opacity-50"
+                className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none disabled:opacity-50 max-h-32 min-h-[40px] py-2"
               />
               <button
                 onClick={() => sendMessage()}
