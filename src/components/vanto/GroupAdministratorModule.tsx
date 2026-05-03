@@ -8,6 +8,13 @@ import { ShieldAlert, Users, RefreshCw, Loader2, Eye, History } from 'lucide-rea
 import { useCurrentUser } from '@/hooks/use-current-user';
 
 type WGroup = { id: string; group_name: string; group_jid: string | null; is_active?: boolean };
+type Persistence = {
+  members_attempted: number;
+  members_persisted: boolean;
+  members_error: string | null;
+  report_persisted: boolean;
+  report_error: string | null;
+};
 type Report = {
   group_jid?: string;
   group_name?: string;
@@ -19,6 +26,19 @@ type Report = {
   reconnect_shortlist?: any[];
   suggested_action?: string;
   generated_at?: string;
+  ok?: boolean;
+  persistence?: Persistence;
+};
+type ScanResult = {
+  ok: boolean;
+  partial: boolean;
+  mode: 'audit_only';
+  auto_send_blocked: boolean;
+  scanned: number;
+  audit_logged: boolean;
+  audit_error: string | null;
+  warnings: string[];
+  reports: Report[];
 };
 type Member = {
   phone_normalized: string;
@@ -58,6 +78,7 @@ export function GroupAdministratorModule() {
   const [reports, setReports] = useState<Record<string, Report>>({});
   const [members, setMembers] = useState<Record<string, Member[]>>({});
   const [audit, setAudit] = useState<AuditRow[]>([]);
+  const [lastScan, setLastScan] = useState<ScanResult | null>(null);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -126,12 +147,23 @@ export function GroupAdministratorModule() {
     try {
       const { data, error } = await supabase.functions.invoke('group-intel-scan', { body: { group_jid: jid } });
       if (error) throw new Error(error.message);
-      if (!data?.ok) throw new Error(data?.reason || 'Scan failed');
-      toast({ title: '✅ Scan complete', description: `${data.scanned} group scanned (read-only).` });
+      const result = data as ScanResult;
+      setLastScan(result);
+
+      if (result.partial) {
+        toast({
+          title: '⚠️ Scan completed with warnings',
+          description: result.audit_error || result.warnings[0] || 'Persistence warning surfaced in the Group Administrator panel.',
+          variant: 'destructive',
+        });
+      } else {
+        toast({ title: '✅ Scan complete', description: `${result.scanned} group scanned (read-only).` });
+      }
+
       await loadAll();
       await loadMembers(jid);
     } catch (e: any) {
-      toast({ title: 'Scan failed', description: e.message, variant: 'destructive' });
+      toast({ title: 'Scan request failed', description: e.message, variant: 'destructive' });
     } finally { setScanning(null); }
   }
 
@@ -178,6 +210,30 @@ export function GroupAdministratorModule() {
           </div>
         </div>
       </div>
+
+      {lastScan?.partial && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 space-y-2">
+          <div className="flex items-start gap-2 text-sm">
+            <ShieldAlert size={16} className="text-destructive mt-0.5 shrink-0" />
+            <div>
+              <div className="font-semibold text-foreground">Scan warnings surfaced</div>
+              <div className="text-xs text-muted-foreground">
+                Partial persistence was detected. Audit-only remains active and zero-send protections remain in force.
+              </div>
+            </div>
+          </div>
+          {lastScan.audit_error && (
+            <div className="text-xs text-destructive">Audit log warning: {lastScan.audit_error}</div>
+          )}
+          {lastScan.warnings.length > 0 && (
+            <ul className="text-xs space-y-1 list-disc pl-5 text-foreground">
+              {lastScan.warnings.map((warning, index) => (
+                <li key={`${warning}-${index}`}>{warning}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* Selector */}
       <div className="vanto-card p-4 space-y-3">
@@ -248,6 +304,32 @@ export function GroupAdministratorModule() {
                   <span>Enumeration: <span className="text-foreground">{r.enumeration_status}</span></span>
                   <span>Source: <span className="text-foreground font-mono">{r.enumeration_source}</span></span>
                   <span>Last scan: <span className="text-foreground">{r.generated_at ? new Date(r.generated_at).toLocaleString() : '—'}</span></span>
+                </div>
+
+                {(r.persistence?.members_error || r.persistence?.report_error || r.ok === false) && (
+                  <div className="rounded border border-destructive/40 bg-destructive/10 p-3 space-y-1 text-xs">
+                    <div className="font-medium text-foreground">Persistence warning</div>
+                    {r.persistence?.members_error && <div className="text-destructive">Member upsert: {r.persistence.members_error}</div>}
+                    {r.persistence?.report_error && <div className="text-destructive">Report persistence: {r.persistence.report_error}</div>}
+                    {!r.persistence?.members_error && !r.persistence?.report_error && r.ok === false && (
+                      <div className="text-destructive">Scan completed with partial persistence. Review warnings above.</div>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-[11px]">
+                  <div className="rounded border border-border p-2">
+                    <div className="text-muted-foreground">Members persisted</div>
+                    <div className="font-medium">{r.persistence?.members_persisted ? 'YES' : 'NO'}</div>
+                  </div>
+                  <div className="rounded border border-border p-2">
+                    <div className="text-muted-foreground">Report persisted</div>
+                    <div className="font-medium">{r.persistence?.report_persisted ? 'YES' : 'NO'}</div>
+                  </div>
+                  <div className="rounded border border-border p-2">
+                    <div className="text-muted-foreground">Members attempted</div>
+                    <div className="font-medium">{r.persistence?.members_attempted ?? 0}</div>
+                  </div>
                 </div>
 
                 {/* Member list */}

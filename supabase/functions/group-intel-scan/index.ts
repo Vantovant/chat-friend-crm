@@ -40,23 +40,66 @@ const ACTIVE_DAYS = 14;
 const WARM_DAYS = 60;
 const DORMANT_DAYS = 180;
 
+export type GroupPersistence = {
+  members_attempted: number;
+  members_persisted: boolean;
+  members_error: string | null;
+  report_persisted: boolean;
+  report_error: string | null;
+};
+
+export type GroupScanReport = {
+  group_id: string;
+  group_jid: string;
+  group_name: string;
+  member_count: number;
+  buckets: { active: number; warm: number; dormant: number; ghost: number; total: number };
+  enumeration_status: string;
+  enumeration_source: string;
+  enumeration_http_status: number | null;
+  enumeration_sample_keys?: string[];
+  dnc_excluded?: number;
+  suggested_action: string;
+  risk_notes: string;
+  reconnect_shortlist: any[];
+  auto_send_blocked: true;
+  mode: "audit_only";
+  persistence: GroupPersistence;
+  generated_at: string;
+  ok: boolean;
+};
+
+export type ScanResponse = {
+  ok: boolean;
+  partial: boolean;
+  mode: "audit_only";
+  auto_send_blocked: true;
+  scanned: number;
+  audit_logged: boolean;
+  audit_error: string | null;
+  warnings: string[];
+  reports: GroupScanReport[];
+};
+
+type GroupFetcher = (groupJid: string) => Promise<{ phones: string[]; source: string; sample_keys: string[]; http_status: number | null }>;
+
 // READ-ONLY: calls the documented per-group detail endpoint.
 // Returns { phones, raw } so caller can record evidence + diagnose shape if empty.
-async function fetchGroupMembers(groupJid: string): Promise<{ phones: string[]; source: string; sample_keys: string[]; http_status: number | null }> {
+export async function fetchGroupMembers(groupJid: string): Promise<{ phones: string[]; source: string; sample_keys: string[]; http_status: number | null }> {
   const empty = { phones: [], source: "no_credentials", sample_keys: [], http_status: null as number | null };
   if (!MAYTAPI_PRODUCT_ID || !MAYTAPI_PHONE_ID || !MAYTAPI_API_TOKEN) return empty;
   try {
-    // Per Maytapi docs: GET /{phone_id}/getGroups/{conversation_id} returns specific group details (incl. participants).
     const url = `https://api.maytapi.com/api/${MAYTAPI_PRODUCT_ID}/${MAYTAPI_PHONE_ID}/getGroups/${encodeURIComponent(groupJid)}`;
     const r = await fetch(url, { headers: { "x-maytapi-key": MAYTAPI_API_TOKEN } });
     const status = r.status;
-    if (!r.ok) { await r.text(); return { ...empty, source: "http_error", http_status: status }; }
+    if (!r.ok) {
+      await r.text();
+      return { ...empty, source: "http_error", http_status: status };
+    }
     const data = await r.json();
-    // Maytapi may wrap as { success, data: {...} } or return the group object directly.
     const grp: any = data?.data ?? data ?? {};
     const sample_keys = Object.keys(grp || {});
-    const participants: any[] =
-      grp.participants || grp.members || grp.contacts || grp?.data?.participants || [];
+    const participants: any[] = grp.participants || grp.members || grp.contacts || grp?.data?.participants || [];
     const phones = participants
       .map((p: any) => (typeof p === "string" ? p : p?.id || p?.phone || p?.jid || p?.number || ""))
       .map((s: string) => String(s).replace(/@.*$/, "").replace(/\D/g, ""))
@@ -92,12 +135,16 @@ function suggestion(buckets: { active: number; warm: number; dormant: number; gh
   return { action: "Post general group reminder (manual)", risk: "low" };
 }
 
-async function scanGroup(svc: any, group: { id: string; group_jid: string | null; group_name: string }) {
+export async function scanGroup(
+  svc: any,
+  group: { id: string; group_jid: string | null; group_name: string },
+  fetchMembers: GroupFetcher = fetchGroupMembers,
+): Promise<GroupScanReport | { group_id: string; group_name: string; error: string }> {
   if (!group.group_jid) {
     return { group_id: group.id, group_name: group.group_name, error: "no_group_jid" };
   }
 
-  const fetched = await fetchGroupMembers(group.group_jid);
+  const fetched = await fetchMembers(group.group_jid);
   const memberPhones = fetched.phones;
 
   if (memberPhones.length === 0) {
@@ -116,11 +163,18 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
       reconnect_shortlist: [],
       auto_send_blocked: true,
       mode: "audit_only",
+      persistence: {
+        members_attempted: 0,
+        members_persisted: true,
+        members_error: null,
+        report_persisted: false,
+        report_error: null,
+      },
       generated_at: new Date().toISOString(),
+      ok: false,
     };
   }
 
-  // Look up contacts by normalized phone
   const phonesNormalized = memberPhones.map((p) => "+" + p.replace(/^\+/, ""));
   const { data: contacts } = await svc
     .from("contacts")
@@ -174,8 +228,6 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
   }
 
   const sugg = suggestion(buckets);
-
-  // Persist member intelligence (audit-only; never used for sending)
   const memberRows = phonesNormalized.map((phone) => {
     const c = contactByPhone[phone];
     const lastIn = c ? lastInboundByContact[c.id] || null : null;
@@ -192,16 +244,17 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
       last_scanned_at: new Date().toISOString(),
     };
   });
-  const persistence: { members_attempted: number; members_persisted: boolean; members_error: string | null; report_persisted: boolean; report_error: string | null } = {
+
+  const persistence: GroupPersistence = {
     members_attempted: memberRows.length,
     members_persisted: false,
     members_error: null,
     report_persisted: false,
     report_error: null,
   };
+
   if (memberRows.length > 0) {
-    const { error: mErr } = await svc.from("whatsapp_group_members")
-      .upsert(memberRows, { onConflict: "group_jid,phone_normalized" });
+    const { error: mErr } = await svc.from("whatsapp_group_members").upsert(memberRows, { onConflict: "group_jid,phone_normalized" });
     if (mErr) {
       persistence.members_error = mErr.message;
       console.error(`[group-intel-scan] member upsert failed for ${group.group_jid}: ${mErr.message}`);
@@ -209,10 +262,10 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
       persistence.members_persisted = true;
     }
   } else {
-    persistence.members_persisted = true; // nothing to write
+    persistence.members_persisted = true;
   }
 
-  const report: any = {
+  const report: GroupScanReport = {
     group_id: group.id,
     group_jid: group.group_jid,
     group_name: group.group_name,
@@ -229,6 +282,7 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
     mode: "audit_only",
     persistence,
     generated_at: new Date().toISOString(),
+    ok: false,
   };
 
   const { error: rErr } = await svc.from("group_health_reports").insert({
@@ -248,70 +302,27 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
   return report;
 }
 
-Deno.serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-
-  const svc = createClient(SUPABASE_URL, SERVICE_KEY);
-
-  // Gate
-  const { data: settings } = await svc
-    .from("integration_settings")
-    .select("key, value")
-    .in("key", ["zazi_group_admin_enabled", "zazi_group_admin_mode", "zazi_group_dm_mode"]);
-  const map: Record<string, string> = {};
-  (settings || []).forEach((r: any) => { map[r.key] = r.value; });
-
-  // Audit-only is allowed even when zazi_group_admin_enabled=false (the scan itself is read-only)
-  if (map["zazi_group_dm_mode"] && map["zazi_group_dm_mode"] !== "disabled") {
-    return new Response(JSON.stringify({ ok: false, refused: true, reason: "group_dm_mode_must_be_disabled_at_level_3a" }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403,
-    });
-  }
-  if (map["zazi_group_admin_mode"] && map["zazi_group_admin_mode"] !== "audit_only") {
-    return new Response(JSON.stringify({ ok: false, refused: true, reason: "group_admin_mode_must_be_audit_only" }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403,
-    });
-  }
-
-  let body: any = {};
-  try { body = await req.json(); } catch (_) { body = {}; }
-
-  // Identify caller for audit log
-  let performed_by: string | null = null;
-  try {
-    const authHeader = req.headers.get("Authorization") || "";
-    const token = authHeader.replace("Bearer ", "");
-    if (token) {
-      const { data: u } = await svc.auth.getUser(token);
-      performed_by = u?.user?.id ?? null;
-    }
-  } catch (_) { /* ignore */ }
-
-  let q = svc.from("whatsapp_groups").select("id, group_jid, group_name").not("group_jid", "is", null).eq("is_active", true);
-  if (body?.group_jid) q = q.eq("group_jid", body.group_jid);
-  const { data: groups, error } = await q.limit(50);
-  if (error) {
-    return new Response(JSON.stringify({ ok: false, error: error.message }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500,
-    });
-  }
-
-  const startedAt = new Date().toISOString();
-  const reports: any[] = [];
-  for (const g of groups || []) {
-    reports.push(await scanGroup(svc, g));
-  }
-
-  // Aggregate persistence warnings from per-group scans
+export function collectWarnings(reports: any[]): string[] {
   const warnings: string[] = [];
   for (const r of reports) {
     if (r?.persistence?.members_error) warnings.push(`members_upsert_failed[${r.group_jid}]: ${r.persistence.members_error}`);
     if (r?.persistence?.report_error) warnings.push(`report_insert_failed[${r.group_jid}]: ${r.persistence.report_error}`);
   }
+  return warnings;
+}
 
-  // Audit log entry — surface failure visibly
+export async function writeAuditLog(
+  svc: any,
+  body: any,
+  groups: any[],
+  performed_by: string | null,
+  startedAt: string,
+  reports: any[],
+  warnings: string[],
+) {
   let audit_logged = false;
   let audit_error: string | null = null;
+
   const { error: aErr } = await svc.from("group_admin_actions").insert({
     action_type: "manual_scan",
     group_jid: body?.group_jid ?? null,
@@ -332,6 +343,7 @@ Deno.serve(async (req) => {
     started_at: startedAt,
     finished_at: new Date().toISOString(),
   });
+
   if (aErr) {
     audit_error = aErr.message;
     warnings.push(`audit_insert_failed: ${aErr.message}`);
@@ -340,16 +352,97 @@ Deno.serve(async (req) => {
     audit_logged = true;
   }
 
-  const ok = warnings.length === 0;
-  return new Response(JSON.stringify({
+  return { audit_logged, audit_error, warnings };
+}
+
+export function buildScanResponse(params: {
+  reports: GroupScanReport[];
+  warnings: string[];
+  audit_logged: boolean;
+  audit_error: string | null;
+}): ScanResponse {
+  const ok = params.warnings.length === 0;
+  return {
     ok,
     partial: !ok,
     mode: "audit_only",
     auto_send_blocked: true,
-    scanned: reports.length,
-    audit_logged,
-    audit_error,
-    warnings,
-    reports,
-  }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: ok ? 200 : 207 });
-});
+    scanned: params.reports.length,
+    audit_logged: params.audit_logged,
+    audit_error: params.audit_error,
+    warnings: params.warnings,
+    reports: params.reports,
+  };
+}
+
+if (import.meta.main) {
+  Deno.serve(async (req) => {
+    if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+    const svc = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    const { data: settings } = await svc
+      .from("integration_settings")
+      .select("key, value")
+      .in("key", ["zazi_group_admin_enabled", "zazi_group_admin_mode", "zazi_group_dm_mode"]);
+    const map: Record<string, string> = {};
+    (settings || []).forEach((r: any) => { map[r.key] = r.value; });
+
+    if (map["zazi_group_dm_mode"] && map["zazi_group_dm_mode"] !== "disabled") {
+      return new Response(JSON.stringify({ ok: false, refused: true, reason: "group_dm_mode_must_be_disabled_at_level_3a" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403,
+      });
+    }
+    if (map["zazi_group_admin_mode"] && map["zazi_group_admin_mode"] !== "audit_only") {
+      return new Response(JSON.stringify({ ok: false, refused: true, reason: "group_admin_mode_must_be_audit_only" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403,
+      });
+    }
+
+    let body: any = {};
+    try { body = await req.json(); } catch (_) { body = {}; }
+
+    let performed_by: string | null = null;
+    try {
+      const authHeader = req.headers.get("Authorization") || "";
+      const token = authHeader.replace("Bearer ", "");
+      if (token) {
+        const { data: u } = await svc.auth.getUser(token);
+        performed_by = u?.user?.id ?? null;
+      }
+    } catch (_) {
+      // ignore auth lookup failure; scan remains read-only
+    }
+
+    let q = svc.from("whatsapp_groups").select("id, group_jid, group_name").not("group_jid", "is", null).eq("is_active", true);
+    if (body?.group_jid) q = q.eq("group_jid", body.group_jid);
+    const { data: groups, error } = await q.limit(50);
+    if (error) {
+      return new Response(JSON.stringify({ ok: false, error: error.message }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500,
+      });
+    }
+
+    const startedAt = new Date().toISOString();
+    const reports: GroupScanReport[] = [];
+    for (const g of groups || []) {
+      const result = await scanGroup(svc, g);
+      if ("error" in result) continue;
+      reports.push(result);
+    }
+
+    const warnings = collectWarnings(reports);
+    const audit = await writeAuditLog(svc, body, groups || [], performed_by, startedAt, reports, warnings);
+    const response = buildScanResponse({
+      reports,
+      warnings: audit.warnings,
+      audit_logged: audit.audit_logged,
+      audit_error: audit.audit_error,
+    });
+
+    return new Response(JSON.stringify(response), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      status: response.ok ? 200 : 207,
+    });
+  });
+}
