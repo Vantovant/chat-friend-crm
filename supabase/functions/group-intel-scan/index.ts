@@ -302,23 +302,54 @@ Deno.serve(async (req) => {
     reports.push(await scanGroup(svc, g));
   }
 
-  // Audit log entry
-  await svc.from("group_admin_actions").insert({
+  // Aggregate persistence warnings from per-group scans
+  const warnings: string[] = [];
+  for (const r of reports) {
+    if (r?.persistence?.members_error) warnings.push(`members_upsert_failed[${r.group_jid}]: ${r.persistence.members_error}`);
+    if (r?.persistence?.report_error) warnings.push(`report_insert_failed[${r.group_jid}]: ${r.persistence.report_error}`);
+  }
+
+  // Audit log entry — surface failure visibly
+  let audit_logged = false;
+  let audit_error: string | null = null;
+  const { error: aErr } = await svc.from("group_admin_actions").insert({
     action_type: "manual_scan",
     group_jid: body?.group_jid ?? null,
     group_name: groups?.[0]?.group_name ?? null,
     performed_by,
-    result: { scanned: reports.length, summaries: reports.map((r: any) => ({ group_jid: r.group_jid, member_count: r.member_count, buckets: r.buckets, enumeration_status: r.enumeration_status })) },
+    result: {
+      scanned: reports.length,
+      warnings,
+      summaries: reports.map((r: any) => ({
+        group_jid: r.group_jid,
+        member_count: r.member_count,
+        buckets: r.buckets,
+        enumeration_status: r.enumeration_status,
+        persistence: r.persistence,
+      })),
+    },
     send_activity_attempted: false,
     started_at: startedAt,
     finished_at: new Date().toISOString(),
-  }).then(() => {}).catch(() => {});
+  });
+  if (aErr) {
+    audit_error = aErr.message;
+    warnings.push(`audit_insert_failed: ${aErr.message}`);
+    console.error(`[group-intel-scan] audit insert failed: ${aErr.message}`);
+  } else {
+    audit_logged = true;
+  }
 
+  const ok = warnings.length === 0;
   return new Response(JSON.stringify({
-    ok: true,
+    ok,
+    partial: !ok,
     mode: "audit_only",
     auto_send_blocked: true,
     scanned: reports.length,
+    audit_logged,
+    audit_error,
+    warnings,
     reports,
-  }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }), { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: ok ? 200 : 207 });
 });
