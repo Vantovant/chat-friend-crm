@@ -211,6 +211,30 @@ export function GroupAdministratorModule() {
         </div>
       </div>
 
+      {lastScan?.partial && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 space-y-2">
+          <div className="flex items-start gap-2 text-sm">
+            <ShieldAlert size={16} className="text-destructive mt-0.5 shrink-0" />
+            <div>
+              <div className="font-semibold text-foreground">Scan warnings surfaced</div>
+              <div className="text-xs text-muted-foreground">
+                Partial persistence was detected. Audit-only remains active and zero-send protections remain in force.
+              </div>
+            </div>
+          </div>
+          {lastScan.audit_error && (
+            <div className="text-xs text-destructive">Audit log warning: {lastScan.audit_error}</div>
+          )}
+          {lastScan.warnings.length > 0 && (
+            <ul className="text-xs space-y-1 list-disc pl-5 text-foreground">
+              {lastScan.warnings.map((warning, index) => (
+                <li key={`${warning}-${index}`}>{warning}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
       {/* Selector */}
       <div className="vanto-card p-4 space-y-3">
         <div className="flex items-center justify-between">
