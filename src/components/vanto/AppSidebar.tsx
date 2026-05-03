@@ -9,6 +9,7 @@ import {
   LayoutDashboard, MessageSquare, Users, BarChart3, Zap, Bot, GitBranch,
   Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X, Megaphone, ShieldCheck, ShieldAlert, Brain
 } from 'lucide-react';
+import { InstallAppButton } from './InstallAppButton';
 
 interface NavItem {
   id: Module;
