@@ -206,6 +206,7 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
                   <LogOut size={18} />
                 </button>
               </div>
+              <InstallAppButton className="w-full" />
             </div>
           </div>
         )}
