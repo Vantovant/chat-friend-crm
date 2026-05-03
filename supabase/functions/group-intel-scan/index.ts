@@ -175,6 +175,29 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
 
   const sugg = suggestion(buckets);
 
+  // Persist member intelligence (audit-only; never used for sending)
+  const memberRows = phonesNormalized.map((phone) => {
+    const c = contactByPhone[phone];
+    const lastIn = c ? lastInboundByContact[c.id] || null : null;
+    const cls = classify(lastIn, !!c);
+    return {
+      group_jid: group.group_jid,
+      phone_normalized: phone,
+      role: null,
+      contact_id: c?.id ?? null,
+      classification: cls,
+      crm_last_activity_at: lastIn,
+      last_seen_in_group_status: "insufficient_data",
+      evidence: { source: fetched.source, has_contact: !!c, dnc: !!c?.do_not_contact },
+      last_scanned_at: new Date().toISOString(),
+    };
+  });
+  if (memberRows.length > 0) {
+    await svc.from("whatsapp_group_members")
+      .upsert(memberRows, { onConflict: "group_jid,phone_normalized" })
+      .then(() => {}).catch(() => {});
+  }
+
   const report = {
     group_id: group.id,
     group_jid: group.group_jid,
