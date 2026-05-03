@@ -15,6 +15,7 @@ import { IntegrationsModule } from '@/components/vanto/IntegrationsModule';
 import { APIConsoleModule } from '@/components/vanto/APIConsoleModule';
 import { SettingsModule } from '@/components/vanto/SettingsModule';
 import { GroupCampaignsModule } from '@/components/vanto/GroupCampaignsModule';
+import { GroupAdministratorModule } from '@/components/vanto/GroupAdministratorModule';
 import { ReviewQueueModule } from '@/components/vanto/ReviewQueueModule';
 import { DamageControlModule } from '@/components/vanto/DamageControlModule';
 import { ProspectorDraftsModule } from '@/components/vanto/ProspectorDraftsModule';
@@ -58,6 +59,7 @@ const Index = () => {
       case 'integrations': return <IntegrationsModule userId={session?.user?.id ?? ''} />;
       case 'api-console': return <APIConsoleModule />;
       case 'group-campaigns': return <GroupCampaignsModule />;
+      case 'group-administrator': return <GroupAdministratorModule />;
       case 'review-queue': return <ReviewQueueModule />;
       case 'damage-control': return <DamageControlModule />;
       case 'prospector-drafts': return <ProspectorDraftsModule />;
