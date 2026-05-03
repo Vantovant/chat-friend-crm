@@ -212,7 +212,7 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
     persistence.members_persisted = true; // nothing to write
   }
 
-  const report = {
+  const report: any = {
     group_id: group.id,
     group_jid: group.group_jid,
     group_name: group.group_name,
@@ -227,16 +227,24 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
     reconnect_shortlist: shortlist.slice(0, 25),
     auto_send_blocked: true,
     mode: "audit_only",
+    persistence,
     generated_at: new Date().toISOString(),
   };
 
-  await svc.from("group_health_reports").insert({
+  const { error: rErr } = await svc.from("group_health_reports").insert({
     group_id: group.id,
     group_jid: group.group_jid,
     group_name: group.group_name,
     report,
-  }).then(() => {}).catch(() => {});
+  });
+  if (rErr) {
+    persistence.report_error = rErr.message;
+    console.error(`[group-intel-scan] report insert failed for ${group.group_jid}: ${rErr.message}`);
+  } else {
+    persistence.report_persisted = true;
+  }
 
+  report.ok = !persistence.members_error && !persistence.report_error;
   return report;
 }
 
