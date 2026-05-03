@@ -175,6 +175,29 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
 
   const sugg = suggestion(buckets);
 
+  // Persist member intelligence (audit-only; never used for sending)
+  const memberRows = phonesNormalized.map((phone) => {
+    const c = contactByPhone[phone];
+    const lastIn = c ? lastInboundByContact[c.id] || null : null;
+    const cls = classify(lastIn, !!c);
+    return {
+      group_jid: group.group_jid,
+      phone_normalized: phone,
+      role: null,
+      contact_id: c?.id ?? null,
+      classification: cls,
+      crm_last_activity_at: lastIn,
+      last_seen_in_group_status: "insufficient_data",
+      evidence: { source: fetched.source, has_contact: !!c, dnc: !!c?.do_not_contact },
+      last_scanned_at: new Date().toISOString(),
+    };
+  });
+  if (memberRows.length > 0) {
+    await svc.from("whatsapp_group_members")
+      .upsert(memberRows, { onConflict: "group_jid,phone_normalized" })
+      .then(() => {}).catch(() => {});
+  }
+
   const report = {
     group_id: group.id,
     group_jid: group.group_jid,
@@ -231,7 +254,18 @@ Deno.serve(async (req) => {
   let body: any = {};
   try { body = await req.json(); } catch (_) { body = {}; }
 
-  let q = svc.from("whatsapp_groups").select("id, group_jid, group_name").not("group_jid", "is", null);
+  // Identify caller for audit log
+  let performed_by: string | null = null;
+  try {
+    const authHeader = req.headers.get("Authorization") || "";
+    const token = authHeader.replace("Bearer ", "");
+    if (token) {
+      const { data: u } = await svc.auth.getUser(token);
+      performed_by = u?.user?.id ?? null;
+    }
+  } catch (_) { /* ignore */ }
+
+  let q = svc.from("whatsapp_groups").select("id, group_jid, group_name").not("group_jid", "is", null).eq("is_active", true);
   if (body?.group_jid) q = q.eq("group_jid", body.group_jid);
   const { data: groups, error } = await q.limit(50);
   if (error) {
@@ -240,10 +274,23 @@ Deno.serve(async (req) => {
     });
   }
 
+  const startedAt = new Date().toISOString();
   const reports: any[] = [];
   for (const g of groups || []) {
     reports.push(await scanGroup(svc, g));
   }
+
+  // Audit log entry
+  await svc.from("group_admin_actions").insert({
+    action_type: "manual_scan",
+    group_jid: body?.group_jid ?? null,
+    group_name: groups?.[0]?.group_name ?? null,
+    performed_by,
+    result: { scanned: reports.length, summaries: reports.map((r: any) => ({ group_jid: r.group_jid, member_count: r.member_count, buckets: r.buckets, enumeration_status: r.enumeration_status })) },
+    send_activity_attempted: false,
+    started_at: startedAt,
+    finished_at: new Date().toISOString(),
+  }).then(() => {}).catch(() => {});
 
   return new Response(JSON.stringify({
     ok: true,

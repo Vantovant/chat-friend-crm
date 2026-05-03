@@ -585,6 +585,45 @@ export type Database = {
         }
         Relationships: []
       }
+      group_admin_actions: {
+        Row: {
+          action_type: string
+          error: string | null
+          finished_at: string | null
+          group_jid: string | null
+          group_name: string | null
+          id: string
+          performed_by: string | null
+          result: Json
+          send_activity_attempted: boolean
+          started_at: string
+        }
+        Insert: {
+          action_type: string
+          error?: string | null
+          finished_at?: string | null
+          group_jid?: string | null
+          group_name?: string | null
+          id?: string
+          performed_by?: string | null
+          result?: Json
+          send_activity_attempted?: boolean
+          started_at?: string
+        }
+        Update: {
+          action_type?: string
+          error?: string | null
+          finished_at?: string | null
+          group_jid?: string | null
+          group_name?: string | null
+          id?: string
+          performed_by?: string | null
+          result?: Json
+          send_activity_attempted?: boolean
+          started_at?: string
+        }
+        Relationships: []
+      }
       group_health_reports: {
         Row: {
           created_at: string
@@ -1465,26 +1504,80 @@ export type Database = {
         }
         Relationships: []
       }
+      whatsapp_group_members: {
+        Row: {
+          classification: string | null
+          contact_id: string | null
+          crm_last_activity_at: string | null
+          evidence: Json
+          first_seen_at: string
+          group_jid: string
+          id: string
+          last_scanned_at: string
+          last_seen_in_group_status: string
+          phone_normalized: string
+          role: string | null
+        }
+        Insert: {
+          classification?: string | null
+          contact_id?: string | null
+          crm_last_activity_at?: string | null
+          evidence?: Json
+          first_seen_at?: string
+          group_jid: string
+          id?: string
+          last_scanned_at?: string
+          last_seen_in_group_status?: string
+          phone_normalized: string
+          role?: string | null
+        }
+        Update: {
+          classification?: string | null
+          contact_id?: string | null
+          crm_last_activity_at?: string | null
+          evidence?: Json
+          first_seen_at?: string
+          group_jid?: string
+          id?: string
+          last_scanned_at?: string
+          last_seen_in_group_status?: string
+          phone_normalized?: string
+          role?: string | null
+        }
+        Relationships: []
+      }
       whatsapp_groups: {
         Row: {
           created_at: string
+          dedup_at: string | null
+          dedup_note: string | null
+          duplicate_of: string | null
           group_jid: string | null
           group_name: string
           id: string
+          is_active: boolean
           user_id: string
         }
         Insert: {
           created_at?: string
+          dedup_at?: string | null
+          dedup_note?: string | null
+          duplicate_of?: string | null
           group_jid?: string | null
           group_name: string
           id?: string
+          is_active?: boolean
           user_id: string
         }
         Update: {
           created_at?: string
+          dedup_at?: string | null
+          dedup_note?: string | null
+          duplicate_of?: string | null
           group_jid?: string | null
           group_name?: string
           id?: string
+          is_active?: boolean
           user_id?: string
         }
         Relationships: [
