@@ -192,10 +192,24 @@ async function scanGroup(svc: any, group: { id: string; group_jid: string | null
       last_scanned_at: new Date().toISOString(),
     };
   });
+  const persistence: { members_attempted: number; members_persisted: boolean; members_error: string | null; report_persisted: boolean; report_error: string | null } = {
+    members_attempted: memberRows.length,
+    members_persisted: false,
+    members_error: null,
+    report_persisted: false,
+    report_error: null,
+  };
   if (memberRows.length > 0) {
-    await svc.from("whatsapp_group_members")
-      .upsert(memberRows, { onConflict: "group_jid,phone_normalized" })
-      .then(() => {}).catch(() => {});
+    const { error: mErr } = await svc.from("whatsapp_group_members")
+      .upsert(memberRows, { onConflict: "group_jid,phone_normalized" });
+    if (mErr) {
+      persistence.members_error = mErr.message;
+      console.error(`[group-intel-scan] member upsert failed for ${group.group_jid}: ${mErr.message}`);
+    } else {
+      persistence.members_persisted = true;
+    }
+  } else {
+    persistence.members_persisted = true; // nothing to write
   }
 
   const report = {
