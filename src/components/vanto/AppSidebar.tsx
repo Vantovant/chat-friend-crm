@@ -30,6 +30,7 @@ const navItems: NavItem[] = [
   { id: 'playbooks', label: 'Playbooks', icon: FileText },
   { id: 'workflows', label: 'Workflows', icon: GitBranch },
   { id: 'group-campaigns', label: 'Group Campaigns', icon: Megaphone },
+  { id: 'group-administrator', label: 'Group Administrator', icon: ShieldCheck, adminOnly: true },
   { id: 'integrations', label: 'Integrations', icon: Puzzle },
   { id: 'api-console', label: 'API Console', icon: Terminal },
   { id: 'damage-control', label: 'Damage Control', icon: ShieldAlert, adminOnly: true },
