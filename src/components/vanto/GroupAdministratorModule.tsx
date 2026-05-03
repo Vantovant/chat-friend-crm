@@ -8,6 +8,13 @@ import { ShieldAlert, Users, RefreshCw, Loader2, Eye, History } from 'lucide-rea
 import { useCurrentUser } from '@/hooks/use-current-user';
 
 type WGroup = { id: string; group_name: string; group_jid: string | null; is_active?: boolean };
+type Persistence = {
+  members_attempted: number;
+  members_persisted: boolean;
+  members_error: string | null;
+  report_persisted: boolean;
+  report_error: string | null;
+};
 type Report = {
   group_jid?: string;
   group_name?: string;
@@ -19,6 +26,19 @@ type Report = {
   reconnect_shortlist?: any[];
   suggested_action?: string;
   generated_at?: string;
+  ok?: boolean;
+  persistence?: Persistence;
+};
+type ScanResult = {
+  ok: boolean;
+  partial: boolean;
+  mode: 'audit_only';
+  auto_send_blocked: boolean;
+  scanned: number;
+  audit_logged: boolean;
+  audit_error: string | null;
+  warnings: string[];
+  reports: Report[];
 };
 type Member = {
   phone_normalized: string;
