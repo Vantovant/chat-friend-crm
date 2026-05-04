@@ -72,3 +72,6 @@ verify_jwt = false
 [functions.send-admin-alert]
 verify_jwt = false
 
+[functions.option-b-daily-summary]
+verify_jwt = false
+
