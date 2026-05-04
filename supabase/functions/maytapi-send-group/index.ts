@@ -224,6 +224,7 @@ Deno.serve(async (req) => {
           results.push({ id: post.id, status: "sent", preview: previewStatus });
         } else {
           const reason = sendData.message || sendData.error || JSON.stringify(sendData);
+          const newAttemptCount = (post.attempt_count || 0) + 1;
           await supabase.from("scheduled_group_posts").update({
             status: "failed",
             failure_reason: `Maytapi send failed: ${reason}`,
@@ -232,6 +233,11 @@ Deno.serve(async (req) => {
             preview_checked_at: new Date().toISOString(),
           }).eq("id", post.id);
           results.push({ id: post.id, status: "failed", error: reason });
+
+          // ── Conservative alert: only after 2nd failure on this post ──
+          if (newAttemptCount >= 2) {
+            await raiseDeliveryAlert(supabase, post, targetJid, reason, newAttemptCount);
+          }
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Unknown send error";
