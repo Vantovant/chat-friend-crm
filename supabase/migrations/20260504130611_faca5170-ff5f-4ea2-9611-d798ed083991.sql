@@ -1,0 +1,1 @@
+INSERT INTO integration_settings (key, value) VALUES ('zazi_option_b_status', 'hardened_pending_first_audit_row') ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
