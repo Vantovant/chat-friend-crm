@@ -68,8 +68,10 @@ Deno.serve(async (req) => {
     .select("key,value")
     .in("key", [
       "level_3a_monitor_only",
+      "zazi_level3_full_autoclose",
       "zazi_dormant_dm_enabled",
       "zazi_group_auto_post_enabled",
+      "zazi_group_reply_mode",
       "zazi_bulk_send_enabled",
       "zazi_prospector_phase3_mode",
       "zazi_prospector_recovery_mode",
@@ -80,8 +82,10 @@ Deno.serve(async (req) => {
 
   const proofs = {
     level_3_full_auto_close_disabled: settingMap.level_3a_monitor_only === "true",
+    level3_full_autoclose_explicit: settingMap.zazi_level3_full_autoclose === "false",
     dormant_member_dms_disabled: settingMap.zazi_dormant_dm_enabled !== "true",
     group_replies_draft_only: settingMap.zazi_group_auto_post_enabled !== "true",
+    group_reply_mode_explicit: settingMap.zazi_group_reply_mode === "draft_only",
     bulk_send_disabled: settingMap.zazi_bulk_send_enabled !== "true",
     phase3_mode: settingMap.zazi_prospector_phase3_mode || "suggest_only",
     recovery_mode: settingMap.zazi_prospector_recovery_mode || "suggest_only",
