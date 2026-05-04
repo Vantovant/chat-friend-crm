@@ -1001,6 +1001,75 @@ export type Database = {
         }
         Relationships: []
       }
+      option_b_audit_log: {
+        Row: {
+          attempt_outcome: string
+          channel: string
+          contact_id: string | null
+          conversation_id: string | null
+          created_at: string
+          delivery_status: string
+          error_code: string | null
+          error_message: string | null
+          governance_flags: Json
+          id: string
+          message_preview: string | null
+          message_text: string | null
+          operating_mode: string
+          phone_normalized: string | null
+          provider_message_id: string | null
+          reason_allowed: string | null
+          safety_checks_passed: Json
+          template_id: string | null
+          template_label: string | null
+          trigger_type: string
+        }
+        Insert: {
+          attempt_outcome?: string
+          channel: string
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          delivery_status?: string
+          error_code?: string | null
+          error_message?: string | null
+          governance_flags?: Json
+          id?: string
+          message_preview?: string | null
+          message_text?: string | null
+          operating_mode?: string
+          phone_normalized?: string | null
+          provider_message_id?: string | null
+          reason_allowed?: string | null
+          safety_checks_passed?: Json
+          template_id?: string | null
+          template_label?: string | null
+          trigger_type: string
+        }
+        Update: {
+          attempt_outcome?: string
+          channel?: string
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          delivery_status?: string
+          error_code?: string | null
+          error_message?: string | null
+          governance_flags?: Json
+          id?: string
+          message_preview?: string | null
+          message_text?: string | null
+          operating_mode?: string
+          phone_normalized?: string | null
+          provider_message_id?: string | null
+          reason_allowed?: string | null
+          safety_checks_passed?: Json
+          template_id?: string | null
+          template_label?: string | null
+          trigger_type?: string
+        }
+        Relationships: []
+      }
       pipeline_stages: {
         Row: {
           color: string | null
