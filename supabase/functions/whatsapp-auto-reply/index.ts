@@ -1256,13 +1256,19 @@ Deno.serve(async (req) => {
       const tocLabel = twilioStyle
         ? `You can also start with our learning guide here:`
         : `Learning guide:`;
+      // Only emit the Learning guide line when TOC_URL is genuinely different
+      // from SHOP_URL — prevents the shop link appearing twice on first touch.
+      const tocBlock =
+        TOC_URL && TOC_URL.trim() && TOC_URL.trim() !== SHOP_URL
+          ? `${tocLabel}\n${TOC_URL}\n\n`
+          : "";
       return (
         `${PROOF_URL}\n\n` +
         `🌿 *APLGO Official Wellness Info*\n\n` +
         `Hi, I'm *Vanto from Get Well Africa* — an accredited APLGO distributor.\n\n` +
         `${bridge}` +
         `${intro}\n${SHOP_URL}\n\n` +
-        `${tocLabel}\n${TOC_URL}\n\n` +
+        `${tocBlock}` +
         `What would you like support with most — ${SUPPORT_MENU}?\n\n` +
         `— Vanto\nLocal support: ${LOCAL_NUMBER}`
       );
