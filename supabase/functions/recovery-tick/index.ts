@@ -92,6 +92,20 @@ Deno.serve(async (req) => {
 
     const nowIso = new Date().toISOString();
 
+    // ── Option B emergency pause gate ──
+    const { data: pauseRow } = await supabase
+      .from("integration_settings")
+      .select("value")
+      .eq("key", "zazi_option_b_paused")
+      .maybeSingle();
+    const optionBPaused = (pauseRow?.value || "false").toLowerCase() === "true";
+    if (optionBPaused) {
+      console.log("[recovery-tick] Option B paused — skipping all auto-sends");
+      return new Response(JSON.stringify({
+        success: true, processed: 0, sent: 0, failed: 0, completed: 0, paused: true,
+      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     // Find due rows (limit batch size)
     const { data: due, error } = await supabase
       .from("missed_inquiries")
@@ -197,6 +211,31 @@ Deno.serve(async (req) => {
         status: isLast && sendResp.ok ? "exhausted" : "active",
         last_error: sendResp.ok ? null : newAttempt.error,
       }).eq("id", row.id);
+
+      // Option B audit trail
+      await supabase.from("option_b_audit_log").insert({
+        contact_id: row.contact_id,
+        conversation_id: row.conversation_id,
+        phone_normalized: phone,
+        trigger_type: "recovery",
+        channel: "maytapi",
+        template_label: `recovery_step_${stepIdx + 1}`,
+        message_text: message,
+        message_preview: message.slice(0, 200),
+        provider_message_id: sendData?.message_id || null,
+        delivery_status: sendResp.ok ? "sent" : "failed",
+        error_message: sendResp.ok ? null : newAttempt.error,
+        safety_checks_passed: [
+          "contact_present",
+          "phone_present",
+          "no_user_reply_since_last_attempt",
+          "option_b_not_paused",
+        ],
+        reason_allowed: `Recovery step ${stepIdx + 1} for missed Facebook→Twilio inquiry; legacy 5-step cadence`,
+        operating_mode: "option_b",
+        governance_flags: { option_b_paused: false },
+        attempt_outcome: sendResp.ok ? "delivered" : "failed",
+      });
 
       if (sendResp.ok) sent++; else failed++;
     }

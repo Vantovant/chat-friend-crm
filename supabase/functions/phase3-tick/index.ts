@@ -28,16 +28,20 @@ Deno.serve(async (req) => {
 
     const nowIso = new Date().toISOString();
 
-    // ── GOVERNANCE GATE (Level 2A lock) ──
-    // Phase 3 auto-send is gated by integration_settings.zazi_prospector_phase3_mode.
-    // Default = 'suggest_only'. Auto-send only when explicitly set to 'auto'.
-    const { data: phase3ModeRow } = await supabase
+    // ── GOVERNANCE GATE (Level 2A lock + Option B pause) ──
+    const { data: gateRows } = await supabase
       .from("integration_settings")
-      .select("value")
-      .eq("key", "zazi_prospector_phase3_mode")
-      .maybeSingle();
-    const phase3Mode = (phase3ModeRow?.value || "suggest_only").toLowerCase();
-    const autoSendAllowed = phase3Mode === "auto";
+      .select("key,value")
+      .in("key", ["zazi_prospector_phase3_mode", "zazi_option_b_paused"]);
+    const gateMap: Record<string, string> = {};
+    (gateRows || []).forEach((r: any) => { gateMap[r.key] = r.value; });
+    const phase3Mode = (gateMap["zazi_prospector_phase3_mode"] || "suggest_only").toLowerCase();
+    const optionBPaused = (gateMap["zazi_option_b_paused"] || "false").toLowerCase() === "true";
+    const autoSendAllowed = phase3Mode === "auto" && !optionBPaused;
+
+    if (optionBPaused) {
+      console.log("[phase3-tick] Option B paused — auto-sends downgraded to suggest");
+    }
 
     const { data: due, error } = await supabase
       .from("missed_inquiries")
@@ -181,6 +185,35 @@ Deno.serve(async (req) => {
           delivery: sendResp.ok ? "sent" : "failed",
           provider_message_id: sendData?.message_id || null,
           error: sendResp.ok ? null : newAttempt.error,
+        });
+
+        // Option B audit trail
+        await supabase.from("option_b_audit_log").insert({
+          contact_id: row.contact_id,
+          conversation_id: row.conversation_id,
+          phone_normalized: phone,
+          trigger_type: `follow_up_${stepIdx + 1}`,
+          channel: "maytapi",
+          template_id: tpl.id,
+          template_label: `${row.intent_state}_step_${stepIdx + 1}`,
+          message_text: message,
+          message_preview: message.slice(0, 200),
+          provider_message_id: sendData?.message_id || null,
+          delivery_status: sendResp.ok ? "sent" : "failed",
+          error_message: sendResp.ok ? null : newAttempt.error,
+          safety_checks_passed: [
+            "auto_followup_enabled",
+            "do_not_contact_clear",
+            "phone_present",
+            "no_user_reply_since_last_attempt",
+            "human_touch_guard_passed",
+            "phase3_mode_auto",
+            "option_b_not_paused",
+          ],
+          reason_allowed: `Phase 3 follow-up #${stepIdx + 1} for intent=${row.intent_state}; safe category, contact opted-in window`,
+          operating_mode: "option_b",
+          governance_flags: { phase3_mode: phase3Mode, option_b_paused: optionBPaused },
+          attempt_outcome: sendResp.ok ? "delivered" : "failed",
         });
 
         if (sendResp.ok && row.conversation_id) {
