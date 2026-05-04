@@ -58,6 +58,68 @@ function pickMeta(html: string, property: string): string | null {
 }
 // ----------------------------------------------------------
 
+// ---------- Conservative delivery-failure alert ----------
+// Only fires after a scheduled post has failed twice. Logs to maytapi_delivery_alerts
+// and best-effort pings admin phone via send-admin-alert. Does NOT retry the post,
+// does NOT change schedule, does NOT touch Option B.
+async function raiseDeliveryAlert(
+  supabase: any,
+  post: any,
+  targetJid: string | null,
+  reason: string,
+  attemptCount: number,
+) {
+  try {
+    // Idempotent: unique partial index on (scheduled_post_id) where alert_status='open'
+    const { data: alertRow, error: insertErr } = await supabase
+      .from("maytapi_delivery_alerts")
+      .insert({
+        scheduled_post_id: post.id,
+        target_group_name: post.target_group_name,
+        target_group_jid: targetJid,
+        failure_reason: reason?.slice(0, 1000),
+        attempt_count: attemptCount,
+        alert_status: "open",
+      })
+      .select("id")
+      .maybeSingle();
+
+    if (insertErr) {
+      // If duplicate (alert already open for this post), skip silently
+      if (!String(insertErr.message || "").includes("duplicate")) {
+        console.error("[alert] insert error:", insertErr.message);
+      }
+      return;
+    }
+
+    // Best-effort admin phone ping (only if function exists & 24h window open)
+    try {
+      const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+      const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const pingRes = await fetch(`${SUPABASE_URL}/functions/v1/send-admin-alert`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${SERVICE_ROLE_KEY}`,
+        },
+        body: JSON.stringify({
+          message: `Maytapi group post FAILED 2x: "${post.target_group_name}" — ${String(reason).slice(0, 80)}`,
+        }),
+      });
+      const pingOk = pingRes.ok;
+      await supabase
+        .from("maytapi_delivery_alerts")
+        .update({ phone_pinged: pingOk, phone_ping_status: pingOk ? "sent" : `http_${pingRes.status}` })
+        .eq("id", alertRow?.id);
+    } catch (e) {
+      console.warn("[alert] admin phone ping skipped:", e instanceof Error ? e.message : String(e));
+    }
+  } catch (e) {
+    console.error("[alert] raiseDeliveryAlert exception:", e);
+  }
+}
+// ----------------------------------------------------------
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -224,6 +286,7 @@ Deno.serve(async (req) => {
           results.push({ id: post.id, status: "sent", preview: previewStatus });
         } else {
           const reason = sendData.message || sendData.error || JSON.stringify(sendData);
+          const newAttemptCount = (post.attempt_count || 0) + 1;
           await supabase.from("scheduled_group_posts").update({
             status: "failed",
             failure_reason: `Maytapi send failed: ${reason}`,
@@ -232,14 +295,24 @@ Deno.serve(async (req) => {
             preview_checked_at: new Date().toISOString(),
           }).eq("id", post.id);
           results.push({ id: post.id, status: "failed", error: reason });
+
+          // ── Conservative alert: only after 2nd failure on this post ──
+          if (newAttemptCount >= 2) {
+            await raiseDeliveryAlert(supabase, post, targetJid, reason, newAttemptCount);
+          }
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Unknown send error";
+        const newAttemptCount = (post.attempt_count || 0) + 1;
         await supabase.from("scheduled_group_posts").update({
           status: "failed",
           failure_reason: `Send exception: ${msg}`,
         }).eq("id", post.id);
         results.push({ id: post.id, status: "failed", error: msg });
+
+        if (newAttemptCount >= 2) {
+          await raiseDeliveryAlert(supabase, post, post.target_group_jid, msg, newAttemptCount);
+        }
       }
     }
 

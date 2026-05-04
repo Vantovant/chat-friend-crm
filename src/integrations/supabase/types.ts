@@ -863,6 +863,51 @@ export type Database = {
         }
         Relationships: []
       }
+      maytapi_delivery_alerts: {
+        Row: {
+          acknowledged_at: string | null
+          acknowledged_by: string | null
+          alert_status: string
+          attempt_count: number
+          created_at: string
+          failure_reason: string | null
+          id: string
+          phone_ping_status: string | null
+          phone_pinged: boolean
+          scheduled_post_id: string
+          target_group_jid: string | null
+          target_group_name: string
+        }
+        Insert: {
+          acknowledged_at?: string | null
+          acknowledged_by?: string | null
+          alert_status?: string
+          attempt_count?: number
+          created_at?: string
+          failure_reason?: string | null
+          id?: string
+          phone_ping_status?: string | null
+          phone_pinged?: boolean
+          scheduled_post_id: string
+          target_group_jid?: string | null
+          target_group_name: string
+        }
+        Update: {
+          acknowledged_at?: string | null
+          acknowledged_by?: string | null
+          alert_status?: string
+          attempt_count?: number
+          created_at?: string
+          failure_reason?: string | null
+          id?: string
+          phone_ping_status?: string | null
+          phone_pinged?: boolean
+          scheduled_post_id?: string
+          target_group_jid?: string | null
+          target_group_name?: string
+        }
+        Relationships: []
+      }
       messages: {
         Row: {
           content: string
