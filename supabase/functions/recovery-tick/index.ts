@@ -92,6 +92,20 @@ Deno.serve(async (req) => {
 
     const nowIso = new Date().toISOString();
 
+    // ── Option B emergency pause gate ──
+    const { data: pauseRow } = await supabase
+      .from("integration_settings")
+      .select("value")
+      .eq("key", "zazi_option_b_paused")
+      .maybeSingle();
+    const optionBPaused = (pauseRow?.value || "false").toLowerCase() === "true";
+    if (optionBPaused) {
+      console.log("[recovery-tick] Option B paused — skipping all auto-sends");
+      return new Response(JSON.stringify({
+        success: true, processed: 0, sent: 0, failed: 0, completed: 0, paused: true,
+      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     // Find due rows (limit batch size)
     const { data: due, error } = await supabase
       .from("missed_inquiries")
