@@ -187,6 +187,35 @@ Deno.serve(async (req) => {
           error: sendResp.ok ? null : newAttempt.error,
         });
 
+        // Option B audit trail
+        await supabase.from("option_b_audit_log").insert({
+          contact_id: row.contact_id,
+          conversation_id: row.conversation_id,
+          phone_normalized: phone,
+          trigger_type: `follow_up_${stepIdx + 1}`,
+          channel: "maytapi",
+          template_id: tpl.id,
+          template_label: `${row.intent_state}_step_${stepIdx + 1}`,
+          message_text: message,
+          message_preview: message.slice(0, 200),
+          provider_message_id: sendData?.message_id || null,
+          delivery_status: sendResp.ok ? "sent" : "failed",
+          error_message: sendResp.ok ? null : newAttempt.error,
+          safety_checks_passed: [
+            "auto_followup_enabled",
+            "do_not_contact_clear",
+            "phone_present",
+            "no_user_reply_since_last_attempt",
+            "human_touch_guard_passed",
+            "phase3_mode_auto",
+            "option_b_not_paused",
+          ],
+          reason_allowed: `Phase 3 follow-up #${stepIdx + 1} for intent=${row.intent_state}; safe category, contact opted-in window`,
+          operating_mode: "option_b",
+          governance_flags: { phase3_mode: phase3Mode, option_b_paused: optionBPaused },
+          attempt_outcome: sendResp.ok ? "delivered" : "failed",
+        });
+
         if (sendResp.ok && row.conversation_id) {
           await supabase.from("messages").insert({
             conversation_id: row.conversation_id,
