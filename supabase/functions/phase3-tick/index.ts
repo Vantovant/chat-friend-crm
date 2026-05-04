@@ -28,16 +28,20 @@ Deno.serve(async (req) => {
 
     const nowIso = new Date().toISOString();
 
-    // ── GOVERNANCE GATE (Level 2A lock) ──
-    // Phase 3 auto-send is gated by integration_settings.zazi_prospector_phase3_mode.
-    // Default = 'suggest_only'. Auto-send only when explicitly set to 'auto'.
-    const { data: phase3ModeRow } = await supabase
+    // ── GOVERNANCE GATE (Level 2A lock + Option B pause) ──
+    const { data: gateRows } = await supabase
       .from("integration_settings")
-      .select("value")
-      .eq("key", "zazi_prospector_phase3_mode")
-      .maybeSingle();
-    const phase3Mode = (phase3ModeRow?.value || "suggest_only").toLowerCase();
-    const autoSendAllowed = phase3Mode === "auto";
+      .select("key,value")
+      .in("key", ["zazi_prospector_phase3_mode", "zazi_option_b_paused"]);
+    const gateMap: Record<string, string> = {};
+    (gateRows || []).forEach((r: any) => { gateMap[r.key] = r.value; });
+    const phase3Mode = (gateMap["zazi_prospector_phase3_mode"] || "suggest_only").toLowerCase();
+    const optionBPaused = (gateMap["zazi_option_b_paused"] || "false").toLowerCase() === "true";
+    const autoSendAllowed = phase3Mode === "auto" && !optionBPaused;
+
+    if (optionBPaused) {
+      console.log("[phase3-tick] Option B paused — auto-sends downgraded to suggest");
+    }
 
     const { data: due, error } = await supabase
       .from("missed_inquiries")
