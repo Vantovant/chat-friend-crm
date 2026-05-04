@@ -80,16 +80,35 @@ Deno.serve(async (req) => {
   const settingMap: Record<string, string> = {};
   (lockSettings || []).forEach((s: any) => { settingMap[s.key] = s.value; });
 
+  // Scheduled group content posts (separate autonomous system, NOT part of Option B)
+  const { count: scheduledGroupSentToday } = await sb
+    .from("scheduled_group_posts")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "sent")
+    .gte("scheduled_at", startIso)
+    .lt("scheduled_at", endIso);
+
+  const { count: scheduledGroupPendingNext24h } = await sb
+    .from("scheduled_group_posts")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "pending")
+    .gte("scheduled_at", new Date().toISOString())
+    .lt("scheduled_at", new Date(Date.now() + 24 * 3600 * 1000).toISOString());
+
   const proofs = {
     level_3_full_auto_close_disabled: settingMap.level_3a_monitor_only === "true",
     level3_full_autoclose_explicit: settingMap.zazi_level3_full_autoclose === "false",
     dormant_member_dms_disabled: settingMap.zazi_dormant_dm_enabled !== "true",
-    group_replies_draft_only: settingMap.zazi_group_auto_post_enabled !== "true",
+    group_ai_auto_reply_inside_threads_disabled: settingMap.zazi_group_auto_post_enabled !== "true",
     group_reply_mode_explicit: settingMap.zazi_group_reply_mode === "draft_only",
     bulk_send_disabled: settingMap.zazi_bulk_send_enabled !== "true",
     phase3_mode: settingMap.zazi_prospector_phase3_mode || "suggest_only",
     recovery_mode: settingMap.zazi_prospector_recovery_mode || "suggest_only",
     option_b_paused: settingMap.zazi_option_b_paused === "true",
+    // Autonomous systems NOT subject to Option B pause:
+    scheduled_group_content_posts_LIVE: true,
+    scheduled_group_posts_sent_today: scheduledGroupSentToday || 0,
+    scheduled_group_posts_pending_next_24h: scheduledGroupPendingNext24h || 0,
   };
 
   return new Response(JSON.stringify({
