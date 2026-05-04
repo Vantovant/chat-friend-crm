@@ -69,3 +69,6 @@ verify_jwt = false
 [functions.maytapi-health]
 verify_jwt = false
 
+[functions.send-admin-alert]
+verify_jwt = false
+
