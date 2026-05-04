@@ -241,11 +241,16 @@ Deno.serve(async (req) => {
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Unknown send error";
+        const newAttemptCount = (post.attempt_count || 0) + 1;
         await supabase.from("scheduled_group_posts").update({
           status: "failed",
           failure_reason: `Send exception: ${msg}`,
         }).eq("id", post.id);
         results.push({ id: post.id, status: "failed", error: msg });
+
+        if (newAttemptCount >= 2) {
+          await raiseDeliveryAlert(supabase, post, post.target_group_jid, msg, newAttemptCount);
+        }
       }
     }
 
