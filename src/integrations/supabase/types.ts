@@ -1726,6 +1726,7 @@ export type Database = {
           dedup_at: string | null
           dedup_note: string | null
           duplicate_of: string | null
+          emergency_engagement: boolean
           group_jid: string | null
           group_name: string
           id: string
@@ -1737,6 +1738,7 @@ export type Database = {
           dedup_at?: string | null
           dedup_note?: string | null
           duplicate_of?: string | null
+          emergency_engagement?: boolean
           group_jid?: string | null
           group_name: string
           id?: string
@@ -1748,6 +1750,7 @@ export type Database = {
           dedup_at?: string | null
           dedup_note?: string | null
           duplicate_of?: string | null
+          emergency_engagement?: boolean
           group_jid?: string | null
           group_name?: string
           id?: string
