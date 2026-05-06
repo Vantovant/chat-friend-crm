@@ -95,6 +95,31 @@ Deno.serve(async (req) => {
   const templateSid = settingMap['zazi_admin_alert_template_content_sid'] || '';
   const templateApproved = settingMap['zazi_admin_alert_template_status'] === 'approved' && !!templateSid;
 
+  // Pull email fallback configuration
+  const { data: emailSettings } = await sb
+    .from('integration_settings')
+    .select('key,value')
+    .in('key', ['zazi_emergency_admin_email']);
+  const emailMap: Record<string,string> = {};
+  (emailSettings || []).forEach((s: any) => { emailMap[s.key] = s.value; });
+  const adminEmail = emailMap['zazi_emergency_admin_email'] || '';
+  const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
+
+  const attempts: any[] = [];
+  async function logAttempt(channel: string, ok: boolean, info: any) {
+    attempts.push({ channel, ok, ...info, ts: new Date().toISOString() });
+    try {
+      await sb.from('webhook_events').insert({
+        source: 'admin_alert',
+        action: channel,
+        direction: 'outbound',
+        status: ok ? 'delivered' : 'failed',
+        payload: { to: toE164, message: alertText, info },
+        error: ok ? null : (info?.error || info?.code || 'unknown'),
+      });
+    } catch (_) { /* ignore */ }
+  }
+
   // Build Twilio request
   const params = new URLSearchParams();
   params.set('To', `whatsapp:${toE164}`);
