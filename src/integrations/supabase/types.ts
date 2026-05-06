@@ -105,32 +105,47 @@ export type Database = {
       }
       ai_suggestions: {
         Row: {
+          approved_at: string | null
+          approved_by: string | null
+          attempt_count: number
           confidence: number | null
           content: Json
           conversation_id: string
           created_at: string
           id: string
+          last_blocked_at: string | null
           mode: string | null
+          provider_message_id: string | null
           status: string | null
           suggestion_type: string
         }
         Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          attempt_count?: number
           confidence?: number | null
           content?: Json
           conversation_id: string
           created_at?: string
           id?: string
+          last_blocked_at?: string | null
           mode?: string | null
+          provider_message_id?: string | null
           status?: string | null
           suggestion_type?: string
         }
         Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          attempt_count?: number
           confidence?: number | null
           content?: Json
           conversation_id?: string
           created_at?: string
           id?: string
+          last_blocked_at?: string | null
           mode?: string | null
+          provider_message_id?: string | null
           status?: string | null
           suggestion_type?: string
         }
@@ -1217,6 +1232,51 @@ export type Database = {
         }
         Relationships: []
       }
+      prospector_approval_audit: {
+        Row: {
+          admin_user: string | null
+          contact_id: string | null
+          conversation_id: string | null
+          created_at: string
+          draft_id: string | null
+          failure_reason: string | null
+          id: string
+          metadata: Json
+          outcome: string
+          provider_message_id: string | null
+          status_after: string | null
+          status_before: string | null
+        }
+        Insert: {
+          admin_user?: string | null
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          draft_id?: string | null
+          failure_reason?: string | null
+          id?: string
+          metadata?: Json
+          outcome: string
+          provider_message_id?: string | null
+          status_after?: string | null
+          status_before?: string | null
+        }
+        Update: {
+          admin_user?: string | null
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          draft_id?: string | null
+          failure_reason?: string | null
+          id?: string
+          metadata?: Json
+          outcome?: string
+          provider_message_id?: string | null
+          status_after?: string | null
+          status_before?: string | null
+        }
+        Relationships: []
+      }
       prospector_damage_audit: {
         Row: {
           contact_id: string
@@ -1873,6 +1933,13 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_ai_suggestion_for_send: {
+        Args: { _id: string; _user: string }
+        Returns: {
+          claimed: boolean
+          prior_status: string
+        }[]
+      }
       disable_april_flash_sale_rule: { Args: never; Returns: undefined }
       get_user_role: {
         Args: never

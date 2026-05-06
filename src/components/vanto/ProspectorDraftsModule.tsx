@@ -91,19 +91,30 @@ export function ProspectorDraftsModule() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [filter]);
 
   const approveAndSend = async (d: Draft) => {
+    if (busy) return; // hard guard against double-clicks
     setBusy(d.id);
+    // Optimistically remove from pending list to prevent re-clicks
+    setDrafts(prev => prev.map(x => x.id === d.id ? { ...x, status: 'claimed' } : x));
     try {
-      const text: string = d.content?.draft_reply || '';
-      if (!text.trim()) throw new Error('Empty draft');
-      const { data: sd, error } = await supabase.functions.invoke('send-message', {
-        body: { conversation_id: d.conversation_id, content: text, message_type: 'text' },
+      const { data: sd, error } = await supabase.functions.invoke('approve-prospector-draft', {
+        body: { draft_id: d.id },
       });
-      if (error || !sd?.ok) throw new Error(sd?.message || error?.message || 'Send failed');
-      await supabase.from('ai_suggestions').update({ status: 'sent' }).eq('id', d.id);
-      toast({ title: '✅ Sent', description: 'Draft delivered to recipient.' });
+      if (error || !sd?.ok) {
+        const code = sd?.code || '';
+        if (code === 'ALREADY_PROCESSED') {
+          toast({ title: 'Already processed', description: `Status: ${sd?.prior_status || 'unknown'}` });
+        } else if (code === 'SELF_ADMIN_BLOCKED') {
+          toast({ title: 'Blocked', description: 'Cannot send live drafts to admin/self number.', variant: 'destructive' });
+        } else {
+          throw new Error(sd?.message || error?.message || 'Send failed');
+        }
+      } else {
+        toast({ title: '✅ Sent', description: `Provider SID: ${sd.provider_message_id || 'recorded'}` });
+      }
       await load();
     } catch (e: any) {
       toast({ title: 'Send failed', description: e.message, variant: 'destructive' });
+      await load();
     } finally {
       setBusy(null);
     }

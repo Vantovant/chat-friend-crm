@@ -1420,6 +1420,32 @@ Deno.serve(async (req) => {
     console.warn("[auto-reply] duplicate guard error (non-fatal):", e?.message);
   }
 
+  // ── ADMIN/SELF EXCLUSION (2026-05-06) ──
+  // Never auto-send and never create live prospect drafts to the admin's own
+  // WhatsApp number (+27790831530). Only allow when contact is explicitly
+  // tagged as a QA/test fixture.
+  try {
+    if (contact_id) {
+      const { data: cSelf } = await svc.from("contacts")
+        .select("phone_normalized, phone, tags, name").eq("id", contact_id).maybeSingle();
+      const phoneNorm = (cSelf?.phone_normalized || cSelf?.phone || "").trim();
+      const isQA = (cSelf?.tags || []).includes("test:fixture")
+        || (cSelf?.name || "").startsWith("[TEST]");
+      if (!isQA && (phoneNorm === "+27790831530" || phoneNorm === "27790831530")) {
+        diag.result = "skipped_admin_self";
+        console.log("[auto-reply] SKIP admin/self number:", phoneNorm);
+        await svc.from("auto_reply_events").insert({
+          conversation_id, inbound_message_id: inbound_message_id || null,
+          action_taken: "skipped_admin_self",
+          reason: "Admin/self number — no live prospect drafts or auto-sends.",
+        });
+        return jsonRes({ ok: true, auto_reply: false, action: "skipped_admin_self" });
+      }
+    }
+  } catch (e: any) {
+    console.warn("[auto-reply] admin/self guard error (non-fatal):", e?.message);
+  }
+
   // ── MASTER PROSPECTOR LEVEL 2A — AUTO FIRST-TOUCH GATE (2026-05-02) ──
   // Auto-send is allowed ONLY for the Unified Trust Entry first-touch.
   // Every other reply path is downgraded to a draft in `ai_suggestions`
