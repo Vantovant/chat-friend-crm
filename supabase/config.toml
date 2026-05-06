@@ -75,3 +75,6 @@ verify_jwt = false
 [functions.option-b-daily-summary]
 verify_jwt = false
 
+
+[functions.approve-prospector-draft]
+verify_jwt = false
