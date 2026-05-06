@@ -95,6 +95,31 @@ Deno.serve(async (req) => {
   const templateSid = settingMap['zazi_admin_alert_template_content_sid'] || '';
   const templateApproved = settingMap['zazi_admin_alert_template_status'] === 'approved' && !!templateSid;
 
+  // Pull email fallback configuration
+  const { data: emailSettings } = await sb
+    .from('integration_settings')
+    .select('key,value')
+    .in('key', ['zazi_emergency_admin_email']);
+  const emailMap: Record<string,string> = {};
+  (emailSettings || []).forEach((s: any) => { emailMap[s.key] = s.value; });
+  const adminEmail = emailMap['zazi_emergency_admin_email'] || '';
+  const RESEND_API_KEY = Deno.env.get('RESEND_API_KEY');
+
+  const attempts: any[] = [];
+  async function logAttempt(channel: string, ok: boolean, info: any) {
+    attempts.push({ channel, ok, ...info, ts: new Date().toISOString() });
+    try {
+      await sb.from('webhook_events').insert({
+        source: 'admin_alert',
+        action: channel,
+        direction: 'outbound',
+        status: ok ? 'delivered' : 'failed',
+        payload: { to: toE164, message: alertText, info },
+        error: ok ? null : (info?.error || info?.code || 'unknown'),
+      });
+    } catch (_) { /* ignore */ }
+  }
+
   // Build Twilio request
   const params = new URLSearchParams();
   params.set('To', `whatsapp:${toE164}`);
@@ -111,14 +136,70 @@ Deno.serve(async (req) => {
     params.set('ContentVariables', JSON.stringify({ '1': alertText }));
     mode = 'template';
   } else {
+    // Skip WA send entirely; cascade to SMS then email
+    await logAttempt('whatsapp', false, { code: 'OUTSIDE_WINDOW_NO_TEMPLATE' });
+
+    // SMS fallback via Twilio
+    let smsOk = false; let smsData: any = null; let smsStatus = 0;
+    try {
+      const smsParams = new URLSearchParams();
+      smsParams.set('To', toE164);
+      if (TWILIO_MESSAGING_SERVICE_SID) smsParams.set('MessagingServiceSid', TWILIO_MESSAGING_SERVICE_SID);
+      smsParams.set('Body', `🔔 ${alertText}`);
+      const auth = btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`);
+      const smsRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
+        method: 'POST',
+        headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: smsParams,
+      });
+      smsStatus = smsRes.status;
+      smsData = await smsRes.json();
+      smsOk = smsRes.ok && !smsData?.error_code;
+    } catch (e: any) {
+      smsData = { error: e?.message };
+    }
+    await logAttempt('sms', smsOk, { sid: smsData?.sid, status: smsData?.status, error_code: smsData?.error_code, http: smsStatus });
+
+    // Email fallback via Resend (only if SMS failed and key present)
+    let emailOk = false; let emailInfo: any = null;
+    if (!smsOk && adminEmail && RESEND_API_KEY) {
+      try {
+        const er = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: 'Vanto CRM <onboarding@resend.dev>',
+            to: [adminEmail],
+            subject: '🔔 Vanto CRM Emergency Alert',
+            text: alertText,
+          }),
+        });
+        emailInfo = await er.json();
+        emailOk = er.ok;
+      } catch (e: any) {
+        emailInfo = { error: e?.message };
+      }
+      await logAttempt('email', emailOk, emailInfo);
+    } else if (!smsOk) {
+      await logAttempt('email', false, { code: 'EMAIL_NOT_CONFIGURED', has_email: !!adminEmail, has_key: !!RESEND_API_KEY });
+    }
+
+    // Persist last attempt summary
+    await sb.from('integration_settings').upsert([
+      { key: 'zazi_admin_alert_last_attempt_at', value: new Date().toISOString(), updated_at: new Date().toISOString() },
+      { key: 'zazi_admin_alert_last_attempt_mode', value: smsOk ? 'sms_fallback' : (emailOk ? 'email_fallback' : 'all_failed'), updated_at: new Date().toISOString() },
+      { key: 'zazi_admin_alert_last_attempt_sid', value: smsData?.sid || '', updated_at: new Date().toISOString() },
+      { key: 'zazi_admin_alert_last_attempt_status', value: smsData?.status || `http_${smsStatus}`, updated_at: new Date().toISOString() },
+      { key: 'zazi_admin_alert_last_attempt_error', value: smsData?.error_code ? String(smsData.error_code) : '', updated_at: new Date().toISOString() },
+    ], { onConflict: 'key' });
+
     return jsonRes({
-      ok: false,
-      code: 'OUTSIDE_WINDOW_NO_TEMPLATE',
-      message: 'Outside 24h window and approved template not configured',
-      hint: 'Approve vanto_admin_alert template in Twilio Console and set zazi_admin_alert_template_content_sid',
+      ok: smsOk || emailOk,
+      mode: smsOk ? 'sms_fallback' : (emailOk ? 'email_fallback' : 'all_failed'),
+      attempts,
       to: toE164,
       last_inbound_at: lastInboundAt?.toISOString() || null,
-    }, 400);
+    }, smsOk || emailOk ? 200 : 502);
   }
 
   const auth = btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`);
@@ -129,6 +210,8 @@ Deno.serve(async (req) => {
     body: params,
   });
   const twData = await twRes.json();
+
+  await logAttempt('whatsapp', twRes.ok && !twData?.error_code, { sid: twData?.sid, status: twData?.status, error_code: twData?.error_code });
 
   // Log every attempt
   await sb.from('integration_settings').upsert([
@@ -148,6 +231,7 @@ Deno.serve(async (req) => {
       error_code: twData?.error_code,
       error_message: twData?.message,
       sid: twData?.sid || null,
+      attempts,
     }, 502);
   }
 
@@ -158,5 +242,6 @@ Deno.serve(async (req) => {
     status: twData.status,
     to: toE164,
     inside_window: insideWindow,
+    attempts,
   });
 });
