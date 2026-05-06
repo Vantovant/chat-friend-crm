@@ -1446,6 +1446,201 @@ Deno.serve(async (req) => {
     console.warn("[auto-reply] admin/self guard error (non-fatal):", e?.message);
   }
 
+  // ── EMERGENCY MODE — UNSAFE CATEGORY HARD BLOCK (Slice 2, 2026-05-06) ──
+  // Refund / legal / adverse-reaction / angry / medical-cure-claim language must
+  // NEVER auto-send, regardless of channel, mode, or emergency lane status.
+  // Forces a draft for human review and writes an audit row.
+  let emergencyUnsafeBlocked = false;
+  let emergencyUnsafeCategory: string | null = null;
+  try {
+    const { data: usRows } = await svc.from("integration_settings")
+      .select("key,value").eq("key", "zazi_emergency_unsafe_block_enabled").maybeSingle();
+    const unsafeBlockEnabled = (usRows?.value || "true").toLowerCase() === "true";
+    const inText = (inbound_content || "").toLowerCase();
+    const candidate = (replyContent || "").toLowerCase();
+    const checks: Array<{ cat: string; re: RegExp }> = [
+      { cat: "refund",     re: /\b(refund|money back|chargeback|reverse my payment|cancel my order)\b/i },
+      { cat: "legal",      re: /\b(lawyer|attorney|sue|legal action|hawks|consumer protection|cpa|ombudsman)\b/i },
+      { cat: "adverse",    re: /\b(side effect|allerg|rash|swell|hospital|admitted|reaction|vomit|dizz|fainted|collapsed|emergency room|er visit)\b/i },
+      { cat: "angry",      re: /\b(scam|fraud|liar|cheat|disgust|furious|trash|rubbish|ripped me off|stole my money)\b/i },
+      { cat: "medical",    re: /\b(cure|cures|cured|diagnose|diagnoses|diagnosis|treat|treats|treats?\s+cancer|prevent\s+cancer|hiv\s+cure|aids\s+cure|reverse\s+(diabetes|cancer))\b/i },
+      { cat: "stop",       re: /\b(stop|unsubscribe|opt out|opt-out|do not contact|dnc|remove me)\b/i },
+    ];
+    if (unsafeBlockEnabled) {
+      for (const c of checks) {
+        if (c.re.test(inText) || c.re.test(candidate)) {
+          emergencyUnsafeBlocked = true;
+          emergencyUnsafeCategory = c.cat;
+          break;
+        }
+      }
+    }
+    if (emergencyUnsafeBlocked) {
+      diag.emergency_unsafe_blocked = true;
+      diag.emergency_unsafe_category = emergencyUnsafeCategory;
+      // Write to option_b_audit_log + auto_reply_events; downgrade to draft.
+      const draftPayload = {
+        conversation_id,
+        suggestion_type: "draft_reply",
+        status: "pending",
+        confidence: 0.5,
+        mode: "guidance",
+        content: {
+          draft_reply: replyContent,
+          reply_mode: "guidance",
+          response_type: actionTaken,
+          contact_id: contact_id || null,
+          inbound_message_id: inbound_message_id || null,
+          emergency: {
+            blocked: true,
+            category: emergencyUnsafeCategory,
+            policy: "unsafe_category_human_only",
+          },
+        },
+      };
+      await svc.from("ai_suggestions").insert(draftPayload);
+      await svc.from("option_b_audit_log").insert({
+        contact_id: contact_id || null,
+        conversation_id,
+        phone_normalized: phone_e164,
+        channel: (diag.channel_detected || "unknown"),
+        trigger_type: "emergency_unsafe_block",
+        template_label: emergencyUnsafeCategory,
+        message_preview: (replyContent || "").slice(0, 240),
+        delivery_status: "drafted_for_human",
+        attempt_outcome: "blocked",
+        operating_mode: "emergency_v2",
+        reason_allowed: null,
+        safety_checks_passed: ["unsafe_category_human_only"],
+        governance_flags: { unsafe_category: emergencyUnsafeCategory },
+        error_message: `Unsafe category ${emergencyUnsafeCategory} — auto-send refused.`,
+      });
+      await svc.from("auto_reply_events").insert({
+        conversation_id, inbound_message_id: inbound_message_id || null,
+        action_taken: "emergency_unsafe_blocked",
+        reason: `category=${emergencyUnsafeCategory}; downgraded to draft`,
+      });
+      console.log("[auto-reply] EMERGENCY UNSAFE BLOCKED:", emergencyUnsafeCategory);
+      return jsonRes({
+        ok: true, auto_reply: false, action: "emergency_unsafe_blocked",
+        category: emergencyUnsafeCategory,
+      });
+    }
+  } catch (e: any) {
+    console.warn("[auto-reply] emergency unsafe guard error (non-fatal):", e?.message);
+  }
+
+  // ── EMERGENCY MODE V2 — FB/TWILIO LANE DETECTION + AUDIT (Slice 2) ──
+  // Detects FB/Twilio inbound leads via contact tags + channel.
+  // When the master switch `zazi_emergency_mode_v2_enabled=true`, allowed intents
+  // (price/where_to_buy/join/product_range) may auto-send and an audit row is
+  // written to option_b_audit_log on dispatch. Outside the allowed-intent list,
+  // the reply is downgraded to a draft. `zazi_emergency_log_only=true` runs in
+  // shadow mode (audit only, still drafts).
+  let emergencyLane = false;
+  let emergencyIntent: string | null = null;
+  let emergencyLogOnly = false;
+  try {
+    const { data: emRows } = await svc.from("integration_settings")
+      .select("key,value").in("key", [
+        "zazi_emergency_mode_v2_enabled",
+        "zazi_emergency_allowed_intents",
+        "zazi_emergency_source_tags",
+        "zazi_emergency_log_only",
+      ]);
+    const em: Record<string, string> = {};
+    for (const r of (emRows || []) as any[]) em[r.key] = (r.value || "").trim();
+    const masterOn = (em.zazi_emergency_mode_v2_enabled || "false").toLowerCase() === "true";
+    emergencyLogOnly = (em.zazi_emergency_log_only || "false").toLowerCase() === "true";
+    const allowedIntents = (em.zazi_emergency_allowed_intents || "price,where_to_buy,join,product_range")
+      .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+    const sourceTags = (em.zazi_emergency_source_tags || "fb_lead,facebook,facebook_ad,twilio_inbound,ad_lead")
+      .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+
+    // Source detection: contact tags overlap with sourceTags, OR channel == twilio
+    let isFbTwilioSource = false;
+    if (contact_id) {
+      const { data: cTags } = await svc.from("contacts")
+        .select("tags, contact_source").eq("id", contact_id).maybeSingle();
+      const tagsLower = (cTags?.tags || []).map((t: string) => (t || "").toLowerCase());
+      const srcLower = (cTags?.contact_source || "").toLowerCase();
+      isFbTwilioSource = tagsLower.some((t: string) => sourceTags.includes(t))
+        || sourceTags.includes(srcLower)
+        || (diag.channel_detected || "").toLowerCase() === "twilio";
+    }
+
+    // Map current intent to emergency intent classes
+    const inLow = (inbound_content || "").toLowerCase();
+    if (intent.isPricing || /\bprice|how much|cost\b/i.test(inLow)) emergencyIntent = "price";
+    else if (/\bwhere.*(buy|get)|takealot|authentic|real|legit|original\b/i.test(inLow)) emergencyIntent = "where_to_buy";
+    else if (/\bjoin|register|sign up|distributor|business|opportunity\b/i.test(inLow)) emergencyIntent = "join";
+    else if (/\bproduct range|what (do you|products)|range|catalog\b/i.test(inLow)) emergencyIntent = "product_range";
+
+    emergencyLane = masterOn && isFbTwilioSource;
+    diag.emergency_master_on = masterOn;
+    diag.emergency_fb_twilio_source = isFbTwilioSource;
+    diag.emergency_intent = emergencyIntent;
+    diag.emergency_log_only = emergencyLogOnly;
+    diag.emergency_lane_active = emergencyLane;
+
+    // If emergency lane is active but intent isn't in allowed list → downgrade to draft
+    if (emergencyLane && (!emergencyIntent || !allowedIntents.includes(emergencyIntent))) {
+      const skipReason = emergencyIntent
+        ? `emergency_intent_not_allowed:${emergencyIntent}`
+        : "emergency_intent_unrecognised";
+      await svc.from("ai_suggestions").insert({
+        conversation_id, suggestion_type: "draft_reply", status: "pending",
+        confidence: 0.6, mode: "guidance",
+        content: {
+          draft_reply: replyContent, reply_mode: "guidance", response_type: actionTaken,
+          contact_id: contact_id || null, inbound_message_id: inbound_message_id || null,
+          emergency: { lane: "fb_twilio", reason: skipReason, intent: emergencyIntent },
+        },
+      });
+      await svc.from("option_b_audit_log").insert({
+        contact_id: contact_id || null, conversation_id, phone_normalized: phone_e164,
+        channel: (diag.channel_detected || "unknown"),
+        trigger_type: "emergency_intent_drafted",
+        template_label: emergencyIntent || "unrecognised",
+        message_preview: (replyContent || "").slice(0, 240),
+        delivery_status: "drafted_for_human", attempt_outcome: "drafted",
+        operating_mode: "emergency_v2", reason_allowed: null,
+        safety_checks_passed: ["intent_outside_allowlist"],
+        governance_flags: { allowed_intents: allowedIntents },
+      });
+      diag.result = "emergency_drafted_intent";
+      console.log("[auto-reply] EMERGENCY draft (intent):", skipReason);
+      return jsonRes({ ok: true, auto_reply: false, action: "emergency_drafted", reason: skipReason });
+    }
+
+    // Log-only mode: shadow drafts even for allowed intents
+    if (emergencyLane && emergencyLogOnly) {
+      await svc.from("ai_suggestions").insert({
+        conversation_id, suggestion_type: "draft_reply", status: "pending",
+        confidence: 0.7, mode: "guidance",
+        content: {
+          draft_reply: replyContent, reply_mode: "guidance", response_type: actionTaken,
+          contact_id: contact_id || null, inbound_message_id: inbound_message_id || null,
+          emergency: { lane: "fb_twilio", reason: "log_only_shadow", intent: emergencyIntent },
+        },
+      });
+      await svc.from("option_b_audit_log").insert({
+        contact_id: contact_id || null, conversation_id, phone_normalized: phone_e164,
+        channel: (diag.channel_detected || "unknown"),
+        trigger_type: "emergency_log_only_shadow",
+        template_label: emergencyIntent,
+        message_preview: (replyContent || "").slice(0, 240),
+        delivery_status: "drafted_for_human", attempt_outcome: "shadow",
+        operating_mode: "emergency_v2", reason_allowed: emergencyIntent,
+        safety_checks_passed: ["log_only"], governance_flags: { log_only: true },
+      });
+      diag.result = "emergency_log_only_shadow";
+      return jsonRes({ ok: true, auto_reply: false, action: "emergency_log_only_shadow" });
+    }
+  } catch (e: any) {
+    console.warn("[auto-reply] emergency lane detection error (non-fatal):", e?.message);
+  }
+
   // ── MASTER PROSPECTOR LEVEL 2A — AUTO FIRST-TOUCH GATE (2026-05-02) ──
   // Auto-send is allowed ONLY for the Unified Trust Entry first-touch.
   // Every other reply path is downgraded to a draft in `ai_suggestions`
