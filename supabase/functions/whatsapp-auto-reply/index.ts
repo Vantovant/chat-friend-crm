@@ -1893,6 +1893,31 @@ Deno.serve(async (req) => {
       menu_option: intent.intent, knowledge_query: intent.query?.slice(0, 200) || null, knowledge_found: knowledgeFound,
     });
 
+    // Emergency-lane audit on successful auto-send
+    if (emergencyLane && !emergencyUnsafeBlocked) {
+      try {
+        await svc.from("option_b_audit_log").insert({
+          contact_id: contact_id || null, conversation_id, phone_normalized: phone_e164,
+          channel: (diag.channel_detected || "unknown"),
+          trigger_type: "emergency_auto_send",
+          template_label: emergencyIntent,
+          message_preview: (replyContent || "").slice(0, 240),
+          delivery_status: "sent",
+          provider_message_id: sentMessage?.provider_message_id || null,
+          attempt_outcome: "sent",
+          operating_mode: "emergency_v2",
+          reason_allowed: emergencyIntent,
+          safety_checks_passed: [
+            "admin_self_excluded","duplicate_guard","price_link_safety",
+            "unsafe_category_guard","quiet_hours_check","dnc_check",
+          ],
+          governance_flags: { lane: "fb_twilio", intent: emergencyIntent, action: actionTaken },
+        });
+      } catch (auditErr: any) {
+        console.warn("[auto-reply] emergency audit insert failed (non-fatal):", auditErr?.message);
+      }
+    }
+
     if (contact_id) {
       const isFirstTouchSent = actionTaken === "first_touch_trust_message";
       await svc.from("contact_activity").insert({
