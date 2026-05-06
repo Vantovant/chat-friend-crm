@@ -380,69 +380,123 @@ if (import.meta.main) {
     if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
     const svc = createClient(SUPABASE_URL, SERVICE_KEY);
-
-    const { data: settings } = await svc
-      .from("integration_settings")
-      .select("key, value")
-      .in("key", ["zazi_group_admin_enabled", "zazi_group_admin_mode", "zazi_group_dm_mode"]);
-    const map: Record<string, string> = {};
-    (settings || []).forEach((r: any) => { map[r.key] = r.value; });
-
-    if (map["zazi_group_dm_mode"] && map["zazi_group_dm_mode"] !== "disabled") {
-      return new Response(JSON.stringify({ ok: false, refused: true, reason: "group_dm_mode_must_be_disabled_at_level_3a" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403,
-      });
-    }
-    if (map["zazi_group_admin_mode"] && map["zazi_group_admin_mode"] !== "audit_only") {
-      return new Response(JSON.stringify({ ok: false, refused: true, reason: "group_admin_mode_must_be_audit_only" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403,
-      });
-    }
-
-    let body: any = {};
-    try { body = await req.json(); } catch (_) { body = {}; }
-
-    let performed_by: string | null = null;
-    try {
-      const authHeader = req.headers.get("Authorization") || "";
-      const token = authHeader.replace("Bearer ", "");
-      if (token) {
-        const { data: u } = await svc.auth.getUser(token);
-        performed_by = u?.user?.id ?? null;
-      }
-    } catch (_) {
-      // ignore auth lookup failure; scan remains read-only
-    }
-
-    let q = svc.from("whatsapp_groups").select("id, group_jid, group_name").not("group_jid", "is", null).eq("is_active", true);
-    if (body?.group_jid) q = q.eq("group_jid", body.group_jid);
-    const { data: groups, error } = await q.limit(50);
-    if (error) {
-      return new Response(JSON.stringify({ ok: false, error: error.message }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500,
-      });
-    }
-
     const startedAt = new Date().toISOString();
-    const reports: GroupScanReport[] = [];
-    for (const g of groups || []) {
-      const result = await scanGroup(svc, g);
-      if ("error" in result) continue;
-      reports.push(result);
+    let body: any = {};
+    let stage = "init";
+
+    const logFailure = async (errStage: string, message: string, http_status: number, extra: any = {}) => {
+      try {
+        await svc.from("group_admin_actions").insert({
+          action_type: "manual_scan",
+          group_jid: body?.group_jid ?? null,
+          group_name: null,
+          performed_by: null,
+          result: { ok: false, stage: errStage, error: message, http_status, ...extra },
+          send_activity_attempted: false,
+          started_at: startedAt,
+          finished_at: new Date().toISOString(),
+          error: message,
+        });
+      } catch (_) { /* swallow audit-write failure */ }
+    };
+
+    try {
+      stage = "load_settings";
+      const { data: settings, error: settingsErr } = await svc
+        .from("integration_settings")
+        .select("key, value")
+        .in("key", ["zazi_group_admin_enabled", "zazi_group_admin_mode", "zazi_group_dm_mode"]);
+      if (settingsErr) {
+        await logFailure(stage, settingsErr.message, 500);
+        return new Response(JSON.stringify({ ok: false, stage, error: settingsErr.message }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500,
+        });
+      }
+      const map: Record<string, string> = {};
+      (settings || []).forEach((r: any) => { map[r.key] = r.value; });
+
+      stage = "governance_check";
+      if (map["zazi_group_dm_mode"] && map["zazi_group_dm_mode"] !== "disabled") {
+        await logFailure(stage, "group_dm_mode_must_be_disabled_at_level_3a", 403);
+        return new Response(JSON.stringify({ ok: false, refused: true, stage, reason: "group_dm_mode_must_be_disabled_at_level_3a" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403,
+        });
+      }
+      if (map["zazi_group_admin_mode"] && map["zazi_group_admin_mode"] !== "audit_only") {
+        await logFailure(stage, "group_admin_mode_must_be_audit_only", 403);
+        return new Response(JSON.stringify({ ok: false, refused: true, stage, reason: "group_admin_mode_must_be_audit_only" }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 403,
+        });
+      }
+
+      stage = "parse_body";
+      try { body = await req.json(); } catch (_) { body = {}; }
+
+      stage = "auth_lookup";
+      let performed_by: string | null = null;
+      try {
+        const authHeader = req.headers.get("Authorization") || "";
+        const token = authHeader.replace("Bearer ", "");
+        if (token) {
+          const { data: u } = await svc.auth.getUser(token);
+          performed_by = u?.user?.id ?? null;
+        }
+      } catch (_) { /* read-only scan continues */ }
+
+      stage = "load_groups";
+      let q = svc.from("whatsapp_groups").select("id, group_jid, group_name").not("group_jid", "is", null).eq("is_active", true);
+      if (body?.group_jid) q = q.eq("group_jid", body.group_jid);
+      const { data: groups, error } = await q.limit(50);
+      if (error) {
+        await logFailure(stage, error.message, 500);
+        return new Response(JSON.stringify({ ok: false, stage, error: error.message }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 500,
+        });
+      }
+
+      stage = "scan_groups";
+      const reports: GroupScanReport[] = [];
+      const scanErrors: string[] = [];
+      for (const g of groups || []) {
+        try {
+          const result = await scanGroup(svc, g);
+          if ("error" in result) {
+            scanErrors.push(`scan_failed[${g.group_jid}]: ${(result as any).error}`);
+            continue;
+          }
+          reports.push(result);
+        } catch (innerErr) {
+          scanErrors.push(`scan_threw[${g.group_jid}]: ${(innerErr as Error).message}`);
+        }
+      }
+
+      stage = "audit_write";
+      const warnings = [...collectWarnings(reports), ...scanErrors];
+      const audit = await writeAuditLog(svc, body, groups || [], performed_by, startedAt, reports, warnings);
+      const response = buildScanResponse({
+        reports,
+        warnings: audit.warnings,
+        audit_logged: audit.audit_logged,
+        audit_error: audit.audit_error,
+      });
+
+      return new Response(JSON.stringify(response), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: response.ok ? 200 : 207,
+      });
+    } catch (fatal) {
+      const message = (fatal as Error)?.message || String(fatal);
+      console.error(`[group-intel-scan] fatal at stage=${stage}: ${message}`);
+      await logFailure(stage, message, 500, { fatal: true });
+      return new Response(JSON.stringify({
+        ok: false,
+        stage,
+        error: message,
+        hint: "structured error; group_admin_actions row written for audit",
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        status: 500,
+      });
     }
-
-    const warnings = collectWarnings(reports);
-    const audit = await writeAuditLog(svc, body, groups || [], performed_by, startedAt, reports, warnings);
-    const response = buildScanResponse({
-      reports,
-      warnings: audit.warnings,
-      audit_logged: audit.audit_logged,
-      audit_error: audit.audit_error,
-    });
-
-    return new Response(JSON.stringify(response), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-      status: response.ok ? 200 : 207,
-    });
   });
 }
