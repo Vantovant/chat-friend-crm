@@ -1569,12 +1569,26 @@ Deno.serve(async (req) => {
         || (diag.channel_detected || "").toLowerCase() === "twilio";
     }
 
-    // Map current intent to emergency intent classes
+    // Map current intent to emergency intent classes — Option 2 widened patterns (2026-05-07)
+    // Order matters: membership_R375 > how_to_join > where_to_buy > product_range > price
     const inLow = (inbound_content || "").toLowerCase();
-    if (intent.isPricing || /\bprice|how much|cost\b/i.test(inLow)) emergencyIntent = "price";
-    else if (/\bwhere.*(buy|get)|takealot|authentic|real|legit|original\b/i.test(inLow)) emergencyIntent = "where_to_buy";
-    else if (/\bjoin|register|sign up|distributor|business|opportunity\b/i.test(inLow)) emergencyIntent = "join";
-    else if (/\bproduct range|what (do you|products)|range|catalog\b/i.test(inLow)) emergencyIntent = "product_range";
+    let emergencyIntentPattern: string | null = null;
+    if (/\b(r\s*375|r375)\b|membership benefits|benefits of (the )?(r\s*375|membership)|tell me about (the )?membership|member benefits|what (is|are)( the)? (r\s*375|membership)/i.test(inLow)) {
+      emergencyIntent = "membership_R375"; emergencyIntentPattern = "membership_r375";
+    } else if (/\b(become a distributor|how (do|can) i (join|register|sign ?up)|i (want|wish) to (join|register|become)|send me the (registration|joining) (guide|info|link)|registration guide|join (as )?(an )?associate|sign me up)\b/i.test(inLow)) {
+      emergencyIntent = "how_to_join"; emergencyIntentPattern = "how_to_join_natural";
+    } else if (/\bjoin|register|sign up|distributor|business opportunity\b/i.test(inLow)) {
+      emergencyIntent = "how_to_join"; emergencyIntentPattern = "how_to_join_short";
+    } else if (/\b(i (want|wish|would like) to (buy|purchase|order|get)|where (can|do) i (buy|get|order)|how (do|to|can i) (buy|order|purchase)|i want the product|purchase the product|order the product|send (me )?(the )?(shop|order) link)\b/i.test(inLow)) {
+      emergencyIntent = "where_to_buy"; emergencyIntentPattern = "where_to_buy_natural";
+    } else if (/\bwhere.*(buy|get)|takealot|authentic|real|legit|original\b/i.test(inLow)) {
+      emergencyIntent = "where_to_buy"; emergencyIntentPattern = "where_to_buy_short";
+    } else if (/\b(product range|what (do you|products do you) (sell|have|offer)|what products|product list|tell me about (the |your )?products|send (me )?(the )?(product )?(range|catalog|info))\b/i.test(inLow)) {
+      emergencyIntent = "product_range"; emergencyIntentPattern = "product_range_natural";
+    } else if (intent.isPricing || /\bprice|how much|cost\b/i.test(inLow)) {
+      emergencyIntent = "price"; emergencyIntentPattern = "price";
+    }
+    diag.emergency_intent_matched_pattern = emergencyIntentPattern;
 
     emergencyLane = masterOn && isFbTwilioSource;
     diag.emergency_master_on = masterOn;
