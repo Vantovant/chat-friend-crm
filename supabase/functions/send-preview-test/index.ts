@@ -19,17 +19,19 @@ Deno.serve(async (req) => {
   }
 
   const to = "whatsapp:+27790831530";
+  const imageUrl = "https://nqyyvqcmcyggvlcswkio.supabase.co/storage/v1/object/public/campaign-assets/proof%2Faplgo-wellness-card-green-20260507.jpg";
   const body = `🌿 *APLGO Official Wellness Info*
 
 Preview test from Vanto CRM — please confirm the link card renders correctly.
 
-https://chat.onlinecourseformlm.com/proof/index.html?v=7
+${imageUrl}
 
 — Vanto · Local support: +27 79 083 1530`;
 
   const params = new URLSearchParams();
   params.set("To", to);
   params.set("Body", body);
+  params.set("MediaUrl", imageUrl);
   if (MSID) params.set("MessagingServiceSid", MSID);
   else if (FROM) params.set("From", FROM.startsWith("whatsapp:") ? FROM : `whatsapp:${FROM}`);
 
