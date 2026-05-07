@@ -1569,12 +1569,26 @@ Deno.serve(async (req) => {
         || (diag.channel_detected || "").toLowerCase() === "twilio";
     }
 
-    // Map current intent to emergency intent classes
+    // Map current intent to emergency intent classes — Option 2 widened patterns (2026-05-07)
+    // Order matters: membership_R375 > how_to_join > where_to_buy > product_range > price
     const inLow = (inbound_content || "").toLowerCase();
-    if (intent.isPricing || /\bprice|how much|cost\b/i.test(inLow)) emergencyIntent = "price";
-    else if (/\bwhere.*(buy|get)|takealot|authentic|real|legit|original\b/i.test(inLow)) emergencyIntent = "where_to_buy";
-    else if (/\bjoin|register|sign up|distributor|business|opportunity\b/i.test(inLow)) emergencyIntent = "join";
-    else if (/\bproduct range|what (do you|products)|range|catalog\b/i.test(inLow)) emergencyIntent = "product_range";
+    let emergencyIntentPattern: string | null = null;
+    if (/\b(r\s*375|r375)\b|membership benefits|benefits of (the )?(r\s*375|membership)|tell me about (the )?membership|member benefits|what (is|are)( the)? (r\s*375|membership)/i.test(inLow)) {
+      emergencyIntent = "membership_R375"; emergencyIntentPattern = "membership_r375";
+    } else if (/\b(become a distributor|how (do|can) i (join|register|sign ?up)|i (want|wish) to (join|register|become)|send me the (registration|joining) (guide|info|link)|registration guide|join (as )?(an )?associate|sign me up)\b/i.test(inLow)) {
+      emergencyIntent = "how_to_join"; emergencyIntentPattern = "how_to_join_natural";
+    } else if (/\bjoin|register|sign up|distributor|business opportunity\b/i.test(inLow)) {
+      emergencyIntent = "how_to_join"; emergencyIntentPattern = "how_to_join_short";
+    } else if (/\b(i (want|wish|would like) to (buy|purchase|order|get)|where (can|do) i (buy|get|order)|how (do|to|can i) (buy|order|purchase)|i want the product|purchase the product|order the product|send (me )?(the )?(shop|order) link)\b/i.test(inLow)) {
+      emergencyIntent = "where_to_buy"; emergencyIntentPattern = "where_to_buy_natural";
+    } else if (/\bwhere.*(buy|get)|takealot|authentic|real|legit|original\b/i.test(inLow)) {
+      emergencyIntent = "where_to_buy"; emergencyIntentPattern = "where_to_buy_short";
+    } else if (/\b(product range|what (do you|products do you) (sell|have|offer)|what products|product list|tell me about (the |your )?products|send (me )?(the )?(product )?(range|catalog|info))\b/i.test(inLow)) {
+      emergencyIntent = "product_range"; emergencyIntentPattern = "product_range_natural";
+    } else if (intent.isPricing || /\bprice|how much|cost\b/i.test(inLow)) {
+      emergencyIntent = "price"; emergencyIntentPattern = "price";
+    }
+    diag.emergency_intent_matched_pattern = emergencyIntentPattern;
 
     emergencyLane = masterOn && isFbTwilioSource;
     diag.emergency_master_on = masterOn;
@@ -1639,6 +1653,109 @@ Deno.serve(async (req) => {
     }
   } catch (e: any) {
     console.warn("[auto-reply] emergency lane detection error (non-fatal):", e?.message);
+  }
+
+  // ── OPTION 2 — APPROVED-TEMPLATE EMERGENCY AUTO-REPLY (2026-05-07) ──
+  // Narrow auto-send for 4 safe intents only. Hard-coded templates, no AI free-text.
+  // Master kill-switch: zazi_emergency_template_autoreply_enabled.
+  let emergencyTemplateApplied = false;
+  let emergencyTemplateLabel: string | null = null;
+  let contactFirstName = "";
+  try {
+    const { data: tplRows } = await svc.from("integration_settings")
+      .select("key,value").in("key", [
+        "zazi_emergency_template_autoreply_enabled",
+        "local_support_number",
+      ]);
+    const tplCfg: Record<string,string> = {};
+    for (const r of (tplRows || []) as any[]) tplCfg[r.key] = (r.value || "").trim();
+    const tplEnabled = (tplCfg.zazi_emergency_template_autoreply_enabled || "true").toLowerCase() === "true";
+    const localSupport = tplCfg.local_support_number || "+27 79 083 1530";
+    const SHOP = "https://onlinecourseformlm.com/shop";
+    const REG = "https://backoffice.aplgo.com/register/?sp=787262";
+
+    const allowedTemplateIntents = new Set(["where_to_buy","how_to_join","membership_R375","product_range"]);
+
+    const sastHourTpl = (new Date().getUTCHours() + 2) % 24;
+    const inQuietTpl = sastHourTpl >= 22 || sastHourTpl < 6;
+    let dncTpl = false;
+    if (contact_id) {
+      const { data: cDnc } = await svc.from("contacts").select("do_not_contact,name,first_name").eq("id", contact_id).maybeSingle();
+      dncTpl = !!cDnc?.do_not_contact;
+      contactFirstName = (cDnc?.first_name || (cDnc?.name || "").split(/\s+/)[0] || "").trim();
+    }
+    const greetName = contactFirstName ? ` ${contactFirstName}` : "";
+
+    if (
+      tplEnabled &&
+      emergencyLane &&
+      !emergencyLogOnly &&
+      !emergencyUnsafeBlocked &&
+      emergencyIntent && allowedTemplateIntents.has(emergencyIntent) &&
+      !inQuietTpl && !dncTpl
+    ) {
+      const TEMPLATES: Record<string,string> = {
+        where_to_buy:
+`Hi${greetName} 👋 You can order directly here:
+🛒 ${SHOP}
+
+Need help choosing? Reply with the area you want to support — sleep, energy, joints, stomach, hormones, or immune.
+
+— Vanto · ${localSupport}`,
+        how_to_join:
+`Hi${greetName} 👋 To register as an APLGO Associate (sponsor 787262):
+🔗 ${REG}
+
+Reply START and I'll guide you through the registration step by step.
+
+— Vanto · ${localSupport}`,
+        membership_R375:
+`Hi${greetName} 👋 The R375 APLGO membership gives you wholesale pricing on every product, access to the official back-office, and the option to refer customers under sponsor 787262.
+
+Register here:
+🔗 ${REG}
+
+Reply START if you want me to walk you through it.
+
+— Vanto · ${localSupport}`,
+        product_range:
+`Hi${greetName} 👋 Full APLGO product range:
+🛒 ${SHOP}
+
+Tell me which area you want to support — sleep, energy, cravings, joints, stomach, hormones, immune — and I'll point you to the right one.
+
+— Vanto · ${localSupport}`,
+      };
+      const tpl = TEMPLATES[emergencyIntent];
+      if (tpl) {
+        replyContent = tpl;
+        actionTaken = "emergency_template_auto_sent";
+        emergencyTemplateApplied = true;
+        emergencyTemplateLabel = emergencyIntent;
+        diag.emergency_template_applied = true;
+        diag.emergency_template_label = emergencyIntent;
+        try {
+          await svc.from("option_b_audit_log").insert({
+            contact_id: contact_id || null, conversation_id, phone_normalized: phone_e164,
+            channel: (diag.channel_detected || "unknown"),
+            trigger_type: "emergency_template_autosend",
+            template_label: emergencyIntent,
+            message_text: tpl,
+            message_preview: tpl.slice(0, 240),
+            delivery_status: "pending",
+            attempt_outcome: "attempted",
+            operating_mode: "emergency_v2_template",
+            reason_allowed: emergencyIntent,
+            safety_checks_passed: ["price_ok","dnc_ok","quiet_ok","dup_ok","sponsor_ok","unsafe_block_ok"],
+            governance_flags: { intent: emergencyIntent, sponsor: "787262", links_enforced: true },
+          });
+        } catch (auditErr: any) {
+          console.warn("[auto-reply] emergency_template audit insert failed (non-fatal):", auditErr?.message);
+        }
+      }
+    }
+  } catch (e: any) {
+    console.warn("[auto-reply] emergency template block error (non-fatal):", e?.message);
   }
 
   // ── MASTER PROSPECTOR LEVEL 2A — AUTO FIRST-TOUCH GATE (2026-05-02) ──

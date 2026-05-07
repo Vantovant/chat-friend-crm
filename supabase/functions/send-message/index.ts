@@ -70,7 +70,11 @@ Deno.serve(async (req) => {
 
   let userId: string | null = null;
 
-  if (token) {
+  // Internal dispatch path takes precedence — never reject due to a stale JWT
+  // injected by the edge runtime (caused 2026-05-07 "Invalid token" regression).
+  if (internalAllowed) {
+    console.log("[send-message] Internal dispatch call accepted");
+  } else if (token) {
     const anonClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: { Authorization: `Bearer ${token}` } },
     });
@@ -80,8 +84,6 @@ Deno.serve(async (req) => {
       return jsonRes({ ok: false, code: "UNAUTHORIZED", message: "Invalid token" }, 401);
     }
     userId = userData.user.id;
-  } else {
-    console.log("[send-message] Internal dispatch call accepted");
   }
 
   // ── Parse body ──
