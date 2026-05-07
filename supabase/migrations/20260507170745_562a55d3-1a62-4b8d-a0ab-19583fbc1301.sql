@@ -1,0 +1,1 @@
+UPDATE public.integration_settings SET value='false', updated_at=now() WHERE key='level_3a_monitor_only';
