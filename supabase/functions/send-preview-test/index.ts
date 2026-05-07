@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
 
 Preview test from Vanto CRM — please confirm the link card renders correctly.
 
-https://chat.onlinecourseformlm.com/proof/index.html?v=7
+https://chat.onlinecourseformlm.com/proof/index.html?v=8-green-card
 
 — Vanto · Local support: +27 79 083 1530`;
 
