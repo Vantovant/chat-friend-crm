@@ -109,11 +109,166 @@ Deno.serve(async (req) => {
     const rawConversation = String(payload.conversation || message.chatId || message.from || "");
     const rawText = getInboundText(message);
     const isFromMe = message.fromMe === true || payload.fromMe === true;
+    const isGroupMessage = rawConversation.includes("@g.us");
     const isInboundMessage =
       (payload.type === "message" || payload.type === "text" || (!!rawText && !!rawConversation)) &&
       !isFromMe &&
-      // Skip group messages — only 1-on-1
-      !rawConversation.includes("@g.us");
+      !isGroupMessage;
+
+    // ── BRANCH 2b: Pilot WhatsApp Group keyword auto-reply (RESTORE 2026-05-07) ──
+    // Only fires for messages inside the pilot group when zazi_group_reply_mode = emergency_whitelist_auto.
+    // Hard-coded approved templates only. No AI free-text. Safety caps enforced.
+    if (!isFromMe && isGroupMessage && rawText) {
+      try {
+        const { data: gCfg } = await supabase
+          .from("integration_settings")
+          .select("key,value")
+          .in("key", [
+            "zazi_group_reply_mode",
+            "zazi_group_emergency_keywords",
+            "zazi_group_emergency_whitelist_jids",
+            "zazi_group_admin_phone",
+            "local_support_number",
+          ]);
+        const gMap: Record<string, string> = {};
+        for (const r of (gCfg || []) as any[]) gMap[r.key] = (r.value || "").trim();
+
+        const mode = (gMap.zazi_group_reply_mode || "emergency_whitelist_only").toLowerCase();
+        const whitelistJids = (gMap.zazi_group_emergency_whitelist_jids || "")
+          .split(",").map(s => s.trim()).filter(Boolean);
+        const keywords = (gMap.zazi_group_emergency_keywords || "")
+          .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+        const adminPhone = (gMap.zazi_group_admin_phone || "").replace(/\D/g, "");
+        const localSupport = gMap.local_support_number || "+27 79 083 1530";
+
+        const inAuto = mode === "emergency_whitelist_auto";
+        const groupAllowed = whitelistJids.includes(rawConversation);
+
+        const text = rawText;
+        const lower = text.toLowerCase();
+        const mentioned = adminPhone && lower.includes(adminPhone.slice(-9));
+        const matchedKeyword = keywords.find(k => lower.includes(k));
+        const triggered = !!matchedKeyword || !!mentioned;
+
+        if (inAuto && groupAllowed && triggered) {
+          // Cap: 1 reply per member per hour, 6 per group per hour, 24h dup guard
+          const senderPhoneRaw = (payload.user?.phone || message.from || "").replace(/\D/g, "");
+          const sinceHr = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+          const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+          const { count: groupHrCount } = await supabase
+            .from("option_b_audit_log")
+            .select("id", { count: "exact", head: true })
+            .eq("trigger_type", "group_keyword_autoreply")
+            .eq("phone_normalized", rawConversation)
+            .gte("created_at", sinceHr);
+
+          const { count: memberHrCount } = await supabase
+            .from("option_b_audit_log")
+            .select("id", { count: "exact", head: true })
+            .eq("trigger_type", "group_keyword_autoreply")
+            .like("message_preview", `%${senderPhoneRaw.slice(-9)}%`)
+            .gte("created_at", sinceHr);
+
+          const { count: dupCount } = await supabase
+            .from("option_b_audit_log")
+            .select("id", { count: "exact", head: true })
+            .eq("trigger_type", "group_keyword_autoreply")
+            .eq("phone_normalized", rawConversation)
+            .like("message_preview", `%${(matchedKeyword || "mention").slice(0, 16)}%`)
+            .gte("created_at", since24h);
+
+          const groupCapHit = (groupHrCount || 0) >= 6;
+          const memberCapHit = (memberHrCount || 0) >= 1;
+          const dupHit = (dupCount || 0) >= 1;
+
+          if (groupCapHit || memberCapHit || dupHit) {
+            await supabase.from("option_b_audit_log").insert({
+              channel: "maytapi_group",
+              trigger_type: "group_keyword_blocked",
+              template_label: matchedKeyword || "mention",
+              phone_normalized: rawConversation,
+              message_preview: `cap_block sender=${senderPhoneRaw.slice(-9)} kw=${matchedKeyword || "mention"}`,
+              delivery_status: "blocked",
+              attempt_outcome: "blocked",
+              operating_mode: "group_pilot",
+              safety_checks_passed: ["cap_check"],
+              governance_flags: { groupCapHit, memberCapHit, dupHit },
+            });
+          } else {
+            // Approved templates (same 4 intents as DM emergency lane)
+            let intent: string | null = null;
+            if (/r\s*375|membership/.test(lower)) intent = "membership_R375";
+            else if (/(start|join|register|sign\s*up|how to (join|register))/i.test(lower)) intent = "how_to_join";
+            else if (/(buy|purchase|order|where to (buy|get)|send info|interested|product)/i.test(lower)) intent = "where_to_buy";
+            else if (/(price|how much|cost)/i.test(lower)) intent = "where_to_buy";
+            else if (/help/i.test(lower)) intent = "how_to_join";
+            else intent = "where_to_buy";
+
+            const SHOP = "https://onlinecourseformlm.com/shop";
+            const REG = "https://backoffice.aplgo.com/register/?sp=787262";
+            const senderName = (payload.user?.name || message.notifyName || "").split(/\s+/)[0] || "";
+            const greet = senderName ? ` ${senderName}` : "";
+            const TEMPLATES: Record<string, string> = {
+              where_to_buy: `Hi${greet} 👋 You can order APLGO directly here:\n🛒 ${SHOP}\n\nFor 1-on-1 help reply HELP and an associate will DM you.\n\n— Vanto · ${localSupport}`,
+              how_to_join: `Hi${greet} 👋 To register as an APLGO Associate (sponsor 787262):\n🔗 ${REG}\n\nReply START in DM and I'll guide you step by step.\n\n— Vanto · ${localSupport}`,
+              membership_R375: `Hi${greet} 👋 R375 APLGO membership = wholesale pricing on every product + back-office access.\nRegister: 🔗 ${REG}\n\n— Vanto · ${localSupport}`,
+              product_range: `Hi${greet} 👋 Full product range:\n🛒 ${SHOP}\n\n— Vanto · ${localSupport}`,
+            };
+            const replyBody = TEMPLATES[intent] || TEMPLATES.where_to_buy;
+
+            // Send via maytapi-send-group
+            try {
+              const sgRes = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-group`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+                },
+                body: JSON.stringify({
+                  group_jid: rawConversation,
+                  message: replyBody,
+                  source: "group_keyword_autoreply",
+                }),
+              });
+              const sgData = await sgRes.json().catch(() => ({}));
+
+              await supabase.from("option_b_audit_log").insert({
+                channel: "maytapi_group",
+                trigger_type: "group_keyword_autoreply",
+                template_label: intent,
+                phone_normalized: rawConversation,
+                message_text: replyBody,
+                message_preview: `sender=${senderPhoneRaw.slice(-9)} kw=${matchedKeyword || "mention"} intent=${intent}`,
+                provider_message_id: sgData?.message_id || sgData?.provider_message_id || null,
+                delivery_status: sgRes.ok ? "sent" : "failed",
+                attempt_outcome: sgRes.ok ? "sent" : "failed",
+                error_message: sgRes.ok ? null : (sgData?.error || `HTTP ${sgRes.status}`),
+                operating_mode: "group_pilot_emergency_whitelist_auto",
+                reason_allowed: matchedKeyword || "admin_mention",
+                safety_checks_passed: [
+                  "group_in_whitelist",
+                  "keyword_match_or_mention",
+                  "member_cap_ok",
+                  "group_cap_ok",
+                  "duplicate_24h_ok",
+                  "approved_template_only",
+                ],
+                governance_flags: { mode, intent, matchedKeyword, mentioned, jid: rawConversation },
+              });
+              console.log("[maytapi-inbound] group autoreply:", intent, sgRes.status);
+            } catch (sendErr: any) {
+              console.error("[maytapi-inbound] group autoreply send failed:", sendErr?.message);
+            }
+          }
+        }
+      } catch (gErr: any) {
+        console.warn("[maytapi-inbound] group keyword block error (non-fatal):", gErr?.message);
+      }
+      return new Response(JSON.stringify({ ok: true, processed: "group_message" }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     if (isInboundMessage) {
       const msg = message;
