@@ -2,3 +2,6 @@ project_id = "nqyyvqcmcyggvlcswkio"
 
 [functions.send-preview-test]
 verify_jwt = false
+
+[functions.twilio-msg-status]
+verify_jwt = false
