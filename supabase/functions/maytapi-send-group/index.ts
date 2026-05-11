@@ -144,6 +144,13 @@ Deno.serve(async (req) => {
     // Direct Group Administrator lane: used by pilot-group auto-reply.
     // This must send immediately to Maytapi, not fall through to the scheduled queue.
     if (directBody?.group_jid && directBody?.message) {
+      const authHeader = req.headers.get("Authorization") || "";
+      if (authHeader !== `Bearer ${SERVICE_ROLE_KEY}`) {
+        return new Response(JSON.stringify({ success: false, error: "Administrator group lane only" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       const targetJid = String(directBody.group_jid).trim();
       const message = String(directBody.message).trim();
       const source = String(directBody.source || "direct_group_send");
