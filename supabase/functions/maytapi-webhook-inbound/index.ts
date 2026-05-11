@@ -147,12 +147,16 @@ Deno.serve(async (req) => {
         const text = rawText;
         const lower = text.toLowerCase();
         const mentioned = adminPhone && lower.includes(adminPhone.slice(-9));
-        const matchedKeyword = keywords.find(k => lower.includes(k));
+        const matchedKeyword = keywords.find(k => lower.includes(k))
+          || (/(how\s*much|cost|price|buy|order|purchase|join|register|start|help|interested|distributor|associate|membership|where\s*to\s*(buy|get)|send\s*info|\b(nrm|grw|gts|pwr|rlx|sld|stp|alt|hpr|hrt|ice|lft|mls|bty|air|hpy|brn|pft|terra)\b)/i.test(text) ? "question" : undefined);
         const triggered = !!matchedKeyword || !!mentioned;
 
         if (inAuto && groupAllowed && triggered) {
           // Cap: 1 reply per member per hour, 6 per group per hour, 24h dup guard
           const senderPhoneRaw = (payload.user?.phone || message.from || "").replace(/\D/g, "");
+          const dupKey = matchedKeyword === "question"
+            ? `${senderPhoneRaw.slice(-9)}:${lower.replace(/\s+/g, " ").replace(/[^a-z0-9 ?]/g, "").slice(0, 48)}`
+            : (matchedKeyword || "mention").slice(0, 16);
           const sinceHr = new Date(Date.now() - 60 * 60 * 1000).toISOString();
           const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
@@ -175,7 +179,7 @@ Deno.serve(async (req) => {
             .select("id", { count: "exact", head: true })
             .eq("trigger_type", "group_keyword_autoreply")
             .eq("phone_normalized", rawConversation)
-            .like("message_preview", `%${(matchedKeyword || "mention").slice(0, 16)}%`)
+            .like("message_preview", `%dup=${dupKey}%`)
             .gte("created_at", since24h);
 
           const groupCapHit = (groupHrCount || 0) >= 6;
@@ -188,7 +192,7 @@ Deno.serve(async (req) => {
               trigger_type: "group_keyword_blocked",
               template_label: matchedKeyword || "mention",
               phone_normalized: rawConversation,
-              message_preview: `cap_block sender=${senderPhoneRaw.slice(-9)} kw=${matchedKeyword || "mention"}`,
+              message_preview: `cap_block sender=${senderPhoneRaw.slice(-9)} kw=${matchedKeyword || "mention"} dup=${dupKey}`,
               delivery_status: "blocked",
               attempt_outcome: "blocked",
               operating_mode: "group_pilot",
@@ -199,9 +203,9 @@ Deno.serve(async (req) => {
             // Approved templates (same 4 intents as DM emergency lane)
             let intent: string | null = null;
             if (/r\s*375|membership/.test(lower)) intent = "membership_R375";
-            else if (/(start|join|register|sign\s*up|how to (join|register))/i.test(lower)) intent = "how_to_join";
+            else if (/(start|join|register|sign\s*up|distributor|associate|how to (join|register))/i.test(lower)) intent = "how_to_join";
+            else if (/(price|how\s*much|cost|\b(nrm|grw|gts|pwr|rlx|sld|stp|alt|hpr|hrt|ice|lft|mls|bty|air|hpy|brn|pft|terra)\b)/i.test(lower)) intent = "product_price";
             else if (/(buy|purchase|order|where to (buy|get)|send info|interested|product)/i.test(lower)) intent = "where_to_buy";
-            else if (/(price|how much|cost)/i.test(lower)) intent = "where_to_buy";
             else if (/help/i.test(lower)) intent = "how_to_join";
             else intent = "where_to_buy";
 
@@ -213,6 +217,7 @@ Deno.serve(async (req) => {
               where_to_buy: `Hi${greet} 👋 You can order APLGO directly here:\n🛒 ${SHOP}\n\nFor 1-on-1 help reply HELP and an associate will DM you.\n\n— Vanto · ${localSupport}`,
               how_to_join: `Hi${greet} 👋 To register as an APLGO Associate (sponsor 787262):\n🔗 ${REG}\n\nReply START in DM and I'll guide you step by step.\n\n— Vanto · ${localSupport}`,
               membership_R375: `Hi${greet} 👋 R375 APLGO membership = wholesale pricing on every product + back-office access.\nRegister: 🔗 ${REG}\n\n— Vanto · ${localSupport}`,
+              product_price: `Hi${greet} 👋 APLGO prices depend on the product and member/retail level. Please check the official shop for the current price:\n🛒 ${SHOP}\n\nFor help choosing the right product, reply HELP or DM Vanto.\n\n— Vanto · ${localSupport}`,
               product_range: `Hi${greet} 👋 Full product range:\n🛒 ${SHOP}\n\n— Vanto · ${localSupport}`,
             };
             const replyBody = TEMPLATES[intent] || TEMPLATES.where_to_buy;
@@ -239,7 +244,7 @@ Deno.serve(async (req) => {
                 template_label: intent,
                 phone_normalized: rawConversation,
                 message_text: replyBody,
-                message_preview: `sender=${senderPhoneRaw.slice(-9)} kw=${matchedKeyword || "mention"} intent=${intent}`,
+                message_preview: `sender=${senderPhoneRaw.slice(-9)} kw=${matchedKeyword || "mention"} intent=${intent} dup=${dupKey}`,
                 provider_message_id: sgData?.message_id || sgData?.provider_message_id || null,
                 delivery_status: sgRes.ok ? "sent" : "failed",
                 attempt_outcome: sgRes.ok ? "sent" : "failed",

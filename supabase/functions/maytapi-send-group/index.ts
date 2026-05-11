@@ -126,6 +126,7 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const directBody = await req.json().catch(() => null);
     const PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID")?.trim();
     const PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID")?.trim();
     const API_TOKEN = Deno.env.get("MAYTAPI_API_TOKEN")?.trim();
@@ -139,6 +140,70 @@ Deno.serve(async (req) => {
     }
 
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
+    // Direct Group Administrator lane: used by pilot-group auto-reply.
+    // This must send immediately to Maytapi, not fall through to the scheduled queue.
+    if (directBody?.group_jid && directBody?.message) {
+      const authHeader = req.headers.get("Authorization") || "";
+      if (authHeader !== `Bearer ${SERVICE_ROLE_KEY}`) {
+        return new Response(JSON.stringify({ success: false, error: "Administrator group lane only" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const targetJid = String(directBody.group_jid).trim();
+      const message = String(directBody.message).trim();
+      const source = String(directBody.source || "direct_group_send");
+
+      const { data: settings } = await supabase
+        .from("integration_settings")
+        .select("key,value")
+        .in("key", ["zazi_group_emergency_whitelist_jids", "zazi_group_pilot_jids"]);
+      const allowedJids = new Set<string>();
+      for (const row of (settings || []) as any[]) {
+        String(row.value || "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .forEach((jid) => allowedJids.add(jid));
+      }
+
+      if (!targetJid.endsWith("@g.us") || !allowedJids.has(targetJid)) {
+        return new Response(JSON.stringify({ success: false, error: "Group is not approved for admin auto-reply" }), {
+          status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const sendRes = await fetch(`${MAYTAPI_BASE}/${PRODUCT_ID}/${PHONE_ID}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-maytapi-key": API_TOKEN },
+        body: JSON.stringify({ to_number: targetJid, type: "text", message }),
+      });
+      const sendData = await sendRes.json().catch(() => ({}));
+      const providerMessageId = sendData?.data?.msgId || sendData?.msgId || null;
+
+      if (!sendRes.ok || sendData?.success === false) {
+        return new Response(JSON.stringify({
+          success: false,
+          error: sendData?.message || sendData?.error || `Maytapi HTTP ${sendRes.status}`,
+          details: sendData,
+        }), {
+          status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      return new Response(JSON.stringify({
+        success: true,
+        status: "sent",
+        source,
+        provider_message_id: providerMessageId,
+        message_id: providerMessageId,
+        target_group_jid: targetJid,
+        raw: sendData,
+      }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     const { data: duePosts, error: fetchErr } = await supabase
       .from("scheduled_group_posts")
