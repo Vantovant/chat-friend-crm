@@ -154,6 +154,9 @@ Deno.serve(async (req) => {
         if (inAuto && groupAllowed && triggered) {
           // Cap: 1 reply per member per hour, 6 per group per hour, 24h dup guard
           const senderPhoneRaw = (payload.user?.phone || message.from || "").replace(/\D/g, "");
+          const dupKey = matchedKeyword === "question"
+            ? `${senderPhoneRaw.slice(-9)}:${lower.replace(/\s+/g, " ").replace(/[^a-z0-9 ?]/g, "").slice(0, 48)}`
+            : (matchedKeyword || "mention").slice(0, 16);
           const sinceHr = new Date(Date.now() - 60 * 60 * 1000).toISOString();
           const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
@@ -176,7 +179,7 @@ Deno.serve(async (req) => {
             .select("id", { count: "exact", head: true })
             .eq("trigger_type", "group_keyword_autoreply")
             .eq("phone_normalized", rawConversation)
-            .like("message_preview", `%${(matchedKeyword || "mention").slice(0, 16)}%`)
+            .like("message_preview", `%dup=${dupKey}%`)
             .gte("created_at", since24h);
 
           const groupCapHit = (groupHrCount || 0) >= 6;
@@ -189,7 +192,7 @@ Deno.serve(async (req) => {
               trigger_type: "group_keyword_blocked",
               template_label: matchedKeyword || "mention",
               phone_normalized: rawConversation,
-              message_preview: `cap_block sender=${senderPhoneRaw.slice(-9)} kw=${matchedKeyword || "mention"}`,
+              message_preview: `cap_block sender=${senderPhoneRaw.slice(-9)} kw=${matchedKeyword || "mention"} dup=${dupKey}`,
               delivery_status: "blocked",
               attempt_outcome: "blocked",
               operating_mode: "group_pilot",
@@ -241,7 +244,7 @@ Deno.serve(async (req) => {
                 template_label: intent,
                 phone_normalized: rawConversation,
                 message_text: replyBody,
-                message_preview: `sender=${senderPhoneRaw.slice(-9)} kw=${matchedKeyword || "mention"} intent=${intent}`,
+                message_preview: `sender=${senderPhoneRaw.slice(-9)} kw=${matchedKeyword || "mention"} intent=${intent} dup=${dupKey}`,
                 provider_message_id: sgData?.message_id || sgData?.provider_message_id || null,
                 delivery_status: sgRes.ok ? "sent" : "failed",
                 attempt_outcome: sgRes.ok ? "sent" : "failed",
