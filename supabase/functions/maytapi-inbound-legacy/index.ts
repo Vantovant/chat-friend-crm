@@ -353,14 +353,10 @@ Deno.serve(async (req) => {
   }
   if (req.method !== "POST") return jres(405, { error: "method_not_allowed" });
 
-  // 1. Token check (constant-time)
+  // 1. Parse body first so Maytapi can authenticate by product_id + phone_id
+  // when the dashboard cannot append a token query parameter.
   const url = new URL(req.url);
   const token = url.searchParams.get("token") ?? "";
-  if (!WEBHOOK_SECRET || !safeEqual(token, WEBHOOK_SECRET)) {
-    return jres(401, { error: "unauthorized" });
-  }
-
-  // 2. Parse body
   let body: any;
   try {
     body = await req.json();
@@ -368,7 +364,14 @@ Deno.serve(async (req) => {
     return jres(400, { error: "invalid_json" });
   }
 
-  // 3. Validate product_id + phone_id (defense in depth)
+  const tokenOk = !!WEBHOOK_SECRET && safeEqual(token, WEBHOOK_SECRET);
+  const productOk = !!PRODUCT_ID && body?.product_id === PRODUCT_ID;
+  const phoneOk = !!PHONE_ID && body?.phone_id !== undefined && String(body.phone_id) === String(PHONE_ID);
+  if (!tokenOk && !(productOk && phoneOk)) {
+    return jres(401, { error: "unauthorized" });
+  }
+
+  // 2. Validate product_id + phone_id (defense in depth when present)
   if (PRODUCT_ID && body?.product_id && body.product_id !== PRODUCT_ID) {
     return jres(401, { error: "product_id_mismatch" });
   }
