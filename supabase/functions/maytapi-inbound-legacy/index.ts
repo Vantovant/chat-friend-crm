@@ -17,8 +17,11 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const WEBHOOK_SECRET = Deno.env.get("MAYTAPI_WEBHOOK_SECRET") ?? "";
-const HASH_SALT = Deno.env.get("MAYTAPI_HASH_SALT") ?? "";
+const WEBHOOK_SECRET = Deno.env.get("MAYTAPI_WEBHOOK_SECRET")
+  || Deno.env.get("WEBHOOK_SECRET")
+  || Deno.env.get("WEBHOOK_SECRET_NEXT")
+  || "";
+const HASH_SALT = Deno.env.get("MAYTAPI_HASH_SALT") || WEBHOOK_SECRET || "vanto-maytapi-inbound";
 const PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID") ?? "";
 const PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID") ?? "";
 const OWNER_EMAIL = Deno.env.get("DEFAULT_ZAZI_OWNER_EMAIL") ?? "";
@@ -61,6 +64,171 @@ function preview(s: string | null | undefined, n = 140): string | null {
   if (!s) return null;
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > n ? t.slice(0, n) : t;
+}
+
+function getInboundText(message: any): string {
+  if (!message) return "";
+  if (typeof message.text === "string") return message.text;
+  if (typeof message.body === "string") return message.body;
+  if (typeof message.caption === "string") return message.caption;
+  if (typeof message.message === "string") return message.message;
+  if (typeof message?.text?.body === "string") return message.text.body;
+  if (typeof message?.extendedTextMessage?.text === "string") return message.extendedTextMessage.text;
+  if (typeof message?.conversation === "string") return message.conversation;
+  return "";
+}
+
+function resolveGroupJid(body: any, message: any): string {
+  const candidates = [
+    body?.conversation,
+    message?.chatId,
+    message?.from,
+    body?.from,
+    body?.chatId,
+  ];
+  return String(candidates.find((v) => typeof v === "string" && v.includes("@g.us")) || "").trim();
+}
+
+async function handlePilotGroupAutoReply(admin: any, groupJid: string, inboundText: string, body: any, message: any) {
+  const { data: cfgRows } = await admin
+    .from("integration_settings")
+    .select("key,value")
+    .in("key", [
+      "zazi_group_reply_mode",
+      "zazi_group_emergency_keywords",
+      "zazi_group_emergency_whitelist_jids",
+      "zazi_group_pilot_jids",
+      "zazi_group_admin_phone",
+      "local_support_number",
+    ]);
+
+  const cfg: Record<string, string> = {};
+  for (const row of (cfgRows || []) as any[]) cfg[row.key] = String(row.value || "").trim();
+
+  const mode = (cfg.zazi_group_reply_mode || "emergency_whitelist_only").toLowerCase();
+  const allowedJids = new Set<string>();
+  for (const key of ["zazi_group_emergency_whitelist_jids", "zazi_group_pilot_jids"]) {
+    String(cfg[key] || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .forEach((jid) => allowedJids.add(jid));
+  }
+
+  const { data: groupRow } = await admin
+    .from("whatsapp_groups")
+    .select("id")
+    .eq("group_jid", groupJid)
+    .eq("emergency_engagement", true)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  const inAuto = mode === "emergency_whitelist_auto";
+  const groupAllowed = allowedJids.has(groupJid) || !!groupRow;
+  if (!inAuto || !groupAllowed) return { processed: false, reason: "group_not_in_auto_whitelist", mode, groupAllowed };
+
+  const lower = inboundText.toLowerCase();
+  const keywords = (cfg.zazi_group_emergency_keywords || "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  const adminPhone = (cfg.zazi_group_admin_phone || "").replace(/\D/g, "");
+  const mentioned = !!adminPhone && lower.includes(adminPhone.slice(-9));
+  const matchedKeyword = keywords.find((k) => lower.includes(k))
+    || (/(how\s*much|cost|price|buy|order|purchase|join|register|start|help|interested|distributor|associate|membership|where\s*to\s*(buy|get)|send\s*info|\b(nrm|grw|gts|pwr|rlx|sld|stp|alt|hpr|hrt|ice|lft|mls|bty|air|hpy|brn|pft|terra)\b)/i.test(inboundText) ? "question" : undefined);
+  if (!matchedKeyword && !mentioned) return { processed: false, reason: "no_keyword_or_admin_mention", mode, groupAllowed };
+
+  const senderPhoneRaw = String(body?.user?.phone || message?.from || "").replace(/\D/g, "");
+  const senderKey = senderPhoneRaw.slice(-9) || "unknown";
+  const dupKey = `${senderKey}:${lower.replace(/\s+/g, " ").replace(/[^a-z0-9 ?]/g, "").slice(0, 48)}`;
+  const sinceHr = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  const { count: groupHrCount } = await admin
+    .from("option_b_audit_log")
+    .select("id", { count: "exact", head: true })
+    .eq("trigger_type", "group_keyword_autoreply")
+    .eq("phone_normalized", groupJid)
+    .gte("created_at", sinceHr);
+  const { count: memberHrCount } = await admin
+    .from("option_b_audit_log")
+    .select("id", { count: "exact", head: true })
+    .eq("trigger_type", "group_keyword_autoreply")
+    .like("message_preview", `%sender=${senderKey}%`)
+    .gte("created_at", sinceHr);
+  const { count: dupCount } = await admin
+    .from("option_b_audit_log")
+    .select("id", { count: "exact", head: true })
+    .eq("trigger_type", "group_keyword_autoreply")
+    .eq("phone_normalized", groupJid)
+    .like("message_preview", `%dup=${dupKey}%`)
+    .gte("created_at", since24h);
+
+  const groupCapHit = (groupHrCount || 0) >= 6;
+  const memberCapHit = (memberHrCount || 0) >= 1;
+  const dupHit = (dupCount || 0) >= 1;
+  if (groupCapHit || memberCapHit || dupHit) {
+    await admin.from("option_b_audit_log").insert({
+      channel: "maytapi_group",
+      trigger_type: "group_keyword_blocked",
+      template_label: matchedKeyword || "mention",
+      phone_normalized: groupJid,
+      message_preview: `cap_block sender=${senderKey} kw=${matchedKeyword || "mention"} dup=${dupKey}`,
+      delivery_status: "blocked",
+      attempt_outcome: "blocked",
+      operating_mode: "group_pilot",
+      safety_checks_passed: ["cap_check"],
+      governance_flags: { groupCapHit, memberCapHit, dupHit },
+    });
+    return { processed: true, sent: false, blocked: true, groupCapHit, memberCapHit, dupHit };
+  }
+
+  let intent: string;
+  if (/r\s*375|membership/.test(lower)) intent = "membership_R375";
+  else if (/(start|join|register|sign\s*up|distributor|associate|how to (join|register))/i.test(lower)) intent = "how_to_join";
+  else if (/(price|how\s*much|cost|\b(nrm|grw|gts|pwr|rlx|sld|stp|alt|hpr|hrt|ice|lft|mls|bty|air|hpy|brn|pft|terra)\b)/i.test(lower)) intent = "product_price";
+  else if (/(buy|purchase|order|where to (buy|get)|send info|interested|product)/i.test(lower)) intent = "where_to_buy";
+  else intent = "where_to_buy";
+
+  const localSupport = cfg.local_support_number || "+27 79 083 1530";
+  const SHOP = "https://onlinecourseformlm.com/shop";
+  const REG = "https://backoffice.aplgo.com/register/?sp=787262";
+  const senderName = String(body?.user?.name || message?.notifyName || "").split(/\s+/)[0] || "";
+  const greet = senderName ? ` ${senderName}` : "";
+  const templates: Record<string, string> = {
+    where_to_buy: `Hi${greet} 👋 You can order APLGO directly here:\n🛒 ${SHOP}\n\nFor 1-on-1 help reply HELP and an associate will DM you.\n\n— Vanto · ${localSupport}`,
+    how_to_join: `Hi${greet} 👋 To register as an APLGO Associate (sponsor 787262):\n🔗 ${REG}\n\nReply START in DM and I'll guide you step by step.\n\n— Vanto · ${localSupport}`,
+    membership_R375: `Hi${greet} 👋 R375 APLGO membership = wholesale pricing on every product + back-office access.\nRegister: 🔗 ${REG}\n\n— Vanto · ${localSupport}`,
+    product_price: `Hi${greet} 👋 APLGO prices depend on the product and member/retail level. Please check the official shop for the current price:\n🛒 ${SHOP}\n\nFor help choosing the right product, reply HELP or DM Vanto.\n\n— Vanto · ${localSupport}`,
+  };
+  const replyBody = templates[intent] || templates.where_to_buy;
+
+  const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-group`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE}` },
+    body: JSON.stringify({ group_jid: groupJid, message: replyBody, source: "maytapi_inbound_legacy_group_autoreply" }),
+  });
+  const sendData = await sendRes.json().catch(() => ({}));
+  const providerMessageId = sendData?.message_id || sendData?.provider_message_id || null;
+
+  await admin.from("option_b_audit_log").insert({
+    channel: "maytapi_group",
+    trigger_type: "group_keyword_autoreply",
+    template_label: intent,
+    phone_normalized: groupJid,
+    message_text: replyBody,
+    message_preview: `sender=${senderKey} kw=${matchedKeyword || "mention"} intent=${intent} dup=${dupKey}`,
+    provider_message_id: providerMessageId,
+    delivery_status: sendRes.ok ? "sent" : "failed",
+    attempt_outcome: sendRes.ok ? "sent" : "failed",
+    error_message: sendRes.ok ? null : (sendData?.error || `HTTP ${sendRes.status}`),
+    operating_mode: "group_pilot_emergency_whitelist_auto",
+    reason_allowed: matchedKeyword || "admin_mention",
+    safety_checks_passed: ["group_in_whitelist", "keyword_match_or_mention", "member_cap_ok", "group_cap_ok", "duplicate_24h_ok", "approved_template_only"],
+    governance_flags: { mode, intent, matchedKeyword, mentioned, jid: groupJid, legacy_webhook: true },
+  });
+
+  return { processed: true, sent: sendRes.ok, status: sendRes.status, intent, provider_message_id: providerMessageId, send_error: sendRes.ok ? null : sendData };
 }
 
 function redactRaw(body: any): Record<string, unknown> {
@@ -185,14 +353,10 @@ Deno.serve(async (req) => {
   }
   if (req.method !== "POST") return jres(405, { error: "method_not_allowed" });
 
-  // 1. Token check (constant-time)
+  // 1. Parse body first so Maytapi can authenticate by product_id + phone_id
+  // when the dashboard cannot append a token query parameter.
   const url = new URL(req.url);
   const token = url.searchParams.get("token") ?? "";
-  if (!WEBHOOK_SECRET || !safeEqual(token, WEBHOOK_SECRET)) {
-    return jres(401, { error: "unauthorized" });
-  }
-
-  // 2. Parse body
   let body: any;
   try {
     body = await req.json();
@@ -200,7 +364,14 @@ Deno.serve(async (req) => {
     return jres(400, { error: "invalid_json" });
   }
 
-  // 3. Validate product_id + phone_id (defense in depth)
+  const tokenOk = !!WEBHOOK_SECRET && safeEqual(token, WEBHOOK_SECRET);
+  const productOk = !!PRODUCT_ID && body?.product_id === PRODUCT_ID;
+  const phoneOk = !!PHONE_ID && body?.phone_id !== undefined && String(body.phone_id) === String(PHONE_ID);
+  if (!tokenOk && !(productOk && phoneOk)) {
+    return jres(401, { error: "unauthorized" });
+  }
+
+  // 2. Validate product_id + phone_id (defense in depth when present)
   if (PRODUCT_ID && body?.product_id && body.product_id !== PRODUCT_ID) {
     return jres(401, { error: "product_id_mismatch" });
   }
@@ -215,17 +386,18 @@ Deno.serve(async (req) => {
     auth: { persistSession: false },
   });
 
+  await admin.from("webhook_events").insert({
+    source: "maytapi-inbound-legacy",
+    action: body?.type || "callback",
+    payload: body,
+    status: "received",
+  });
+
   // 4. Rate limit (by source IP, fallback to phone_id)
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     req.headers.get("cf-connecting-ip") || String(body?.phone_id ?? "unknown");
   const allowed = await checkRateLimit(admin, ip);
   if (!allowed) return jres(429, { error: "rate_limited" });
-
-  const ownerId = await resolveOwnerId(admin);
-  if (!ownerId) {
-    console.log("[maytapi-inbound] owner_unresolved");
-    return jres(500, { error: "owner_unresolved" });
-  }
 
   const evtType = body?.type;
 
@@ -299,8 +471,19 @@ Deno.serve(async (req) => {
   }
 
   const conv: string = body?.conversation ?? "";
-  if (conv.endsWith("@g.us")) {
-    return jres(200, { ok: true, ignored: "group_out_of_scope_h2" });
+  const groupJid = resolveGroupJid(body, m);
+  if (groupJid) {
+    const text = getInboundText(m);
+    if (!text) return jres(200, { ok: true, ignored: "group_no_text", group_jid: groupJid });
+    const result = await handlePilotGroupAutoReply(admin, groupJid, text, body, m);
+    console.log("[maytapi-inbound] legacy group autoreply", JSON.stringify(result).slice(0, 300));
+    return jres(200, { ok: true, processed: "group_message", group_jid: groupJid, ...result });
+  }
+
+  const ownerId = await resolveOwnerId(admin);
+  if (!ownerId) {
+    console.log("[maytapi-inbound] owner_unresolved");
+    return jres(500, { error: "owner_unresolved" });
   }
 
   const mid: string | null = m?.id ?? null;
