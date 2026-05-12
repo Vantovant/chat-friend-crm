@@ -380,6 +380,13 @@ Deno.serve(async (req) => {
     auth: { persistSession: false },
   });
 
+  await admin.from("webhook_events").insert({
+    source: "maytapi-inbound-legacy",
+    action: body?.type || "callback",
+    payload: body,
+    status: "received",
+  });
+
   // 4. Rate limit (by source IP, fallback to phone_id)
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     req.headers.get("cf-connecting-ip") || String(body?.phone_id ?? "unknown");
@@ -464,8 +471,13 @@ Deno.serve(async (req) => {
   }
 
   const conv: string = body?.conversation ?? "";
-  if (conv.endsWith("@g.us")) {
-    return jres(200, { ok: true, ignored: "group_out_of_scope_h2" });
+  const groupJid = resolveGroupJid(body, m);
+  if (groupJid) {
+    const text = getInboundText(m);
+    if (!text) return jres(200, { ok: true, ignored: "group_no_text", group_jid: groupJid });
+    const result = await handlePilotGroupAutoReply(admin, groupJid, text, body, m);
+    console.log("[maytapi-inbound] legacy group autoreply", JSON.stringify(result).slice(0, 300));
+    return jres(200, { ok: true, processed: "group_message", group_jid: groupJid, ...result });
   }
 
   const mid: string | null = m?.id ?? null;
