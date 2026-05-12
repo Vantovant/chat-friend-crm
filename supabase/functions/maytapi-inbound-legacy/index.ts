@@ -17,8 +17,11 @@ const corsHeaders = {
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const WEBHOOK_SECRET = Deno.env.get("MAYTAPI_WEBHOOK_SECRET") ?? "";
-const HASH_SALT = Deno.env.get("MAYTAPI_HASH_SALT") ?? "";
+const WEBHOOK_SECRET = Deno.env.get("MAYTAPI_WEBHOOK_SECRET")
+  || Deno.env.get("WEBHOOK_SECRET")
+  || Deno.env.get("WEBHOOK_SECRET_NEXT")
+  || "";
+const HASH_SALT = Deno.env.get("MAYTAPI_HASH_SALT") || WEBHOOK_SECRET || "vanto-maytapi-inbound";
 const PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID") ?? "";
 const PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID") ?? "";
 const OWNER_EMAIL = Deno.env.get("DEFAULT_ZAZI_OWNER_EMAIL") ?? "";
@@ -393,12 +396,6 @@ Deno.serve(async (req) => {
   const allowed = await checkRateLimit(admin, ip);
   if (!allowed) return jres(429, { error: "rate_limited" });
 
-  const ownerId = await resolveOwnerId(admin);
-  if (!ownerId) {
-    console.log("[maytapi-inbound] owner_unresolved");
-    return jres(500, { error: "owner_unresolved" });
-  }
-
   const evtType = body?.type;
 
   // ===== ACK / delivery callback =====
@@ -478,6 +475,12 @@ Deno.serve(async (req) => {
     const result = await handlePilotGroupAutoReply(admin, groupJid, text, body, m);
     console.log("[maytapi-inbound] legacy group autoreply", JSON.stringify(result).slice(0, 300));
     return jres(200, { ok: true, processed: "group_message", group_jid: groupJid, ...result });
+  }
+
+  const ownerId = await resolveOwnerId(admin);
+  if (!ownerId) {
+    console.log("[maytapi-inbound] owner_unresolved");
+    return jres(500, { error: "owner_unresolved" });
   }
 
   const mid: string | null = m?.id ?? null;
