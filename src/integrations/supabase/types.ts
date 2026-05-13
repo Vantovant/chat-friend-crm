@@ -923,6 +923,111 @@ export type Database = {
         }
         Relationships: []
       }
+      maytapi_inbound_unmatched: {
+        Row: {
+          created_at: string | null
+          id: string
+          last_body_preview: string | null
+          last_seen_at: string | null
+          linked_contact_id: string | null
+          message_count: number | null
+          phone_hash: string
+          phone_last4: string | null
+          status: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          last_body_preview?: string | null
+          last_seen_at?: string | null
+          linked_contact_id?: string | null
+          message_count?: number | null
+          phone_hash: string
+          phone_last4?: string | null
+          status?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          last_body_preview?: string | null
+          last_seen_at?: string | null
+          linked_contact_id?: string | null
+          message_count?: number | null
+          phone_hash?: string
+          phone_last4?: string | null
+          status?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      maytapi_messages: {
+        Row: {
+          body: string | null
+          body_preview: string | null
+          contact_id: string | null
+          conversation_key: string | null
+          created_at: string | null
+          direction: string
+          id: string
+          maytapi_message_id: string
+          media_type: string | null
+          media_url: string | null
+          phone_e164: string | null
+          phone_hash: string
+          phone_last4: string | null
+          raw: Json | null
+          received_at: string | null
+          status: string | null
+          user_id: string
+          zazi_action_id: string | null
+        }
+        Insert: {
+          body?: string | null
+          body_preview?: string | null
+          contact_id?: string | null
+          conversation_key?: string | null
+          created_at?: string | null
+          direction: string
+          id?: string
+          maytapi_message_id: string
+          media_type?: string | null
+          media_url?: string | null
+          phone_e164?: string | null
+          phone_hash: string
+          phone_last4?: string | null
+          raw?: Json | null
+          received_at?: string | null
+          status?: string | null
+          user_id: string
+          zazi_action_id?: string | null
+        }
+        Update: {
+          body?: string | null
+          body_preview?: string | null
+          contact_id?: string | null
+          conversation_key?: string | null
+          created_at?: string | null
+          direction?: string
+          id?: string
+          maytapi_message_id?: string
+          media_type?: string | null
+          media_url?: string | null
+          phone_e164?: string | null
+          phone_hash?: string
+          phone_last4?: string | null
+          raw?: Json | null
+          received_at?: string | null
+          status?: string | null
+          user_id?: string
+          zazi_action_id?: string | null
+        }
+        Relationships: []
+      }
       messages: {
         Row: {
           content: string
@@ -1675,6 +1780,30 @@ export type Database = {
           response?: Json | null
           status_code?: number | null
           user_identity?: string | null
+        }
+        Relationships: []
+      }
+      webhook_rate_limit_buckets: {
+        Row: {
+          id: string
+          identity: string
+          request_count: number | null
+          scope: string
+          window_start: string
+        }
+        Insert: {
+          id?: string
+          identity: string
+          request_count?: number | null
+          scope: string
+          window_start: string
+        }
+        Update: {
+          id?: string
+          identity?: string
+          request_count?: number | null
+          scope?: string
+          window_start?: string
         }
         Relationships: []
       }
