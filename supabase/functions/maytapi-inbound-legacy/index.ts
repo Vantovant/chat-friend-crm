@@ -590,6 +590,22 @@ Deno.serve(async (req) => {
         await recordIdempotent(admin, idemKey, 500, { error: "insert_failed" });
         return jres(500, { error: "insert_failed" });
       }
+    } else {
+      // Audit trail for the Maytapi inbox
+      await admin.from("contact_activity").insert({
+        contact_id: matchedContactId,
+        type: "maytapi_message",
+        performed_by: ownerId,
+        metadata: {
+          direction: "inbound",
+          maytapi_message_id: mid,
+          phone_last4: ph4,
+          msg_type: msgType,
+          body_preview: preview(text),
+          match_source: matchSource,
+          received_at: receivedAt,
+        },
+      }).then(() => {}, (e: any) => console.log("[maytapi-inbound] activity_insert_warn", e?.message));
     }
 
     // H3A: If matched via the linked gate, advance audit counters on that row
