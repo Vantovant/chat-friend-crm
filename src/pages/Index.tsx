@@ -50,6 +50,7 @@ const Index = () => {
     switch (activeModule) {
       case 'dashboard': return <DashboardModule />;
       case 'inbox': return <InboxModule />;
+      case 'maytapi-inbox': return <MaytapiInboxModule />;
       case 'contacts': return <ContactsModule />;
       case 'crm': return <CRMModule />;
       case 'automations': return <AutomationsModule />;
