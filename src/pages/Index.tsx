@@ -4,6 +4,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { AppSidebar } from '@/components/vanto/AppSidebar';
 import { DashboardModule } from '@/components/vanto/DashboardModule';
 import { InboxModule } from '@/components/vanto/InboxModule';
+import { MaytapiInboxModule } from '@/components/vanto/MaytapiInboxModule';
 import { ContactsModule } from '@/components/vanto/ContactsModule';
 import { CRMModule } from '@/components/vanto/CRMModule';
 import { AutomationsModule } from '@/components/vanto/AutomationsModule';
@@ -25,10 +26,15 @@ import type { Module } from '@/lib/vanto-data';
 import type { Session } from '@supabase/supabase-js';
 import { Bot } from 'lucide-react';
 
+const pathToModule: Record<string, Module> = {
+  '/maytapi-inbox': 'maytapi-inbox',
+};
+
 const Index = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeModule, setActiveModule] = useState<Module>('dashboard');
+  const initialModule: Module = (typeof window !== 'undefined' && pathToModule[window.location.pathname]) || 'dashboard';
+  const [activeModule, setActiveModule] = useState<Module>(initialModule);
   const isMobile = useIsMobile();
 
   useEffect(() => {
@@ -49,6 +55,7 @@ const Index = () => {
     switch (activeModule) {
       case 'dashboard': return <DashboardModule />;
       case 'inbox': return <InboxModule />;
+      case 'maytapi-inbox': return <MaytapiInboxModule />;
       case 'contacts': return <ContactsModule />;
       case 'crm': return <CRMModule />;
       case 'automations': return <AutomationsModule />;
