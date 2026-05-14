@@ -22,6 +22,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'inbox', label: 'Inbox', icon: MessageSquare },
+  { id: 'maytapi-inbox', label: 'Maytapi Inbox', icon: MessageSquare },
   { id: 'prospector-drafts', label: 'Prospector Drafts', icon: Brain },
   { id: 'contacts', label: 'Contacts', icon: Users },
   { id: 'crm', label: 'CRM', icon: BarChart3 },
