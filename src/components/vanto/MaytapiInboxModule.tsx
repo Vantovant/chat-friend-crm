@@ -447,9 +447,10 @@ function LinkContactDialog({
                 results.map((c) => (
                   <button
                     key={c.id}
+                    type="button"
                     disabled={busy}
-                    onClick={() => linkTo(c.id)}
-                    className="w-full text-left px-3 py-2 hover:bg-secondary/50 text-sm flex justify-between items-center"
+                    onMouseDown={(e) => { e.preventDefault(); linkTo(c.id); }}
+                    className="w-full text-left px-3 py-2 hover:bg-secondary/50 text-sm flex justify-between items-center disabled:opacity-50"
                   >
                     <span>{c.name}</span>
                     <span className="text-xs text-muted-foreground">{c.phone}</span>
