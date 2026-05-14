@@ -26,10 +26,15 @@ import type { Module } from '@/lib/vanto-data';
 import type { Session } from '@supabase/supabase-js';
 import { Bot } from 'lucide-react';
 
+const pathToModule: Record<string, Module> = {
+  '/maytapi-inbox': 'maytapi-inbox',
+};
+
 const Index = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeModule, setActiveModule] = useState<Module>('dashboard');
+  const initialModule: Module = (typeof window !== 'undefined' && pathToModule[window.location.pathname]) || 'dashboard';
+  const [activeModule, setActiveModule] = useState<Module>(initialModule);
   const isMobile = useIsMobile();
 
   useEffect(() => {
