@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.twilio-msg-status]
 verify_jwt = false
+
+[functions.maytapi-dispatcher]
+verify_jwt = false
