@@ -124,9 +124,10 @@ export function MaytapiInboxModule() {
   }, [matched, search]);
 
   const filteredUnmatched = useMemo(() => {
-    if (!search.trim()) return unmatched;
+    const base = unmatched.filter((u) => u.status !== 'linked' && !u.linked_contact_id);
+    if (!search.trim()) return base;
     const s = search.toLowerCase();
-    return unmatched.filter(
+    return base.filter(
       (u) => (u.phone_last4 || '').includes(s) || (u.last_body_preview || '').toLowerCase().includes(s)
     );
   }, [unmatched, search]);
