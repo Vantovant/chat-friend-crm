@@ -87,33 +87,10 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      // Was there a motivation post earlier today (between 17:00 and 19:00 SAST)?
-      const { data: motivation } = await supabase
-        .from("scheduled_group_posts")
-        .select("id, scheduled_at, status")
-        .eq("target_group_jid", jid)
-        .gte("scheduled_at", todayStartUtc.toISOString())
-        .lte("scheduled_at", cutoffUtc.toISOString())
-        .in("status", ["sent", "delivered"])
-        .limit(1);
-      if (!motivation || motivation.length === 0) {
-        results.push({ jid, skipped: "no_motivation_post_today" });
-        continue;
-      }
-
-      // Any inbound member messages on this JID since the motivation post?
-      const motivationAt = motivation[0].scheduled_at;
-      const { count: replies } = await supabase
-        .from("webhook_events")
-        .select("id", { count: "exact", head: true })
-        .eq("source", "maytapi")
-        .gte("created_at", motivationAt)
-        .filter("payload->>conversation", "eq", jid);
-
-      if ((replies || 0) > 0) {
-        results.push({ jid, skipped: `had_${replies}_replies` });
-        continue;
-      }
+      // 2026-05-14: User requested unconditional daily 19:30 check-in across all
+      // pilot groups. Prior gates (motivation-post-required, zero-replies-required)
+      // removed. Idempotency check above still ensures we only fire ONCE per JID per
+      // SAST day, and the time-window gate keeps it inside 19:25–19:45.
 
       // Fire the follow-up
       const sgRes = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-group`, {
