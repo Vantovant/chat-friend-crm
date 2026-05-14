@@ -124,9 +124,10 @@ export function MaytapiInboxModule() {
   }, [matched, search]);
 
   const filteredUnmatched = useMemo(() => {
-    if (!search.trim()) return unmatched;
+    const base = unmatched.filter((u) => u.status !== 'linked' && !u.linked_contact_id);
+    if (!search.trim()) return base;
     const s = search.toLowerCase();
-    return unmatched.filter(
+    return base.filter(
       (u) => (u.phone_last4 || '').includes(s) || (u.last_body_preview || '').toLowerCase().includes(s)
     );
   }, [unmatched, search]);
@@ -366,17 +367,41 @@ function LinkContactDialog({
   const linkTo = async (contactId: string) => {
     if (!target) return;
     setBusy(true);
-    const { error } = await supabase
-      .from('maytapi_inbound_unmatched')
-      .update({ linked_contact_id: contactId, status: 'linked', updated_at: new Date().toISOString() })
-      .eq('id', target.id);
-    setBusy(false);
-    if (error) {
-      toast({ title: 'Link failed', description: error.message, variant: 'destructive' });
-      return;
+    try {
+      const { error: upErr } = await supabase
+        .from('maytapi_inbound_unmatched')
+        .update({ linked_contact_id: contactId, status: 'linked', updated_at: new Date().toISOString() })
+        .eq('id', target.id);
+      if (upErr) throw upErr;
+
+      // Backfill contact_activity so this number's history appears in Conversations immediately.
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('contact_activity').insert({
+          contact_id: contactId,
+          type: 'maytapi_message',
+          performed_by: user.id,
+          metadata: {
+            body_preview: target.last_body_preview,
+            body: target.last_body_preview,
+            direction: 'inbound',
+            phone_last4: target.phone_last4,
+            matched: true,
+            backfilled_from_unmatched: true,
+            unmatched_id: target.id,
+            received_at: target.last_seen_at,
+          },
+        });
+      }
+
+      toast({ title: 'Linked', description: 'Number moved to Conversations.' });
+      onLinked();
+    } catch (e: any) {
+      console.error('link failed', e);
+      toast({ title: 'Link failed', description: e?.message || 'Unknown error', variant: 'destructive' });
+    } finally {
+      setBusy(false);
     }
-    toast({ title: 'Linked', description: 'Future messages from this number will be matched.' });
-    onLinked();
   };
 
   const createAndLink = async () => {
@@ -423,9 +448,10 @@ function LinkContactDialog({
                 results.map((c) => (
                   <button
                     key={c.id}
+                    type="button"
                     disabled={busy}
-                    onClick={() => linkTo(c.id)}
-                    className="w-full text-left px-3 py-2 hover:bg-secondary/50 text-sm flex justify-between items-center"
+                    onMouseDown={(e) => { e.preventDefault(); linkTo(c.id); }}
+                    className="w-full text-left px-3 py-2 hover:bg-secondary/50 text-sm flex justify-between items-center disabled:opacity-50"
                   >
                     <span>{c.name}</span>
                     <span className="text-xs text-muted-foreground">{c.phone}</span>
