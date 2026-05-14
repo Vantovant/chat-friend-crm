@@ -366,17 +366,41 @@ function LinkContactDialog({
   const linkTo = async (contactId: string) => {
     if (!target) return;
     setBusy(true);
-    const { error } = await supabase
-      .from('maytapi_inbound_unmatched')
-      .update({ linked_contact_id: contactId, status: 'linked', updated_at: new Date().toISOString() })
-      .eq('id', target.id);
-    setBusy(false);
-    if (error) {
-      toast({ title: 'Link failed', description: error.message, variant: 'destructive' });
-      return;
+    try {
+      const { error: upErr } = await supabase
+        .from('maytapi_inbound_unmatched')
+        .update({ linked_contact_id: contactId, status: 'linked', updated_at: new Date().toISOString() })
+        .eq('id', target.id);
+      if (upErr) throw upErr;
+
+      // Backfill contact_activity so this number's history appears in Conversations immediately.
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('contact_activity').insert({
+          contact_id: contactId,
+          type: 'maytapi_message',
+          performed_by: user.id,
+          metadata: {
+            body_preview: target.last_body_preview,
+            body: target.last_body_preview,
+            direction: 'inbound',
+            phone_last4: target.phone_last4,
+            matched: true,
+            backfilled_from_unmatched: true,
+            unmatched_id: target.id,
+            received_at: target.last_seen_at,
+          },
+        });
+      }
+
+      toast({ title: 'Linked', description: 'Number moved to Conversations.' });
+      onLinked();
+    } catch (e: any) {
+      console.error('link failed', e);
+      toast({ title: 'Link failed', description: e?.message || 'Unknown error', variant: 'destructive' });
+    } finally {
+      setBusy(false);
     }
-    toast({ title: 'Linked', description: 'Future messages from this number will be matched.' });
-    onLinked();
   };
 
   const createAndLink = async () => {
