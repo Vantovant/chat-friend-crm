@@ -504,6 +504,130 @@ export type Database = {
           },
         ]
       }
+      fb_dispatch_log: {
+        Row: {
+          created_at: string
+          error: string | null
+          fb_generated_post_id: string
+          id: string
+          provider_message_id: string | null
+          scheduled_group_post_id: string | null
+          status: string
+          target_group_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          error?: string | null
+          fb_generated_post_id: string
+          id?: string
+          provider_message_id?: string | null
+          scheduled_group_post_id?: string | null
+          status?: string
+          target_group_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          error?: string | null
+          fb_generated_post_id?: string
+          id?: string
+          provider_message_id?: string | null
+          scheduled_group_post_id?: string | null
+          status?: string
+          target_group_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fb_dispatch_log_fb_generated_post_id_fkey"
+            columns: ["fb_generated_post_id"]
+            isOneToOne: false
+            referencedRelation: "fb_generated_posts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fb_generated_posts: {
+        Row: {
+          ai_model: string | null
+          ai_safety_flags: Json | null
+          approved_at: string | null
+          approved_by: string | null
+          body: string
+          created_at: string
+          fb_source_post_id: string
+          id: string
+          status: string
+          variant: string
+        }
+        Insert: {
+          ai_model?: string | null
+          ai_safety_flags?: Json | null
+          approved_at?: string | null
+          approved_by?: string | null
+          body: string
+          created_at?: string
+          fb_source_post_id: string
+          id?: string
+          status?: string
+          variant: string
+        }
+        Update: {
+          ai_model?: string | null
+          ai_safety_flags?: Json | null
+          approved_at?: string | null
+          approved_by?: string | null
+          body?: string
+          created_at?: string
+          fb_source_post_id?: string
+          id?: string
+          status?: string
+          variant?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fb_generated_posts_fb_source_post_id_fkey"
+            columns: ["fb_source_post_id"]
+            isOneToOne: false
+            referencedRelation: "fb_source_posts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fb_source_posts: {
+        Row: {
+          attachments: Json | null
+          fb_post_id: string
+          fetched_at: string
+          id: string
+          permalink_url: string | null
+          posted_at: string | null
+          raw_message: string | null
+          source_ref: string | null
+          source_type: string
+        }
+        Insert: {
+          attachments?: Json | null
+          fb_post_id: string
+          fetched_at?: string
+          id?: string
+          permalink_url?: string | null
+          posted_at?: string | null
+          raw_message?: string | null
+          source_ref?: string | null
+          source_type?: string
+        }
+        Update: {
+          attachments?: Json | null
+          fb_post_id?: string
+          fetched_at?: string
+          id?: string
+          permalink_url?: string | null
+          posted_at?: string | null
+          raw_message?: string | null
+          source_ref?: string | null
+          source_type?: string
+        }
+        Relationships: []
+      }
       followup_logs: {
         Row: {
           contact_id: string
@@ -1535,6 +1659,7 @@ export type Database = {
           created_at: string
           failure_reason: string | null
           fallback_message: string | null
+          fb_generated_post_id: string | null
           id: string
           image_url: string | null
           last_attempt_at: string | null
@@ -1544,6 +1669,7 @@ export type Database = {
           preview_status: string | null
           provider_message_id: string | null
           scheduled_at: string
+          source: string
           status: string
           target_group_jid: string | null
           target_group_name: string
@@ -1554,6 +1680,7 @@ export type Database = {
           created_at?: string
           failure_reason?: string | null
           fallback_message?: string | null
+          fb_generated_post_id?: string | null
           id?: string
           image_url?: string | null
           last_attempt_at?: string | null
@@ -1563,6 +1690,7 @@ export type Database = {
           preview_status?: string | null
           provider_message_id?: string | null
           scheduled_at: string
+          source?: string
           status?: string
           target_group_jid?: string | null
           target_group_name: string
@@ -1573,6 +1701,7 @@ export type Database = {
           created_at?: string
           failure_reason?: string | null
           fallback_message?: string | null
+          fb_generated_post_id?: string | null
           id?: string
           image_url?: string | null
           last_attempt_at?: string | null
@@ -1582,6 +1711,7 @@ export type Database = {
           preview_status?: string | null
           provider_message_id?: string | null
           scheduled_at?: string
+          source?: string
           status?: string
           target_group_jid?: string | null
           target_group_name?: string

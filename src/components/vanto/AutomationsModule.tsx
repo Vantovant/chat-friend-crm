@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
-import { Plus, Zap, Clock, BarChart2, ChevronRight, Loader2, Pause, Play, X, Trash2, LifeBuoy } from 'lucide-react';
+import { Plus, Zap, Clock, BarChart2, ChevronRight, Loader2, Pause, Play, X, Trash2, LifeBuoy, Facebook } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { RecoveryPanel } from './RecoveryPanel';
 
@@ -47,7 +47,7 @@ const TEMPLATES = [
 ];
 
 export function AutomationsModule() {
-  const [tab, setTab] = useState<'rules' | 'recovery'>('rules');
+  const [tab, setTab] = useState<'rules' | 'recovery' | 'fb_wa'>('rules');
   const [automations, setAutomations] = useState<Automation[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -133,9 +133,33 @@ export function AutomationsModule() {
         >
           <LifeBuoy size={14} /> Recovery
         </button>
+        <button
+          onClick={() => setTab('fb_wa')}
+          className={cn('px-4 py-2.5 text-sm font-medium border-b-2 transition-colors flex items-center gap-2', tab === 'fb_wa' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}
+        >
+          <Facebook size={14} /> FB → WA Inbox
+        </button>
       </div>
 
-      {tab === 'recovery' ? <RecoveryPanel /> : (
+      {tab === 'fb_wa' ? (
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="vanto-card p-6 max-w-2xl">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-primary/15 flex items-center justify-center">
+                <Facebook size={20} className="text-primary" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-foreground">FB → WA Inbox</h3>
+                <p className="text-xs text-muted-foreground">Facebook post → AI summary → WhatsApp group queue</p>
+              </div>
+            </div>
+            <div className="p-3 rounded-lg bg-secondary border border-border text-sm text-foreground">
+              <span className="font-semibold text-primary">Phase 1 complete:</span> tables and RLS ready.
+              <p className="text-xs text-muted-foreground mt-1">Next: ingest UI, AI variant generation, and approval queue (Phase 2).</p>
+            </div>
+          </div>
+        </div>
+      ) : tab === 'recovery' ? <RecoveryPanel /> : (
         <>
           <div className="px-4 md:px-6 py-4 border-b border-border grid grid-cols-3 gap-2 md:gap-4 shrink-0">
             {[
