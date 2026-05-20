@@ -10,8 +10,11 @@ const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const PAGE_TOKEN = Deno.env.get('META_PAGE_ACCESS_TOKEN') ?? '';
 const PAGE_ID = Deno.env.get('META_PAGE_ID') ?? '';
 const APP_SECRET = Deno.env.get('META_APP_SECRET') ?? '';
-// Webhook verify token: separate value Meta sends in handshake; defaults to APP_SECRET for back-compat.
-const VERIFY_TOKEN = Deno.env.get('META_WEBHOOK_VERIFY_TOKEN') || APP_SECRET;
+// Webhook verify tokens: accept an explicit webhook token OR the Meta app secret for back-compat.
+const WEBHOOK_VERIFY_TOKEN = Deno.env.get('META_WEBHOOK_VERIFY_TOKEN') ?? '';
+const VERIFY_TOKENS = Array.from(new Set([WEBHOOK_VERIFY_TOKEN, APP_SECRET]
+  .map((value) => value.trim())
+  .filter(Boolean)));
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
 
@@ -77,9 +80,12 @@ Deno.serve(async (req) => {
     } catch (e) { console.error('[fb-ingest] debug log err', e); }
 
     if (mode === 'subscribe') {
-      console.log(`[fb-ingest] Expected verify token: ${VERIFY_TOKEN ? 'set' : 'MISSING!'}`);
-      if (VERIFY_TOKEN && token !== VERIFY_TOKEN) {
-        console.warn(`[fb-ingest] ❌ Token mismatch. Provided length: ${token.length}, Expected length: ${VERIFY_TOKEN.length}`);
+      const normalizedToken = token.trim();
+      const matched = VERIFY_TOKENS.some((expectedToken) => normalizedToken === expectedToken);
+      console.log(`[fb-ingest] Verify tokens configured: webhook=${WEBHOOK_VERIFY_TOKEN ? 'set' : 'missing'}, app_secret=${APP_SECRET ? 'set' : 'missing'}`);
+      if (!matched) {
+        const expectedLengths = VERIFY_TOKENS.map((expectedToken) => expectedToken.length).join(',') || 'none';
+        console.warn(`[fb-ingest] ❌ Token mismatch. Provided length: ${normalizedToken.length}, Expected lengths: ${expectedLengths}`);
         return new Response('Forbidden: Invalid verify token', { status: 403, headers: { 'Content-Type': 'text/plain' } });
       }
       console.log(`[fb-ingest] ✅ Verification OK, returning challenge: ${challenge}`);
