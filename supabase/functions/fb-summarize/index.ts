@@ -177,6 +177,21 @@ Rules:
       return json({ ok: false, error: insErr.message }, 200);
     }
 
+    // Phase 4: if trust mode auto-approved, fire-and-forget inject to queue per approved variant
+    if (autoApprove) {
+      const injectUrl = `${SUPABASE_URL}/functions/v1/fb-inject-to-queue`;
+      for (const row of ins ?? []) {
+        if (row.status !== 'approved') continue;
+        const p = fetch(injectUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SERVICE_ROLE}` },
+          body: JSON.stringify({ fb_generated_post_id: row.id }),
+        }).catch(e => console.error('[fb-summarize] inject err', e));
+        // @ts-ignore
+        if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(p);
+      }
+    }
+
     return json({ ok: true, inserted: ins }, 200);
   } catch (e) {
     console.error('[fb-summarize] exception', e);
