@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
       }
 
       const finalKey = postId ?? `manual_${crypto.randomUUID()}`;
-      const { error } = await supabase
+      const { data: upserted, error } = await supabase
         .from('fb_source_posts')
         .upsert({
           fb_post_id: finalKey,
@@ -92,10 +92,29 @@ Deno.serve(async (req) => {
           permalink_url: permalink,
           attachments,
           posted_at,
-        }, { onConflict: 'fb_post_id' });
+        }, { onConflict: 'fb_post_id' })
+        .select('id')
+        .maybeSingle();
 
-      if (error) console.error('[fb-ingest] upsert err', error.message);
-      else ingested++;
+      if (error) {
+        console.error('[fb-ingest] upsert err', error.message);
+      } else {
+        ingested++;
+        // Phase 3: trigger AI summarize in background (non-blocking)
+        if (upserted?.id) {
+          const summarizeUrl = `${SUPABASE_URL}/functions/v1/fb-summarize`;
+          const p = fetch(summarizeUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${SERVICE_ROLE}`,
+            },
+            body: JSON.stringify({ fb_source_post_id: upserted.id }),
+          }).catch(e => console.error('[fb-ingest] summarize trigger err', e));
+          // @ts-ignore EdgeRuntime exists in Supabase runtime
+          if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(p);
+        }
+      }
     }
 
     return json({ ok: true, ingested }, 200);
