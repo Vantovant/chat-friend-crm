@@ -252,6 +252,18 @@ export function FbWaInboxPanel() {
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      {/* Emergency stop banner */}
+      {!instantEnabled && (
+        <div className="max-w-5xl flex items-start gap-3 p-4 rounded-lg border border-red-500/40 bg-red-500/10">
+          <AlertTriangle size={18} className="text-red-400 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-red-300">Emergency stop is ACTIVE</p>
+            <p className="text-xs text-red-300/80">No FB → WA injections will be queued. Existing scheduled posts continue to drain normally.</p>
+          </div>
+          <button onClick={() => toggleInstantEnabled(true)} className="text-xs px-3 py-1.5 rounded bg-red-500/20 text-red-200 border border-red-500/40 hover:bg-red-500/30">Resume</button>
+        </div>
+      )}
+
       {/* Manual ingest */}
       <div className="vanto-card p-5 max-w-3xl">
         <div className="flex items-center gap-3 mb-4">
@@ -260,8 +272,17 @@ export function FbWaInboxPanel() {
           </div>
           <div className="flex-1">
             <h3 className="text-base font-bold text-foreground">FB → WA Inbox</h3>
-            <p className="text-xs text-muted-foreground">Phase 3: AI variants + admin approval. No queue injection yet.</p>
+            <p className="text-xs text-muted-foreground">Phase 4: approve & inject into the WhatsApp group queue (8s spacing, 6/day per group).</p>
           </div>
+          {instantEnabled && (
+            <button
+              onClick={() => toggleInstantEnabled(false)}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-red-500/40 text-xs text-red-300 hover:bg-red-500/10"
+              title="Emergency stop"
+            >
+              <Power size={14} /> Stop
+            </button>
+          )}
           <button
             onClick={runPoll} disabled={polling}
             className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border text-xs text-foreground hover:bg-secondary disabled:opacity-50"
