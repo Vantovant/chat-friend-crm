@@ -48,10 +48,40 @@ function extractImageUrl(graphPost: any): string | null {
 }
 
 Deno.serve(async (req) => {
-  // Log every request for debugging (best-effort, never blocks)
+  const url = new URL(req.url);
+
+  // ── Meta webhook GET handshake (MUST be first, MUST return plain text) ──
+  if (req.method === 'GET') {
+    const mode = url.searchParams.get('hub.mode');
+    const challenge = url.searchParams.get('hub.challenge') ?? '';
+    const token = url.searchParams.get('hub.verify_token') ?? '';
+
+    // Best-effort debug log of handshake attempt
+    try {
+      const debugClient = createClient(SUPABASE_URL, SERVICE_ROLE);
+      await debugClient.from('webhook_debug').insert({
+        method: 'GET',
+        headers: Object.fromEntries(req.headers.entries()),
+        body: url.search,
+        logged_at: new Date().toISOString(),
+      });
+    } catch (e) { console.error('[fb-ingest] debug log err', e); }
+
+    if (mode === 'subscribe') {
+      if (VERIFY_TOKEN && token !== VERIFY_TOKEN) {
+        return new Response('Forbidden', { status: 403, headers: { 'Content-Type': 'text/plain' } });
+      }
+      return new Response(challenge, { status: 200, headers: { 'Content-Type': 'text/plain' } });
+    }
+    return new Response('ok', { status: 200, headers: { 'Content-Type': 'text/plain' } });
+  }
+
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+
+  // Log non-GET requests for debugging (best-effort, never blocks)
   try {
     const debugClient = createClient(SUPABASE_URL, SERVICE_ROLE);
-    const debugBody = req.method === 'GET' ? '' : await req.clone().text();
+    const debugBody = await req.clone().text();
     await debugClient.from('webhook_debug').insert({
       method: req.method,
       headers: Object.fromEntries(req.headers.entries()),
@@ -61,20 +91,6 @@ Deno.serve(async (req) => {
   } catch (e) {
     console.error('[fb-ingest] debug log err', e);
   }
-
-  const url = new URL(req.url);
-
-  // ── Meta webhook GET handshake ───────────────────────────────
-  if (req.method === 'GET' && url.searchParams.get('hub.mode') === 'subscribe') {
-    const challenge = url.searchParams.get('hub.challenge') ?? '';
-    const token = url.searchParams.get('hub.verify_token') ?? '';
-    if (VERIFY_TOKEN && token !== VERIFY_TOKEN) {
-      return new Response('forbidden', { status: 403, headers: corsHeaders });
-    }
-    return new Response(challenge, { status: 200, headers: { ...corsHeaders, 'Content-Type': 'text/plain' } });
-  }
-
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
     // Capture raw body once (needed for signature verification)
