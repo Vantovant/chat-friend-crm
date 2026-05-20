@@ -195,6 +195,59 @@ export function FbWaInboxPanel() {
     });
   };
 
+  const toggleInstantEnabled = async (next: boolean) => {
+    const { data: u } = await supabase.auth.getUser();
+    const { error } = await supabase
+      .from('integration_settings')
+      .upsert({ key: 'fb_instant_enabled', value: next ? 'true' : 'false', updated_by: u.user?.id ?? null }, { onConflict: 'key' });
+    if (error) toast({ title: 'Failed', description: error.message, variant: 'destructive' });
+    else {
+      setInstantEnabled(next);
+      toast({ title: next ? 'FB → WA injection ENABLED' : 'EMERGENCY STOP active', description: next ? 'New approvals will queue to WhatsApp groups.' : 'No new injections will be sent.' });
+    }
+  };
+
+  const openSendModal = (variantId: string, mode: 'now' | 'later') => {
+    setSendModal({ variantId, mode });
+    setPickedGroups(new Set(groups.map(g => g.group_name)));
+    if (mode === 'later') {
+      const d = new Date(Date.now() + 60 * 60 * 1000);
+      d.setSeconds(0, 0);
+      // datetime-local format YYYY-MM-DDTHH:mm
+      const pad = (n: number) => String(n).padStart(2, '0');
+      setScheduleAt(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+    } else {
+      setScheduleAt('');
+    }
+  };
+
+  const confirmInject = async () => {
+    if (!sendModal) return;
+    if (pickedGroups.size === 0) { toast({ title: 'Pick at least one group', variant: 'destructive' }); return; }
+    setInjecting(true);
+    const body: any = {
+      fb_generated_post_id: sendModal.variantId,
+      target_groups: Array.from(pickedGroups),
+    };
+    if (sendModal.mode === 'later' && scheduleAt) {
+      body.scheduled_at = new Date(scheduleAt).toISOString();
+    }
+    const { data, error } = await supabase.functions.invoke('fb-inject-to-queue', { body });
+    setInjecting(false);
+    if (error) { toast({ title: 'Injection failed', description: error.message, variant: 'destructive' }); return; }
+    const d = data as any;
+    if (d?.ok === false) {
+      const msg = d.error === 'emergency_stop_enabled' ? 'Emergency stop is active.'
+        : d.error === 'daily_limit_reached_all_groups' ? `Daily limit hit for: ${(d.blocked || []).join(', ')}`
+        : d.error || 'unknown';
+      toast({ title: 'Could not queue', description: msg, variant: 'destructive' });
+      return;
+    }
+    toast({ title: `Queued for ${d.queued} group${d.queued === 1 ? '' : 's'}`, description: `First send at ${new Date(d.first_scheduled_at).toLocaleString()}${d.blocked?.length ? ` · Blocked (daily limit): ${d.blocked.join(', ')}` : ''}` });
+    setSendModal(null);
+    load();
+  };
+
   const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleString() : '—';
 
   return (
