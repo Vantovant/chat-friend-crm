@@ -4,6 +4,7 @@ import { toast } from '@/hooks/use-toast';
 import {
   Facebook, ExternalLink, RefreshCw, Loader2, Send,
   Check, X, Edit2, Save, ShieldCheck, ShieldAlert, ChevronDown, ChevronRight,
+  AlertTriangle, Power, Clock,
 } from 'lucide-react';
 
 type FbPost = {
@@ -63,10 +64,16 @@ export function FbWaInboxPanel() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState('');
   const [trustMap, setTrustMap] = useState<Record<string, boolean>>({});
+  const [groups, setGroups] = useState<Array<{ id: string; group_name: string; group_jid: string | null }>>([]);
+  const [instantEnabled, setInstantEnabled] = useState(true);
+  const [sendModal, setSendModal] = useState<null | { variantId: string; mode: 'now' | 'later' }>(null);
+  const [pickedGroups, setPickedGroups] = useState<Set<string>>(new Set());
+  const [scheduleAt, setScheduleAt] = useState<string>('');
+  const [injecting, setInjecting] = useState(false);
 
   const load = async () => {
     setLoading(true);
-    const [p, v, l] = await Promise.all([
+    const [p, v, l, g, stop] = await Promise.all([
       supabase.from('fb_source_posts')
         .select('id,fb_post_id,source_type,source_ref,raw_message,permalink_url,posted_at,fetched_at')
         .order('fetched_at', { ascending: false }).limit(50),
@@ -76,11 +83,15 @@ export function FbWaInboxPanel() {
       supabase.from('fb_dispatch_log')
         .select('id,fb_generated_post_id,target_group_id,status,error,created_at')
         .order('created_at', { ascending: false }).limit(20),
+      supabase.from('whatsapp_groups').select('id,group_name,group_jid').order('group_name'),
+      supabase.from('integration_settings').select('value').eq('key', 'fb_instant_enabled').maybeSingle(),
     ]);
     if (p.error) toast({ title: 'Failed to load posts', description: p.error.message, variant: 'destructive' });
     else setPosts((p.data as FbPost[]) ?? []);
     if (!v.error) setVariants((v.data as Variant[]) ?? []);
     if (!l.error) setLogs((l.data as DispatchLog[]) ?? []);
+    if (!g.error) setGroups((g.data as any) ?? []);
+    setInstantEnabled(stop.data ? (stop.data.value === 'true' || stop.data.value === '1') : true);
 
     // Load trust mode flags for all distinct source_refs
     const refs = Array.from(new Set((p.data ?? []).map((x: any) => x.source_ref).filter(Boolean)));
@@ -184,10 +195,75 @@ export function FbWaInboxPanel() {
     });
   };
 
+  const toggleInstantEnabled = async (next: boolean) => {
+    const { data: u } = await supabase.auth.getUser();
+    const { error } = await supabase
+      .from('integration_settings')
+      .upsert({ key: 'fb_instant_enabled', value: next ? 'true' : 'false', updated_by: u.user?.id ?? null }, { onConflict: 'key' });
+    if (error) toast({ title: 'Failed', description: error.message, variant: 'destructive' });
+    else {
+      setInstantEnabled(next);
+      toast({ title: next ? 'FB → WA injection ENABLED' : 'EMERGENCY STOP active', description: next ? 'New approvals will queue to WhatsApp groups.' : 'No new injections will be sent.' });
+    }
+  };
+
+  const openSendModal = (variantId: string, mode: 'now' | 'later') => {
+    setSendModal({ variantId, mode });
+    setPickedGroups(new Set(groups.map(g => g.group_name)));
+    if (mode === 'later') {
+      const d = new Date(Date.now() + 60 * 60 * 1000);
+      d.setSeconds(0, 0);
+      // datetime-local format YYYY-MM-DDTHH:mm
+      const pad = (n: number) => String(n).padStart(2, '0');
+      setScheduleAt(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
+    } else {
+      setScheduleAt('');
+    }
+  };
+
+  const confirmInject = async () => {
+    if (!sendModal) return;
+    if (pickedGroups.size === 0) { toast({ title: 'Pick at least one group', variant: 'destructive' }); return; }
+    setInjecting(true);
+    const body: any = {
+      fb_generated_post_id: sendModal.variantId,
+      target_groups: Array.from(pickedGroups),
+    };
+    if (sendModal.mode === 'later' && scheduleAt) {
+      body.scheduled_at = new Date(scheduleAt).toISOString();
+    }
+    const { data, error } = await supabase.functions.invoke('fb-inject-to-queue', { body });
+    setInjecting(false);
+    if (error) { toast({ title: 'Injection failed', description: error.message, variant: 'destructive' }); return; }
+    const d = data as any;
+    if (d?.ok === false) {
+      const msg = d.error === 'emergency_stop_enabled' ? 'Emergency stop is active.'
+        : d.error === 'daily_limit_reached_all_groups' ? `Daily limit hit for: ${(d.blocked || []).join(', ')}`
+        : d.error || 'unknown';
+      toast({ title: 'Could not queue', description: msg, variant: 'destructive' });
+      return;
+    }
+    toast({ title: `Queued for ${d.queued} group${d.queued === 1 ? '' : 's'}`, description: `First send at ${new Date(d.first_scheduled_at).toLocaleString()}${d.blocked?.length ? ` · Blocked (daily limit): ${d.blocked.join(', ')}` : ''}` });
+    setSendModal(null);
+    load();
+  };
+
   const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleString() : '—';
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      {/* Emergency stop banner */}
+      {!instantEnabled && (
+        <div className="max-w-5xl flex items-start gap-3 p-4 rounded-lg border border-red-500/40 bg-red-500/10">
+          <AlertTriangle size={18} className="text-red-400 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-red-300">Emergency stop is ACTIVE</p>
+            <p className="text-xs text-red-300/80">No FB → WA injections will be queued. Existing scheduled posts continue to drain normally.</p>
+          </div>
+          <button onClick={() => toggleInstantEnabled(true)} className="text-xs px-3 py-1.5 rounded bg-red-500/20 text-red-200 border border-red-500/40 hover:bg-red-500/30">Resume</button>
+        </div>
+      )}
+
       {/* Manual ingest */}
       <div className="vanto-card p-5 max-w-3xl">
         <div className="flex items-center gap-3 mb-4">
@@ -196,8 +272,17 @@ export function FbWaInboxPanel() {
           </div>
           <div className="flex-1">
             <h3 className="text-base font-bold text-foreground">FB → WA Inbox</h3>
-            <p className="text-xs text-muted-foreground">Phase 3: AI variants + admin approval. No queue injection yet.</p>
+            <p className="text-xs text-muted-foreground">Phase 4: approve & inject into the WhatsApp group queue (8s spacing, 6/day per group).</p>
           </div>
+          {instantEnabled && (
+            <button
+              onClick={() => toggleInstantEnabled(false)}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-red-500/40 text-xs text-red-300 hover:bg-red-500/10"
+              title="Emergency stop"
+            >
+              <Power size={14} /> Stop
+            </button>
+          )}
           <button
             onClick={runPoll} disabled={polling}
             className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border text-xs text-foreground hover:bg-secondary disabled:opacity-50"
@@ -333,10 +418,24 @@ export function FbWaInboxPanel() {
                                 </button>
                                 <button
                                   onClick={() => setStatus(v.id, 'approved')}
-                                  disabled={v.status === 'approved'}
+                                  disabled={v.status === 'approved' || v.status === 'sent'}
                                   className="flex items-center gap-1 text-[11px] px-2 py-1 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30 disabled:opacity-40"
                                 >
                                   <Check size={11} /> Approve
+                                </button>
+                                <button
+                                  onClick={() => openSendModal(v.id, 'later')}
+                                  disabled={v.status === 'rejected' || v.status === 'sent' || !instantEnabled}
+                                  className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-border text-muted-foreground hover:bg-secondary disabled:opacity-40"
+                                >
+                                  <Clock size={11} /> Queue at…
+                                </button>
+                                <button
+                                  onClick={() => openSendModal(v.id, 'now')}
+                                  disabled={v.status === 'rejected' || v.status === 'sent' || !instantEnabled}
+                                  className="flex items-center gap-1 text-[11px] px-2 py-1 rounded bg-primary/20 text-primary border border-primary/40 hover:bg-primary/30 disabled:opacity-40"
+                                >
+                                  <Send size={11} /> Send now
                                 </button>
                               </>
                             )}
@@ -386,6 +485,72 @@ export function FbWaInboxPanel() {
           </div>
         )}
       </div>
+
+      {/* Send modal */}
+      {sendModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => !injecting && setSendModal(null)}>
+          <div className="vanto-card w-full max-w-lg p-5" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-bold text-foreground">
+                {sendModal.mode === 'now' ? 'Send to WhatsApp groups now' : 'Queue for later'}
+              </h3>
+              <button onClick={() => setSendModal(null)} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
+            </div>
+
+            {sendModal.mode === 'later' && (
+              <div className="mb-3">
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Schedule at</label>
+                <input
+                  type="datetime-local" value={scheduleAt}
+                  onChange={e => setScheduleAt(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+            )}
+
+            <div className="mb-3">
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-medium text-muted-foreground">Target groups ({pickedGroups.size}/{groups.length})</label>
+                <div className="flex gap-2">
+                  <button onClick={() => setPickedGroups(new Set(groups.map(g => g.group_name)))} className="text-[11px] text-primary hover:underline">All</button>
+                  <button onClick={() => setPickedGroups(new Set())} className="text-[11px] text-muted-foreground hover:underline">None</button>
+                </div>
+              </div>
+              <div className="max-h-56 overflow-y-auto border border-border rounded-lg p-2 space-y-1 bg-secondary/30">
+                {groups.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic p-2">No WhatsApp groups captured yet.</p>
+                ) : groups.map(g => (
+                  <label key={g.id} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-secondary cursor-pointer">
+                    <input
+                      type="checkbox" checked={pickedGroups.has(g.group_name)}
+                      onChange={e => setPickedGroups(s => {
+                        const n = new Set(s);
+                        e.target.checked ? n.add(g.group_name) : n.delete(g.group_name);
+                        return n;
+                      })}
+                      className="accent-primary"
+                    />
+                    <span className="text-xs text-foreground flex-1 truncate">{g.group_name}</span>
+                    {g.group_jid && <span className="text-[10px] text-emerald-400">JID ✓</span>}
+                  </label>
+                ))}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-2">Sends are spaced 8s apart. Max 6 FB posts/group/day.</p>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setSendModal(null)} disabled={injecting} className="text-xs px-3 py-2 rounded border border-border text-muted-foreground hover:bg-secondary disabled:opacity-50">Cancel</button>
+              <button
+                onClick={confirmInject} disabled={injecting || pickedGroups.size === 0}
+                className="flex items-center gap-2 text-xs px-3 py-2 rounded vanto-gradient text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                {injecting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                {sendModal.mode === 'now' ? 'Send now' : 'Queue'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
