@@ -48,7 +48,19 @@ function extractImageUrl(graphPost: any): string | null {
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  // Log every request for debugging (best-effort, never blocks)
+  try {
+    const debugClient = createClient(SUPABASE_URL, SERVICE_ROLE);
+    const debugBody = req.method === 'GET' ? '' : await req.clone().text();
+    await debugClient.from('webhook_debug').insert({
+      method: req.method,
+      headers: Object.fromEntries(req.headers.entries()),
+      body: debugBody,
+      logged_at: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.error('[fb-ingest] debug log err', e);
+  }
 
   const url = new URL(req.url);
 
@@ -59,8 +71,10 @@ Deno.serve(async (req) => {
     if (VERIFY_TOKEN && token !== VERIFY_TOKEN) {
       return new Response('forbidden', { status: 403, headers: corsHeaders });
     }
-    return new Response(challenge, { headers: { ...corsHeaders, 'Content-Type': 'text/plain' } });
+    return new Response(challenge, { status: 200, headers: { ...corsHeaders, 'Content-Type': 'text/plain' } });
   }
+
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   try {
     // Capture raw body once (needed for signature verification)

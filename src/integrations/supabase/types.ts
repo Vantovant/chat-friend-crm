@@ -1820,6 +1820,30 @@ export type Database = {
         }
         Relationships: []
       }
+      webhook_debug: {
+        Row: {
+          body: string | null
+          headers: Json | null
+          id: string
+          logged_at: string | null
+          method: string | null
+        }
+        Insert: {
+          body?: string | null
+          headers?: Json | null
+          id?: string
+          logged_at?: string | null
+          method?: string | null
+        }
+        Update: {
+          body?: string | null
+          headers?: Json | null
+          id?: string
+          logged_at?: string | null
+          method?: string | null
+        }
+        Relationships: []
+      }
       webhook_events: {
         Row: {
           action: string
