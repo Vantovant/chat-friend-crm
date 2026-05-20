@@ -4,6 +4,7 @@ import { toast } from '@/hooks/use-toast';
 import {
   Facebook, ExternalLink, RefreshCw, Loader2, Send,
   Check, X, Edit2, Save, ShieldCheck, ShieldAlert, ChevronDown, ChevronRight,
+  AlertTriangle, Power, Clock,
 } from 'lucide-react';
 
 type FbPost = {
