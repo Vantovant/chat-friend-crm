@@ -485,6 +485,72 @@ export function FbWaInboxPanel() {
           </div>
         )}
       </div>
+
+      {/* Send modal */}
+      {sendModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => !injecting && setSendModal(null)}>
+          <div className="vanto-card w-full max-w-lg p-5" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-bold text-foreground">
+                {sendModal.mode === 'now' ? 'Send to WhatsApp groups now' : 'Queue for later'}
+              </h3>
+              <button onClick={() => setSendModal(null)} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
+            </div>
+
+            {sendModal.mode === 'later' && (
+              <div className="mb-3">
+                <label className="text-xs font-medium text-muted-foreground mb-1 block">Schedule at</label>
+                <input
+                  type="datetime-local" value={scheduleAt}
+                  onChange={e => setScheduleAt(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+            )}
+
+            <div className="mb-3">
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-medium text-muted-foreground">Target groups ({pickedGroups.size}/{groups.length})</label>
+                <div className="flex gap-2">
+                  <button onClick={() => setPickedGroups(new Set(groups.map(g => g.group_name)))} className="text-[11px] text-primary hover:underline">All</button>
+                  <button onClick={() => setPickedGroups(new Set())} className="text-[11px] text-muted-foreground hover:underline">None</button>
+                </div>
+              </div>
+              <div className="max-h-56 overflow-y-auto border border-border rounded-lg p-2 space-y-1 bg-secondary/30">
+                {groups.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic p-2">No WhatsApp groups captured yet.</p>
+                ) : groups.map(g => (
+                  <label key={g.id} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-secondary cursor-pointer">
+                    <input
+                      type="checkbox" checked={pickedGroups.has(g.group_name)}
+                      onChange={e => setPickedGroups(s => {
+                        const n = new Set(s);
+                        e.target.checked ? n.add(g.group_name) : n.delete(g.group_name);
+                        return n;
+                      })}
+                      className="accent-primary"
+                    />
+                    <span className="text-xs text-foreground flex-1 truncate">{g.group_name}</span>
+                    {g.group_jid && <span className="text-[10px] text-emerald-400">JID ✓</span>}
+                  </label>
+                ))}
+              </div>
+              <p className="text-[10px] text-muted-foreground mt-2">Sends are spaced 8s apart. Max 6 FB posts/group/day.</p>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setSendModal(null)} disabled={injecting} className="text-xs px-3 py-2 rounded border border-border text-muted-foreground hover:bg-secondary disabled:opacity-50">Cancel</button>
+              <button
+                onClick={confirmInject} disabled={injecting || pickedGroups.size === 0}
+                className="flex items-center gap-2 text-xs px-3 py-2 rounded vanto-gradient text-primary-foreground hover:opacity-90 disabled:opacity-50"
+              >
+                {injecting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+                {sendModal.mode === 'now' ? 'Send now' : 'Queue'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
