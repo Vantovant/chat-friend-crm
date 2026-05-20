@@ -3,8 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import {
   Facebook, ExternalLink, RefreshCw, Loader2, Send,
-  Check, X, Edit2, Save, ShieldCheck, ShieldAlert, ChevronDown, ChevronRight,
-  AlertTriangle, Power, Clock,
+  ChevronDown, ChevronRight, AlertTriangle, Power, Save, Image as ImageIcon,
 } from 'lucide-react';
 
 type FbPost = {
@@ -16,6 +15,7 @@ type FbPost = {
   permalink_url: string | null;
   posted_at: string | null;
   fetched_at: string;
+  attachments: any;
 };
 
 type Variant = {
@@ -25,7 +25,6 @@ type Variant = {
   body: string;
   status: 'draft' | 'approved' | 'rejected' | 'sent';
   ai_safety_flags: any;
-  approved_at: string | null;
   created_at: string;
 };
 
@@ -44,7 +43,6 @@ const VARIANT_COLORS: Record<Variant['variant'], string> = {
   cta: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
   emotional: 'bg-pink-500/15 text-pink-400 border-pink-500/30',
 };
-
 const STATUS_COLORS: Record<Variant['status'], string> = {
   draft: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
   approved: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
@@ -61,52 +59,38 @@ export function FbWaInboxPanel() {
   const [submitting, setSubmitting] = useState(false);
   const [polling, setPolling] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editBody, setEditBody] = useState('');
-  const [trustMap, setTrustMap] = useState<Record<string, boolean>>({});
   const [groups, setGroups] = useState<Array<{ id: string; group_name: string; group_jid: string | null }>>([]);
   const [instantEnabled, setInstantEnabled] = useState(true);
-  const [sendModal, setSendModal] = useState<null | { variantId: string; mode: 'now' | 'later' }>(null);
-  const [pickedGroups, setPickedGroups] = useState<Set<string>>(new Set());
-  const [scheduleAt, setScheduleAt] = useState<string>('');
-  const [injecting, setInjecting] = useState(false);
+  const [defaultGroups, setDefaultGroups] = useState<Set<string>>(new Set());
+  const [savingGroups, setSavingGroups] = useState(false);
 
   const load = async () => {
     setLoading(true);
-    const [p, v, l, g, stop] = await Promise.all([
+    const [p, v, l, g, stop, defs] = await Promise.all([
       supabase.from('fb_source_posts')
-        .select('id,fb_post_id,source_type,source_ref,raw_message,permalink_url,posted_at,fetched_at')
+        .select('id,fb_post_id,source_type,source_ref,raw_message,permalink_url,posted_at,fetched_at,attachments')
         .order('fetched_at', { ascending: false }).limit(50),
       supabase.from('fb_generated_posts')
-        .select('id,fb_source_post_id,variant,body,status,ai_safety_flags,approved_at,created_at')
+        .select('id,fb_source_post_id,variant,body,status,ai_safety_flags,created_at')
         .order('created_at', { ascending: false }).limit(400),
       supabase.from('fb_dispatch_log')
         .select('id,fb_generated_post_id,target_group_id,status,error,created_at')
-        .order('created_at', { ascending: false }).limit(20),
+        .order('created_at', { ascending: false }).limit(30),
       supabase.from('whatsapp_groups').select('id,group_name,group_jid').order('group_name'),
       supabase.from('integration_settings').select('value').eq('key', 'fb_instant_enabled').maybeSingle(),
+      supabase.from('integration_settings').select('value').eq('key', 'fb_auto_target_groups').maybeSingle(),
     ]);
-    if (p.error) toast({ title: 'Failed to load posts', description: p.error.message, variant: 'destructive' });
-    else setPosts((p.data as FbPost[]) ?? []);
+    if (!p.error) setPosts((p.data as FbPost[]) ?? []);
     if (!v.error) setVariants((v.data as Variant[]) ?? []);
     if (!l.error) setLogs((l.data as DispatchLog[]) ?? []);
     if (!g.error) setGroups((g.data as any) ?? []);
     setInstantEnabled(stop.data ? (stop.data.value === 'true' || stop.data.value === '1') : true);
-
-    // Load trust mode flags for all distinct source_refs
-    const refs = Array.from(new Set((p.data ?? []).map((x: any) => x.source_ref).filter(Boolean)));
-    if (refs.length) {
-      const keys = refs.map(r => `fb_auto_approve_${r}`);
-      const { data: settings } = await supabase
-        .from('integration_settings').select('key,value').in('key', keys);
-      const map: Record<string, boolean> = {};
-      for (const row of settings ?? []) {
-        const ref = (row.key as string).replace('fb_auto_approve_', '');
-        map[ref] = row.value === 'true' || row.value === '1';
-      }
-      setTrustMap(map);
+    if (defs.data?.value) {
+      try {
+        const arr = JSON.parse(defs.data.value);
+        if (Array.isArray(arr)) setDefaultGroups(new Set(arr.map(String)));
+      } catch { /* ignore */ }
     }
-
     setLoading(false);
   };
 
@@ -134,7 +118,7 @@ export function FbWaInboxPanel() {
     if ((data as any)?.ok === false) {
       toast({ title: 'Ingest error', description: (data as any).error ?? 'unknown', variant: 'destructive' }); return;
     }
-    toast({ title: 'Post stored', description: 'AI variants will appear in ~15s.' });
+    toast({ title: 'Post stored', description: 'AI variants + auto-send will run in ~15s.' });
     setInput('');
     setTimeout(load, 1500);
     setTimeout(load, 15000);
@@ -157,42 +141,8 @@ export function FbWaInboxPanel() {
     else { toast({ title: 'Regenerating', description: 'Variants will refresh shortly.' }); setTimeout(load, 4000); }
   };
 
-  const setStatus = async (id: string, status: 'approved' | 'rejected', bodyOverride?: string) => {
-    const { data: u } = await supabase.auth.getUser();
-    const patch: any = { status };
-    if (status === 'approved') {
-      patch.approved_by = u.user?.id ?? null;
-      patch.approved_at = new Date().toISOString();
-    }
-    if (bodyOverride !== undefined) patch.body = bodyOverride;
-    const { error } = await supabase.from('fb_generated_posts').update(patch).eq('id', id);
-    if (error) toast({ title: 'Update failed', description: error.message, variant: 'destructive' });
-    else {
-      toast({ title: `Variant ${status}` });
-      setEditingId(null);
-      load();
-    }
-  };
-
-  const toggleTrust = async (sourceRef: string, next: boolean) => {
-    const key = `fb_auto_approve_${sourceRef}`;
-    const { data: u } = await supabase.auth.getUser();
-    const { error } = await supabase
-      .from('integration_settings')
-      .upsert({ key, value: next ? 'true' : 'false', updated_by: u.user?.id ?? null }, { onConflict: 'key' });
-    if (error) toast({ title: 'Failed', description: error.message, variant: 'destructive' });
-    else {
-      setTrustMap(m => ({ ...m, [sourceRef]: next }));
-      toast({ title: next ? 'Trust mode ON' : 'Trust mode OFF', description: next ? 'New variants will auto-approve.' : 'New variants stay in draft.' });
-    }
-  };
-
   const toggleExpand = (id: string) => {
-    setExpanded(s => {
-      const n = new Set(s);
-      n.has(id) ? n.delete(id) : n.add(id);
-      return n;
-    });
+    setExpanded(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
 
   const toggleInstantEnabled = async (next: boolean) => {
@@ -203,66 +153,88 @@ export function FbWaInboxPanel() {
     if (error) toast({ title: 'Failed', description: error.message, variant: 'destructive' });
     else {
       setInstantEnabled(next);
-      toast({ title: next ? 'FB → WA injection ENABLED' : 'EMERGENCY STOP active', description: next ? 'New approvals will queue to WhatsApp groups.' : 'No new injections will be sent.' });
+      toast({ title: next ? 'Auto-send RESUMED' : 'EMERGENCY STOP active', description: next ? 'New FB posts will flow to WhatsApp groups.' : 'No new injections will be queued.' });
     }
   };
 
-  const openSendModal = (variantId: string, mode: 'now' | 'later') => {
-    setSendModal({ variantId, mode });
-    setPickedGroups(new Set(groups.map(g => g.group_name)));
-    if (mode === 'later') {
-      const d = new Date(Date.now() + 60 * 60 * 1000);
-      d.setSeconds(0, 0);
-      // datetime-local format YYYY-MM-DDTHH:mm
-      const pad = (n: number) => String(n).padStart(2, '0');
-      setScheduleAt(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`);
-    } else {
-      setScheduleAt('');
-    }
-  };
-
-  const confirmInject = async () => {
-    if (!sendModal) return;
-    if (pickedGroups.size === 0) { toast({ title: 'Pick at least one group', variant: 'destructive' }); return; }
-    setInjecting(true);
-    const body: any = {
-      fb_generated_post_id: sendModal.variantId,
-      target_groups: Array.from(pickedGroups),
-    };
-    if (sendModal.mode === 'later' && scheduleAt) {
-      body.scheduled_at = new Date(scheduleAt).toISOString();
-    }
-    const { data, error } = await supabase.functions.invoke('fb-inject-to-queue', { body });
-    setInjecting(false);
-    if (error) { toast({ title: 'Injection failed', description: error.message, variant: 'destructive' }); return; }
-    const d = data as any;
-    if (d?.ok === false) {
-      const msg = d.error === 'emergency_stop_enabled' ? 'Emergency stop is active.'
-        : d.error === 'daily_limit_reached_all_groups' ? `Daily limit hit for: ${(d.blocked || []).join(', ')}`
-        : d.error || 'unknown';
-      toast({ title: 'Could not queue', description: msg, variant: 'destructive' });
-      return;
-    }
-    toast({ title: `Queued for ${d.queued} group${d.queued === 1 ? '' : 's'}`, description: `First send at ${new Date(d.first_scheduled_at).toLocaleString()}${d.blocked?.length ? ` · Blocked (daily limit): ${d.blocked.join(', ')}` : ''}` });
-    setSendModal(null);
-    load();
+  const saveDefaultGroups = async () => {
+    setSavingGroups(true);
+    const { data: u } = await supabase.auth.getUser();
+    const { error } = await supabase
+      .from('integration_settings')
+      .upsert({ key: 'fb_auto_target_groups', value: JSON.stringify(Array.from(defaultGroups)), updated_by: u.user?.id ?? null }, { onConflict: 'key' });
+    setSavingGroups(false);
+    if (error) toast({ title: 'Save failed', description: error.message, variant: 'destructive' });
+    else toast({ title: 'Default target groups saved', description: `${defaultGroups.size} group${defaultGroups.size === 1 ? '' : 's'} will receive future FB posts.` });
   };
 
   const fmt = (iso: string | null) => iso ? new Date(iso).toLocaleString() : '—';
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6">
-      {/* Emergency stop banner */}
-      {!instantEnabled && (
-        <div className="max-w-5xl flex items-start gap-3 p-4 rounded-lg border border-red-500/40 bg-red-500/10">
-          <AlertTriangle size={18} className="text-red-400 mt-0.5" />
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-red-300">Emergency stop is ACTIVE</p>
-            <p className="text-xs text-red-300/80">No FB → WA injections will be queued. Existing scheduled posts continue to drain normally.</p>
-          </div>
-          <button onClick={() => toggleInstantEnabled(true)} className="text-xs px-3 py-1.5 rounded bg-red-500/20 text-red-200 border border-red-500/40 hover:bg-red-500/30">Resume</button>
+      {/* Auto-send banner */}
+      <div className={`max-w-5xl flex items-start gap-3 p-4 rounded-lg border ${instantEnabled ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-red-500/40 bg-red-500/10'}`}>
+        {instantEnabled
+          ? <Power size={18} className="text-emerald-400 mt-0.5" />
+          : <AlertTriangle size={18} className="text-red-400 mt-0.5" />}
+        <div className="flex-1">
+          <p className={`text-sm font-semibold ${instantEnabled ? 'text-emerald-300' : 'text-red-300'}`}>
+            {instantEnabled ? 'Auto-send is ACTIVE' : 'Emergency stop is ACTIVE'}
+          </p>
+          <p className={`text-xs ${instantEnabled ? 'text-emerald-300/80' : 'text-red-300/80'}`}>
+            {instantEnabled
+              ? 'New Facebook posts are summarized and dispatched to the default WhatsApp groups automatically. Use emergency stop to halt.'
+              : 'No FB → WA injections will be queued. The morning/noon/evening scheduler is unaffected.'}
+          </p>
         </div>
-      )}
+        <button
+          onClick={() => toggleInstantEnabled(!instantEnabled)}
+          className={`text-xs px-3 py-1.5 rounded border ${instantEnabled ? 'bg-red-500/20 text-red-200 border-red-500/40 hover:bg-red-500/30' : 'bg-emerald-500/20 text-emerald-200 border-emerald-500/40 hover:bg-emerald-500/30'}`}
+        >
+          {instantEnabled ? 'Emergency Stop' : 'Resume'}
+        </button>
+      </div>
+
+      {/* Default target groups */}
+      <div className="vanto-card p-5 max-w-3xl">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="text-base font-bold text-foreground">Default target groups</h3>
+            <p className="text-xs text-muted-foreground">FB-triggered posts auto-send to these groups (same list as your scheduler).</p>
+          </div>
+          <button
+            onClick={saveDefaultGroups} disabled={savingGroups}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg vanto-gradient text-primary-foreground text-xs font-medium hover:opacity-90 disabled:opacity-50"
+          >
+            {savingGroups ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+            Save selection
+          </button>
+        </div>
+        <div className="flex gap-2 mb-2">
+          <button onClick={() => setDefaultGroups(new Set(groups.map(g => g.group_name)))} className="text-[11px] text-primary hover:underline">Select all</button>
+          <button onClick={() => setDefaultGroups(new Set())} className="text-[11px] text-muted-foreground hover:underline">Clear</button>
+          <span className="text-[11px] text-muted-foreground ml-auto">{defaultGroups.size} / {groups.length} selected</span>
+        </div>
+        <div className="max-h-56 overflow-y-auto border border-border rounded-lg p-2 space-y-1 bg-secondary/30">
+          {groups.length === 0 ? (
+            <p className="text-xs text-muted-foreground italic p-2">No WhatsApp groups captured yet.</p>
+          ) : groups.map(g => (
+            <label key={g.id} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-secondary cursor-pointer">
+              <input
+                type="checkbox" checked={defaultGroups.has(g.group_name)}
+                onChange={e => setDefaultGroups(s => {
+                  const n = new Set(s);
+                  e.target.checked ? n.add(g.group_name) : n.delete(g.group_name);
+                  return n;
+                })}
+                className="accent-primary"
+              />
+              <span className="text-xs text-foreground flex-1 truncate">{g.group_name}</span>
+              {g.group_jid && <span className="text-[10px] text-emerald-400">JID ✓</span>}
+            </label>
+          ))}
+        </div>
+      </div>
 
       {/* Manual ingest */}
       <div className="vanto-card p-5 max-w-3xl">
@@ -271,18 +243,9 @@ export function FbWaInboxPanel() {
             <Facebook size={20} className="text-primary" />
           </div>
           <div className="flex-1">
-            <h3 className="text-base font-bold text-foreground">FB → WA Inbox</h3>
-            <p className="text-xs text-muted-foreground">Phase 4: approve & inject into the WhatsApp group queue (8s spacing, 6/day per group).</p>
+            <h3 className="text-base font-bold text-foreground">Manual ingest</h3>
+            <p className="text-xs text-muted-foreground">Paste a Facebook URL or text — used for backfill. Live webhook handles new posts automatically.</p>
           </div>
-          {instantEnabled && (
-            <button
-              onClick={() => toggleInstantEnabled(false)}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg border border-red-500/40 text-xs text-red-300 hover:bg-red-500/10"
-              title="Emergency stop"
-            >
-              <Power size={14} /> Stop
-            </button>
-          )}
           <button
             onClick={runPoll} disabled={polling}
             className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border text-xs text-foreground hover:bg-secondary disabled:opacity-50"
@@ -291,7 +254,6 @@ export function FbWaInboxPanel() {
             Run poll now
           </button>
         </div>
-        <label className="text-xs font-medium text-muted-foreground mb-1 block">Facebook post URL or text</label>
         <textarea
           value={input} onChange={e => setInput(e.target.value)}
           placeholder="https://facebook.com/.../posts/123 — or paste raw post text"
@@ -303,15 +265,15 @@ export function FbWaInboxPanel() {
             className="flex items-center gap-2 px-4 py-2 rounded-lg vanto-gradient text-primary-foreground text-sm font-medium hover:opacity-90 disabled:opacity-50"
           >
             {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-            Fetch & Generate
+            Ingest & Auto-send
           </button>
         </div>
       </div>
 
-      {/* Ingested posts + variants */}
+      {/* Ingested posts + variants (read-only) */}
       <div className="max-w-5xl">
         <div className="flex items-center justify-between mb-3">
-          <h4 className="text-sm font-semibold text-foreground">Ingested posts & AI variants</h4>
+          <h4 className="text-sm font-semibold text-foreground">Ingested posts & AI variants (read-only)</h4>
           <span className="text-xs text-muted-foreground">{posts.length} most recent</span>
         </div>
         {loading ? (
@@ -320,26 +282,29 @@ export function FbWaInboxPanel() {
           </div>
         ) : posts.length === 0 ? (
           <div className="vanto-card p-6 text-center text-sm text-muted-foreground">
-            No posts yet. Paste a URL above or run the poll.
+            No posts yet. Webhook will populate this automatically. You can also paste a URL above.
           </div>
         ) : (
           <div className="space-y-3">
             {posts.map(p => {
               const pv = variantsByPost.get(p.id) ?? [];
               const isOpen = expanded.has(p.id);
-              const ref = p.source_ref ?? 'default';
-              const trust = !!trustMap[ref];
+              const imageUrl = (p.attachments && typeof p.attachments === 'object' && !Array.isArray(p.attachments)) ? p.attachments.image_url : null;
               return (
                 <div key={p.id} className="vanto-card overflow-hidden">
                   <div className="p-4 flex items-start gap-3">
                     <button onClick={() => toggleExpand(p.id)} className="mt-0.5 text-muted-foreground hover:text-foreground">
                       {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                     </button>
+                    {imageUrl && (
+                      <img src={imageUrl} alt="" className="w-14 h-14 rounded object-cover border border-border" />
+                    )}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-primary/15 text-primary border border-primary/30 uppercase">{p.source_type}</span>
                         <span className="text-[11px] text-muted-foreground">{fmt(p.posted_at ?? p.fetched_at)}</span>
                         <span className="text-[11px] text-muted-foreground">· {pv.length} variant{pv.length === 1 ? '' : 's'}</span>
+                        {imageUrl && <span className="text-[10px] text-emerald-400 inline-flex items-center gap-1"><ImageIcon size={10} /> image</span>}
                         {p.permalink_url && (
                           <a href={p.permalink_url} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1 text-[11px]">
                             <ExternalLink size={11} /> open
@@ -350,29 +315,18 @@ export function FbWaInboxPanel() {
                         {p.raw_message || <span className="text-muted-foreground italic">(no text)</span>}
                       </p>
                     </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <label className="flex items-center gap-2 text-[11px] text-muted-foreground cursor-pointer">
-                        {trust ? <ShieldCheck size={12} className="text-emerald-400" /> : <ShieldAlert size={12} />}
-                        Trust
-                        <input
-                          type="checkbox" checked={trust}
-                          onChange={e => toggleTrust(ref, e.target.checked)}
-                          className="accent-primary"
-                        />
-                      </label>
-                      <button
-                        onClick={() => regenerate(p.id)}
-                        className="text-[11px] px-2 py-1 rounded border border-border text-muted-foreground hover:text-foreground hover:bg-secondary"
-                      >
-                        Regenerate
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => regenerate(p.id)}
+                      className="text-[11px] px-2 py-1 rounded border border-border text-muted-foreground hover:text-foreground hover:bg-secondary"
+                    >
+                      Regenerate
+                    </button>
                   </div>
 
                   {isOpen && (
                     <div className="border-t border-border bg-secondary/20 p-4 space-y-3">
                       {pv.length === 0 ? (
-                        <div className="text-xs text-muted-foreground italic">No variants yet — generation may still be running. Try regenerate in 15s.</div>
+                        <div className="text-xs text-muted-foreground italic">No variants yet — generation may still be running.</div>
                       ) : pv.sort((a, b) => a.variant.localeCompare(b.variant)).map(v => (
                         <div key={v.id} className="vanto-card p-3 bg-background">
                           <div className="flex items-center gap-2 mb-2 flex-wrap">
@@ -380,66 +334,10 @@ export function FbWaInboxPanel() {
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${STATUS_COLORS[v.status]}`}>{v.status}</span>
                             <span className="text-[10px] text-muted-foreground ml-auto">{v.body.length} chars</span>
                           </div>
-                          {editingId === v.id ? (
-                            <textarea
-                              value={editBody} onChange={e => setEditBody(e.target.value)}
-                              className="w-full px-2 py-1.5 rounded bg-secondary border border-border text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary min-h-[100px] font-mono"
-                            />
-                          ) : (
-                            <pre className="text-xs text-foreground whitespace-pre-wrap font-sans">{v.body || <span className="text-muted-foreground italic">(empty)</span>}</pre>
-                          )}
+                          <pre className="text-xs text-foreground whitespace-pre-wrap font-sans">{v.body || <span className="text-muted-foreground italic">(empty)</span>}</pre>
                           {v.ai_safety_flags && (
-                            <div className="mt-2 text-[10px] text-red-400">
-                              ⚠ {JSON.stringify(v.ai_safety_flags)}
-                            </div>
+                            <div className="mt-2 text-[10px] text-red-400">⚠ {JSON.stringify(v.ai_safety_flags)}</div>
                           )}
-                          <div className="mt-3 flex items-center gap-2 justify-end">
-                            {editingId === v.id ? (
-                              <>
-                                <button onClick={() => setEditingId(null)} className="text-[11px] px-2 py-1 rounded border border-border text-muted-foreground hover:bg-secondary">Cancel</button>
-                                <button onClick={() => setStatus(v.id, 'approved', editBody)} className="flex items-center gap-1 text-[11px] px-2 py-1 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30">
-                                  <Save size={11} /> Save & Approve
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  onClick={() => { setEditingId(v.id); setEditBody(v.body); }}
-                                  className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-border text-muted-foreground hover:bg-secondary"
-                                >
-                                  <Edit2 size={11} /> Edit
-                                </button>
-                                <button
-                                  onClick={() => setStatus(v.id, 'rejected')}
-                                  disabled={v.status === 'rejected'}
-                                  className="flex items-center gap-1 text-[11px] px-2 py-1 rounded bg-red-500/15 text-red-400 border border-red-500/30 hover:bg-red-500/25 disabled:opacity-40"
-                                >
-                                  <X size={11} /> Reject
-                                </button>
-                                <button
-                                  onClick={() => setStatus(v.id, 'approved')}
-                                  disabled={v.status === 'approved' || v.status === 'sent'}
-                                  className="flex items-center gap-1 text-[11px] px-2 py-1 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30 disabled:opacity-40"
-                                >
-                                  <Check size={11} /> Approve
-                                </button>
-                                <button
-                                  onClick={() => openSendModal(v.id, 'later')}
-                                  disabled={v.status === 'rejected' || v.status === 'sent' || !instantEnabled}
-                                  className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-border text-muted-foreground hover:bg-secondary disabled:opacity-40"
-                                >
-                                  <Clock size={11} /> Queue at…
-                                </button>
-                                <button
-                                  onClick={() => openSendModal(v.id, 'now')}
-                                  disabled={v.status === 'rejected' || v.status === 'sent' || !instantEnabled}
-                                  className="flex items-center gap-1 text-[11px] px-2 py-1 rounded bg-primary/20 text-primary border border-primary/40 hover:bg-primary/30 disabled:opacity-40"
-                                >
-                                  <Send size={11} /> Send now
-                                </button>
-                              </>
-                            )}
-                          </div>
                         </div>
                       ))}
                     </div>
@@ -453,10 +351,10 @@ export function FbWaInboxPanel() {
 
       {/* Audit log */}
       <div className="max-w-5xl">
-        <h4 className="text-sm font-semibold text-foreground mb-2">Audit log</h4>
+        <h4 className="text-sm font-semibold text-foreground mb-2">Dispatch log (last 30)</h4>
         {logs.length === 0 ? (
           <div className="vanto-card p-4 text-xs text-muted-foreground italic">
-            No dispatch events yet. Phase 4 will populate this when approved variants are sent to WhatsApp groups.
+            No dispatch events yet.
           </div>
         ) : (
           <div className="vanto-card overflow-hidden">
@@ -485,72 +383,6 @@ export function FbWaInboxPanel() {
           </div>
         )}
       </div>
-
-      {/* Send modal */}
-      {sendModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => !injecting && setSendModal(null)}>
-          <div className="vanto-card w-full max-w-lg p-5" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-base font-bold text-foreground">
-                {sendModal.mode === 'now' ? 'Send to WhatsApp groups now' : 'Queue for later'}
-              </h3>
-              <button onClick={() => setSendModal(null)} className="text-muted-foreground hover:text-foreground"><X size={16} /></button>
-            </div>
-
-            {sendModal.mode === 'later' && (
-              <div className="mb-3">
-                <label className="text-xs font-medium text-muted-foreground mb-1 block">Schedule at</label>
-                <input
-                  type="datetime-local" value={scheduleAt}
-                  onChange={e => setScheduleAt(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-secondary border border-border text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                />
-              </div>
-            )}
-
-            <div className="mb-3">
-              <div className="flex items-center justify-between mb-1">
-                <label className="text-xs font-medium text-muted-foreground">Target groups ({pickedGroups.size}/{groups.length})</label>
-                <div className="flex gap-2">
-                  <button onClick={() => setPickedGroups(new Set(groups.map(g => g.group_name)))} className="text-[11px] text-primary hover:underline">All</button>
-                  <button onClick={() => setPickedGroups(new Set())} className="text-[11px] text-muted-foreground hover:underline">None</button>
-                </div>
-              </div>
-              <div className="max-h-56 overflow-y-auto border border-border rounded-lg p-2 space-y-1 bg-secondary/30">
-                {groups.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic p-2">No WhatsApp groups captured yet.</p>
-                ) : groups.map(g => (
-                  <label key={g.id} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-secondary cursor-pointer">
-                    <input
-                      type="checkbox" checked={pickedGroups.has(g.group_name)}
-                      onChange={e => setPickedGroups(s => {
-                        const n = new Set(s);
-                        e.target.checked ? n.add(g.group_name) : n.delete(g.group_name);
-                        return n;
-                      })}
-                      className="accent-primary"
-                    />
-                    <span className="text-xs text-foreground flex-1 truncate">{g.group_name}</span>
-                    {g.group_jid && <span className="text-[10px] text-emerald-400">JID ✓</span>}
-                  </label>
-                ))}
-              </div>
-              <p className="text-[10px] text-muted-foreground mt-2">Sends are spaced 8s apart. Max 6 FB posts/group/day.</p>
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setSendModal(null)} disabled={injecting} className="text-xs px-3 py-2 rounded border border-border text-muted-foreground hover:bg-secondary disabled:opacity-50">Cancel</button>
-              <button
-                onClick={confirmInject} disabled={injecting || pickedGroups.size === 0}
-                className="flex items-center gap-2 text-xs px-3 py-2 rounded vanto-gradient text-primary-foreground hover:opacity-90 disabled:opacity-50"
-              >
-                {injecting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-                {sendModal.mode === 'now' ? 'Send now' : 'Queue'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
