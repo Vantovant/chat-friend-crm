@@ -48,13 +48,22 @@ function extractImageUrl(graphPost: any): string | null {
 }
 
 Deno.serve(async (req) => {
-  const url = new URL(req.url);
+  // CORS preflight first
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
 
-  // ── Meta webhook GET handshake (MUST be first, MUST return plain text) ──
+  const url = new URL(req.url);
+  console.log(`[fb-ingest] Method: ${req.method}, URL: ${url.toString()}`);
+  console.log(`[fb-ingest] Headers:`, JSON.stringify(Object.fromEntries(req.headers.entries())));
+
+  // ── Meta webhook GET handshake (MUST return plain text) ──
   if (req.method === 'GET') {
     const mode = url.searchParams.get('hub.mode');
     const challenge = url.searchParams.get('hub.challenge') ?? '';
     const token = url.searchParams.get('hub.verify_token') ?? '';
+
+    console.log(`[fb-ingest] GET - mode: ${mode}, challenge: ${challenge}, token provided: ${token ? 'yes' : 'no'}`);
 
     // Best-effort debug log of handshake attempt
     try {
@@ -68,15 +77,22 @@ Deno.serve(async (req) => {
     } catch (e) { console.error('[fb-ingest] debug log err', e); }
 
     if (mode === 'subscribe') {
+      console.log(`[fb-ingest] Expected verify token: ${VERIFY_TOKEN ? 'set' : 'MISSING!'}`);
       if (VERIFY_TOKEN && token !== VERIFY_TOKEN) {
-        return new Response('Forbidden', { status: 403, headers: { 'Content-Type': 'text/plain' } });
+        console.warn(`[fb-ingest] ❌ Token mismatch. Provided length: ${token.length}, Expected length: ${VERIFY_TOKEN.length}`);
+        return new Response('Forbidden: Invalid verify token', { status: 403, headers: { 'Content-Type': 'text/plain' } });
       }
+      console.log(`[fb-ingest] ✅ Verification OK, returning challenge: ${challenge}`);
       return new Response(challenge, { status: 200, headers: { 'Content-Type': 'text/plain' } });
     }
-    return new Response('ok', { status: 200, headers: { 'Content-Type': 'text/plain' } });
-  }
 
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+    // Default GET response (browser visit)
+    return new Response(JSON.stringify({
+      message: 'fb-ingest function is running',
+      status: 'ready',
+      endpoint: 'Meta webhook endpoint for Facebook Page posts',
+    }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  }
 
   // Log non-GET requests for debugging (best-effort, never blocks)
   try {
