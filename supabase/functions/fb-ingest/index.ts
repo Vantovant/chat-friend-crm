@@ -15,6 +15,8 @@ const WEBHOOK_VERIFY_TOKEN = Deno.env.get('META_WEBHOOK_VERIFY_TOKEN') ?? '';
 const VERIFY_TOKENS = Array.from(new Set([WEBHOOK_VERIFY_TOKEN, APP_SECRET]
   .map((value) => value.trim())
   .filter(Boolean)));
+// Backward-compatible verifier for the token already configured in Meta UI.
+const LEGACY_VERIFY_TOKEN_SHA256 = 'e4bfab9b169c1b9cdb5266df9aaa1959989d98d6c4a94364e5d18964cb107a64';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
 
@@ -33,6 +35,11 @@ async function verifySignature(rawBody: string, header: string | null): Promise<
   let diff = 0;
   for (let i = 0; i < hex.length; i++) diff |= hex.charCodeAt(i) ^ expected.charCodeAt(i);
   return diff === 0;
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 function extractImageUrl(graphPost: any): string | null {
@@ -81,7 +88,8 @@ Deno.serve(async (req) => {
 
     if (mode === 'subscribe') {
       const normalizedToken = token.trim();
-      const matched = VERIFY_TOKENS.some((expectedToken) => normalizedToken === expectedToken);
+      const matched = VERIFY_TOKENS.some((expectedToken) => normalizedToken === expectedToken)
+        || await sha256Hex(normalizedToken) === LEGACY_VERIFY_TOKEN_SHA256;
       console.log(`[fb-ingest] Verify tokens configured: webhook=${WEBHOOK_VERIFY_TOKEN ? 'set' : 'missing'}, app_secret=${APP_SECRET ? 'set' : 'missing'}`);
       if (!matched) {
         const expectedLengths = VERIFY_TOKENS.map((expectedToken) => expectedToken.length).join(',') || 'none';
