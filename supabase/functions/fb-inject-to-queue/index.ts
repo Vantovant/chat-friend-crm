@@ -57,13 +57,24 @@ Deno.serve(async (req) => {
     };
     if (!fb_generated_post_id) return json({ ok: false, error: 'fb_generated_post_id required' }, 200);
 
-    // Load variant
+    // Load variant + linked source (for image_url)
     const { data: variant, error: vErr } = await admin
       .from('fb_generated_posts')
-      .select('id, body, status')
+      .select('id, body, status, fb_source_post_id')
       .eq('id', fb_generated_post_id).maybeSingle();
     if (vErr || !variant) return json({ ok: false, error: vErr?.message ?? 'variant not found' }, 200);
     if (variant.status === 'rejected') return json({ ok: false, error: 'variant_rejected' }, 200);
+
+    // Fetch image_url from source attachments (stored as { image_url, items } by fb-ingest/poll)
+    let imageUrl: string | null = null;
+    if (variant.fb_source_post_id) {
+      const { data: src } = await admin
+        .from('fb_source_posts').select('attachments').eq('id', variant.fb_source_post_id).maybeSingle();
+      const att = src?.attachments as any;
+      if (att && typeof att === 'object' && !Array.isArray(att) && att.image_url) {
+        imageUrl = att.image_url;
+      }
+    }
 
     // Promote to approved if currently draft
     if (variant.status === 'draft') {
@@ -72,12 +83,27 @@ Deno.serve(async (req) => {
       }).eq('id', variant.id);
     }
 
-    // Resolve target groups (default = all)
+    // Resolve target groups.
+    // Precedence: explicit payload.target_groups > fb_auto_target_groups setting > all captured groups.
     const { data: allGroups } = await admin
       .from('whatsapp_groups').select('group_name, group_jid').order('group_name');
     let groups = (allGroups ?? []) as Array<{ group_name: string; group_jid: string | null }>;
+
+    let pickList: string[] | null = null;
     if (target_groups && target_groups.length) {
-      const set = new Set(target_groups);
+      pickList = target_groups;
+    } else {
+      const { data: defaultRow } = await admin
+        .from('integration_settings').select('value').eq('key', 'fb_auto_target_groups').maybeSingle();
+      if (defaultRow?.value) {
+        try {
+          const parsed = JSON.parse(defaultRow.value);
+          if (Array.isArray(parsed) && parsed.length) pickList = parsed.map(String);
+        } catch { /* ignore — fall through to "all" */ }
+      }
+    }
+    if (pickList) {
+      const set = new Set(pickList);
       groups = groups.filter(g => set.has(g.group_name));
     }
     if (groups.length === 0) return json({ ok: false, error: 'no_target_groups' }, 200);
@@ -119,6 +145,7 @@ Deno.serve(async (req) => {
         target_group_name: g.group_name,
         target_group_jid: g.group_jid,
         message_content: variant.body,
+        image_url: imageUrl,
         scheduled_at: at,
         status: 'pending',
         source: 'facebook_instant',

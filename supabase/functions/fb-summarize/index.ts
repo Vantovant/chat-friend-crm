@@ -114,12 +114,12 @@ Rules:
       .gte('created_at', since)
       .limit(500);
 
-    // Auto-approve check
+    // Phase 5: auto-approve defaults ON (unless explicitly set to 'false')
     const autoKey = `fb_auto_approve_${src.source_ref ?? 'default'}`;
     const { data: trustRow } = await supabase
       .from('integration_settings')
       .select('value').eq('key', autoKey).maybeSingle();
-    const autoApprove = trustRow?.value === 'true' || trustRow?.value === '1';
+    const autoApprove = trustRow ? (trustRow.value === 'true' || trustRow.value === '1') : true;
 
     const variants: Variant[] = ['group', 'status', 'cta', 'emotional'];
     const inserts: any[] = [];
@@ -135,16 +135,11 @@ Rules:
         continue;
       }
 
-      // length caps
       const cap = v === 'status' ? 120 : 700;
       if (body.length > cap) body = body.slice(0, cap - 1).trimEnd() + '…';
-
-      // append permalink
       if (src.permalink_url) body = `${body}\n${src.permalink_url}`;
 
-      // safety
       const { flags, failed } = safetyCheck(body);
-      // dedupe
       let dupe = false;
       for (const r of recent ?? []) {
         if (r.variant !== v) continue;
@@ -177,19 +172,22 @@ Rules:
       return json({ ok: false, error: insErr.message }, 200);
     }
 
-    // Phase 4: if trust mode auto-approved, fire-and-forget inject to queue per approved variant
-    if (autoApprove) {
+    // Phase 5: always auto-inject the GROUP variant (full message) to WhatsApp groups.
+    // Other variants stay in the DB for reference but are not auto-dispatched.
+    const groupRow = (ins ?? []).find((r: any) => r.variant === 'group' && r.status === 'approved');
+    if (groupRow) {
       const injectUrl = `${SUPABASE_URL}/functions/v1/fb-inject-to-queue`;
-      for (const row of ins ?? []) {
-        if (row.status !== 'approved') continue;
-        const p = fetch(injectUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SERVICE_ROLE}` },
-          body: JSON.stringify({ fb_generated_post_id: row.id }),
-        }).catch(e => console.error('[fb-summarize] inject err', e));
-        // @ts-ignore
-        if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(p);
-      }
+      const p = fetch(injectUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SERVICE_ROLE}` },
+        body: JSON.stringify({ fb_generated_post_id: groupRow.id }),
+      }).catch(e => console.error('[fb-summarize] inject err', e));
+      // @ts-ignore
+      if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(p);
+    } else {
+      console.warn('[fb-summarize] group variant not approved — skipping auto-inject', {
+        statuses: (ins ?? []).map((r: any) => ({ v: r.variant, s: r.status })),
+      });
     }
 
     return json({ ok: true, inserted: ins }, 200);
