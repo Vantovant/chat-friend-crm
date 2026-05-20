@@ -229,7 +229,7 @@ Deno.serve(async (req) => {
             const greet = senderName ? ` ${senderName}` : "";
             const TEMPLATES: Record<string, string> = {
               where_to_buy: `Hi${greet} 👋 You can order APLGO directly here:\n🛒 ${SHOP}\n\nFor 1-on-1 help reply HELP and an associate will DM you.\n\n— Vanto · ${localSupport}`,
-              how_to_join: `Hi${greet} 👋 To register as an APLGO Associate (sponsor 787262):\n🔗 ${REG}\n\nReply START in DM and I'll guide you step by step.\n\n— Vanto · ${localSupport}`,
+              how_to_join: `Hi${greet} 👋 To register as an APLGO Associate (sponsor ${REG_SPONSOR}):\n🔗 ${REG}\n\nReply START in DM and I'll guide you step by step.\n\n— Vanto · ${localSupport}`,
               membership_R375: `Hi${greet} 👋 R375 APLGO membership = wholesale pricing on every product + back-office access.\nRegister: 🔗 ${REG}\n\n— Vanto · ${localSupport}`,
               product_price: `Hi${greet} 👋 APLGO prices depend on the product and member/retail level. Please check the official shop for the current price:\n🛒 ${SHOP}\n\nFor help choosing the right product, reply HELP or DM Vanto.\n\n— Vanto · ${localSupport}`,
               product_range: `Hi${greet} 👋 Full product range:\n🛒 ${SHOP}\n\n— Vanto · ${localSupport}`,
