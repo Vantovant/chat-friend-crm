@@ -64,6 +64,12 @@ export function FbWaInboxPanel() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState('');
   const [trustMap, setTrustMap] = useState<Record<string, boolean>>({});
+  const [groups, setGroups] = useState<Array<{ id: string; group_name: string; group_jid: string | null }>>([]);
+  const [instantEnabled, setInstantEnabled] = useState(true);
+  const [sendModal, setSendModal] = useState<null | { variantId: string; mode: 'now' | 'later' }>(null);
+  const [pickedGroups, setPickedGroups] = useState<Set<string>>(new Set());
+  const [scheduleAt, setScheduleAt] = useState<string>('');
+  const [injecting, setInjecting] = useState(false);
 
   const load = async () => {
     setLoading(true);
