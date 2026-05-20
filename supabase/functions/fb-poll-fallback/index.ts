@@ -18,8 +18,9 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: 'META_PAGE_ACCESS_TOKEN or META_PAGE_ID not set' }, 200);
     }
 
-    const since = Math.floor((Date.now() - 6 * 60 * 60 * 1000) / 1000); // last 6h
-    const url = `${GRAPH}/${PAGE_ID}/posts?fields=id,message,permalink_url,created_time,attachments{media,url,type,title}&since=${since}&access_token=${PAGE_TOKEN}`;
+    // Phase 5: widened to 6h (webhook is primary; this is a safety net @ ~15 min cron)
+    const since = Math.floor((Date.now() - 6 * 60 * 60 * 1000) / 1000);
+    const url = `${GRAPH}/${PAGE_ID}/posts?fields=id,message,permalink_url,created_time,full_picture,attachments{media,url,type,title,subattachments}&since=${since}&access_token=${PAGE_TOKEN}`;
 
     const res = await fetch(url);
     const data = await res.json();
@@ -32,10 +33,18 @@ Deno.serve(async (req) => {
     const posts: any[] = data.data ?? [];
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
     let upserted = 0;
+    const newIds: string[] = [];
 
     for (const p of posts) {
-      if (!p.id || !p.message) continue; // skip empty
-      const { error } = await supabase
+      if (!p.id || !p.message) continue;
+      let imageUrl: string | null = p.full_picture ?? null;
+      if (!imageUrl) {
+        for (const a of (p.attachments?.data ?? [])) {
+          const src = a?.media?.image?.src;
+          if (src) { imageUrl = src; break; }
+        }
+      }
+      const { data: row, error } = await supabase
         .from('fb_source_posts')
         .upsert({
           fb_post_id: p.id,
@@ -43,11 +52,31 @@ Deno.serve(async (req) => {
           source_ref: PAGE_ID,
           raw_message: p.message,
           permalink_url: p.permalink_url ?? null,
-          attachments: p.attachments?.data ?? [],
+          attachments: { image_url: imageUrl, items: p.attachments?.data ?? [] },
           posted_at: p.created_time ?? null,
-        }, { onConflict: 'fb_post_id' });
-      if (error) console.error('[fb-poll-fallback] upsert err', error.message);
-      else upserted++;
+        }, { onConflict: 'fb_post_id' })
+        .select('id')
+        .maybeSingle();
+      if (error) { console.error('[fb-poll-fallback] upsert err', error.message); continue; }
+      upserted++;
+      if (row?.id) newIds.push(row.id);
+    }
+
+    // Ensure auto-approve default ON for this source
+    const autoKey = `fb_auto_approve_${PAGE_ID}`;
+    const { data: existing } = await supabase
+      .from('integration_settings').select('id').eq('key', autoKey).maybeSingle();
+    if (!existing) await supabase.from('integration_settings').insert({ key: autoKey, value: 'true' });
+
+    // Fire-and-forget summarize for each (idempotent enough; dedupe inside fb-summarize)
+    for (const id of newIds) {
+      const p = fetch(`${SUPABASE_URL}/functions/v1/fb-summarize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SERVICE_ROLE}` },
+        body: JSON.stringify({ fb_source_post_id: id }),
+      }).catch(e => console.error('[fb-poll-fallback] summarize trigger err', e));
+      // @ts-ignore
+      if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(p);
     }
 
     console.log('[fb-poll-fallback] polled', { fetched: posts.length, upserted });
