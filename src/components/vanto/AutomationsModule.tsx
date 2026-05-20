@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
-import { Plus, Zap, Clock, BarChart2, ChevronRight, Loader2, Pause, Play, X, Trash2, LifeBuoy, Facebook, ExternalLink, RefreshCw } from 'lucide-react';
+import { Plus, Zap, Clock, BarChart2, ChevronRight, Loader2, Pause, Play, X, Trash2, LifeBuoy, Facebook } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { RecoveryPanel } from './RecoveryPanel';
 import { FbWaInboxPanel } from './FbWaInboxPanel';
