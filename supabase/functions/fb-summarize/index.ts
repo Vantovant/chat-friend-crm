@@ -59,6 +59,20 @@ Deno.serve(async (req) => {
     const message = (src.raw_message ?? '').trim();
     if (!message) return json({ ok: false, error: 'empty source message' }, 200);
 
+    // IDEMPOTENCY GUARD: a source post may only ever produce ONE batch of variants.
+    // fb-summarize is fired by BOTH fb-ingest (webhook) and fb-poll-fallback (cron),
+    // so we must early-return if variants already exist. Backed by partial unique index
+    // fb_generated_posts_source_variant_unique.
+    const { data: existing } = await supabase
+      .from('fb_generated_posts')
+      .select('id')
+      .eq('fb_source_post_id', fb_source_post_id)
+      .limit(1);
+    if (existing && existing.length > 0) {
+      console.log('[fb-summarize] already summarized, skipping', { fb_source_post_id });
+      return json({ ok: true, skipped: 'already_summarized' }, 200);
+    }
+
     // Call Lovable AI Gateway
     const aiRes = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
