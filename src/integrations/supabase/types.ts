@@ -2003,6 +2003,45 @@ export type Database = {
         }
         Relationships: []
       }
+      whatsapp_group_overrides: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          enabled: boolean
+          group_id: string
+          group_label: string
+          id: string
+          notes: string | null
+          register_link: string
+          sponsor_code: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          enabled?: boolean
+          group_id: string
+          group_label: string
+          id?: string
+          notes?: string | null
+          register_link: string
+          sponsor_code: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          enabled?: boolean
+          group_id?: string
+          group_label?: string
+          id?: string
+          notes?: string | null
+          register_link?: string
+          sponsor_code?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       whatsapp_groups: {
         Row: {
           created_at: string
