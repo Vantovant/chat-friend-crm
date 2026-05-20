@@ -418,10 +418,24 @@ export function FbWaInboxPanel() {
                                 </button>
                                 <button
                                   onClick={() => setStatus(v.id, 'approved')}
-                                  disabled={v.status === 'approved'}
+                                  disabled={v.status === 'approved' || v.status === 'sent'}
                                   className="flex items-center gap-1 text-[11px] px-2 py-1 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30 disabled:opacity-40"
                                 >
                                   <Check size={11} /> Approve
+                                </button>
+                                <button
+                                  onClick={() => openSendModal(v.id, 'later')}
+                                  disabled={v.status === 'rejected' || v.status === 'sent' || !instantEnabled}
+                                  className="flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-border text-muted-foreground hover:bg-secondary disabled:opacity-40"
+                                >
+                                  <Clock size={11} /> Queue at…
+                                </button>
+                                <button
+                                  onClick={() => openSendModal(v.id, 'now')}
+                                  disabled={v.status === 'rejected' || v.status === 'sent' || !instantEnabled}
+                                  className="flex items-center gap-1 text-[11px] px-2 py-1 rounded bg-primary/20 text-primary border border-primary/40 hover:bg-primary/30 disabled:opacity-40"
+                                >
+                                  <Send size={11} /> Send now
                                 </button>
                               </>
                             )}
