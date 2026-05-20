@@ -210,7 +210,21 @@ Deno.serve(async (req) => {
             else intent = "where_to_buy";
 
             const SHOP = "https://onlinecourseformlm.com/shop";
-            const REG = "https://backoffice.aplgo.com/register/?sp=787262";
+            // Per-group registration link override (e.g. APLGO 4 SHO uses sp=804776)
+            let REG = "https://backoffice.aplgo.com/register/?sp=787262";
+            let REG_SPONSOR = "787262";
+            try {
+              const { data: ovr } = await supabase
+                .from("whatsapp_group_overrides")
+                .select("register_link, sponsor_code")
+                .eq("group_id", rawConversation)
+                .eq("enabled", true)
+                .maybeSingle();
+              if (ovr?.register_link) {
+                REG = ovr.register_link;
+                REG_SPONSOR = ovr.sponsor_code || REG_SPONSOR;
+              }
+            } catch (_) { /* fall back to default */ }
             const senderName = (payload.user?.name || message.notifyName || "").split(/\s+/)[0] || "";
             const greet = senderName ? ` ${senderName}` : "";
             const TEMPLATES: Record<string, string> = {
