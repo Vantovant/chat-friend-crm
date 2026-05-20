@@ -73,7 +73,7 @@ export function FbWaInboxPanel() {
 
   const load = async () => {
     setLoading(true);
-    const [p, v, l] = await Promise.all([
+    const [p, v, l, g, stop] = await Promise.all([
       supabase.from('fb_source_posts')
         .select('id,fb_post_id,source_type,source_ref,raw_message,permalink_url,posted_at,fetched_at')
         .order('fetched_at', { ascending: false }).limit(50),
@@ -83,11 +83,15 @@ export function FbWaInboxPanel() {
       supabase.from('fb_dispatch_log')
         .select('id,fb_generated_post_id,target_group_id,status,error,created_at')
         .order('created_at', { ascending: false }).limit(20),
+      supabase.from('whatsapp_groups').select('id,group_name,group_jid').order('group_name'),
+      supabase.from('integration_settings').select('value').eq('key', 'fb_instant_enabled').maybeSingle(),
     ]);
     if (p.error) toast({ title: 'Failed to load posts', description: p.error.message, variant: 'destructive' });
     else setPosts((p.data as FbPost[]) ?? []);
     if (!v.error) setVariants((v.data as Variant[]) ?? []);
     if (!l.error) setLogs((l.data as DispatchLog[]) ?? []);
+    if (!g.error) setGroups((g.data as any) ?? []);
+    setInstantEnabled(stop.data ? (stop.data.value === 'true' || stop.data.value === '1') : true);
 
     // Load trust mode flags for all distinct source_refs
     const refs = Array.from(new Set((p.data ?? []).map((x: any) => x.source_ref).filter(Boolean)));
