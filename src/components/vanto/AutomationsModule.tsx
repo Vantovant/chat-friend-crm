@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils';
 import { Plus, Zap, Clock, BarChart2, ChevronRight, Loader2, Pause, Play, X, Trash2, LifeBuoy, Facebook } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import { RecoveryPanel } from './RecoveryPanel';
+import { FbWaInboxPanel } from './FbWaInboxPanel';
 
 type Automation = {
   id: string;
@@ -142,23 +143,7 @@ export function AutomationsModule() {
       </div>
 
       {tab === 'fb_wa' ? (
-        <div className="flex-1 overflow-y-auto p-6">
-          <div className="vanto-card p-6 max-w-2xl">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-xl bg-primary/15 flex items-center justify-center">
-                <Facebook size={20} className="text-primary" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-foreground">FB → WA Inbox</h3>
-                <p className="text-xs text-muted-foreground">Facebook post → AI summary → WhatsApp group queue</p>
-              </div>
-            </div>
-            <div className="p-3 rounded-lg bg-secondary border border-border text-sm text-foreground">
-              <span className="font-semibold text-primary">Phase 1 complete:</span> tables and RLS ready.
-              <p className="text-xs text-muted-foreground mt-1">Next: ingest UI, AI variant generation, and approval queue (Phase 2).</p>
-            </div>
-          </div>
-        </div>
+        <FbWaInboxPanel />
       ) : tab === 'recovery' ? <RecoveryPanel /> : (
         <>
           <div className="px-4 md:px-6 py-4 border-b border-border grid grid-cols-3 gap-2 md:gap-4 shrink-0">

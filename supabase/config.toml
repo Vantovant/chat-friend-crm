@@ -8,3 +8,9 @@ verify_jwt = false
 
 [functions.maytapi-dispatcher]
 verify_jwt = false
+
+[functions.fb-ingest]
+verify_jwt = false
+
+[functions.fb-poll-fallback]
+verify_jwt = false
