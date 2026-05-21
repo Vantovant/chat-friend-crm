@@ -628,6 +628,39 @@ export type Database = {
         }
         Relationships: []
       }
+      fb_token_alerts: {
+        Row: {
+          created_at: string
+          days_elapsed: number | null
+          graph_ok: boolean | null
+          id: string
+          message: string
+          resolved: boolean
+          resolved_at: string | null
+          severity: string
+        }
+        Insert: {
+          created_at?: string
+          days_elapsed?: number | null
+          graph_ok?: boolean | null
+          id?: string
+          message: string
+          resolved?: boolean
+          resolved_at?: string | null
+          severity: string
+        }
+        Update: {
+          created_at?: string
+          days_elapsed?: number | null
+          graph_ok?: boolean | null
+          id?: string
+          message?: string
+          resolved?: boolean
+          resolved_at?: string | null
+          severity?: string
+        }
+        Relationships: []
+      }
       followup_logs: {
         Row: {
           contact_id: string
