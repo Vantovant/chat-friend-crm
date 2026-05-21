@@ -142,7 +142,7 @@ Deno.serve(async (req) => {
     try { body = rawBody ? JSON.parse(rawBody) : {}; } catch { body = {}; }
     console.log('[fb-ingest] body', rawBody.slice(0, 400));
 
-    const candidates: { postId?: string; url?: string; text?: string }[] = [];
+    const candidates: { postId?: string; url?: string; text?: string; createdTime?: string }[] = [];
 
     if (body.post_url || body.post_id || body.text) {
       candidates.push({ postId: body.post_id, url: body.post_url, text: body.text });
@@ -150,10 +150,24 @@ Deno.serve(async (req) => {
     if (Array.isArray(body.entry)) {
       for (const entry of body.entry) {
         for (const change of entry.changes ?? []) {
-          const postId = change.value?.post_id || change.value?.id;
-          const link = change.value?.link;
-          if (postId) candidates.push({ postId });
-          else if (link) candidates.push({ url: link });
+          const v = change.value ?? {};
+          // FILTER: skip reactions, likes, comments, shares without message body.
+          // Only ingest actual page posts (item: 'status' | 'post' | 'photo' | 'video' | 'share' WITH message).
+          const item = (v.item ?? '').toLowerCase();
+          const isNoise = ['reaction', 'like', 'comment'].includes(item);
+          if (isNoise) {
+            console.log(`[fb-ingest] skip noise event item=${item} post_id=${v.post_id}`);
+            continue;
+          }
+          const postId = v.post_id || v.id;
+          const link = v.link;
+          const message = typeof v.message === 'string' ? v.message : '';
+          const createdTime = v.created_time
+            ? (typeof v.created_time === 'number' ? new Date(v.created_time * 1000).toISOString() : String(v.created_time))
+            : undefined;
+          // Require either a post id OR a message body; otherwise it's not a real post.
+          if (!postId && !link && !message) continue;
+          candidates.push({ postId, url: link, text: message, createdTime });
         }
       }
     }
@@ -174,25 +188,39 @@ Deno.serve(async (req) => {
         if (postId && PAGE_ID && !postId.includes('_')) postId = `${PAGE_ID}_${postId}`;
       }
 
+      // PRIMARY source: use webhook payload values (always present, never expire).
       let message = c.text ?? '';
       let permalink = c.url ?? null;
-      let posted_at: string | null = null;
+      let posted_at: string | null = c.createdTime ?? null;
       let imageUrl: string | null = null;
       let rawAttachments: any[] = [];
 
+      // ENRICHMENT only: Graph API for full_picture + canonical permalink.
+      // If this fails (token expired), we still ingest with webhook payload.
       if (postId && PAGE_TOKEN) {
-        const r = await fetch(`${GRAPH}/${postId}?fields=id,message,permalink_url,created_time,full_picture,attachments{media,url,type,title,subattachments}&access_token=${PAGE_TOKEN}`);
-        const d = await r.json();
-        if (r.ok) {
-          message = d.message ?? message;
-          permalink = d.permalink_url ?? permalink;
-          posted_at = d.created_time ?? null;
-          rawAttachments = d.attachments?.data ?? [];
-          imageUrl = extractImageUrl(d);
-        } else {
-          console.error('[fb-ingest] graph fetch err', d);
+        try {
+          const r = await fetch(`${GRAPH}/${postId}?fields=id,message,permalink_url,created_time,full_picture,attachments{media,url,type,title,subattachments}&access_token=${PAGE_TOKEN}`);
+          const d = await r.json();
+          if (r.ok) {
+            message = d.message ?? message;
+            permalink = d.permalink_url ?? permalink;
+            posted_at = d.created_time ?? posted_at;
+            rawAttachments = d.attachments?.data ?? [];
+            imageUrl = extractImageUrl(d);
+          } else {
+            console.error(`[fb-ingest] ⚠️ Graph enrichment failed for ${postId} — likely PAGE_TOKEN expired. Proceeding with webhook payload. err=`, JSON.stringify(d));
+          }
+        } catch (e) {
+          console.error('[fb-ingest] graph fetch exception (continuing with webhook payload):', e);
         }
       }
+
+      // Last guard: if after all that there's still no body, skip — don't insert a phantom row.
+      if (!message && !permalink) {
+        console.warn(`[fb-ingest] skip ingest — no message and no permalink for postId=${postId}`);
+        continue;
+      }
+
 
       const finalKey = postId ?? `manual_${crypto.randomUUID()}`;
       const sourceRef = PAGE_ID || null;
