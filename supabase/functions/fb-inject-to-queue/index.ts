@@ -84,14 +84,15 @@ Deno.serve(async (req) => {
     }
 
     // Resolve target groups.
-    // Precedence: explicit payload.target_groups > fb_auto_target_groups setting > all captured groups.
+    // STRICT precedence: explicit payload.target_groups > fb_auto_target_groups setting.
+    // NEVER fall back to "all groups" — sending FB content to unapproved groups is a bug (see VTT_VUT Alumni incident).
     const { data: allGroups } = await admin
       .from('whatsapp_groups').select('group_name, group_jid').order('group_name');
     let groups = (allGroups ?? []) as Array<{ group_name: string; group_jid: string | null }>;
 
     let pickList: string[] | null = null;
     if (target_groups && target_groups.length) {
-      pickList = target_groups;
+      pickList = target_groups.map(String);
     } else {
       const { data: defaultRow } = await admin
         .from('integration_settings').select('value').eq('key', 'fb_auto_target_groups').maybeSingle();
@@ -99,13 +100,17 @@ Deno.serve(async (req) => {
         try {
           const parsed = JSON.parse(defaultRow.value);
           if (Array.isArray(parsed) && parsed.length) pickList = parsed.map(String);
-        } catch { /* ignore — fall through to "all" */ }
+        } catch (e) {
+          console.error('[fb-inject-to-queue] invalid fb_auto_target_groups JSON', e);
+        }
       }
     }
-    if (pickList) {
-      const set = new Set(pickList);
-      groups = groups.filter(g => set.has(g.group_name));
+    if (!pickList || pickList.length === 0) {
+      console.warn('[fb-inject-to-queue] no fb_auto_target_groups configured — refusing to broadcast');
+      return json({ ok: false, error: 'fb_auto_target_groups_not_configured' }, 200);
     }
+    const set = new Set(pickList);
+    groups = groups.filter(g => set.has(g.group_name));
     if (groups.length === 0) return json({ ok: false, error: 'no_target_groups' }, 200);
 
     // Daily-limit guard per group (24h rolling, FB instant only)
