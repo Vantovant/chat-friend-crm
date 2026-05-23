@@ -189,8 +189,11 @@ Deno.serve(async (req) => {
       }
 
       // PRIMARY source: use webhook payload values (always present, never expire).
+      // NOTE: we deliberately IGNORE c.url (webhook `link` field) — for shop/link posts
+      // it points to the shared URL (e.g. onlinecourseformlm.com), not the Facebook post.
+      // We always want a facebook.com permalink so groups link back to the FB post itself.
       let message = c.text ?? '';
-      let permalink = c.url ?? null;
+      let permalink: string | null = null;
       let posted_at: string | null = c.createdTime ?? null;
       let imageUrl: string | null = null;
       let rawAttachments: any[] = [];
@@ -213,6 +216,13 @@ Deno.serve(async (req) => {
         } catch (e) {
           console.error('[fb-ingest] graph fetch exception (continuing with webhook payload):', e);
         }
+      }
+
+      // FALLBACK: if Graph didn't give us a permalink, construct a facebook.com URL from PAGE_ID + post_id.
+      // Composite post ids look like "{PAGE_ID}_{POST_NUMBER}"; we only want the POST_NUMBER suffix.
+      if (!permalink && postId && PAGE_ID) {
+        const postNumber = postId.includes('_') ? postId.split('_').pop() : postId;
+        if (postNumber) permalink = `https://www.facebook.com/${PAGE_ID}/posts/${postNumber}`;
       }
 
       // Last guard: if after all that there's still no body, skip — don't insert a phantom row.
