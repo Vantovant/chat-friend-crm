@@ -124,10 +124,12 @@ Deno.serve(async (req) => {
       const groupJid = group.jid || DEFAULT_TARGET.jid;
 
       for (let i = 0; i < days; i++) {
-        const date = new Date(start_date + "T00:00:00+02:00"); // SAST
-        date.setDate(date.getDate() + i);
-        const dateStr = date.toISOString().split("T")[0];
-        const dayOfWeek = date.getDay(); // 0=Sun
+        // Build SAST calendar date (timezone-safe — never use Date.getDay() on a UTC server)
+        const [sy, sm, sd] = start_date.split("-").map(Number);
+        const baseUTC = new Date(Date.UTC(sy, sm - 1, sd));
+        baseUTC.setUTCDate(baseUTC.getUTCDate() + i);
+        const dateStr = baseUTC.toISOString().split("T")[0];
+        const dayOfWeek = baseUTC.getUTCDay(); // 0=Sun, matches the SAST calendar date
 
         // Morning post at 07:00 SAST (05:00 UTC)
         const morningIdx = (morningStart + i) % 30;
