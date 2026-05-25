@@ -227,7 +227,35 @@ Deno.serve(async (req) => {
 
     const results: { id: string; status: string; error?: string; preview?: string }[] = [];
 
+    // Load FB allowlist ONCE per tick (defense-in-depth, layer 2 of 3).
+    // Even if a bad row sneaks into the queue, we refuse to send facebook_instant
+    // content to any group not on fb_auto_target_groups.
+    let fbAllowlist: Set<string> | null = null;
+    {
+      const { data: row } = await supabase
+        .from("integration_settings").select("value").eq("key", "fb_auto_target_groups").maybeSingle();
+      if (row?.value) {
+        try {
+          const parsed = JSON.parse(row.value);
+          if (Array.isArray(parsed)) fbAllowlist = new Set(parsed.map(String));
+        } catch { /* ignore */ }
+      }
+    }
+
     for (const post of duePosts) {
+      // LAYER 2 GUARD: block FB-instant sends to unapproved groups at dispatch time.
+      if (post.source === "facebook_instant") {
+        if (!fbAllowlist || !fbAllowlist.has(post.target_group_name)) {
+          await supabase.from("scheduled_group_posts").update({
+            status: "failed",
+            failure_reason: `BLOCKED: "${post.target_group_name}" is not on fb_auto_target_groups allowlist. Refusing to broadcast FB content to unapproved group.`,
+            last_attempt_at: new Date().toISOString(),
+          }).eq("id", post.id);
+          results.push({ id: post.id, status: "blocked_not_in_fb_allowlist" });
+          continue;
+        }
+      }
+
       await supabase.from("scheduled_group_posts").update({
         status: "executing",
         last_attempt_at: new Date().toISOString(),
