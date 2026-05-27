@@ -23,6 +23,21 @@ const corsHeaders = {
 
 const DEFAULT_PROOF_URL = "https://vanto-zazi-bloom.lovable.app";
 const SHOP_URL = "https://onlinecourseformlm.com/shop";
+const ONE_DAY_SALE_CUTOFF_SAST = Date.UTC(2026, 4, 26, 22, 0, 0); // 2026-05-27 00:00 Africa/Johannesburg
+const ONE_DAY_SALE_MARKERS = [
+  "APLGO WITH LOVE SALE",
+  "4dFiGQp",
+  "4dFiGpQ",
+  "30-40% OFF",
+  "90 MINUTES LEFT",
+  "winter shield",
+];
+
+function isExpiredOneDaySaleMessage(message: string): boolean {
+  const text = message.toLowerCase();
+  const isSaleMessage = ONE_DAY_SALE_MARKERS.some((marker) => text.includes(marker.toLowerCase()));
+  return isSaleMessage && Date.now() >= ONE_DAY_SALE_CUTOFF_SAST;
+}
 
 function buildTrustHeader(proofUrl: string, tocUrl: string, localNumber: string): string {
   return (
@@ -44,6 +59,15 @@ Deno.serve(async (req) => {
     if (!to_number || !message) {
       return new Response(JSON.stringify({ error: "to_number and message required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (isExpiredOneDaySaleMessage(String(message))) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: "Expired one-day sale content blocked. The APLGO WITH LOVE SALE may not be sent after its 2026-05-26 SAST window.",
+      }), {
+        status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
