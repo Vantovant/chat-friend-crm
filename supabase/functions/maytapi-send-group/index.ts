@@ -29,6 +29,21 @@ function isTooLateToDispatch(scheduledAt: string): boolean {
   return Number.isFinite(scheduledMs) && Date.now() - scheduledMs > MAX_GROUP_POST_DELAY_MS;
 }
 
+async function assertMaytapiReady(productId: string, phoneId: string, token: string): Promise<{ ok: boolean; reason?: string }> {
+  try {
+    const res = await fetch(`${MAYTAPI_BASE}/${productId}/${phoneId}/status`, {
+      headers: { "x-maytapi-key": token },
+    });
+    const data = await res.json().catch(() => ({}));
+    const statusData = data?.status || data?.data || data;
+    const stateStr = statusData?.state?.state || statusData?.state || "";
+    const ok = res.ok && (statusData?.loggedIn === true || stateStr === "CONNECTED");
+    return ok ? { ok: true } : { ok: false, reason: data?.message || stateStr || `status_http_${res.status}` };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : "status_check_failed" };
+  }
+}
+
 // ---------- Pre-flight Open Graph preview check ----------
 async function checkLinkPreview(input: string): Promise<{
   url: string | null; ok: boolean; imageUrl: string | null; title: string | null; reason: string | null;
@@ -157,6 +172,18 @@ Deno.serve(async (req) => {
     if (!PRODUCT_ID || !PHONE_ID || !API_TOKEN) {
       return new Response(JSON.stringify({ error: "Maytapi credentials not configured" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const readiness = await assertMaytapiReady(PRODUCT_ID, PHONE_ID, API_TOKEN);
+    if (!readiness.ok) {
+      return new Response(JSON.stringify({
+        processed: 0,
+        status: "blocked_phone_not_ready",
+        message: "Maytapi phone is not ready; refusing to hand off group posts that may backlog and send later.",
+        reason: readiness.reason,
+      }), {
+        status: 423, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
