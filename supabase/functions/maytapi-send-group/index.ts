@@ -7,6 +7,27 @@ const corsHeaders = {
 
 const MAYTAPI_BASE = "https://api.maytapi.com/api";
 const URL_REGEX = /https?:\/\/[^\s]+/i;
+const MAX_GROUP_POST_DELAY_MS = 2 * 60 * 60 * 1000;
+const ONE_DAY_SALE_CUTOFF_SAST = Date.UTC(2026, 4, 26, 22, 0, 0); // 2026-05-27 00:00 Africa/Johannesburg
+const ONE_DAY_SALE_MARKERS = [
+  "APLGO WITH LOVE SALE",
+  "4dFiGQp",
+  "4dFiGpQ",
+  "30-40% OFF",
+  "90 MINUTES LEFT",
+  "winter shield",
+];
+
+function isExpiredOneDaySaleMessage(message: string): boolean {
+  const text = message.toLowerCase();
+  const isSaleMessage = ONE_DAY_SALE_MARKERS.some((marker) => text.includes(marker.toLowerCase()));
+  return isSaleMessage && Date.now() >= ONE_DAY_SALE_CUTOFF_SAST;
+}
+
+function isTooLateToDispatch(scheduledAt: string): boolean {
+  const scheduledMs = new Date(scheduledAt).getTime();
+  return Number.isFinite(scheduledMs) && Date.now() - scheduledMs > MAX_GROUP_POST_DELAY_MS;
+}
 
 // ---------- Pre-flight Open Graph preview check ----------
 async function checkLinkPreview(input: string): Promise<{
@@ -243,6 +264,26 @@ Deno.serve(async (req) => {
     }
 
     for (const post of duePosts) {
+      if (isExpiredOneDaySaleMessage(String(post.message_content || ""))) {
+        await supabase.from("scheduled_group_posts").update({
+          status: "failed",
+          failure_reason: "BLOCKED: expired one-day APLGO WITH LOVE SALE content cannot be dispatched after its 2026-05-26 SAST window.",
+          last_attempt_at: new Date().toISOString(),
+        }).eq("id", post.id);
+        results.push({ id: post.id, status: "blocked_expired_one_day_sale" });
+        continue;
+      }
+
+      if (isTooLateToDispatch(post.scheduled_at)) {
+        await supabase.from("scheduled_group_posts").update({
+          status: "failed",
+          failure_reason: "BLOCKED: scheduled group post is more than 2 hours late. Refusing to release stale backlog after a WhatsApp restriction or outage.",
+          last_attempt_at: new Date().toISOString(),
+        }).eq("id", post.id);
+        results.push({ id: post.id, status: "blocked_stale_backlog" });
+        continue;
+      }
+
       // LAYER 2 GUARD: block FB-instant sends to unapproved groups at dispatch time.
       if (post.source === "facebook_instant") {
         if (!fbAllowlist || !fbAllowlist.has(post.target_group_name)) {
