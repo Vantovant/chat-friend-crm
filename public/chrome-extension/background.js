@@ -728,8 +728,39 @@ async function pollDuePosts() {
   }
 }
 
+const MAX_GROUP_POST_DELAY_MS = 2 * 60 * 60 * 1000;
+const ONE_DAY_SALE_CUTOFF_MS = Date.UTC(2026, 4, 26, 22, 0, 0); // 2026-05-27 00:00 SAST
+const ONE_DAY_SALE_MARKERS = [
+  'APLGO WITH LOVE SALE',
+  '4dFiGQp',
+  '4dFiGpQ',
+  '30-40% OFF',
+  '90 MINUTES LEFT',
+  'winter shield'
+];
+
+function isExpiredOneDaySalePost(post) {
+  const text = String(post?.message_content || '').toLowerCase();
+  return ONE_DAY_SALE_MARKERS.some(marker => text.includes(marker.toLowerCase())) && Date.now() >= ONE_DAY_SALE_CUTOFF_MS;
+}
+
+function isStaleGroupPost(post) {
+  const scheduledMs = new Date(post?.scheduled_at || 0).getTime();
+  return Number.isFinite(scheduledMs) && Date.now() - scheduledMs > MAX_GROUP_POST_DELAY_MS;
+}
+
 async function executeGroupPost(post, token) {
   log('Executing post:', post.id, 'to group:', post.target_group_name);
+
+  if (isExpiredOneDaySalePost(post)) {
+    await updatePostStatus(post.id, 'failed', '[blocked_expired_sale] One-day APLGO WITH LOVE SALE content cannot send after its sale-day window.', token);
+    return;
+  }
+
+  if (isStaleGroupPost(post)) {
+    await updatePostStatus(post.id, 'failed', '[blocked_stale_backlog] Scheduled post is more than 2 hours late; refusing to release stale backlog.', token);
+    return;
+  }
 
   // Find WhatsApp tabs with retry logic
   let tabs = [];

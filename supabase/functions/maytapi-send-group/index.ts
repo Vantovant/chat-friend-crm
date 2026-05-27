@@ -7,6 +7,42 @@ const corsHeaders = {
 
 const MAYTAPI_BASE = "https://api.maytapi.com/api";
 const URL_REGEX = /https?:\/\/[^\s]+/i;
+const MAX_GROUP_POST_DELAY_MS = 2 * 60 * 60 * 1000;
+const ONE_DAY_SALE_CUTOFF_SAST = Date.UTC(2026, 4, 26, 22, 0, 0); // 2026-05-27 00:00 Africa/Johannesburg
+const ONE_DAY_SALE_MARKERS = [
+  "APLGO WITH LOVE SALE",
+  "4dFiGQp",
+  "4dFiGpQ",
+  "30-40% OFF",
+  "90 MINUTES LEFT",
+  "winter shield",
+];
+
+function isExpiredOneDaySaleMessage(message: string): boolean {
+  const text = message.toLowerCase();
+  const isSaleMessage = ONE_DAY_SALE_MARKERS.some((marker) => text.includes(marker.toLowerCase()));
+  return isSaleMessage && Date.now() >= ONE_DAY_SALE_CUTOFF_SAST;
+}
+
+function isTooLateToDispatch(scheduledAt: string): boolean {
+  const scheduledMs = new Date(scheduledAt).getTime();
+  return Number.isFinite(scheduledMs) && Date.now() - scheduledMs > MAX_GROUP_POST_DELAY_MS;
+}
+
+async function assertMaytapiReady(productId: string, phoneId: string, token: string): Promise<{ ok: boolean; reason?: string }> {
+  try {
+    const res = await fetch(`${MAYTAPI_BASE}/${productId}/${phoneId}/status`, {
+      headers: { "x-maytapi-key": token },
+    });
+    const data = await res.json().catch(() => ({}));
+    const statusData = data?.status || data?.data || data;
+    const stateStr = statusData?.state?.state || statusData?.state || "";
+    const ok = res.ok && (statusData?.loggedIn === true || stateStr === "CONNECTED");
+    return ok ? { ok: true } : { ok: false, reason: data?.message || stateStr || `status_http_${res.status}` };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : "status_check_failed" };
+  }
+}
 
 // ---------- Pre-flight Open Graph preview check ----------
 async function checkLinkPreview(input: string): Promise<{
@@ -139,6 +175,18 @@ Deno.serve(async (req) => {
       });
     }
 
+    const readiness = await assertMaytapiReady(PRODUCT_ID, PHONE_ID, API_TOKEN);
+    if (!readiness.ok) {
+      return new Response(JSON.stringify({
+        processed: 0,
+        status: "blocked_phone_not_ready",
+        message: "Maytapi phone is not ready; refusing to hand off group posts that may backlog and send later.",
+        reason: readiness.reason,
+      }), {
+        status: 423, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
     // Direct Group Administrator lane: used by pilot-group auto-reply.
@@ -227,25 +275,54 @@ Deno.serve(async (req) => {
 
     const results: { id: string; status: string; error?: string; preview?: string }[] = [];
 
-    // Load FB allowlist ONCE per tick (defense-in-depth, layer 2 of 3).
-    // Even if a bad row sneaks into the queue, we refuse to send facebook_instant
-    // content to any group not on fb_auto_target_groups.
-    let fbAllowlist: Set<string> | null = null;
+    // Load locked group allowlist ONCE per tick. Every queued group send must
+    // target one of these names; no stale row or manual mistake can escape it.
+    let groupAllowlist: Set<string> | null = null;
     {
       const { data: row } = await supabase
         .from("integration_settings").select("value").eq("key", "fb_auto_target_groups").maybeSingle();
       if (row?.value) {
         try {
           const parsed = JSON.parse(row.value);
-          if (Array.isArray(parsed)) fbAllowlist = new Set(parsed.map(String));
+          if (Array.isArray(parsed)) groupAllowlist = new Set(parsed.map(String));
         } catch { /* ignore */ }
       }
     }
 
     for (const post of duePosts) {
+      if (!groupAllowlist || !groupAllowlist.has(post.target_group_name)) {
+        await supabase.from("scheduled_group_posts").update({
+          status: "failed",
+          failure_reason: `BLOCKED: "${post.target_group_name}" is not in the locked 11 approved WhatsApp groups.`,
+          last_attempt_at: new Date().toISOString(),
+        }).eq("id", post.id);
+        results.push({ id: post.id, status: "blocked_not_in_locked_groups" });
+        continue;
+      }
+
+      if (isExpiredOneDaySaleMessage(String(post.message_content || ""))) {
+        await supabase.from("scheduled_group_posts").update({
+          status: "failed",
+          failure_reason: "BLOCKED: expired one-day APLGO WITH LOVE SALE content cannot be dispatched after its 2026-05-26 SAST window.",
+          last_attempt_at: new Date().toISOString(),
+        }).eq("id", post.id);
+        results.push({ id: post.id, status: "blocked_expired_one_day_sale" });
+        continue;
+      }
+
+      if (isTooLateToDispatch(post.scheduled_at)) {
+        await supabase.from("scheduled_group_posts").update({
+          status: "failed",
+          failure_reason: "BLOCKED: scheduled group post is more than 2 hours late. Refusing to release stale backlog after a WhatsApp restriction or outage.",
+          last_attempt_at: new Date().toISOString(),
+        }).eq("id", post.id);
+        results.push({ id: post.id, status: "blocked_stale_backlog" });
+        continue;
+      }
+
       // LAYER 2 GUARD: block FB-instant sends to unapproved groups at dispatch time.
       if (post.source === "facebook_instant") {
-        if (!fbAllowlist || !fbAllowlist.has(post.target_group_name)) {
+        if (!groupAllowlist || !groupAllowlist.has(post.target_group_name)) {
           await supabase.from("scheduled_group_posts").update({
             status: "failed",
             failure_reason: `BLOCKED: "${post.target_group_name}" is not on fb_auto_target_groups allowlist. Refusing to broadcast FB content to unapproved group.`,
