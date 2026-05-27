@@ -248,22 +248,31 @@ Deno.serve(async (req) => {
 
     const results: { id: string; status: string; error?: string; preview?: string }[] = [];
 
-    // Load FB allowlist ONCE per tick (defense-in-depth, layer 2 of 3).
-    // Even if a bad row sneaks into the queue, we refuse to send facebook_instant
-    // content to any group not on fb_auto_target_groups.
-    let fbAllowlist: Set<string> | null = null;
+    // Load locked group allowlist ONCE per tick. Every queued group send must
+    // target one of these names; no stale row or manual mistake can escape it.
+    let groupAllowlist: Set<string> | null = null;
     {
       const { data: row } = await supabase
         .from("integration_settings").select("value").eq("key", "fb_auto_target_groups").maybeSingle();
       if (row?.value) {
         try {
           const parsed = JSON.parse(row.value);
-          if (Array.isArray(parsed)) fbAllowlist = new Set(parsed.map(String));
+          if (Array.isArray(parsed)) groupAllowlist = new Set(parsed.map(String));
         } catch { /* ignore */ }
       }
     }
 
     for (const post of duePosts) {
+      if (!groupAllowlist || !groupAllowlist.has(post.target_group_name)) {
+        await supabase.from("scheduled_group_posts").update({
+          status: "failed",
+          failure_reason: `BLOCKED: "${post.target_group_name}" is not in the locked 11 approved WhatsApp groups.`,
+          last_attempt_at: new Date().toISOString(),
+        }).eq("id", post.id);
+        results.push({ id: post.id, status: "blocked_not_in_locked_groups" });
+        continue;
+      }
+
       if (isExpiredOneDaySaleMessage(String(post.message_content || ""))) {
         await supabase.from("scheduled_group_posts").update({
           status: "failed",
@@ -286,7 +295,7 @@ Deno.serve(async (req) => {
 
       // LAYER 2 GUARD: block FB-instant sends to unapproved groups at dispatch time.
       if (post.source === "facebook_instant") {
-        if (!fbAllowlist || !fbAllowlist.has(post.target_group_name)) {
+        if (!groupAllowlist || !groupAllowlist.has(post.target_group_name)) {
           await supabase.from("scheduled_group_posts").update({
             status: "failed",
             failure_reason: `BLOCKED: "${post.target_group_name}" is not on fb_auto_target_groups allowlist. Refusing to broadcast FB content to unapproved group.`,
