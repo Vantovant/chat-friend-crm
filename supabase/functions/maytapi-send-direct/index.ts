@@ -39,6 +39,21 @@ function isExpiredOneDaySaleMessage(message: string): boolean {
   return isSaleMessage && Date.now() >= ONE_DAY_SALE_CUTOFF_SAST;
 }
 
+async function assertMaytapiReady(productId: string, phoneId: string, token: string): Promise<{ ok: boolean; reason?: string }> {
+  try {
+    const res = await fetch(`https://api.maytapi.com/api/${productId}/${phoneId}/status`, {
+      headers: { "x-maytapi-key": token },
+    });
+    const data = await res.json().catch(() => ({}));
+    const statusData = data?.status || data?.data || data;
+    const stateStr = statusData?.state?.state || statusData?.state || "";
+    const ok = res.ok && (statusData?.loggedIn === true || stateStr === "CONNECTED");
+    return ok ? { ok: true } : { ok: false, reason: data?.message || stateStr || `status_http_${res.status}` };
+  } catch (e) {
+    return { ok: false, reason: e instanceof Error ? e.message : "status_check_failed" };
+  }
+}
+
 function buildTrustHeader(proofUrl: string, tocUrl: string, localNumber: string): string {
   return (
     `${proofUrl}\n\n` +
@@ -78,6 +93,17 @@ Deno.serve(async (req) => {
     if (!PRODUCT_ID || !PHONE_ID || !TOKEN) {
       return new Response(JSON.stringify({ error: "Maytapi credentials not configured" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const readiness = await assertMaytapiReady(PRODUCT_ID, PHONE_ID, TOKEN);
+    if (!readiness.ok) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: "Maytapi phone is not ready; refusing to hand off messages that may backlog and send later.",
+        reason: readiness.reason,
+      }), {
+        status: 423, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
