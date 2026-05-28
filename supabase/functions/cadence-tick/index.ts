@@ -136,8 +136,13 @@ Deno.serve(async (req) => {
     diag.candidates = due?.length || 0;
 
     const PER_MINUTE_LIMIT = 3;
+    const BURST_FAILURE_THRESHOLD = 3;
     let minuteWindowStart = Date.now();
     let sentInWindow = 0;
+    let invocationFailures = 0;
+    const invocationErrors: any[] = [];
+    let killSwitchTripped = false;
+
 
     for (const row of (due || []) as any[]) {
       if (remainingDaily <= 0) {
