@@ -823,6 +823,57 @@ export type Database = {
         }
         Relationships: []
       }
+      hot_lead_alerts: {
+        Row: {
+          alert_channel: string | null
+          alert_error: string | null
+          alert_sid: string | null
+          alert_status: string
+          contact_id: string
+          conversation_id: string | null
+          created_at: string
+          deduped_against: string | null
+          id: string
+          message_snippet: string | null
+          phone_normalized: string | null
+          primary_intent: string
+          signals: Json
+          temperature_score: number
+        }
+        Insert: {
+          alert_channel?: string | null
+          alert_error?: string | null
+          alert_sid?: string | null
+          alert_status?: string
+          contact_id: string
+          conversation_id?: string | null
+          created_at?: string
+          deduped_against?: string | null
+          id?: string
+          message_snippet?: string | null
+          phone_normalized?: string | null
+          primary_intent: string
+          signals?: Json
+          temperature_score: number
+        }
+        Update: {
+          alert_channel?: string | null
+          alert_error?: string | null
+          alert_sid?: string | null
+          alert_status?: string
+          contact_id?: string
+          conversation_id?: string | null
+          created_at?: string
+          deduped_against?: string | null
+          id?: string
+          message_snippet?: string | null
+          phone_normalized?: string | null
+          primary_intent?: string
+          signals?: Json
+          temperature_score?: number
+        }
+        Relationships: []
+      }
       integration_settings: {
         Row: {
           id: string
