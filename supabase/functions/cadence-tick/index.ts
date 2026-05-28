@@ -216,7 +216,7 @@ Deno.serve(async (req) => {
             "Authorization": `Bearer ${SERVICE_KEY}`,
           },
           body: JSON.stringify({
-            phone: recipient,
+            to_number: recipient,
             message: messageBody,
             source: `cadence_${SEQUENCE_KEY}_step${nextStepNum}`,
             contact_id: contact.id,
