@@ -77,13 +77,16 @@ Deno.serve(async (req) => {
   const diag: any = { now: now.toISOString(), processed: 0, sent: 0, skipped: 0, completed: 0, errors: [] as any[] };
 
   try {
-    // Kill switches
+    // Kill switches + limits
     const { data: flags } = await sb
       .from("integration_settings")
       .select("key,value")
-      .in("key", ["cadence_engine_enabled", "ab_testing_enabled"]);
+      .in("key", ["cadence_engine_enabled", "ab_testing_enabled", "cadence_daily_send_limit"]);
     const flagMap: Record<string, string> = {};
-    for (const r of (flags || []) as any[]) flagMap[r.key] = (r.value || "").toLowerCase();
+    for (const r of (flags || []) as any[]) flagMap[r.key] = (r.value || "");
+    const dailyLimit = parseInt(flagMap.cadence_daily_send_limit || "30", 10);
+    flagMap.cadence_engine_enabled = (flagMap.cadence_engine_enabled || "").toLowerCase();
+    flagMap.ab_testing_enabled = (flagMap.ab_testing_enabled || "").toLowerCase();
     const enabled = flagMap.cadence_engine_enabled === "true";
     const abEnabled = flagMap.ab_testing_enabled === "true";
 
@@ -100,6 +103,25 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Daily send cap (UTC midnight reset)
+    const startOfUtcDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
+    const { count: sentToday } = await sb
+      .from("cadence_log")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "sent")
+      .gte("created_at", startOfUtcDay);
+    let remainingDaily = Math.max(0, dailyLimit - (sentToday || 0));
+    diag.sent_today = sentToday || 0;
+    diag.daily_limit = dailyLimit;
+    diag.remaining_daily = remainingDaily;
+    if (remainingDaily <= 0) {
+      console.warn(`[cadence-tick] daily_send_limit_reached: sent=${sentToday}/${dailyLimit}`);
+      return new Response(JSON.stringify({ ok: true, skipped: true, reason: "daily_send_limit_reached", sent_today: sentToday, daily_limit: dailyLimit }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+
     // Pick due rows
     const { data: due, error } = await sb
       .from("prospect_cadence_state")
@@ -113,7 +135,24 @@ Deno.serve(async (req) => {
 
     diag.candidates = due?.length || 0;
 
+    const PER_MINUTE_LIMIT = 3;
+    let minuteWindowStart = Date.now();
+    let sentInWindow = 0;
+
     for (const row of (due || []) as any[]) {
+      if (remainingDaily <= 0) {
+        diag.stopped_reason = "daily_send_limit_reached";
+        console.warn(`[cadence-tick] stopping mid-batch: daily limit ${dailyLimit} reached`);
+        break;
+      }
+      if (sentInWindow >= PER_MINUTE_LIMIT) {
+        const elapsed = Date.now() - minuteWindowStart;
+        if (elapsed < 60_000) {
+          await new Promise((r) => setTimeout(r, 60_000 - elapsed));
+        }
+        minuteWindowStart = Date.now();
+        sentInWindow = 0;
+      }
       diag.processed++;
       const nextStepNum = (row.current_step || 0) + 1;
       const stepDef = STEPS.find((s) => s.step === nextStepNum);
@@ -255,6 +294,8 @@ Deno.serve(async (req) => {
 
       if (sendOk) {
         diag.sent++;
+        remainingDaily--;
+        sentInWindow++;
         // Schedule next step
         const nextDef = STEPS.find((s) => s.step === nextStepNum + 1);
         const nextAt = nextDef
