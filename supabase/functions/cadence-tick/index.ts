@@ -244,8 +244,15 @@ Deno.serve(async (req) => {
           updated_at: now.toISOString(),
         }).eq("id", row.id);
         diag.errors.push({ contact_id: contact.id, step: nextStepNum, error: errMsg });
+        invocationFailures++;
+        invocationErrors.push({ contact_id: contact.id, step: nextStepNum, error: errMsg });
+        if (invocationFailures >= BURST_FAILURE_THRESHOLD) {
+          killSwitchTripped = true;
+          break;
+        }
         continue;
       }
+
 
       // Send via maytapi-send-direct
       let sendResp: any = null;
