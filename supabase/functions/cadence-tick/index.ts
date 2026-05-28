@@ -103,6 +103,25 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Daily send cap (UTC midnight reset)
+    const startOfUtcDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
+    const { count: sentToday } = await sb
+      .from("cadence_log")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "sent")
+      .gte("created_at", startOfUtcDay);
+    let remainingDaily = Math.max(0, dailyLimit - (sentToday || 0));
+    diag.sent_today = sentToday || 0;
+    diag.daily_limit = dailyLimit;
+    diag.remaining_daily = remainingDaily;
+    if (remainingDaily <= 0) {
+      console.warn(`[cadence-tick] daily_send_limit_reached: sent=${sentToday}/${dailyLimit}`);
+      return new Response(JSON.stringify({ ok: true, skipped: true, reason: "daily_send_limit_reached", sent_today: sentToday, daily_limit: dailyLimit }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+
     // Pick due rows
     const { data: due, error } = await sb
       .from("prospect_cadence_state")
