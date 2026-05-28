@@ -135,7 +135,24 @@ Deno.serve(async (req) => {
 
     diag.candidates = due?.length || 0;
 
+    const PER_MINUTE_LIMIT = 3;
+    let minuteWindowStart = Date.now();
+    let sentInWindow = 0;
+
     for (const row of (due || []) as any[]) {
+      if (remainingDaily <= 0) {
+        diag.stopped_reason = "daily_send_limit_reached";
+        console.warn(`[cadence-tick] stopping mid-batch: daily limit ${dailyLimit} reached`);
+        break;
+      }
+      if (sentInWindow >= PER_MINUTE_LIMIT) {
+        const elapsed = Date.now() - minuteWindowStart;
+        if (elapsed < 60_000) {
+          await new Promise((r) => setTimeout(r, 60_000 - elapsed));
+        }
+        minuteWindowStart = Date.now();
+        sentInWindow = 0;
+      }
       diag.processed++;
       const nextStepNum = (row.current_step || 0) + 1;
       const stepDef = STEPS.find((s) => s.step === nextStepNum);
