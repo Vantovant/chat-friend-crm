@@ -1976,6 +1976,36 @@ export type Database = {
         }
         Relationships: []
       }
+      system_logs: {
+        Row: {
+          context: Json | null
+          created_at: string
+          event: string
+          id: string
+          level: string
+          message: string | null
+          source: string
+        }
+        Insert: {
+          context?: Json | null
+          created_at?: string
+          event: string
+          id?: string
+          level?: string
+          message?: string | null
+          source: string
+        }
+        Update: {
+          context?: Json | null
+          created_at?: string
+          event?: string
+          id?: string
+          level?: string
+          message?: string | null
+          source?: string
+        }
+        Relationships: []
+      }
       user_ai_settings: {
         Row: {
           api_key_encrypted: string | null
