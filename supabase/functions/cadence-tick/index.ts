@@ -257,6 +257,7 @@ Deno.serve(async (req) => {
           body: JSON.stringify({
             to_number: recipient,
             message: messageBody,
+            skip_trust_header: true,
             source: `cadence_${SEQUENCE_KEY}_step${nextStepNum}`,
             contact_id: contact.id,
           }),
