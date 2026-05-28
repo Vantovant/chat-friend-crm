@@ -326,6 +326,8 @@ Deno.serve(async (req) => {
       } else {
         // Retry in 1 hour; pause after too many fails (>=5)
         diag.errors.push({ contact_id: contact.id, step: nextStepNum, error: sendError });
+        invocationFailures++;
+        invocationErrors.push({ contact_id: contact.id, step: nextStepNum, error: sendError });
         const { data: failCount } = await sb
           .from("cadence_log")
           .select("id", { count: "exact", head: true })
@@ -344,12 +346,65 @@ Deno.serve(async (req) => {
             updated_at: now.toISOString(),
           }).eq("id", row.id);
         }
+        if (invocationFailures >= BURST_FAILURE_THRESHOLD) {
+          killSwitchTripped = true;
+          break;
+        }
+      }
+    }
+
+    // Circuit breaker: ≥3 failures in one tick → disable engine, alert admin, log critical.
+    if (killSwitchTripped) {
+      diag.kill_switch_tripped = true;
+      diag.invocation_failures = invocationFailures;
+      console.error(`[cadence-tick] BURST FAILURE GUARD TRIPPED: ${invocationFailures} failures in single tick. Disabling engine.`);
+
+      await sb.from("integration_settings").upsert({
+        key: "cadence_engine_enabled",
+        value: "false",
+        updated_at: new Date().toISOString(),
+      }, { onConflict: "key" });
+
+      await sb.from("system_logs").insert({
+        level: "critical",
+        source: "cadence-tick",
+        event: "burst_failure_kill_switch",
+        message: `Cadence engine auto-disabled after ${invocationFailures} failures in single 15-minute tick`,
+        context: {
+          invocation_failures: invocationFailures,
+          threshold: BURST_FAILURE_THRESHOLD,
+          errors: invocationErrors.slice(0, 10),
+          tick_at: now.toISOString(),
+          sent_this_tick: diag.sent,
+        },
+      });
+
+      const alertText =
+        `🚨 CADENCE ENGINE AUTO-DISABLED\n` +
+        `${invocationFailures} send failures in one 15-min tick (threshold ${BURST_FAILURE_THRESHOLD}).\n` +
+        `cadence_engine_enabled = false.\n` +
+        `Sample errors:\n` +
+        invocationErrors.slice(0, 3).map((e) => `• step ${e.step}: ${String(e.error).slice(0, 80)}`).join("\n") +
+        `\nInvestigate then re-enable manually.`;
+      try {
+        await fetch(`${SUPABASE_URL}/functions/v1/send-admin-alert`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${Deno.env.get("SUPABASE_ANON_KEY") || ""}`,
+            "apikey": Deno.env.get("SUPABASE_ANON_KEY") || "",
+          },
+          body: JSON.stringify({ message: alertText }),
+        });
+      } catch (e: any) {
+        console.error("[cadence-tick] failed to send admin alert:", e?.message);
       }
     }
 
     return new Response(JSON.stringify({ ok: true, ...diag }), {
       status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
+
   } catch (err: any) {
     console.error("[cadence-tick] error:", err);
     return new Response(JSON.stringify({ ok: false, error: err?.message || "unknown", diag }), {
