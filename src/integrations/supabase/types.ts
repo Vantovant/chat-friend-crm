@@ -298,6 +298,48 @@ export type Database = {
           },
         ]
       }
+      cadence_log: {
+        Row: {
+          contact_id: string
+          error: string | null
+          id: string
+          message_preview: string | null
+          provider_message_id: string | null
+          sent_at: string
+          sequence_key: string
+          status: string
+          step: number
+          template_key: string | null
+          variant_id: string | null
+        }
+        Insert: {
+          contact_id: string
+          error?: string | null
+          id?: string
+          message_preview?: string | null
+          provider_message_id?: string | null
+          sent_at?: string
+          sequence_key: string
+          status?: string
+          step: number
+          template_key?: string | null
+          variant_id?: string | null
+        }
+        Update: {
+          contact_id?: string
+          error?: string | null
+          id?: string
+          message_preview?: string | null
+          provider_message_id?: string | null
+          sent_at?: string
+          sequence_key?: string
+          status?: string
+          step?: number
+          template_key?: string | null
+          variant_id?: string | null
+        }
+        Relationships: []
+      }
       contact_activity: {
         Row: {
           contact_id: string
@@ -1236,6 +1278,42 @@ export type Database = {
         }
         Relationships: []
       }
+      message_variants: {
+        Row: {
+          content: string
+          created_at: string
+          enabled: boolean
+          id: string
+          notes: string | null
+          template_key: string
+          updated_at: string
+          variant_label: string
+          weight: number
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          notes?: string | null
+          template_key: string
+          updated_at?: string
+          variant_label: string
+          weight?: number
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          notes?: string | null
+          template_key?: string
+          updated_at?: string
+          variant_label?: string
+          weight?: number
+        }
+        Relationships: []
+      }
       messages: {
         Row: {
           content: string
@@ -1541,6 +1619,54 @@ export type Database = {
           id?: string
           last_synced_at?: string | null
           phone?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      prospect_cadence_state: {
+        Row: {
+          completed_at: string | null
+          contact_id: string
+          created_at: string
+          current_step: number
+          id: string
+          last_sent_at: string | null
+          meta: Json
+          next_send_at: string | null
+          pause_reason: string | null
+          sequence_key: string
+          started_at: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          completed_at?: string | null
+          contact_id: string
+          created_at?: string
+          current_step?: number
+          id?: string
+          last_sent_at?: string | null
+          meta?: Json
+          next_send_at?: string | null
+          pause_reason?: string | null
+          sequence_key?: string
+          started_at?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          completed_at?: string | null
+          contact_id?: string
+          created_at?: string
+          current_step?: number
+          id?: string
+          last_sent_at?: string | null
+          meta?: Json
+          next_send_at?: string | null
+          pause_reason?: string | null
+          sequence_key?: string
+          started_at?: string
+          status?: string
           updated_at?: string
         }
         Relationships: []
@@ -1901,6 +2027,36 @@ export type Database = {
           last_synced_at?: string | null
           role?: Database["public"]["Enums"]["user_role"]
           user_id?: string
+        }
+        Relationships: []
+      }
+      variant_assignments: {
+        Row: {
+          assigned_at: string
+          contact_id: string
+          id: string
+          outcome: string
+          resolved_at: string | null
+          template_key: string
+          variant_id: string
+        }
+        Insert: {
+          assigned_at?: string
+          contact_id: string
+          id?: string
+          outcome?: string
+          resolved_at?: string | null
+          template_key: string
+          variant_id: string
+        }
+        Update: {
+          assigned_at?: string
+          contact_id?: string
+          id?: string
+          outcome?: string
+          resolved_at?: string | null
+          template_key?: string
+          variant_id?: string
         }
         Relationships: []
       }
