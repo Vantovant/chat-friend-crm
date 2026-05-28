@@ -165,6 +165,44 @@ Deno.serve(async (req) => {
       const firstName = (contact.name || "").split(/\s+/)[0] || "there";
       const messageBody = renderTemplate(variant.content, { name: firstName });
 
+      // Resolve recipient: prefer phone_normalized (already E.164). Fallback to phone,
+      // forcing a leading "+" so Maytapi accepts it. SA-specific reformatting if needed.
+      let recipient: string | null = null;
+      const pn = (contact.phone_normalized || "").trim();
+      const ph = (contact.phone || "").trim();
+      if (pn) {
+        recipient = pn.startsWith("+") ? pn : `+${pn.replace(/\D/g, "")}`;
+      } else if (ph) {
+        const digits = ph.replace(/\D/g, "");
+        if (digits.startsWith("0") && (digits.length === 10 || digits.length === 11)) {
+          recipient = "+27" + digits.slice(1);
+        } else if (digits.length >= 10) {
+          recipient = "+" + digits;
+        }
+      }
+
+      if (!recipient || recipient.replace(/\D/g, "").length < 10) {
+        const errMsg = `invalid_phone:phone_normalized="${pn}" phone="${ph}"`;
+        console.error(`[cadence-tick] ${errMsg} contact=${contact.id}`);
+        await sb.from("cadence_log").insert({
+          contact_id: contact.id,
+          sequence_key: SEQUENCE_KEY,
+          step: nextStepNum,
+          template_key: stepDef.templateKey,
+          variant_id: variant.id,
+          message_preview: messageBody.slice(0, 200),
+          status: "failed",
+          error: errMsg,
+        });
+        await sb.from("prospect_cadence_state").update({
+          status: "paused",
+          pause_reason: errMsg.slice(0, 200),
+          updated_at: now.toISOString(),
+        }).eq("id", row.id);
+        diag.errors.push({ contact_id: contact.id, step: nextStepNum, error: errMsg });
+        continue;
+      }
+
       // Send via maytapi-send-direct
       let sendResp: any = null;
       let sendOk = false;
@@ -178,7 +216,7 @@ Deno.serve(async (req) => {
             "Authorization": `Bearer ${SERVICE_KEY}`,
           },
           body: JSON.stringify({
-            phone: contact.phone_normalized || contact.phone,
+            phone: recipient,
             message: messageBody,
             source: `cadence_${SEQUENCE_KEY}_step${nextStepNum}`,
             contact_id: contact.id,
