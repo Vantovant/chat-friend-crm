@@ -942,6 +942,39 @@ Deno.serve(async (req) => {
     timestamp: new Date().toISOString(),
   };
 
+  // ── Week 1 wiring: fire-and-forget intent classifier v2 (read-only) ──
+  // Kill switch: integration_settings.classifier_autoreply_wired = "false"
+  try {
+    const { data: classifierFlag } = await svc
+      .from("integration_settings")
+      .select("value")
+      .eq("key", "classifier_autoreply_wired")
+      .maybeSingle();
+    const wired = ((classifierFlag?.value ?? "true") + "").toLowerCase() === "true";
+    if (wired && inbound_content) {
+      // Do NOT await — never block auto-reply on classifier latency.
+      fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/lead-intent-classify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+        },
+        body: JSON.stringify({
+          text: inbound_content,
+          contact_id: contact_id || undefined,
+          conversation_id,
+          phone: phone_e164,
+        }),
+      }).catch((e) => console.warn("[auto-reply] classifier fire-and-forget failed:", e?.message));
+      diag.classifier_wired = true;
+    } else {
+      diag.classifier_wired = false;
+    }
+  } catch (e: any) {
+    diag.classifier_wired_error = e?.message || "unknown";
+  }
+
+
   // ── Check auto-reply mode ──
   const { data: modeSetting } = await svc.from("integration_settings").select("value").eq("key", "auto_reply_mode").maybeSingle();
   if ((modeSetting?.value || "safe_auto") === "off") {
