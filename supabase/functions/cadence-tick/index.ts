@@ -27,7 +27,7 @@ const SEQUENCE_KEY = "prospect_7touch_v1";
 
 // step → { offsetHoursFromStart, defaultContent, templateKey }
 const STEPS = [
-  { step: 1, offsetH: 2,    templateKey: "cadence_v1_step1_trust",      content: "Hi {name} 👋 Just a quick follow up — I'm Vanto. Most people I chat with want one of two things: feel better day-to-day, or earn alongside me. What feels closer for you?" },
+  { step: 1, offsetH: 2,    templateKey: "cadence_v1_step1_trust",      content: "Hi {name} 👋\n\nYou responded to our NRM advert on Facebook. Your name is in our database.\n\nI'm Vanto. Quick question – are you more interested in:\n💪 Feeling better every day, or\n💰 Earning extra income with APLGO?\n\nLet me know 🙌\n\n🛍️ Shop: onlinecourseformlm.com/shop\n📞 Support: +27 79 083 1530" },
   { step: 2, offsetH: 24,   templateKey: "cadence_v1_step2_story",      content: "Hi {name} — quick story: a client of mine went from R0 in extra income to R8k/month in 90 days using APLGO part-time. Want me to share how she did it?" },
   { step: 3, offsetH: 72,   templateKey: "cadence_v1_step3_wellness",   content: "Hi {name} 🌿 If you ever battle with sleep, energy or sugar cravings, APLGO has one lozenge per concern. Curious which one fits you best?" },
   { step: 4, offsetH: 120,  templateKey: "cadence_v1_step4_savings",    content: "Hi {name} — small thing most people miss: R375 membership unlocks ~25% off forever. On 3 products/month you save R500+. Want me to do the math for you?" },
