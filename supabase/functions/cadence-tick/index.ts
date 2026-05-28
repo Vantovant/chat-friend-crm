@@ -77,13 +77,16 @@ Deno.serve(async (req) => {
   const diag: any = { now: now.toISOString(), processed: 0, sent: 0, skipped: 0, completed: 0, errors: [] as any[] };
 
   try {
-    // Kill switches
+    // Kill switches + limits
     const { data: flags } = await sb
       .from("integration_settings")
       .select("key,value")
-      .in("key", ["cadence_engine_enabled", "ab_testing_enabled"]);
+      .in("key", ["cadence_engine_enabled", "ab_testing_enabled", "cadence_daily_send_limit"]);
     const flagMap: Record<string, string> = {};
-    for (const r of (flags || []) as any[]) flagMap[r.key] = (r.value || "").toLowerCase();
+    for (const r of (flags || []) as any[]) flagMap[r.key] = (r.value || "");
+    const dailyLimit = parseInt(flagMap.cadence_daily_send_limit || "30", 10);
+    flagMap.cadence_engine_enabled = (flagMap.cadence_engine_enabled || "").toLowerCase();
+    flagMap.ab_testing_enabled = (flagMap.ab_testing_enabled || "").toLowerCase();
     const enabled = flagMap.cadence_engine_enabled === "true";
     const abEnabled = flagMap.ab_testing_enabled === "true";
 
