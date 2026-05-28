@@ -294,6 +294,8 @@ Deno.serve(async (req) => {
 
       if (sendOk) {
         diag.sent++;
+        remainingDaily--;
+        sentInWindow++;
         // Schedule next step
         const nextDef = STEPS.find((s) => s.step === nextStepNum + 1);
         const nextAt = nextDef
