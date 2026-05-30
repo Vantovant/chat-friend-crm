@@ -378,6 +378,84 @@ Deno.serve(async (req) => {
         unread_count: 1,
       }).eq("id", conversation!.id);
 
+      // ── STOP / unsubscribe handler (compliance) ──
+      // Detect opt-out keywords → set DNC, halt cadence, send confirmation, skip AI.
+      const STOP_RE = /\b(stop|unsubscribe|opt[\s-]?out|do not contact|dnc|remove me|wag asseblief|haltt|hou op)\b/i;
+      const isStop = STOP_RE.test(text.trim());
+      if (isStop) {
+        try {
+          await supabase.from("contacts")
+            .update({ do_not_contact: true, updated_at: new Date().toISOString() })
+            .eq("id", contact!.id);
+
+          await supabase.from("prospect_cadence_state")
+            .update({
+              status: "opted_out",
+              pause_reason: "stop_keyword",
+              next_send_at: null,
+              completed_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            })
+            .eq("contact_id", contact!.id)
+            .eq("status", "active");
+
+          const confirmBody = "You've been unsubscribed ✅ You won't receive further messages from us. Reply START anytime to opt back in.";
+          await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
+            body: JSON.stringify({
+              to_number: phoneE164,
+              message: confirmBody,
+              conversation_id: conversation!.id,
+              contact_id: contact!.id,
+              skip_trust_header: true,
+              source: "stop_handler",
+            }),
+          }).catch((e) => console.error("[maytapi-inbound] STOP confirm send failed:", e));
+
+          await supabase.from("option_b_audit_log").insert({
+            contact_id: contact!.id,
+            conversation_id: conversation!.id,
+            phone_normalized: phoneE164,
+            channel: "maytapi_dm",
+            trigger_type: "stop_keyword_optout",
+            template_label: "stop_confirmation",
+            message_preview: text.slice(0, 240),
+            delivery_status: "sent",
+            attempt_outcome: "sent",
+            operating_mode: "compliance",
+            safety_checks_passed: ["stop_keyword_detected", "dnc_set", "cadence_halted"],
+            governance_flags: { auto: true },
+          });
+
+          console.log("[maytapi-inbound] STOP handled for", phoneE164);
+        } catch (stopErr: any) {
+          console.error("[maytapi-inbound] STOP handler error:", stopErr?.message);
+        }
+
+        return new Response(JSON.stringify({ ok: true, processed: "stop_optout", conversation_id: conversation!.id }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // ── Auto-complete cadence on any inbound reply ──
+      // If contact has an active cadence row, mark it completed so we don't keep
+      // sending touches once the prospect has engaged.
+      try {
+        await supabase.from("prospect_cadence_state")
+          .update({
+            status: "completed",
+            pause_reason: "inbound_reply",
+            next_send_at: null,
+            completed_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("contact_id", contact!.id)
+          .eq("status", "active");
+      } catch (cErr: any) {
+        console.warn("[maytapi-inbound] cadence auto-complete failed (non-fatal):", cErr?.message);
+      }
+
       // Trigger auto-reply (fire-and-forget, but await briefly so we surface errors in logs)
       try {
         const arRes = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-auto-reply`, {
@@ -400,6 +478,7 @@ Deno.serve(async (req) => {
       } catch (e) {
         console.error("[maytapi-inbound] auto-reply trigger failed:", e instanceof Error ? e.message : e);
       }
+
 
       // Phase 3: fire-and-forget intent detection (never blocks auto-reply)
       try {
