@@ -546,6 +546,27 @@ export type Database = {
           },
         ]
       }
+      daily_send_counter: {
+        Row: {
+          cap_reached_at: string | null
+          count: number
+          send_date: string
+          updated_at: string
+        }
+        Insert: {
+          cap_reached_at?: string | null
+          count?: number
+          send_date: string
+          updated_at?: string
+        }
+        Update: {
+          cap_reached_at?: string | null
+          count?: number
+          send_date?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       fb_dispatch_log: {
         Row: {
           created_at: string
@@ -2548,6 +2569,8 @@ export type Database = {
         Returns: boolean
       }
       is_admin_or_super_admin: { Args: never; Returns: boolean }
+      release_cadence_send_slot: { Args: never; Returns: undefined }
+      reserve_cadence_send_slot: { Args: { p_limit: number }; Returns: number }
       search_knowledge: {
         Args: {
           collection_filter?: string
