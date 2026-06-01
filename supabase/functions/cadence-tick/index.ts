@@ -103,19 +103,28 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Daily send cap (UTC midnight reset)
-    const startOfUtcDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
-    const { count: sentToday } = await sb
-      .from("cadence_log")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "sent")
-      .gte("created_at", startOfUtcDay);
-    let remainingDaily = Math.max(0, dailyLimit - (sentToday || 0));
-    diag.sent_today = sentToday || 0;
+    // Daily send cap — atomic counter in daily_send_counter (per UTC day, hard cap).
+    const todayUtc = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
+      .toISOString().slice(0, 10);
+    const { data: counterRow } = await sb
+      .from("daily_send_counter")
+      .select("count, cap_reached_at")
+      .eq("send_date", todayUtc)
+      .maybeSingle();
+    const sentToday = counterRow?.count || 0;
+    let remainingDaily = Math.max(0, dailyLimit - sentToday);
+    diag.sent_today = sentToday;
     diag.daily_limit = dailyLimit;
     diag.remaining_daily = remainingDaily;
     if (remainingDaily <= 0) {
-      console.warn(`[cadence-tick] daily_send_limit_reached: sent=${sentToday}/${dailyLimit}`);
+      console.warn(`[cadence-tick] daily_send_limit_reached_at_entry: sent=${sentToday}/${dailyLimit}`);
+      await sb.from("system_logs").insert({
+        level: "warning",
+        source: "cadence-tick",
+        event: "daily_cap_reached_at_entry",
+        message: `Cadence tick exited early: daily cap ${dailyLimit} already reached (count=${sentToday}).`,
+        context: { sent_today: sentToday, daily_limit: dailyLimit, tick_at: now.toISOString() },
+      });
       return new Response(JSON.stringify({ ok: true, skipped: true, reason: "daily_send_limit_reached", sent_today: sentToday, daily_limit: dailyLimit }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
