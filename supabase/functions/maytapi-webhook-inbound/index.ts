@@ -184,7 +184,9 @@ Deno.serve(async (req) => {
         console.warn("[maytapi-inbound] group inbound log failed (non-fatal):", logErr?.message);
       }
 
+      try {
         const { data: gCfg } = await supabase
+
           .from("integration_settings")
           .select("key,value")
           .in("key", [
