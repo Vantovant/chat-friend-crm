@@ -80,6 +80,7 @@ export function GroupAdministratorModule() {
   const [members, setMembers] = useState<Record<string, Member[]>>({});
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [lastScan, setLastScan] = useState<ScanResult | null>(null);
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     if (!isAdmin) return;
