@@ -275,15 +275,27 @@ export function GroupAdministratorModule() {
             const r = reports[g.group_jid!];
             const ready = r ? 'READY' : 'PARTIAL';
             return (
-              <label key={g.id} className="flex items-center gap-2 p-2 rounded hover:bg-secondary/40 cursor-pointer">
-                <Checkbox checked={selected.includes(g.group_jid!)} onCheckedChange={() => toggleSelect(g.group_jid!)} />
+              <div key={g.id} className="flex items-center gap-2 p-2 rounded hover:bg-secondary/40">
+                <Checkbox
+                  checked={selected.includes(g.group_jid!)}
+                  onCheckedChange={() => toggleSelect(g.group_jid!)}
+                />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">{g.group_name}</div>
                   <div className="text-[10px] text-muted-foreground font-mono">{maskJid(g.group_jid)}</div>
                 </div>
                 {r && <Badge variant="outline" className="text-[10px]">{r.member_count} members</Badge>}
                 <Badge variant="outline" className={`text-[10px] ${ready === 'READY' ? 'border-primary/40 text-primary' : 'border-muted-foreground/40 text-muted-foreground'}`}>{ready}</Badge>
-              </label>
+                <div className="flex items-center gap-1.5 pl-2 border-l border-border">
+                  <Bot size={12} className={g.auto_reply_enabled ? 'text-primary' : 'text-muted-foreground'} />
+                  <span className="text-[10px] text-muted-foreground">Auto-reply</span>
+                  <Switch
+                    checked={!!g.auto_reply_enabled}
+                    onCheckedChange={(v) => toggleAutoReply(g, v)}
+                    aria-label={`Toggle group auto-reply for ${g.group_name}`}
+                  />
+                </div>
+              </div>
             );
           })}
           {groups.length === 0 && <p className="text-xs text-muted-foreground py-4 text-center">No groups with valid JID found.</p>}
