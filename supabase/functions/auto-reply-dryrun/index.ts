@@ -115,7 +115,7 @@ Deno.serve(async (req) => {
     "I'm always tired",
   ];
   const results = [];
-  for (const q of tests) results.push(await run(svc, q));
+  for (const q of tests) results.push(await run(svc, q, channel));
   return new Response(JSON.stringify({ ok: true, results }, null, 2), {
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
