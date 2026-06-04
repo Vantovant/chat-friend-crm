@@ -11,6 +11,7 @@ type UnmatchedRow = {
   id: string;
   phone_hash: string;
   phone_last4: string | null;
+  phone_e164: string | null;
   last_body_preview: string | null;
   status: string;
   linked_contact_id: string | null;
