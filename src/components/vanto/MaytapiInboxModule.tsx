@@ -81,7 +81,7 @@ export function MaytapiInboxModule() {
         .limit(500),
       supabase
         .from('maytapi_inbound_unmatched')
-        .select('id, phone_hash, phone_last4, last_body_preview, last_seen_at, message_count, status, linked_contact_id')
+        .select('id, phone_hash, phone_last4, phone_e164, last_body_preview, last_seen_at, message_count, status, linked_contact_id')
         .order('last_seen_at', { ascending: false })
         .limit(500),
     ]);
