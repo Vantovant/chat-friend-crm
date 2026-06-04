@@ -83,7 +83,6 @@ Deno.serve(async (req) => {
 
     const url = new URL(req.url);
     const dryRun = url.searchParams.get("dry_run") === "1";
-    const maxPages = Math.min(Number(url.searchParams.get("max_pages") || "20"), 50);
 
     // 1. Load all unmatched rows missing phone_e164.
     const { data: rows, error: rowsErr } = await supabase
@@ -91,66 +90,47 @@ Deno.serve(async (req) => {
       .select("id, phone_hash, phone_last4, status")
       .is("phone_e164", null)
       .neq("status", "dismissed")
-      .limit(1000);
+      .limit(2000);
     if (rowsErr) throw rowsErr;
     const targets = rows || [];
-    const targetByHash = new Map<string, string>(); // hash -> row id
+    const targetByHash = new Map<string, string>();
     for (const r of targets) targetByHash.set((r as any).phone_hash, (r as any).id);
 
     if (targetByHash.size === 0) {
-      return new Response(JSON.stringify({ ok: true, message: "no rows need backfill", scanned: 0, updated: 0 }), {
+      return new Response(JSON.stringify({ ok: true, message: "no rows need backfill", updated: 0 }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // 2. Walk Maytapi message history.
+    // 2. Pull distinct sender phones from webhook_events (the raw inbound logs).
+    const { data: events, error: evErr } = await supabase
+      .from("webhook_events")
+      .select("payload")
+      .eq("source", "maytapi-inbound-legacy")
+      .gte("created_at", "2026-05-13T00:00:00Z")
+      .limit(50000);
+    if (evErr) throw evErr;
+
     const seenPhones = new Set<string>();
-    const matchPlan: Array<{ row_id: string; phone_e164: string }> = [];
-    let pagesFetched = 0;
-    let totalMessages = 0;
-
-    for (let page = 0; page < maxPages; page++) {
-      const apiUrl = `https://api.maytapi.com/api/${PRODUCT_ID}/${PHONE_ID}/getMessages?page=${page}`;
-      const res = await fetch(apiUrl, { headers: { "x-maytapi-key": TOKEN } });
-      pagesFetched++;
-      if (!res.ok) {
-        const detail = await res.text().catch(() => "");
-        return new Response(JSON.stringify({
-          ok: false, error: "maytapi_getMessages_failed", status: res.status, detail: detail.slice(0, 500),
-          pagesFetched, totalMessages, matched: matchPlan.length,
-        }), { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-      }
-      const json: any = await res.json().catch(() => ({}));
-      const list: any[] = Array.isArray(json?.data) ? json.data
-        : Array.isArray(json?.messages) ? json.messages
-        : Array.isArray(json) ? json : [];
-      if (list.length === 0) break;
-      totalMessages += list.length;
-
-      const newPhonesThisPage: string[] = [];
-      for (const m of list) {
-        for (const raw of extractPhones(m)) {
-          const e164 = normalizePhone(raw);
-          if (!e164 || seenPhones.has(e164)) continue;
-          seenPhones.add(e164);
-          newPhonesThisPage.push(e164);
-        }
-      }
-
-      // Hash and match
-      for (const e164 of newPhonesThisPage) {
-        const h = await hmacHex(HASH_SALT, e164);
-        const rowId = targetByHash.get(h);
-        if (rowId) {
-          matchPlan.push({ row_id: rowId, phone_e164: e164 });
-          targetByHash.delete(h); // don't double-update
-          if (targetByHash.size === 0) break;
-        }
-      }
-      if (targetByHash.size === 0) break;
+    for (const ev of events || []) {
+      const p = (ev as any).payload;
+      const raw = p?.user?.phone || p?.message?.from || p?.from;
+      const e164 = normalizePhone(raw);
+      if (e164) seenPhones.add(e164);
     }
 
-    // 3. Apply updates.
+    // 3. Hash and match.
+    const matchPlan: Array<{ row_id: string; phone_e164: string }> = [];
+    for (const e164 of seenPhones) {
+      const h = await hmacHex(HASH_SALT, e164);
+      const rowId = targetByHash.get(h);
+      if (rowId) {
+        matchPlan.push({ row_id: rowId, phone_e164: e164 });
+        targetByHash.delete(h);
+      }
+    }
+
+    // 4. Apply updates.
     let updated = 0;
     if (!dryRun) {
       for (const m of matchPlan) {
@@ -167,8 +147,7 @@ Deno.serve(async (req) => {
       ok: true,
       dry_run: dryRun,
       rows_needing_backfill: targets.length,
-      pages_fetched: pagesFetched,
-      messages_scanned: totalMessages,
+      events_scanned: (events || []).length,
       unique_phones_seen: seenPhones.size,
       matched: matchPlan.length,
       updated,
