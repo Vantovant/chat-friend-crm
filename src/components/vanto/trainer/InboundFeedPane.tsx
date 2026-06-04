@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Loader2, MessageCircle, RefreshCw, Wand2 } from "lucide-react";
+import { Loader2, Lock, MessageCircle, RefreshCw, Wand2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
+import { useCurrentUser } from "@/hooks/use-current-user";
 import type { TrainerChannel } from "../AutoReplyTrainerModule";
 import CorrectReplyModal, { CorrectionTarget } from "./CorrectReplyModal";
 
@@ -26,6 +27,8 @@ type FbRow = {
 };
 
 export default function InboundFeedPane({ channel, onCorrected }: { channel: TrainerChannel; onCorrected?: () => void }) {
+  const currentUser = useCurrentUser();
+  const canCorrect = currentUser?.role === "admin" || currentUser?.role === "super_admin";
   const [loading, setLoading] = useState(true);
   const [waRows, setWaRows] = useState<InboundRow[]>([]);
   const [fbRows, setFbRows] = useState<FbRow[]>([]);
@@ -166,8 +169,10 @@ export default function InboundFeedPane({ channel, onCorrected }: { channel: Tra
                 )}
                 <p className="text-sm text-foreground mb-2 line-clamp-3">{r.body}</p>
                 <button onClick={() => openFbCorrect(r)}
-                  className="text-xs px-2 h-7 rounded vanto-gradient text-primary-foreground font-medium inline-flex items-center gap-1">
-                  <Wand2 size={12} /> Correct this reply
+                  disabled={!canCorrect}
+                  title={canCorrect ? "Create an override training rule from this reply" : "Admin or Super Admin role required to train rules"}
+                  className="text-xs px-2 h-7 rounded vanto-gradient text-primary-foreground font-medium inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed">
+                  {canCorrect ? <Wand2 size={12} /> : <Lock size={12} />} Correct this reply
                 </button>
               </div>
             ))
@@ -192,8 +197,10 @@ export default function InboundFeedPane({ channel, onCorrected }: { channel: Tra
                 </p>
               )}
               <button onClick={() => openWaCorrect(r)}
-                className="text-xs px-2 h-7 rounded vanto-gradient text-primary-foreground font-medium inline-flex items-center gap-1">
-                <Wand2 size={12} /> Correct this reply
+                disabled={!canCorrect}
+                title={canCorrect ? "Create an override training rule from this reply" : "Admin or Super Admin role required to train rules"}
+                className="text-xs px-2 h-7 rounded vanto-gradient text-primary-foreground font-medium inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed">
+                {canCorrect ? <Wand2 size={12} /> : <Lock size={12} />} Correct this reply
               </button>
             </div>
           ))
