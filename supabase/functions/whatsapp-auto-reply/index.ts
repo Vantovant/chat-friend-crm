@@ -223,7 +223,7 @@ function sanitizeOutboundText(input: string): {
 type TopicCategory = "products" | "opportunity" | "compensation" | "wellness" | "general";
 
 type IntentResult = {
-  intent: "menu_1" | "menu_2" | "menu_3" | "greeting" | "call_me" | "whatsapp_me" | "available_at" | "freeform";
+  intent: "menu_1" | "menu_2" | "menu_3" | "greeting" | "call_me" | "whatsapp_me" | "available_at" | "yes_interest" | "freeform";
   query: string;
   collections: string[];
   mode: "strict" | "assisted";
@@ -232,6 +232,7 @@ type IntentResult = {
   detectedProduct: string | null;
   availableTime: string | null;
 };
+
 
 function detectIntent(normalized: string): IntentResult {
   const base: Omit<IntentResult, "intent" | "query" | "collections" | "mode"> = {
