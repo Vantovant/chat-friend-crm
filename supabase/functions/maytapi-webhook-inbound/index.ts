@@ -309,7 +309,7 @@ Deno.serve(async (req) => {
       // Find or create contact by phone_normalized
       let { data: contact } = await supabase
         .from("contacts")
-        .select("id")
+        .select("id, assigned_to, created_by")
         .eq("phone_normalized", phoneE164)
         .eq("is_deleted", false)
         .maybeSingle();
@@ -327,7 +327,7 @@ Deno.serve(async (req) => {
             interest: "medium",
             temperature: "warm",
           })
-          .select("id")
+          .select("id, assigned_to, created_by")
           .single();
         if (ce) {
           console.error("[maytapi-inbound] contact insert failed:", ce.message);
@@ -368,6 +368,27 @@ Deno.serve(async (req) => {
         })
         .select("id")
         .single();
+
+      // Keep the Maytapi Inbox Conversations tab in sync with the main CRM inbox.
+      // This was the missing write path for the active webhook endpoint.
+      const performedBy = contact?.assigned_to || contact?.created_by;
+      if (performedBy) {
+        await supabase.from("contact_activity").insert({
+          contact_id: contact!.id,
+          type: "maytapi_message",
+          performed_by: performedBy,
+          metadata: {
+            direction: "inbound",
+            maytapi_message_id: providerMessageId,
+            phone_last4: phoneE164.replace(/\D/g, "").slice(-4),
+            msg_type: msg.type || "text",
+            body_preview: text.slice(0, 140),
+            body: text,
+            match_source: "phone_normalized",
+            received_at: new Date().toISOString(),
+          },
+        }).then(() => {}, (e: any) => console.warn("[maytapi-inbound] contact_activity warn:", e?.message));
+      }
 
       // Update conversation timestamps + unread
       await supabase.from("conversations").update({
