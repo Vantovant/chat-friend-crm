@@ -488,7 +488,7 @@ function LinkContactDialog({
         <DialogHeader>
           <DialogTitle>Link unmatched number</DialogTitle>
           <DialogDescription>
-            ••••{target?.phone_last4 || '????'} — search an existing contact or create a new one.
+            {target?.phone_e164 || `••••${target?.phone_last4 || '????'}`} — search an existing contact or create a new one.
           </DialogDescription>
         </DialogHeader>
 
