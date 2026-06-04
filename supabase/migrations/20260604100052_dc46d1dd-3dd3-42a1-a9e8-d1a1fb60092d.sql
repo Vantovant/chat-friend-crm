@@ -1,0 +1,1 @@
+ALTER TABLE public.maytapi_inbound_unmatched ADD COLUMN IF NOT EXISTS phone_e164 TEXT;
