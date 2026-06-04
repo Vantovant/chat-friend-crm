@@ -1,0 +1,2 @@
+ALTER TABLE public.auto_reply_corrections DROP CONSTRAINT IF EXISTS auto_reply_corrections_channel_check;
+ALTER TABLE public.auto_reply_corrections ADD CONSTRAINT auto_reply_corrections_channel_check CHECK (channel IN ('maytapi','twilio','groups'));
