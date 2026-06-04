@@ -32,6 +32,16 @@ type UnmatchedRow = {
 
 type ContactLite = { id: string; name: string; phone: string };
 
+type MaytapiMessageRow = {
+  id: string;
+  conversation_id: string;
+  content: string;
+  message_type: string;
+  provider_message_id: string | null;
+  created_at: string;
+  conversations?: { contact_id: string } | null;
+};
+
 function formatTime(iso: string | null) {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -54,11 +64,18 @@ export function MaytapiInboxModule() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: act, error: e1 }, { data: un, error: e2 }] = await Promise.all([
+    const [{ data: act, error: e1 }, { data: msgs, error: e2 }, { data: un, error: e3 }] = await Promise.all([
       supabase
         .from('contact_activity')
         .select('id, contact_id, type, created_at, metadata')
         .in('type', ['maytapi_message', 'maytapi_message_unmatched'])
+        .order('created_at', { ascending: false })
+        .limit(500),
+      supabase
+        .from('messages')
+        .select('id, conversation_id, content, message_type, provider_message_id, created_at, conversations!inner(contact_id)')
+        .eq('provider', 'maytapi')
+        .eq('is_outbound', false)
         .order('created_at', { ascending: false })
         .limit(500),
       supabase
@@ -69,8 +86,33 @@ export function MaytapiInboxModule() {
     ]);
     if (e1) console.error('matched load', e1);
     if (e2) console.error('unmatched load', e2);
+    if (e3) console.error('unmatched load', e3);
 
-    const rows = (act || []) as MatchedRow[];
+    const activityRows = (act || []) as MatchedRow[];
+    const messageRows = ((msgs || []) as MaytapiMessageRow[])
+      .filter((m) => m.conversations?.contact_id)
+      .map((m) => ({
+        id: `message-${m.id}`,
+        contact_id: m.conversations!.contact_id,
+        type: 'maytapi_message',
+        created_at: m.created_at,
+        metadata: {
+          body: m.content,
+          body_preview: m.content,
+          direction: 'inbound',
+          maytapi_message_id: m.provider_message_id,
+          msg_type: m.message_type,
+          source: 'messages',
+        },
+      }));
+    const byKey = new Map<string, MatchedRow>();
+    [...activityRows, ...messageRows].forEach((row) => {
+      const messageId = row.metadata?.maytapi_message_id;
+      const key = messageId ? `${row.contact_id}:${messageId}` : row.id;
+      const existing = byKey.get(key);
+      if (!existing || new Date(row.created_at) > new Date(existing.created_at)) byKey.set(key, row);
+    });
+    const rows = Array.from(byKey.values());
     const ids = Array.from(new Set(rows.map((r) => r.contact_id).filter(Boolean)));
     let contacts: Record<string, ContactLite> = {};
     if (ids.length) {
