@@ -383,8 +383,18 @@ Deno.serve(async (req) => {
         .single();
 
       // Keep the Maytapi Inbox Conversations tab in sync with the main CRM inbox.
-      // This was the missing write path for the active webhook endpoint.
-      const performedBy = contact?.assigned_to || contact?.created_by;
+      // Fall back to the first profile so Maytapi visibility is not skipped for
+      // newly-created/unassigned contacts that have no owner yet.
+      let performedBy = contact?.assigned_to || contact?.created_by || null;
+      if (!performedBy) {
+        const { data: ownerProfile } = await supabase
+          .from("profiles")
+          .select("id")
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        performedBy = ownerProfile?.id || null;
+      }
       if (performedBy) {
         const phoneDigits = phoneE164.replace(/\D/g, "");
         const phoneHash = HASH_SALT ? await hmacHex(HASH_SALT, phoneE164) : phoneE164;
