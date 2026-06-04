@@ -264,12 +264,22 @@ export function GroupAdministratorModule() {
         <div className="flex items-center justify-between">
           <div>
             <h3 className="font-semibold text-sm">Pilot group selector</h3>
-            <p className="text-[11px] text-muted-foreground">Choose up to 2 groups for monitoring. Selection is read-only — no auto-scan.</p>
+            <p className="text-[11px] text-muted-foreground">
+              {showAll
+                ? 'Showing all groups. Toggle Auto-reply ON to mark a group as “mine”.'
+                : 'Showing only groups you’ve enabled Auto-reply on. Use “Show all” to add more.'}
+            </p>
           </div>
-          <Button size="sm" onClick={saveSelection} disabled={saving}>
-            {saving ? <Loader2 size={14} className="animate-spin mr-1" /> : null}
-            Save selection ({selected.length})
-          </Button>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">Show all</span>
+              <Switch checked={showAll} onCheckedChange={setShowAll} aria-label="Show all groups" />
+            </div>
+            <Button size="sm" onClick={saveSelection} disabled={saving}>
+              {saving ? <Loader2 size={14} className="animate-spin mr-1" /> : null}
+              Save selection ({selected.length})
+            </Button>
+          </div>
         </div>
         <div className="grid gap-1.5 max-h-72 overflow-auto">
           {groups.map((g) => {
