@@ -5,6 +5,7 @@ import { AppSidebar } from '@/components/vanto/AppSidebar';
 import { DashboardModule } from '@/components/vanto/DashboardModule';
 import { InboxModule } from '@/components/vanto/InboxModule';
 import { MaytapiInboxModule } from '@/components/vanto/MaytapiInboxModule';
+import { MaytapiUnmatchedModule } from '@/components/vanto/MaytapiUnmatchedModule';
 import { ContactsModule } from '@/components/vanto/ContactsModule';
 import { CRMModule } from '@/components/vanto/CRMModule';
 import { AutomationsModule } from '@/components/vanto/AutomationsModule';
@@ -56,6 +57,7 @@ const Index = () => {
       case 'dashboard': return <DashboardModule />;
       case 'inbox': return <InboxModule />;
       case 'maytapi-inbox': return <MaytapiInboxModule />;
+      case 'maytapi-unmatched': return <MaytapiUnmatchedModule />;
       case 'contacts': return <ContactsModule />;
       case 'crm': return <CRMModule />;
       case 'automations': return <AutomationsModule />;
