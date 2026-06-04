@@ -73,6 +73,40 @@ Deno.serve(async (req) => {
       return json({ ok: true, skipped: 'already_summarized' }, 200);
     }
 
+    // TRAINER LAYER (channel=facebook) — admin-managed correction rules, gated on feature flag.
+    let trainerBlock = '';
+    let trainerCount = 0;
+    try {
+      const { data: fbFlag } = await supabase
+        .from('integration_settings')
+        .select('value')
+        .eq('key', 'trainer_channel_facebook_enabled')
+        .maybeSingle();
+      const fbEnabled = fbFlag ? (fbFlag.value === 'true' || fbFlag.value === '1') : false;
+      if (fbEnabled) {
+        const { data: rules } = await supabase
+          .from('ai_trainer_rules')
+          .select('title,instruction,priority')
+          .eq('enabled', true)
+          .eq('channel', 'facebook');
+        const list = rules || [];
+        trainerCount = list.length;
+        if (list.length) {
+          const order: Record<string, number> = { override: 0, strong: 1, advisory: 2 };
+          list.sort((a: any, b: any) => (order[a.priority] ?? 9) - (order[b.priority] ?? 9));
+          const lines = list.map((r: any) => {
+            const tag = r.priority === 'override' ? '🛑 HARD OVERRIDE'
+              : r.priority === 'strong' ? '⚠️ STRONG' : '💡 ADVISORY';
+            return `${tag} — ${r.title}\n${r.instruction}`;
+          }).join('\n\n');
+          trainerBlock = `\n═══ TRAINER RULES ═══\n${lines}\n═══════════════════════\n`;
+        }
+      }
+    } catch (e: any) {
+      console.warn('[fb-summarize] trainer layer load failed (non-fatal):', e?.message);
+    }
+    console.log('[fb-summarize] trainer_rules_loaded=', trainerCount);
+
     // Call Lovable AI Gateway
     const aiRes = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -94,7 +128,7 @@ Rules:
 - cta: action-driven message that INCLUDES sponsor code 787262.
 - emotional: heartfelt story/testimony framing.
 - NO health/medical claims, NO prices under R100, NO "cure" / "guaranteed" / "FDA" wording.
-- Do NOT include the Facebook link in your text — it will be appended automatically.`,
+- Do NOT include the Facebook link in your text — it will be appended automatically.${trainerBlock}`,
           },
           {
             role: 'user',
