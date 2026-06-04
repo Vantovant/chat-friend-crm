@@ -57,7 +57,7 @@ export function MaytapiUnmatchedModule() {
       last4s.map(async (l4) => {
         const { data: cs } = await supabase
           .from("contacts")
-          .select("id, full_name, phone_normalized, lead_type")
+          .select("id, name, phone_normalized, lead_type")
           .like("phone_normalized", `%${l4}`)
           .eq("is_deleted", false)
           .limit(10);
@@ -181,7 +181,7 @@ export function MaytapiUnmatchedModule() {
                       {candidates.map(c => (
                         <div key={c.id} className="flex items-center justify-between gap-3 border rounded-md px-3 py-2">
                           <div className="min-w-0">
-                            <div className="text-sm font-medium truncate">{c.full_name || "(no name)"}</div>
+                            <div className="text-sm font-medium truncate">{c.name || "(no name)"}</div>
                             <div className="text-xs text-muted-foreground font-mono">{c.phone_normalized}</div>
                           </div>
                           <div className="flex items-center gap-2">
