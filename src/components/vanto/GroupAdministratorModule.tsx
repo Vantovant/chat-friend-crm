@@ -80,6 +80,7 @@ export function GroupAdministratorModule() {
   const [members, setMembers] = useState<Record<string, Member[]>>({});
   const [audit, setAudit] = useState<AuditRow[]>([]);
   const [lastScan, setLastScan] = useState<ScanResult | null>(null);
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -263,15 +264,25 @@ export function GroupAdministratorModule() {
         <div className="flex items-center justify-between">
           <div>
             <h3 className="font-semibold text-sm">Pilot group selector</h3>
-            <p className="text-[11px] text-muted-foreground">Choose up to 2 groups for monitoring. Selection is read-only — no auto-scan.</p>
+            <p className="text-[11px] text-muted-foreground">
+              {showAll
+                ? 'Showing all groups. Toggle Auto-reply ON to mark a group as “mine”.'
+                : 'Showing only groups you’ve enabled Auto-reply on. Use “Show all” to add more.'}
+            </p>
           </div>
-          <Button size="sm" onClick={saveSelection} disabled={saving}>
-            {saving ? <Loader2 size={14} className="animate-spin mr-1" /> : null}
-            Save selection ({selected.length})
-          </Button>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">Show all</span>
+              <Switch checked={showAll} onCheckedChange={setShowAll} aria-label="Show all groups" />
+            </div>
+            <Button size="sm" onClick={saveSelection} disabled={saving}>
+              {saving ? <Loader2 size={14} className="animate-spin mr-1" /> : null}
+              Save selection ({selected.length})
+            </Button>
+          </div>
         </div>
         <div className="grid gap-1.5 max-h-72 overflow-auto">
-          {groups.map((g) => {
+          {(showAll ? groups : groups.filter((g) => g.auto_reply_enabled)).map((g) => {
             const r = reports[g.group_jid!];
             const ready = r ? 'READY' : 'PARTIAL';
             return (
@@ -298,7 +309,11 @@ export function GroupAdministratorModule() {
               </div>
             );
           })}
-          {groups.length === 0 && <p className="text-xs text-muted-foreground py-4 text-center">No groups with valid JID found.</p>}
+          {(showAll ? groups : groups.filter((g) => g.auto_reply_enabled)).length === 0 && (
+            <p className="text-xs text-muted-foreground py-4 text-center">
+              {showAll ? 'No groups with valid JID found.' : 'No groups with Auto-reply enabled yet. Click “Show all” to enable some.'}
+            </p>
+          )}
         </div>
       </div>
 
