@@ -154,9 +154,21 @@ export function MaytapiUnmatchedModule() {
             <Card key={row.id}>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between gap-3 flex-wrap">
-                  <CardTitle className="text-base flex items-center gap-2">
+                  <CardTitle className="text-base flex items-center gap-2 flex-wrap">
                     <Phone className="w-4 h-4" />
-                    Ends in <span className="font-mono">{row.phone_last4 || "??"}</span>
+                    {row.phone_e164 ? (
+                      <a
+                        href={`https://wa.me/${row.phone_e164.replace(/\D/g, "")}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-mono text-primary hover:underline"
+                        title="Open in WhatsApp"
+                      >
+                        {row.phone_e164}
+                      </a>
+                    ) : (
+                      <>Ends in <span className="font-mono">{row.phone_last4 || "??"}</span></>
+                    )}
                     <Badge variant="secondary">{row.message_count} msg{row.message_count !== 1 ? "s" : ""}</Badge>
                   </CardTitle>
                   <div className="text-xs text-muted-foreground">
