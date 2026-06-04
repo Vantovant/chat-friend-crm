@@ -622,8 +622,10 @@ Deno.serve(async (req) => {
         .eq("id", linkedGateRow.id);
     }
   } else {
-    // Unmatched: minimal masked gate record only. No body. Generic label.
-    const GENERIC_LABEL = "Message received from unknown number.";
+    // Unmatched: masked gate record. Phone stays hashed (last4 only), but the
+    // actual message preview is stored so operators can read the inbound text
+    // from the Maytapi Inbox → Unmatched tab and decide who to link.
+    const bodyPreview = preview(text) || "(no text)";
     const { data: existing } = await admin
       .from("maytapi_inbound_unmatched")
       .select("id, message_count, status")
@@ -638,6 +640,7 @@ Deno.serve(async (req) => {
         await admin.from("maytapi_inbound_unmatched").update({
           message_count: (existing as any).message_count + 1,
           last_seen_at: receivedAt,
+          last_body_preview: bodyPreview,
         }).eq("id", (existing as any).id);
       }
       // ignored: silently drop, do not advance counters or write body.
@@ -646,7 +649,7 @@ Deno.serve(async (req) => {
         user_id: ownerId,
         phone_hash: phHash,
         phone_last4: ph4,
-        last_body_preview: GENERIC_LABEL,
+        last_body_preview: bodyPreview,
       });
     }
   }
