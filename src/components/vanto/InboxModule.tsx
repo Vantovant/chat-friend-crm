@@ -124,10 +124,12 @@ export function InboxModule() {
   /* ── Fetch messages ── */
   const fetchMessages = useCallback(async (convId: string) => {
     setMsgLoading(true);
+    // Twilio Inbox: exclude Maytapi-sourced messages (those live in the Maytapi Inbox).
     const { data, error } = await supabase
       .from('messages')
       .select('*')
       .eq('conversation_id', convId)
+      .or('provider.is.null,provider.neq.maytapi')
       .order('created_at', { ascending: true })
       .limit(500);
     if (!error && data) setMessages(data as Message[]);
@@ -214,6 +216,8 @@ export function InboxModule() {
         { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
           const newMsg = payload.new as Message;
+          // Skip Maytapi messages in the Twilio Inbox.
+          if ((newMsg as any).provider === 'maytapi') return;
           if (newMsg.conversation_id === selectedConvId) {
             setMessages(prev => {
               if (prev.some(m => m.id === newMsg.id)) return prev;

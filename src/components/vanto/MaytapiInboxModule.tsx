@@ -23,6 +23,7 @@ type UnmatchedRow = {
   id: string;
   phone_hash: string;
   phone_last4: string | null;
+  phone_e164: string | null;
   last_body_preview: string | null;
   last_seen_at: string | null;
   message_count: number | null;
@@ -80,7 +81,7 @@ export function MaytapiInboxModule() {
         .limit(500),
       supabase
         .from('maytapi_inbound_unmatched')
-        .select('id, phone_hash, phone_last4, last_body_preview, last_seen_at, message_count, status, linked_contact_id')
+        .select('id, phone_hash, phone_last4, phone_e164, last_body_preview, last_seen_at, message_count, status, linked_contact_id')
         .order('last_seen_at', { ascending: false })
         .limit(500),
     ]);
@@ -170,7 +171,10 @@ export function MaytapiInboxModule() {
     if (!search.trim()) return base;
     const s = search.toLowerCase();
     return base.filter(
-      (u) => (u.phone_last4 || '').includes(s) || (u.last_body_preview || '').toLowerCase().includes(s)
+      (u) =>
+        (u.phone_e164 || '').toLowerCase().includes(s) ||
+        (u.phone_last4 || '').includes(s) ||
+        (u.last_body_preview || '').toLowerCase().includes(s)
     );
   }, [unmatched, search]);
 
@@ -283,7 +287,20 @@ export function MaytapiInboxModule() {
                       <div className="flex-1 min-w-0">
                         <div className="flex justify-between gap-2">
                           <p className="text-sm font-medium truncate">
-                            ••••{u.phone_last4 || '????'}
+                            {u.phone_e164 ? (
+                              <a
+                                href={`https://wa.me/${u.phone_e164.replace(/\D/g, '')}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="font-mono text-primary hover:underline"
+                                title="Open in WhatsApp"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {u.phone_e164}
+                              </a>
+                            ) : (
+                              <>••••{u.phone_last4 || '????'}</>
+                            )}
                             <span className="ml-2 text-xs text-muted-foreground">
                               {u.message_count || 0} msg{(u.message_count || 0) !== 1 ? 's' : ''}
                             </span>
@@ -471,7 +488,7 @@ function LinkContactDialog({
         <DialogHeader>
           <DialogTitle>Link unmatched number</DialogTitle>
           <DialogDescription>
-            ••••{target?.phone_last4 || '????'} — search an existing contact or create a new one.
+            {target?.phone_e164 || `••••${target?.phone_last4 || '????'}`} — search an existing contact or create a new one.
           </DialogDescription>
         </DialogHeader>
 
