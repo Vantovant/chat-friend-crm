@@ -309,7 +309,11 @@ export function GroupAdministratorModule() {
               </div>
             );
           })}
-          {groups.length === 0 && <p className="text-xs text-muted-foreground py-4 text-center">No groups with valid JID found.</p>}
+          {(showAll ? groups : groups.filter((g) => g.auto_reply_enabled)).length === 0 && (
+            <p className="text-xs text-muted-foreground py-4 text-center">
+              {showAll ? 'No groups with valid JID found.' : 'No groups with Auto-reply enabled yet. Click “Show all” to enable some.'}
+            </p>
+          )}
         </div>
       </div>
 
