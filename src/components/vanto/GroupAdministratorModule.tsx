@@ -282,7 +282,7 @@ export function GroupAdministratorModule() {
           </div>
         </div>
         <div className="grid gap-1.5 max-h-72 overflow-auto">
-          {groups.map((g) => {
+          {(showAll ? groups : groups.filter((g) => g.auto_reply_enabled)).map((g) => {
             const r = reports[g.group_jid!];
             const ready = r ? 'READY' : 'PARTIAL';
             return (
