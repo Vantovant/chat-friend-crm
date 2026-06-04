@@ -132,7 +132,58 @@ Deno.serve(async (req) => {
     // Only fires for messages inside the pilot group when zazi_group_reply_mode = emergency_whitelist_auto.
     // Hard-coded approved templates only. No AI free-text. Safety caps enforced.
     if (!isFromMe && isGroupMessage && rawText) {
+      // ── 2b.0: Always log group inbound to maytapi_messages so the AI Trainer
+      // "WhatsApp Groups" feed can show it (joined on conversation_key = group_jid).
+      // We intentionally store the RAW @g.us JID (not hashed) because group JIDs are
+      // not PII — they are visible to every member of the group. 1-on-1 phone-based
+      // conversation_keys are still hashed below.
       try {
+        const groupMsgId = message.id || payload.message?.id || crypto.randomUUID();
+        const senderPhoneRaw = (payload.user?.phone || message.from || "").toString();
+        const senderE164 = normalizePhoneToE164(senderPhoneRaw);
+        const { data: ownerProfile } = await supabase
+          .from("profiles")
+          .select("id")
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+        const ownerId = ownerProfile?.id || null;
+
+        if (ownerId) {
+          // Try to attach a contact if the sender phone is already in the CRM.
+          let groupContactId: string | null = null;
+          if (senderE164) {
+            const { data: existingContact } = await supabase
+              .from("contacts")
+              .select("id")
+              .eq("phone_normalized", senderE164)
+              .eq("is_deleted", false)
+              .maybeSingle();
+            groupContactId = existingContact?.id || null;
+          }
+
+          await supabase.from("maytapi_messages").insert({
+            user_id: ownerId,
+            contact_id: groupContactId,
+            direction: "inbound",
+            maytapi_message_id: String(groupMsgId),
+            phone_hash: HASH_SALT && senderE164 ? await hmacHex(HASH_SALT, senderE164) : (senderE164 || rawConversation),
+            phone_e164: senderE164 || null,
+            phone_last4: senderE164 ? senderE164.replace(/\D/g, "").slice(-4) : null,
+            // RAW group JID — required for the trainer feed join with whatsapp_groups.group_jid.
+            conversation_key: rawConversation,
+            body: rawText,
+            body_preview: rawText.slice(0, 140),
+            media_type: message.type || "text",
+            status: "received",
+            received_at: new Date().toISOString(),
+            raw: payload,
+          }).then(() => {}, (e: any) => console.warn("[maytapi-inbound] group maytapi_messages warn:", e?.message));
+        }
+      } catch (logErr: any) {
+        console.warn("[maytapi-inbound] group inbound log failed (non-fatal):", logErr?.message);
+      }
+
         const { data: gCfg } = await supabase
           .from("integration_settings")
           .select("key,value")
