@@ -118,7 +118,34 @@ const PRICING_PATTERNS = [
   "how much is", "what does", "rand", "zar",
 ];
 
+// ── YES / INTEREST intent (Master Prospector closer) ───────────────────────
+// Triggers ONLY when the message is a clear positive / interest signal.
+// Carefully crafted to avoid "no" / "not interested" / "no thanks".
+const YES_INTEREST_REGEX = [
+  /^(yes|yebo|ja|sure|ok(ay)?|alright|definitely|absolutely|cool|sharp|👍|✅)[\s!.?]*$/i,
+  /^(yes\s+(please|pls|thanks|thank you|sure))/i,
+  /^(i'?m\s+)?(interested|keen|in|down|game|ready)\b/i,
+  /\b(tell|send|share|give|drop)\s+(me\s+)?(more|info|details?|the\s+(link|info|details?)|it)\b/i,
+  /\b(send|share|drop)\s+(me\s+)?(a\s+)?link\b/i,
+  /\b(how\s+(do|can)\s+i|where\s+do\s+i)\s+(join|register|sign\s*up|start|get\s+started)\b/i,
+  /\b(sign|count)\s+me\s+(up|in)\b/i,
+  /\b(register|enrol|enroll)\s+me\b/i,
+  /\b(i\s+want\s+(to\s+)?(join|register|sign\s*up|try|start|know|learn))/i,
+  /\b(let'?s\s+(do\s+it|go|start))/i,
+  /\b(where\s+(can\s+i\s+)?(buy|order))/i,
+  /\b(ready\s+to\s+(join|start|buy|register))/i,
+];
+const NEGATIVE_GUARD_REGEX = /\b(no|not|never|don'?t|stop|unsubscribe|cancel|maybe later|busy|not interested|not now)\b/i;
+
+function isYesInterest(normalized: string): boolean {
+  const t = (normalized || "").trim();
+  if (!t || t.length > 160) return false;
+  if (NEGATIVE_GUARD_REGEX.test(t)) return false;
+  return YES_INTEREST_REGEX.some((r) => r.test(t));
+}
+
 const STRICT_COLLECTIONS = new Set(["products", "compensation", "orders"]);
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TRACK B SHARED SAFETY HELPER (2026-05-02)
@@ -196,7 +223,7 @@ function sanitizeOutboundText(input: string): {
 type TopicCategory = "products" | "opportunity" | "compensation" | "wellness" | "general";
 
 type IntentResult = {
-  intent: "menu_1" | "menu_2" | "menu_3" | "greeting" | "call_me" | "whatsapp_me" | "available_at" | "freeform";
+  intent: "menu_1" | "menu_2" | "menu_3" | "greeting" | "call_me" | "whatsapp_me" | "available_at" | "yes_interest" | "freeform";
   query: string;
   collections: string[];
   mode: "strict" | "assisted";
@@ -205,6 +232,7 @@ type IntentResult = {
   detectedProduct: string | null;
   availableTime: string | null;
 };
+
 
 function detectIntent(normalized: string): IntentResult {
   const base: Omit<IntentResult, "intent" | "query" | "collections" | "mode"> = {
@@ -232,6 +260,12 @@ function detectIntent(normalized: string): IntentResult {
       return { intent: "greeting", query: "", collections: [], mode: "assisted", ...base };
     }
   }
+
+  // YES / interest closer — runs AFTER greetings, BEFORE freeform routing.
+  if (isYesInterest(normalized)) {
+    return { intent: "yes_interest", query: "", collections: [], mode: "assisted", ...base, topicCategory: "opportunity" };
+  }
+
 
   // Detect product alias
   let detectedProduct: string | null = null;
@@ -1083,6 +1117,42 @@ Deno.serve(async (req) => {
     replyContent = GREETING_REPLY;
     actionTaken = "greeting_sent";
     diag.answer_source = "static_greeting";
+  } else if (intent.intent === "yes_interest") {
+    // ── Master Prospector CLOSER (auto-send, sponsor 787262) ──
+    const { data: ctaRows } = await svc
+      .from("integration_settings")
+      .select("key, value")
+      .in("key", ["whatsapp_group_invite_link", "registration_form_url"]);
+    const ctaMap: Record<string, string> = {};
+    (ctaRows || []).forEach((r: any) => { ctaMap[r.key] = r.value; });
+    const groupLink = ctaMap["whatsapp_group_invite_link"] || "https://chat.whatsapp.com/Efmbxxh5Wrz7ulfzRWVHPL?s=cl&p=a&ilr=1";
+    const regLink = ctaMap["registration_form_url"] || "https://backoffice.aplgo.com/register/?sp=787262";
+
+    // 3 rotating warm closers — keep it human, avoid template fatigue.
+    const closers = [
+      `Love that 🙌 Two easy next steps depending on how you want to move:\n\n` +
+      `1️⃣ *Join our WhatsApp community* — this is where you can ask *any* question, see what others are using, and the *group administrators* will personally guide you.\n👉 ${groupLink}\n\n` +
+      `2️⃣ *Ready for the special step?* Register here and you're officially in — your sponsor link is already set:\n👉 ${regLink}\n\n` +
+      `Either way, you're not on your own. Welcome 🤝`,
+
+      `Beautiful 💛 Here's the smartest way forward:\n\n` +
+      `➡️ *Start in the group* — ${groupLink}\n` +
+      `Drop your question there anytime. The *admins* are active and will give you a straight, personal answer.\n\n` +
+      `➡️ *Want to take the official step now?* Register through this link:\n${regLink}\n\n` +
+      `Pick whichever feels right — both lead to the same family.`,
+
+      `Awesome ✨ Two doors, both open for you:\n\n` +
+      `🚪 *Door 1 — Community first:* Hop into our WhatsApp group, meet the team, ask the admins anything before you commit.\n${groupLink}\n\n` +
+      `🚪 *Door 2 — Take the step:* If you're ready to register as an APLGO Distributor under our team, here's your link:\n${regLink}\n\n` +
+      `Which one would you like to start with?`,
+    ];
+    // Rotate deterministically per phone so a repeat YES doesn't get the same message twice in a row.
+    const idx = Math.abs(((phone_e164 || "x").split("").reduce((a, c) => a + c.charCodeAt(0), 0)) + new Date().getUTCDate()) % closers.length;
+    replyContent = closers[idx];
+    actionTaken = "yes_interest_closer_sent";
+    diag.answer_source = "static_closer_yes_interest";
+    diag.closer_variant = idx;
+
   } else {
     // ── Knowledge-grounded path ──
     const searchQuery = intent.query;
