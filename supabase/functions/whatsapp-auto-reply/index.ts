@@ -1117,6 +1117,42 @@ Deno.serve(async (req) => {
     replyContent = GREETING_REPLY;
     actionTaken = "greeting_sent";
     diag.answer_source = "static_greeting";
+  } else if (intent.intent === "yes_interest") {
+    // ── Master Prospector CLOSER (auto-send, sponsor 787262) ──
+    const { data: ctaRows } = await svc
+      .from("integration_settings")
+      .select("key, value")
+      .in("key", ["whatsapp_group_invite_link", "registration_form_url"]);
+    const ctaMap: Record<string, string> = {};
+    (ctaRows || []).forEach((r: any) => { ctaMap[r.key] = r.value; });
+    const groupLink = ctaMap["whatsapp_group_invite_link"] || "https://chat.whatsapp.com/Efmbxxh5Wrz7ulfzRWVHPL?s=cl&p=a&ilr=1";
+    const regLink = ctaMap["registration_form_url"] || "https://backoffice.aplgo.com/register/?sp=787262";
+
+    // 3 rotating warm closers — keep it human, avoid template fatigue.
+    const closers = [
+      `Love that 🙌 Two easy next steps depending on how you want to move:\n\n` +
+      `1️⃣ *Join our WhatsApp community* — this is where you can ask *any* question, see what others are using, and the *group administrators* will personally guide you.\n👉 ${groupLink}\n\n` +
+      `2️⃣ *Ready for the special step?* Register here and you're officially in — your sponsor link is already set:\n👉 ${regLink}\n\n` +
+      `Either way, you're not on your own. Welcome 🤝`,
+
+      `Beautiful 💛 Here's the smartest way forward:\n\n` +
+      `➡️ *Start in the group* — ${groupLink}\n` +
+      `Drop your question there anytime. The *admins* are active and will give you a straight, personal answer.\n\n` +
+      `➡️ *Want to take the official step now?* Register through this link:\n${regLink}\n\n` +
+      `Pick whichever feels right — both lead to the same family.`,
+
+      `Awesome ✨ Two doors, both open for you:\n\n` +
+      `🚪 *Door 1 — Community first:* Hop into our WhatsApp group, meet the team, ask the admins anything before you commit.\n${groupLink}\n\n` +
+      `🚪 *Door 2 — Take the step:* If you're ready to register as an APLGO Distributor under our team, here's your link:\n${regLink}\n\n` +
+      `Which one would you like to start with?`,
+    ];
+    // Rotate deterministically per phone so a repeat YES doesn't get the same message twice in a row.
+    const idx = Math.abs(((phoneNormalized || "x").split("").reduce((a, c) => a + c.charCodeAt(0), 0)) + new Date().getUTCDate()) % closers.length;
+    replyContent = closers[idx];
+    actionTaken = "yes_interest_closer_sent";
+    diag.answer_source = "static_closer_yes_interest";
+    diag.closer_variant = idx;
+
   } else {
     // ── Knowledge-grounded path ──
     const searchQuery = intent.query;
