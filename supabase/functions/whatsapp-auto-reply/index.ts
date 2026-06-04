@@ -1222,8 +1222,9 @@ Deno.serve(async (req) => {
       diag.memory_turns = memory.length;
 
       // TRAINER LAYER: load admin-managed correction rules and match against this turn.
-      const allTrainerRules = await loadTrainerRules(svc);
+      const allTrainerRules = await loadTrainerRules(svc, channel);
       const matchedTrainerRules = matchTrainerRules(allTrainerRules, rawInput, intent.detectedProduct);
+      diag.trainer_channel = channel;
       diag.trainer_rules_loaded = allTrainerRules.length;
       diag.trainer_rules_matched = matchedTrainerRules.map((r) => `${r.priority}:${r.title}`);
 
