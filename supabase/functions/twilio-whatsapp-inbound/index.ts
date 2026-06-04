@@ -250,6 +250,7 @@ Deno.serve(async (req) => {
         inbound_content: body,
         phone_e164: phoneE164,
         inbound_message_id: inboundMessageId,
+        channel: 'twilio',
       }),
     }).then(r => r.text()).catch(e => console.warn('[twilio-inbound] Auto-reply fire-and-forget error:', e?.message));
   } catch (e: any) {

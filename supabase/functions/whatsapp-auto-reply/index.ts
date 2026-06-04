@@ -628,12 +628,26 @@ function isSunsetTrainerRule(rule: { title?: string }, nowMs: number): boolean {
   return false;
 }
 
-async function loadTrainerRules(svc: any): Promise<TrainerRule[]> {
+async function loadTrainerRules(svc: any, channel: string = "maytapi"): Promise<TrainerRule[]> {
   try {
+    // Feature-flag check — if this channel's trainer is disabled, return no rules (no-op).
+    const flagKey = `trainer_channel_${channel}_enabled`;
+    const { data: flagRow } = await svc
+      .from("integration_settings")
+      .select("value")
+      .eq("key", flagKey)
+      .maybeSingle();
+    const enabled = flagRow ? (flagRow.value === "true" || flagRow.value === "1") : true;
+    if (!enabled) {
+      console.log(`[auto-reply] trainer layer disabled for channel=${channel}`);
+      return [];
+    }
+
     const { data, error } = await svc
       .from("ai_trainer_rules")
-      .select("id,title,triggers,product,instruction,priority,enabled")
-      .eq("enabled", true);
+      .select("id,title,triggers,product,instruction,priority,enabled,channel")
+      .eq("enabled", true)
+      .eq("channel", channel);
     if (error) {
       console.error("[auto-reply] trainer rules load error:", error.message);
       return [];
@@ -963,7 +977,8 @@ Deno.serve(async (req) => {
     return jsonRes({ ok: false, message: "Invalid JSON" }, 400);
   }
 
-  const { conversation_id, contact_id, inbound_content, phone_e164, inbound_message_id } = body || {};
+  const { conversation_id, contact_id, inbound_content, phone_e164, inbound_message_id, channel: channelParam } = body || {};
+  const channel: string = (channelParam === "twilio" || channelParam === "facebook") ? channelParam : "maytapi";
   if (!conversation_id || !phone_e164) {
     return jsonRes({ ok: false, message: "Missing conversation_id or phone_e164" }, 400);
   }
@@ -1207,8 +1222,9 @@ Deno.serve(async (req) => {
       diag.memory_turns = memory.length;
 
       // TRAINER LAYER: load admin-managed correction rules and match against this turn.
-      const allTrainerRules = await loadTrainerRules(svc);
+      const allTrainerRules = await loadTrainerRules(svc, channel);
       const matchedTrainerRules = matchTrainerRules(allTrainerRules, rawInput, intent.detectedProduct);
+      diag.trainer_channel = channel;
       diag.trainer_rules_loaded = allTrainerRules.length;
       diag.trainer_rules_matched = matchedTrainerRules.map((r) => `${r.priority}:${r.title}`);
 
