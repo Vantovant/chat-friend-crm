@@ -143,6 +143,28 @@ export function GroupAdministratorModule() {
     } finally { setSaving(false); }
   }
 
+  async function toggleAutoReply(g: WGroup, next: boolean) {
+    // Optimistic UI
+    setGroups((arr) => arr.map((x) => x.id === g.id ? { ...x, auto_reply_enabled: next } : x));
+    const { error } = await supabase
+      .from('whatsapp_groups')
+      .update({ auto_reply_enabled: next })
+      .eq('id', g.id);
+    if (error) {
+      setGroups((arr) => arr.map((x) => x.id === g.id ? { ...x, auto_reply_enabled: !next } : x));
+      toast({ title: 'Toggle failed', description: error.message, variant: 'destructive' });
+      return;
+    }
+    toast({
+      title: next ? '🤖 Auto-reply ENABLED' : 'Auto-reply disabled',
+      description: next
+        ? `${g.group_name}: trainer rules will respond (global flag must also be ON).`
+        : `${g.group_name}: no auto-replies will be sent.`,
+    });
+  }
+
+
+
   async function scan(jid: string) {
     setScanning(jid);
     try {
