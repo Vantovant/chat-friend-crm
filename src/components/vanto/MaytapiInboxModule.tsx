@@ -85,7 +85,7 @@ export function MaytapiInboxModule() {
         .limit(500),
     ]);
     if (e1) console.error('matched load', e1);
-    if (e2) console.error('unmatched load', e2);
+    if (e2) console.error('maytapi messages load', e2);
     if (e3) console.error('unmatched load', e3);
 
     const activityRows = (act || []) as MatchedRow[];
