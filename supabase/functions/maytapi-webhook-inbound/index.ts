@@ -184,6 +184,153 @@ Deno.serve(async (req) => {
         console.warn("[maytapi-inbound] group inbound log failed (non-fatal):", logErr?.message);
       }
 
+      // ── BRANCH 2a: Group Auto-Reply Engine (Trainer-rule-only, v1) ──
+      // Refinements locked: trainer rules ONLY (no KB fallback), 2-axis rate limit
+      // (1/group/60s + 1/sender/5min), loop prevention (fromMe already false here,
+      // plus owner-phone guard), per-group toggle + global kill switch.
+      try {
+        const senderE164 = normalizePhoneToE164((payload.user?.phone || message.from || "").toString());
+
+        // Loop guard #2: sender == Maytapi owner phone (configurable).
+        const { data: ownerPhoneRow } = await supabase
+          .from("integration_settings").select("value")
+          .eq("key", "maytapi_owner_phone").maybeSingle();
+        const ownerE164 = ownerPhoneRow?.value ? normalizePhoneToE164(ownerPhoneRow.value) : "";
+        if (ownerE164 && senderE164 && ownerE164 === senderE164) {
+          console.log("[group-engine] skip: sender == maytapi owner (loop guard)");
+          throw new Error("__SKIP_GROUP_ENGINE__");
+        }
+
+        // Global kill switch
+        const { data: globalFlag } = await supabase
+          .from("integration_settings").select("value")
+          .eq("key", "trainer_channel_groups_enabled").maybeSingle();
+        if ((globalFlag?.value || "false").toLowerCase() !== "true") {
+          throw new Error("__SKIP_GROUP_ENGINE__");
+        }
+
+        // Per-group toggle (default OFF)
+        const { data: groupRow } = await supabase
+          .from("whatsapp_groups")
+          .select("id, group_name, auto_reply_enabled, require_mention")
+          .eq("group_jid", rawConversation).eq("is_active", true).maybeSingle();
+        if (!groupRow || groupRow.auto_reply_enabled !== true) {
+          throw new Error("__SKIP_GROUP_ENGINE__");
+        }
+        // require_mention reserved for v2 — read for future, NOT enforced in v1.
+
+        // Trainer rules ONLY (no KB fallback)
+        const { data: rules } = await supabase
+          .from("ai_trainer_rules")
+          .select("id, title, triggers, instruction, correct_answer, priority, enabled")
+          .eq("channel", "groups").eq("enabled", true);
+
+        const lower = rawText.toLowerCase();
+        const priorityRank: Record<string, number> = { strong: 3, medium: 2, weak: 1 };
+        let matched: any = null;
+        let matchedTrigger = "";
+        for (const r of (rules || []) as any[]) {
+          const trigs: string[] = Array.isArray(r.triggers) ? r.triggers : [];
+          const hit = trigs.find((t) => t && lower.includes(String(t).toLowerCase()));
+          if (!hit) continue;
+          if (!matched || (priorityRank[r.priority] || 0) > (priorityRank[matched.priority] || 0)) {
+            matched = r; matchedTrigger = hit;
+          }
+        }
+        if (!matched) { console.log("[group-engine] no rule match"); throw new Error("__SKIP_GROUP_ENGINE__"); }
+
+        // Two-axis rate limit
+        const nowMs = Date.now();
+        const GROUP_WINDOW_MS = 60 * 1000;
+        const SENDER_WINDOW_MS = 5 * 60 * 1000;
+
+        const { data: gT } = await supabase.from("group_reply_throttle")
+          .select("last_reply_at").eq("group_jid", rawConversation).eq("sender_phone", "").maybeSingle();
+        if (gT?.last_reply_at && nowMs - new Date(gT.last_reply_at).getTime() < GROUP_WINDOW_MS) {
+          await supabase.from("option_b_audit_log").insert({
+            channel: "maytapi_group", trigger_type: "group_trainer_blocked",
+            template_label: matched.title, phone_normalized: rawConversation,
+            message_preview: `rate_limit=group_60s sender=${senderE164.slice(-6)}`,
+            delivery_status: "blocked", attempt_outcome: "blocked",
+            operating_mode: "group_trainer_v1",
+            governance_flags: { rule_id: matched.id, scope: "group" },
+          });
+          throw new Error("__SKIP_GROUP_ENGINE__");
+        }
+        if (senderE164) {
+          const { data: sT } = await supabase.from("group_reply_throttle")
+            .select("last_reply_at").eq("group_jid", rawConversation).eq("sender_phone", senderE164).maybeSingle();
+          if (sT?.last_reply_at && nowMs - new Date(sT.last_reply_at).getTime() < SENDER_WINDOW_MS) {
+            await supabase.from("option_b_audit_log").insert({
+              channel: "maytapi_group", trigger_type: "group_trainer_blocked",
+              template_label: matched.title, phone_normalized: rawConversation,
+              message_preview: `rate_limit=sender_5min sender=${senderE164.slice(-6)}`,
+              delivery_status: "blocked", attempt_outcome: "blocked",
+              operating_mode: "group_trainer_v1",
+              governance_flags: { rule_id: matched.id, scope: "sender" },
+            });
+            throw new Error("__SKIP_GROUP_ENGINE__");
+          }
+        }
+
+        const replyBody = (matched.correct_answer || matched.instruction || "").trim();
+        if (!replyBody) { console.log("[group-engine] empty answer"); throw new Error("__SKIP_GROUP_ENGINE__"); }
+
+        const sgRes = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-group`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
+          body: JSON.stringify({ group_jid: rawConversation, message: replyBody, source: "group_trainer_autoreply" }),
+        });
+        const sgData = await sgRes.json().catch(() => ({}));
+
+        if (sgRes.ok) {
+          const nowIso = new Date().toISOString();
+          await supabase.from("group_reply_throttle").upsert(
+            { group_jid: rawConversation, sender_phone: "", last_reply_at: nowIso, reply_count: 1 },
+            { onConflict: "group_jid,sender_phone" },
+          );
+          if (senderE164) {
+            await supabase.from("group_reply_throttle").upsert(
+              { group_jid: rawConversation, sender_phone: senderE164, last_reply_at: nowIso, reply_count: 1 },
+              { onConflict: "group_jid,sender_phone" },
+            );
+          }
+        }
+
+        await supabase.from("option_b_audit_log").insert({
+          channel: "maytapi_group", trigger_type: "group_trainer_autoreply",
+          template_label: matched.title, phone_normalized: rawConversation,
+          message_text: replyBody,
+          message_preview: `sender=${senderE164.slice(-6)} trig=${matchedTrigger.slice(0, 32)} rule=${matched.id}`,
+          provider_message_id: sgData?.message_id || sgData?.provider_message_id || null,
+          delivery_status: sgRes.ok ? "sent" : "failed",
+          attempt_outcome: sgRes.ok ? "sent" : "failed",
+          error_message: sgRes.ok ? null : (sgData?.error || `HTTP ${sgRes.status}`),
+          operating_mode: "group_trainer_v1",
+          reason_allowed: matchedTrigger,
+          safety_checks_passed: [
+            "global_flag_on", "per_group_toggle_on",
+            "loop_guard_fromMe_false", "loop_guard_owner_phone",
+            "trainer_rule_matched", "rate_limit_group_60s_ok", "rate_limit_sender_5min_ok",
+          ],
+          governance_flags: {
+            rule_id: matched.id, priority: matched.priority,
+            group_name: groupRow.group_name,
+            require_mention_reserved: groupRow.require_mention,
+          },
+        });
+
+        console.log("[group-engine] trainer reply sent:", matched.title, sgRes.status);
+        return new Response(JSON.stringify({ ok: true, processed: "group_trainer_autoreply" }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      } catch (engineErr: any) {
+        if (engineErr?.message !== "__SKIP_GROUP_ENGINE__") {
+          console.warn("[group-engine] non-fatal:", engineErr?.message);
+        }
+        // fall through to BRANCH 2b (existing emergency keyword logic)
+      }
+
       try {
         const { data: gCfg } = await supabase
 

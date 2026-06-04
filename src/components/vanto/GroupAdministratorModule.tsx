@@ -4,10 +4,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/hooks/use-toast';
-import { ShieldAlert, Users, RefreshCw, Loader2, Eye, History } from 'lucide-react';
+import { ShieldAlert, Users, RefreshCw, Loader2, Eye, History, Bot } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 import { useCurrentUser } from '@/hooks/use-current-user';
 
-type WGroup = { id: string; group_name: string; group_jid: string | null; is_active?: boolean };
+type WGroup = { id: string; group_name: string; group_jid: string | null; is_active?: boolean; auto_reply_enabled?: boolean; require_mention?: boolean };
 type Persistence = {
   members_attempted: number;
   members_persisted: boolean;
@@ -88,7 +89,7 @@ export function GroupAdministratorModule() {
   async function loadAll() {
     const { data: g } = await supabase
       .from('whatsapp_groups')
-      .select('id, group_name, group_jid, is_active')
+      .select('id, group_name, group_jid, is_active, auto_reply_enabled, require_mention')
       .not('group_jid', 'is', null)
       .eq('is_active', true)
       .order('group_name');
@@ -141,6 +142,28 @@ export function GroupAdministratorModule() {
       toast({ title: 'Save failed', description: e.message, variant: 'destructive' });
     } finally { setSaving(false); }
   }
+
+  async function toggleAutoReply(g: WGroup, next: boolean) {
+    // Optimistic UI
+    setGroups((arr) => arr.map((x) => x.id === g.id ? { ...x, auto_reply_enabled: next } : x));
+    const { error } = await supabase
+      .from('whatsapp_groups')
+      .update({ auto_reply_enabled: next })
+      .eq('id', g.id);
+    if (error) {
+      setGroups((arr) => arr.map((x) => x.id === g.id ? { ...x, auto_reply_enabled: !next } : x));
+      toast({ title: 'Toggle failed', description: error.message, variant: 'destructive' });
+      return;
+    }
+    toast({
+      title: next ? '🤖 Auto-reply ENABLED' : 'Auto-reply disabled',
+      description: next
+        ? `${g.group_name}: trainer rules will respond (global flag must also be ON).`
+        : `${g.group_name}: no auto-replies will be sent.`,
+    });
+  }
+
+
 
   async function scan(jid: string) {
     setScanning(jid);
@@ -252,15 +275,27 @@ export function GroupAdministratorModule() {
             const r = reports[g.group_jid!];
             const ready = r ? 'READY' : 'PARTIAL';
             return (
-              <label key={g.id} className="flex items-center gap-2 p-2 rounded hover:bg-secondary/40 cursor-pointer">
-                <Checkbox checked={selected.includes(g.group_jid!)} onCheckedChange={() => toggleSelect(g.group_jid!)} />
+              <div key={g.id} className="flex items-center gap-2 p-2 rounded hover:bg-secondary/40">
+                <Checkbox
+                  checked={selected.includes(g.group_jid!)}
+                  onCheckedChange={() => toggleSelect(g.group_jid!)}
+                />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate">{g.group_name}</div>
                   <div className="text-[10px] text-muted-foreground font-mono">{maskJid(g.group_jid)}</div>
                 </div>
                 {r && <Badge variant="outline" className="text-[10px]">{r.member_count} members</Badge>}
                 <Badge variant="outline" className={`text-[10px] ${ready === 'READY' ? 'border-primary/40 text-primary' : 'border-muted-foreground/40 text-muted-foreground'}`}>{ready}</Badge>
-              </label>
+                <div className="flex items-center gap-1.5 pl-2 border-l border-border">
+                  <Bot size={12} className={g.auto_reply_enabled ? 'text-primary' : 'text-muted-foreground'} />
+                  <span className="text-[10px] text-muted-foreground">Auto-reply</span>
+                  <Switch
+                    checked={!!g.auto_reply_enabled}
+                    onCheckedChange={(v) => toggleAutoReply(g, v)}
+                    aria-label={`Toggle group auto-reply for ${g.group_name}`}
+                  />
+                </div>
+              </div>
             );
           })}
           {groups.length === 0 && <p className="text-xs text-muted-foreground py-4 text-center">No groups with valid JID found.</p>}

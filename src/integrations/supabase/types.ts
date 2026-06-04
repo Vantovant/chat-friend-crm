@@ -962,6 +962,36 @@ export type Database = {
         }
         Relationships: []
       }
+      group_reply_throttle: {
+        Row: {
+          created_at: string
+          group_jid: string
+          id: string
+          last_reply_at: string
+          reply_count: number
+          sender_phone: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          group_jid: string
+          id?: string
+          last_reply_at?: string
+          reply_count?: number
+          sender_phone?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          group_jid?: string
+          id?: string
+          last_reply_at?: string
+          reply_count?: number
+          sender_phone?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       hot_lead_alerts: {
         Row: {
           alert_channel: string | null
@@ -2414,6 +2444,7 @@ export type Database = {
       }
       whatsapp_groups: {
         Row: {
+          auto_reply_enabled: boolean
           created_at: string
           dedup_at: string | null
           dedup_note: string | null
@@ -2423,9 +2454,11 @@ export type Database = {
           group_name: string
           id: string
           is_active: boolean
+          require_mention: boolean
           user_id: string
         }
         Insert: {
+          auto_reply_enabled?: boolean
           created_at?: string
           dedup_at?: string | null
           dedup_note?: string | null
@@ -2435,9 +2468,11 @@ export type Database = {
           group_name: string
           id?: string
           is_active?: boolean
+          require_mention?: boolean
           user_id: string
         }
         Update: {
+          auto_reply_enabled?: boolean
           created_at?: string
           dedup_at?: string | null
           dedup_note?: string | null
@@ -2447,6 +2482,7 @@ export type Database = {
           group_name?: string
           id?: string
           is_active?: boolean
+          require_mention?: boolean
           user_id?: string
         }
         Relationships: [
