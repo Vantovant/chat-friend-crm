@@ -21,7 +21,7 @@ type UnmatchedRow = {
 
 type ContactMatch = {
   id: string;
-  full_name: string | null;
+  name: string | null;
   phone_normalized: string | null;
   lead_type: string | null;
 };
