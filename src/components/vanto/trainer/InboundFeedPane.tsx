@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2, Lock, MessageCircle, RefreshCw, Wand2 } from "lucide-react";
+import { Loader2, Lock, MessageCircle, RefreshCw, Users, Wand2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/hooks/use-current-user";
@@ -16,14 +16,14 @@ type InboundRow = {
   aiReply?: { id: string; content: string; created_at: string } | null;
 };
 
-type FbRow = {
+type GroupInboundRow = {
   id: string;
   body: string;
-  status: string;
   created_at: string;
-  variant: string;
-  fb_source_post_id: string;
-  source?: { raw_message: string | null; permalink_url: string | null } | null;
+  conversation_key: string; // group JID
+  phone_e164: string | null; // author
+  group_name: string;
+  aiReply?: { id: string; body: string; created_at: string } | null;
 };
 
 export default function InboundFeedPane({ channel, onCorrected }: { channel: TrainerChannel; onCorrected?: () => void }) {
@@ -31,14 +31,13 @@ export default function InboundFeedPane({ channel, onCorrected }: { channel: Tra
   const canCorrect = currentUser?.role === "admin" || currentUser?.role === "super_admin";
   const [loading, setLoading] = useState(true);
   const [waRows, setWaRows] = useState<InboundRow[]>([]);
-  const [fbRows, setFbRows] = useState<FbRow[]>([]);
+  const [groupRows, setGroupRows] = useState<GroupInboundRow[]>([]);
   const [target, setTarget] = useState<CorrectionTarget | null>(null);
 
   const loadWhatsApp = async () => {
     setLoading(true);
     const provider = channel === "twilio" ? "twilio" : "maytapi";
 
-    // 1. Recent inbound messages for this provider
     const { data: msgs, error } = await supabase
       .from("messages")
       .select("id, content, created_at, conversation_id, provider, conversations!inner(contact_id, contacts(id, name, phone_normalized))")
@@ -63,7 +62,6 @@ export default function InboundFeedPane({ channel, onCorrected }: { channel: Tra
       contact: m.conversations?.contacts || null,
     }));
 
-    // 2. For each inbound, look up the AI's outbound reply in the same conversation, after the inbound.
     const convIds = Array.from(new Set(rows.map((r) => r.conversation_id)));
     if (convIds.length > 0) {
       const { data: replies } = await supabase
@@ -82,29 +80,89 @@ export default function InboundFeedPane({ channel, onCorrected }: { channel: Tra
       }
     }
 
-    // Only keep rows where the AI actually replied — those are the ones worth correcting.
     setWaRows(rows.filter((r) => r.aiReply));
     setLoading(false);
   };
 
-  const loadFacebook = async () => {
+  const loadGroups = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("fb_generated_posts")
-      .select("id, body, status, created_at, variant, fb_source_post_id, fb_source_posts(raw_message, permalink_url)")
+
+    // 1. Known groups we post scheduled content to (group_jid populated and active)
+    const { data: groups, error: gErr } = await supabase
+      .from("whatsapp_groups")
+      .select("group_jid, group_name, is_active")
+      .eq("is_active", true)
+      .not("group_jid", "is", null);
+
+    if (gErr) {
+      toast({ title: "Failed to load groups", description: gErr.message, variant: "destructive" });
+      setGroupRows([]);
+      setLoading(false);
+      return;
+    }
+
+    const jidToName = new Map<string, string>();
+    (groups || []).forEach((g: any) => { if (g.group_jid) jidToName.set(g.group_jid, g.group_name); });
+    const jids = Array.from(jidToName.keys());
+
+    if (jids.length === 0) {
+      setGroupRows([]);
+      setLoading(false);
+      return;
+    }
+
+    // 2. Recent inbound messages from those groups
+    const { data: inbound, error: inErr } = await supabase
+      .from("maytapi_messages")
+      .select("id, body, created_at, conversation_key, phone_e164, direction")
+      .eq("direction", "inbound")
+      .in("conversation_key", jids)
       .order("created_at", { ascending: false })
       .limit(50);
-    if (error) toast({ title: "Failed to load FB feed", description: error.message, variant: "destructive" });
-    setFbRows((data || []).map((r: any) => ({ ...r, source: r.fb_source_posts || null })) as any);
+
+    if (inErr) {
+      toast({ title: "Failed to load group feed", description: inErr.message, variant: "destructive" });
+      setGroupRows([]);
+      setLoading(false);
+      return;
+    }
+
+    const rows: GroupInboundRow[] = (inbound || []).map((m: any) => ({
+      id: m.id,
+      body: m.body || "",
+      created_at: m.created_at,
+      conversation_key: m.conversation_key,
+      phone_e164: m.phone_e164,
+      group_name: jidToName.get(m.conversation_key) || m.conversation_key,
+    }));
+
+    // 3. Pair with subsequent outbound reply in the same group (if any)
+    if (rows.length > 0) {
+      const { data: outbound } = await supabase
+        .from("maytapi_messages")
+        .select("id, body, created_at, conversation_key")
+        .eq("direction", "outbound")
+        .in("conversation_key", jids)
+        .order("created_at", { ascending: true });
+
+      for (const r of rows) {
+        const reply = (outbound || []).find(
+          (m: any) => m.conversation_key === r.conversation_key && new Date(m.created_at) > new Date(r.created_at)
+        );
+        if (reply) r.aiReply = { id: reply.id, body: reply.body || "", created_at: reply.created_at };
+      }
+    }
+
+    setGroupRows(rows);
     setLoading(false);
   };
 
   useEffect(() => {
-    if (channel === "facebook") loadFacebook();
+    if (channel === "groups") loadGroups();
     else loadWhatsApp();
   }, [channel]);
 
-  const refresh = () => (channel === "facebook" ? loadFacebook() : loadWhatsApp());
+  const refresh = () => (channel === "groups" ? loadGroups() : loadWhatsApp());
 
   const openWaCorrect = (r: InboundRow) => {
     setTarget({
@@ -117,14 +175,14 @@ export default function InboundFeedPane({ channel, onCorrected }: { channel: Tra
     });
   };
 
-  const openFbCorrect = (r: FbRow) => {
+  const openGroupCorrect = (r: GroupInboundRow) => {
     setTarget({
-      channel: "facebook",
-      originalMessage: r.source?.raw_message || "(no source message)",
-      originalReply: r.body,
-      messageId: null,
+      channel: "groups",
+      originalMessage: r.body,
+      originalReply: r.aiReply?.body || "",
+      messageId: r.aiReply?.id || r.id,
       contactId: null,
-      contactLabel: `${r.variant} variant`,
+      contactLabel: `${r.group_name} · ${r.phone_e164 || "unknown sender"}`,
     });
   };
 
@@ -133,10 +191,13 @@ export default function InboundFeedPane({ channel, onCorrected }: { channel: Tra
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-base font-bold text-foreground flex items-center gap-2">
-            <MessageCircle size={14} className="text-primary" /> Live Inbound Feed
+            {channel === "groups" ? <Users size={14} className="text-primary" /> : <MessageCircle size={14} className="text-primary" />}
+            Live Inbound Feed
           </h3>
           <p className="text-xs text-muted-foreground">
-            {channel === "facebook" ? "Recent generated FB posts." : "Recent inbound messages where the AI auto-replied."}
+            {channel === "groups"
+              ? "Recent inbound messages from WhatsApp groups we post scheduled content to."
+              : "Recent inbound messages where the AI auto-replied."}
           </p>
         </div>
         <button onClick={refresh} disabled={loading}
@@ -150,27 +211,30 @@ export default function InboundFeedPane({ channel, onCorrected }: { channel: Tra
           <div className="flex items-center gap-2 text-muted-foreground text-sm">
             <Loader2 size={14} className="animate-spin" /> Loading…
           </div>
-        ) : channel === "facebook" ? (
-          fbRows.length === 0 ? (
-            <Empty text="No FB generated posts yet." />
+        ) : channel === "groups" ? (
+          groupRows.length === 0 ? (
+            <Empty text="No inbound group messages yet (or no active groups with a Maytapi JID)." />
           ) : (
-            fbRows.map((r) => (
+            groupRows.map((r) => (
               <div key={r.id} className="border border-border/50 rounded-md p-3 bg-secondary/20">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    {r.variant} · {r.status}
+                  <span className="text-xs font-semibold text-foreground flex items-center gap-1">
+                    <Users size={11} className="text-primary" /> {r.group_name}
                   </span>
                   <span className="text-[10px] text-muted-foreground">{new Date(r.created_at).toLocaleString()}</span>
                 </div>
-                {r.source?.raw_message && (
-                  <p className="text-[11px] text-muted-foreground italic mb-1 line-clamp-2">
-                    Source: {r.source.raw_message.slice(0, 140)}…
+                <p className="text-[11px] text-muted-foreground mb-1">From: {r.phone_e164 || "unknown"}</p>
+                <p className="text-sm text-foreground mb-2">{r.body || <span className="italic text-muted-foreground">(no text)</span>}</p>
+                {r.aiReply ? (
+                  <p className="text-sm text-primary/90 bg-primary/5 border border-primary/20 rounded p-2 mb-2 line-clamp-3">
+                    <span className="font-semibold text-primary">AI/Group reply: </span>{r.aiReply.body}
                   </p>
+                ) : (
+                  <p className="text-[11px] italic text-muted-foreground mb-2">No subsequent outbound reply in this group.</p>
                 )}
-                <p className="text-sm text-foreground mb-2 line-clamp-3">{r.body}</p>
-                <button onClick={() => openFbCorrect(r)}
+                <button onClick={() => openGroupCorrect(r)}
                   disabled={!canCorrect}
-                  title={canCorrect ? "Create an override training rule from this reply" : "Admin or Super Admin role required to train rules"}
+                  title={canCorrect ? "Create an override training rule from this group reply" : "Admin or Super Admin role required to train rules"}
                   className="text-xs px-2 h-7 rounded vanto-gradient text-primary-foreground font-medium inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed">
                   {canCorrect ? <Wand2 size={12} /> : <Lock size={12} />} Correct this reply
                 </button>
