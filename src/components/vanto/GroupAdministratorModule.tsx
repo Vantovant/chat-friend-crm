@@ -89,7 +89,7 @@ export function GroupAdministratorModule() {
   async function loadAll() {
     const { data: g } = await supabase
       .from('whatsapp_groups')
-      .select('id, group_name, group_jid, is_active')
+      .select('id, group_name, group_jid, is_active, auto_reply_enabled, require_mention')
       .not('group_jid', 'is', null)
       .eq('is_active', true)
       .order('group_name');
