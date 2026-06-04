@@ -287,7 +287,20 @@ export function MaytapiInboxModule() {
                       <div className="flex-1 min-w-0">
                         <div className="flex justify-between gap-2">
                           <p className="text-sm font-medium truncate">
-                            ••••{u.phone_last4 || '????'}
+                            {u.phone_e164 ? (
+                              <a
+                                href={`https://wa.me/${u.phone_e164.replace(/\D/g, '')}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="font-mono text-primary hover:underline"
+                                title="Open in WhatsApp"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {u.phone_e164}
+                              </a>
+                            ) : (
+                              <>••••{u.phone_last4 || '????'}</>
+                            )}
                             <span className="ml-2 text-xs text-muted-foreground">
                               {u.message_count || 0} msg{(u.message_count || 0) !== 1 ? 's' : ''}
                             </span>
