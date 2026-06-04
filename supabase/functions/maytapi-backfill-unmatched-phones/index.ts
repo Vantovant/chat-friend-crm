@@ -103,30 +103,37 @@ Deno.serve(async (req) => {
       });
     }
 
-    // 2. Pull distinct sender phones from webhook_events (the raw inbound logs).
-    const { data: events, error: evErr } = await supabase
-      .from("webhook_events")
-      .select("payload")
-      .eq("source", "maytapi-inbound-legacy")
-      .gte("created_at", "2026-05-13T00:00:00Z")
-      .limit(50000);
-    if (evErr) throw evErr;
-
-    const seenPhones = new Set<string>();
-    for (const ev of events || []) {
-      const p = (ev as any).payload;
-      const raw = p?.user?.phone || p?.message?.from || p?.from;
-      const e164 = normalizePhone(raw);
-      if (e164) seenPhones.add(e164);
+    // 2. Pull distinct sender phones from webhook_events (paginate past 1000-row cap).
+    const seenDigits = new Set<string>();
+    const PAGE = 1000;
+    let totalEvents = 0;
+    for (let from = 0; from < 100000; from += PAGE) {
+      const { data: events, error: evErr } = await supabase
+        .from("webhook_events")
+        .select("payload")
+        .eq("source", "maytapi-inbound-legacy")
+        .gte("created_at", "2026-05-13T00:00:00Z")
+        .order("created_at", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (evErr) throw evErr;
+      if (!events || events.length === 0) break;
+      totalEvents += events.length;
+      for (const ev of events) {
+        const p = (ev as any).payload;
+        const raw = p?.user?.phone || p?.message?.from || p?.from;
+        const d = digitsOnly(raw);
+        if (d) seenDigits.add(d);
+      }
+      if (events.length < PAGE) break;
     }
 
-    // 3. Hash and match.
+    // 3. Hash (digits-only, matches legacy) and match.
     const matchPlan: Array<{ row_id: string; phone_e164: string }> = [];
-    for (const e164 of seenPhones) {
-      const h = await hmacHex(HASH_SALT, e164);
+    for (const d of seenDigits) {
+      const h = await hmacHex(HASH_SALT, d);
       const rowId = targetByHash.get(h);
       if (rowId) {
-        matchPlan.push({ row_id: rowId, phone_e164: e164 });
+        matchPlan.push({ row_id: rowId, phone_e164: toE164(d) });
         targetByHash.delete(h);
       }
     }
