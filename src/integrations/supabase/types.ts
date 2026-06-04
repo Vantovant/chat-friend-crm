@@ -161,6 +161,8 @@ export type Database = {
       }
       ai_trainer_rules: {
         Row: {
+          channel: string
+          correct_answer: string | null
           created_at: string
           created_by: string | null
           enabled: boolean
@@ -169,11 +171,14 @@ export type Database = {
           notes: string | null
           priority: Database["public"]["Enums"]["trainer_priority"]
           product: string | null
+          source_message_id: string | null
           title: string
           triggers: string[]
           updated_at: string
         }
         Insert: {
+          channel?: string
+          correct_answer?: string | null
           created_at?: string
           created_by?: string | null
           enabled?: boolean
@@ -182,11 +187,14 @@ export type Database = {
           notes?: string | null
           priority?: Database["public"]["Enums"]["trainer_priority"]
           product?: string | null
+          source_message_id?: string | null
           title: string
           triggers?: string[]
           updated_at?: string
         }
         Update: {
+          channel?: string
+          correct_answer?: string | null
           created_at?: string
           created_by?: string | null
           enabled?: boolean
@@ -195,11 +203,79 @@ export type Database = {
           notes?: string | null
           priority?: Database["public"]["Enums"]["trainer_priority"]
           product?: string | null
+          source_message_id?: string | null
           title?: string
           triggers?: string[]
           updated_at?: string
         }
         Relationships: []
+      }
+      auto_reply_corrections: {
+        Row: {
+          channel: string
+          contact_id: string | null
+          corrected_reply: string
+          created_at: string
+          created_by: string | null
+          id: string
+          message_id: string | null
+          original_message: string
+          original_reply: string | null
+          reason: string | null
+          trainer_rule_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          channel: string
+          contact_id?: string | null
+          corrected_reply: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          message_id?: string | null
+          original_message: string
+          original_reply?: string | null
+          reason?: string | null
+          trainer_rule_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          channel?: string
+          contact_id?: string | null
+          corrected_reply?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          message_id?: string | null
+          original_message?: string
+          original_reply?: string | null
+          reason?: string | null
+          trainer_rule_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "auto_reply_corrections_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "auto_reply_corrections_message_id_fkey"
+            columns: ["message_id"]
+            isOneToOne: false
+            referencedRelation: "messages"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "auto_reply_corrections_trainer_rule_id_fkey"
+            columns: ["trainer_rule_id"]
+            isOneToOne: false
+            referencedRelation: "ai_trainer_rules"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       auto_reply_events: {
         Row: {
