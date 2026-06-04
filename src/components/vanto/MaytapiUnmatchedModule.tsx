@@ -104,6 +104,7 @@ export function MaytapiUnmatchedModule() {
     if (!filter.trim()) return true;
     const f = filter.toLowerCase();
     return (r.phone_last4 || "").includes(f)
+      || (r.phone_e164 || "").toLowerCase().includes(f)
       || (r.last_body_preview || "").toLowerCase().includes(f);
   });
 
@@ -113,7 +114,7 @@ export function MaytapiUnmatchedModule() {
         <div>
           <h1 className="text-2xl font-bold">Maytapi Unmatched Inbound</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Inbound messages that hit the legacy webhook before the v2 flip. Raw phone numbers were never stored (privacy by design) — only a hash and the last 4 digits. Use the last-4 + body preview to identify who replied, then link to a contact.
+            Inbound WhatsApp messages from numbers not in your contacts. New rows show the full sender number — click it to open the chat in WhatsApp. Older rows (before this update) only have the last 4 digits, since the raw phone was not stored at the time.
           </p>
         </div>
         <Button variant="outline" onClick={load} disabled={loading}>
@@ -125,17 +126,18 @@ export function MaytapiUnmatchedModule() {
         <CardContent className="pt-4 flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
           <div className="text-sm">
-            <strong>Limitation:</strong> the system cannot auto-send to these — last-4 alone can collide with multiple contacts and risks messaging the wrong person. Pick the right contact yourself; then go to <em>Inbox</em> or <em>Contacts</em> to reach out.
+            <strong>Tip:</strong> click a full number to open it directly in WhatsApp (wa.me link). For rows that only show last-4, use the body preview + Link button to attach to the right contact.
           </div>
         </CardContent>
       </Card>
 
       <Input
-        placeholder="Filter by last-4 or message text…"
+        placeholder="Filter by number, last-4, or message text…"
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
         className="max-w-md"
       />
+
 
       {loading && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground py-8 justify-center">
