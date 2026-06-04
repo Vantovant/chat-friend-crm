@@ -1147,7 +1147,7 @@ Deno.serve(async (req) => {
       `Which one would you like to start with?`,
     ];
     // Rotate deterministically per phone so a repeat YES doesn't get the same message twice in a row.
-    const idx = Math.abs(((phoneNormalized || "x").split("").reduce((a, c) => a + c.charCodeAt(0), 0)) + new Date().getUTCDate()) % closers.length;
+    const idx = Math.abs(((phone_e164 || "x").split("").reduce((a, c) => a + c.charCodeAt(0), 0)) + new Date().getUTCDate()) % closers.length;
     replyContent = closers[idx];
     actionTaken = "yes_interest_closer_sent";
     diag.answer_source = "static_closer_yes_interest";
