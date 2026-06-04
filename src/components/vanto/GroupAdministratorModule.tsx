@@ -4,7 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/hooks/use-toast';
-import { ShieldAlert, Users, RefreshCw, Loader2, Eye, History } from 'lucide-react';
+import { ShieldAlert, Users, RefreshCw, Loader2, Eye, History, Bot } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 import { useCurrentUser } from '@/hooks/use-current-user';
 
 type WGroup = { id: string; group_name: string; group_jid: string | null; is_active?: boolean };
