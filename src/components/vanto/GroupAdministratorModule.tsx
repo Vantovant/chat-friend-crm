@@ -123,10 +123,6 @@ export function GroupAdministratorModule() {
     if (selected.includes(jid)) {
       setSelected(selected.filter((x) => x !== jid));
     } else {
-      if (selected.length >= 2) {
-        toast({ title: 'Stage 1 limit', description: 'Select up to 2 pilot groups.', variant: 'destructive' });
-        return;
-      }
       setSelected([...selected, jid]);
     }
   }
