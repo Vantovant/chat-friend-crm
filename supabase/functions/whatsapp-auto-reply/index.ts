@@ -118,7 +118,34 @@ const PRICING_PATTERNS = [
   "how much is", "what does", "rand", "zar",
 ];
 
+// ── YES / INTEREST intent (Master Prospector closer) ───────────────────────
+// Triggers ONLY when the message is a clear positive / interest signal.
+// Carefully crafted to avoid "no" / "not interested" / "no thanks".
+const YES_INTEREST_REGEX = [
+  /^(yes|yebo|ja|sure|ok(ay)?|alright|definitely|absolutely|cool|sharp|👍|✅)[\s!.?]*$/i,
+  /^(yes\s+(please|pls|thanks|thank you|sure))/i,
+  /^(i'?m\s+)?(interested|keen|in|down|game|ready)\b/i,
+  /\b(tell|send|share|give|drop)\s+(me\s+)?(more|info|details?|the\s+(link|info|details?)|it)\b/i,
+  /\b(send|share|drop)\s+(me\s+)?(a\s+)?link\b/i,
+  /\b(how\s+(do|can)\s+i|where\s+do\s+i)\s+(join|register|sign\s*up|start|get\s+started)\b/i,
+  /\b(sign|count)\s+me\s+(up|in)\b/i,
+  /\b(register|enrol|enroll)\s+me\b/i,
+  /\b(i\s+want\s+(to\s+)?(join|register|sign\s*up|try|start|know|learn))/i,
+  /\b(let'?s\s+(do\s+it|go|start))/i,
+  /\b(where\s+(can\s+i\s+)?(buy|order))/i,
+  /\b(ready\s+to\s+(join|start|buy|register))/i,
+];
+const NEGATIVE_GUARD_REGEX = /\b(no|not|never|don'?t|stop|unsubscribe|cancel|maybe later|busy|not interested|not now)\b/i;
+
+function isYesInterest(normalized: string): boolean {
+  const t = (normalized || "").trim();
+  if (!t || t.length > 160) return false;
+  if (NEGATIVE_GUARD_REGEX.test(t)) return false;
+  return YES_INTEREST_REGEX.some((r) => r.test(t));
+}
+
 const STRICT_COLLECTIONS = new Set(["products", "compensation", "orders"]);
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TRACK B SHARED SAFETY HELPER (2026-05-02)
