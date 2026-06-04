@@ -628,12 +628,26 @@ function isSunsetTrainerRule(rule: { title?: string }, nowMs: number): boolean {
   return false;
 }
 
-async function loadTrainerRules(svc: any): Promise<TrainerRule[]> {
+async function loadTrainerRules(svc: any, channel: string = "maytapi"): Promise<TrainerRule[]> {
   try {
+    // Feature-flag check — if this channel's trainer is disabled, return no rules (no-op).
+    const flagKey = `trainer_channel_${channel}_enabled`;
+    const { data: flagRow } = await svc
+      .from("integration_settings")
+      .select("value")
+      .eq("key", flagKey)
+      .maybeSingle();
+    const enabled = flagRow ? (flagRow.value === "true" || flagRow.value === "1") : true;
+    if (!enabled) {
+      console.log(`[auto-reply] trainer layer disabled for channel=${channel}`);
+      return [];
+    }
+
     const { data, error } = await svc
       .from("ai_trainer_rules")
-      .select("id,title,triggers,product,instruction,priority,enabled")
-      .eq("enabled", true);
+      .select("id,title,triggers,product,instruction,priority,enabled,channel")
+      .eq("enabled", true)
+      .eq("channel", channel);
     if (error) {
       console.error("[auto-reply] trainer rules load error:", error.message);
       return [];
