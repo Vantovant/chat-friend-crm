@@ -649,8 +649,17 @@ Deno.serve(async (req) => {
         user_id: ownerId,
         phone_hash: phHash,
         phone_last4: ph4,
+        phone_e164: phoneNorm,
         last_body_preview: bodyPreview,
       });
+    }
+    // Backfill phone_e164 on existing row if missing (one-time per row)
+    if (existing) {
+      await admin
+        .from("maytapi_inbound_unmatched")
+        .update({ phone_e164: phoneNorm })
+        .eq("id", (existing as any).id)
+        .is("phone_e164", null);
     }
   }
 
