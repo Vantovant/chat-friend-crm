@@ -8,6 +8,7 @@ import { useCurrentUser } from '@/hooks/use-current-user';
 import {
   LayoutDashboard, MessageSquare, Users, BarChart3, Zap, Bot, GitBranch,
   Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X, Megaphone, ShieldCheck, ShieldAlert, Brain
+  AlertCircle,
 } from 'lucide-react';
 import { InstallAppButton } from './InstallAppButton';
 
