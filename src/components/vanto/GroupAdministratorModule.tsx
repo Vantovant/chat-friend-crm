@@ -8,7 +8,7 @@ import { ShieldAlert, Users, RefreshCw, Loader2, Eye, History, Bot } from 'lucid
 import { Switch } from '@/components/ui/switch';
 import { useCurrentUser } from '@/hooks/use-current-user';
 
-type WGroup = { id: string; group_name: string; group_jid: string | null; is_active?: boolean };
+type WGroup = { id: string; group_name: string; group_jid: string | null; is_active?: boolean; auto_reply_enabled?: boolean; require_mention?: boolean };
 type Persistence = {
   members_attempted: number;
   members_persisted: boolean;
