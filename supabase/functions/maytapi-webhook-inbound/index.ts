@@ -43,14 +43,27 @@ function getInboundPhone(payload: any, message: any): string {
     || "";
 }
 
+async function hmacHex(secret: string, value: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
     const PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID");
     const PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID");
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+      const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const HASH_SALT = Deno.env.get("MAYTAPI_HASH_SALT") || "";
 
     const payload = await req.json();
     console.log("[maytapi-inbound] payload:", JSON.stringify(payload).slice(0, 500));
@@ -309,7 +322,7 @@ Deno.serve(async (req) => {
       // Find or create contact by phone_normalized
       let { data: contact } = await supabase
         .from("contacts")
-        .select("id")
+        .select("id, assigned_to, created_by")
         .eq("phone_normalized", phoneE164)
         .eq("is_deleted", false)
         .maybeSingle();
@@ -327,7 +340,7 @@ Deno.serve(async (req) => {
             interest: "medium",
             temperature: "warm",
           })
-          .select("id")
+          .select("id, assigned_to, created_by")
           .single();
         if (ce) {
           console.error("[maytapi-inbound] contact insert failed:", ce.message);
@@ -368,6 +381,46 @@ Deno.serve(async (req) => {
         })
         .select("id")
         .single();
+
+      // Keep the Maytapi Inbox Conversations tab in sync with the main CRM inbox.
+      // This was the missing write path for the active webhook endpoint.
+      const performedBy = contact?.assigned_to || contact?.created_by;
+      if (performedBy) {
+        const phoneDigits = phoneE164.replace(/\D/g, "");
+        const phoneHash = HASH_SALT ? await hmacHex(HASH_SALT, phoneE164) : phoneE164;
+        await supabase.from("maytapi_messages").insert({
+          user_id: performedBy,
+          contact_id: contact!.id,
+          direction: "inbound",
+          maytapi_message_id: providerMessageId || inboundMsg?.id || crypto.randomUUID(),
+          phone_hash: phoneHash,
+          phone_e164: phoneE164,
+          phone_last4: phoneDigits.slice(-4),
+          conversation_key: phoneHash,
+          body: text,
+          body_preview: text.slice(0, 140),
+          media_type: msg.type || "text",
+          status: "received",
+          received_at: new Date().toISOString(),
+          raw: payload,
+        }).then(() => {}, (e: any) => console.warn("[maytapi-inbound] maytapi_messages warn:", e?.message));
+
+        await supabase.from("contact_activity").insert({
+          contact_id: contact!.id,
+          type: "maytapi_message",
+          performed_by: performedBy,
+          metadata: {
+            direction: "inbound",
+            maytapi_message_id: providerMessageId,
+            phone_last4: phoneDigits.slice(-4),
+            msg_type: msg.type || "text",
+            body_preview: text.slice(0, 140),
+            body: text,
+            match_source: "phone_normalized",
+            received_at: new Date().toISOString(),
+          },
+        }).then(() => {}, (e: any) => console.warn("[maytapi-inbound] contact_activity warn:", e?.message));
+      }
 
       // Update conversation timestamps + unread
       await supabase.from("conversations").update({
