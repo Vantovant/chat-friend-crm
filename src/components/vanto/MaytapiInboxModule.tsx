@@ -171,7 +171,10 @@ export function MaytapiInboxModule() {
     if (!search.trim()) return base;
     const s = search.toLowerCase();
     return base.filter(
-      (u) => (u.phone_last4 || '').includes(s) || (u.last_body_preview || '').toLowerCase().includes(s)
+      (u) =>
+        (u.phone_e164 || '').toLowerCase().includes(s) ||
+        (u.phone_last4 || '').includes(s) ||
+        (u.last_body_preview || '').toLowerCase().includes(s)
     );
   }, [unmatched, search]);
 
