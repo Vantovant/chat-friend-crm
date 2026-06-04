@@ -12,6 +12,7 @@ import { AutomationsModule } from '@/components/vanto/AutomationsModule';
 import { AIAgentModule } from '@/components/vanto/AIAgentModule';
 import { KnowledgeVaultModule } from '@/components/vanto/KnowledgeVaultModule';
 import { PlaybooksModule } from '@/components/vanto/PlaybooksModule';
+import { AutoReplyTrainerModule } from '@/components/vanto/AutoReplyTrainerModule';
 import { WorkflowsModule } from '@/components/vanto/WorkflowsModule';
 import { IntegrationsModule } from '@/components/vanto/IntegrationsModule';
 import { APIConsoleModule } from '@/components/vanto/APIConsoleModule';
@@ -63,7 +64,7 @@ const Index = () => {
       case 'automations': return <AutomationsModule />;
       case 'ai-agent': return <AIAgentModule />;
       case 'knowledge': return <KnowledgeVaultModule />;
-      case 'playbooks': return <PlaybooksModule />;
+      case 'playbooks': return <AutoReplyTrainerModule />;
       case 'workflows': return <WorkflowsModule />;
       case 'integrations': return <IntegrationsModule userId={session?.user?.id ?? ''} />;
       case 'api-console': return <APIConsoleModule />;

@@ -42,10 +42,21 @@ function renderTrainerBlock(rules: Trainer[]): string {
   return `\n═══ TRAINER RULES ═══\n${lines}\n═══════════════════════\n`;
 }
 
-async function run(svc: any, question: string) {
+async function run(svc: any, question: string, channel: string = "maytapi") {
   const product = detectProduct(question);
-  const { data: rulesData } = await svc.from("ai_trainer_rules").select("title,triggers,product,instruction,priority,enabled").eq("enabled", true);
-  const rules: Trainer[] = rulesData || [];
+  // Channel-scoped trainer rules + feature-flag gate
+  const flagKey = `trainer_channel_${channel}_enabled`;
+  const { data: flagRow } = await svc.from("integration_settings").select("value").eq("key", flagKey).maybeSingle();
+  const trainerEnabled = flagRow ? (flagRow.value === "true" || flagRow.value === "1") : true;
+  let rules: Trainer[] = [];
+  if (trainerEnabled) {
+    const { data: rulesData } = await svc
+      .from("ai_trainer_rules")
+      .select("title,triggers,product,instruction,priority,enabled")
+      .eq("enabled", true)
+      .eq("channel", channel);
+    rules = rulesData || [];
+  }
   const matched = matchTrainer(rules, question, product);
   const { data: chunks } = await svc.rpc("search_knowledge", { query_text: question, max_results: 8 });
   const ctx = (chunks||[]).map((c:any,i:number)=>`[Source ${i+1}: ${c.file_title} (${c.file_collection})]\n${c.chunk_text.slice(0,1200)}`).join("\n\n");
