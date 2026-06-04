@@ -1202,6 +1202,7 @@ export type Database = {
           last_seen_at: string | null
           linked_contact_id: string | null
           message_count: number | null
+          phone_e164: string | null
           phone_hash: string
           phone_last4: string | null
           status: string | null
@@ -1215,6 +1216,7 @@ export type Database = {
           last_seen_at?: string | null
           linked_contact_id?: string | null
           message_count?: number | null
+          phone_e164?: string | null
           phone_hash: string
           phone_last4?: string | null
           status?: string | null
@@ -1228,6 +1230,7 @@ export type Database = {
           last_seen_at?: string | null
           linked_contact_id?: string | null
           message_count?: number | null
+          phone_e164?: string | null
           phone_hash?: string
           phone_last4?: string | null
           status?: string | null
