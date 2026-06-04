@@ -977,7 +977,8 @@ Deno.serve(async (req) => {
     return jsonRes({ ok: false, message: "Invalid JSON" }, 400);
   }
 
-  const { conversation_id, contact_id, inbound_content, phone_e164, inbound_message_id } = body || {};
+  const { conversation_id, contact_id, inbound_content, phone_e164, inbound_message_id, channel: channelParam } = body || {};
+  const channel: string = (channelParam === "twilio" || channelParam === "facebook") ? channelParam : "maytapi";
   if (!conversation_id || !phone_e164) {
     return jsonRes({ ok: false, message: "Missing conversation_id or phone_e164" }, 400);
   }
