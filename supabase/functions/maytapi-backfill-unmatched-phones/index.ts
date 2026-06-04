@@ -28,15 +28,16 @@ async function hmacHex(salt: string, msg: string): Promise<string> {
   return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-function normalizePhone(raw: string): string {
-  if (!raw) return "";
-  let s = String(raw).replace(/^whatsapp:/i, "").replace(/[\s\-()]/g, "").replace(/@.*/, "");
-  if (s.startsWith("00")) s = "+" + s.slice(2);
-  const d = s.replace(/\D/g, "");
+// Legacy webhook stored hashes computed from digits-only phone (no +).
+// E164-format normaliser is used only for display.
+function digitsOnly(raw: string): string {
+  return (raw || "").replace(/[^0-9]/g, "");
+}
+function toE164(raw: string): string {
+  const d = digitsOnly(raw);
   if (!d) return "";
   if (d.startsWith("0") && (d.length === 10 || d.length === 11)) return "+27" + d.slice(1);
   if (d.startsWith("27") && (d.length === 11 || d.length === 12)) return "+" + d;
-  if (s.startsWith("+")) return s;
   return "+" + d;
 }
 
