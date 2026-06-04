@@ -104,6 +104,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   const svc = createClient(SUPABASE_URL, SERVICE_ROLE);
   const body = await req.json().catch(()=>({}));
+  const channel: string = (body.channel === "twilio" || body.channel === "facebook") ? body.channel : "maytapi";
   const tests: string[] = body.questions || [
     "How do I join?",
     "I want to buy NRM",

@@ -53,7 +53,7 @@ export default function CorrectReplyModal({
           .slice(0, 4);
 
     // 1. Insert trainer rule (always new — Option A)
-    const { data: rule, error: ruleErr } = await supabase
+    const ruleRes: any = await supabase
       .from("ai_trainer_rules" as any)
       .insert({
         title: title.trim(),
@@ -71,11 +71,12 @@ export default function CorrectReplyModal({
       .select("id")
       .single();
 
-    if (ruleErr || !rule) {
+    if (ruleRes.error || !ruleRes.data) {
       setSaving(false);
-      toast({ title: "Failed to create rule", description: ruleErr?.message, variant: "destructive" });
+      toast({ title: "Failed to create rule", description: ruleRes.error?.message, variant: "destructive" });
       return;
     }
+    const newRuleId = (ruleRes.data as { id: string }).id;
 
     // 2. Insert correction audit row
     const { error: corrErr } = await supabase.from("auto_reply_corrections" as any).insert({
@@ -86,7 +87,7 @@ export default function CorrectReplyModal({
       original_reply: target.originalReply || null,
       corrected_reply: correctedReply.trim(),
       reason: reason.trim() || null,
-      trainer_rule_id: rule.id,
+      trainer_rule_id: newRuleId,
       created_by: userId,
     });
 
