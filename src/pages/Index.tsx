@@ -57,6 +57,7 @@ const Index = () => {
       case 'dashboard': return <DashboardModule />;
       case 'inbox': return <InboxModule />;
       case 'maytapi-inbox': return <MaytapiInboxModule />;
+      case 'maytapi-unmatched': return <MaytapiUnmatchedModule />;
       case 'contacts': return <ContactsModule />;
       case 'crm': return <CRMModule />;
       case 'automations': return <AutomationsModule />;
