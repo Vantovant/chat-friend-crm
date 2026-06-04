@@ -261,6 +261,12 @@ function detectIntent(normalized: string): IntentResult {
     }
   }
 
+  // YES / interest closer — runs AFTER greetings, BEFORE freeform routing.
+  if (isYesInterest(normalized)) {
+    return { intent: "yes_interest", query: "", collections: [], mode: "assisted", ...base, topicCategory: "opportunity" };
+  }
+
+
   // Detect product alias
   let detectedProduct: string | null = null;
   for (const [alias, product] of Object.entries(PRODUCT_ALIASES)) {
