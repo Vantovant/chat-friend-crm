@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Sparkles, MessageSquare, Smartphone, Facebook, FileText, Loader2 } from "lucide-react";
+import { Sparkles, MessageSquare, Smartphone, Users, FileText, Loader2 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
@@ -10,12 +10,12 @@ import SandboxPane from "./trainer/SandboxPane";
 import CorrectionsPane from "./trainer/CorrectionsPane";
 import { PlaybooksModule } from "./PlaybooksModule";
 
-export type TrainerChannel = "maytapi" | "twilio" | "facebook";
+export type TrainerChannel = "maytapi" | "twilio" | "groups";
 
 const CHANNELS: { id: TrainerChannel; label: string; icon: any; flagKey: string }[] = [
-  { id: "maytapi", label: "Maytapi WhatsApp", icon: Smartphone, flagKey: "trainer_channel_maytapi_enabled" },
+  { id: "maytapi", label: "Maytapi WhatsApp (DMs)", icon: Smartphone, flagKey: "trainer_channel_maytapi_enabled" },
   { id: "twilio", label: "Twilio WhatsApp", icon: MessageSquare, flagKey: "trainer_channel_twilio_enabled" },
-  { id: "facebook", label: "Facebook Groups", icon: Facebook, flagKey: "trainer_channel_facebook_enabled" },
+  { id: "groups", label: "WhatsApp Groups", icon: Users, flagKey: "trainer_channel_groups_enabled" },
 ];
 
 export function AutoReplyTrainerModule() {
