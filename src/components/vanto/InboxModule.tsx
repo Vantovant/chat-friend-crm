@@ -216,6 +216,8 @@ export function InboxModule() {
         { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
           const newMsg = payload.new as Message;
+          // Skip Maytapi messages in the Twilio Inbox.
+          if ((newMsg as any).provider === 'maytapi') return;
           if (newMsg.conversation_id === selectedConvId) {
             setMessages(prev => {
               if (prev.some(m => m.id === newMsg.id)) return prev;
