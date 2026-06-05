@@ -1479,6 +1479,16 @@
           }
           break;
 
+        case 'VANTO_RUN_NAME_SYNC':
+          log('Received auto-sync trigger');
+          try {
+            const r = await runNameSync({ silent: true });
+            sendResponse({ success: true, ...r });
+          } catch (e) {
+            sendResponse({ success: false, error: e?.message || String(e) });
+          }
+          break;
+
         default:
           sendResponse({ success: false, error: 'Unknown message type' });
       }
