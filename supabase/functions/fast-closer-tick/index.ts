@@ -126,10 +126,10 @@ Deno.serve(async (req) => {
 
       const { data: contact } = await supabase
         .from("contacts")
-        .select("id, name, first_name, phone, phone_normalized, do_not_contact")
+        .select("id, name, first_name, phone, phone_normalized, do_not_contact, auto_reply_enabled")
         .eq("id", conv.contact_id)
         .maybeSingle();
-      if (!contact || contact.do_not_contact) { skipped++; continue; }
+      if (!contact || contact.do_not_contact || contact.auto_reply_enabled === false) { skipped++; continue; }
 
       const phone = contact.phone_normalized || contact.phone;
       if (!phone) { skipped++; continue; }

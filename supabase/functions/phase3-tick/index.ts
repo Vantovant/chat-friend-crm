@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
 
       const { data: contact } = await supabase
         .from("contacts")
-        .select("id, name, phone, phone_normalized, do_not_contact")
+        .select("id, name, phone, phone_normalized, do_not_contact, auto_reply_enabled")
         .eq("id", row.contact_id)
         .maybeSingle();
 
@@ -72,6 +72,10 @@ Deno.serve(async (req) => {
       }
       if (contact.do_not_contact) {
         await supabase.from("missed_inquiries").update({ status: "stopped", last_error: "do_not_contact" }).eq("id", row.id);
+        skipped++; continue;
+      }
+      if (contact.auto_reply_enabled === false) {
+        await supabase.from("missed_inquiries").update({ status: "stopped", last_error: "auto_reply_muted" }).eq("id", row.id);
         skipped++; continue;
       }
 
