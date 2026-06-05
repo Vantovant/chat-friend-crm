@@ -40,10 +40,14 @@ Deno.serve(async (req) => {
     if (!logRow) return new Response(JSON.stringify({ error: "suggestion not found" }), { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     if (logRow.delivery !== "suggested") return new Response(JSON.stringify({ error: `already ${logRow.delivery}` }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-    const { data: contact } = await supabase.from("contacts").select("phone, phone_normalized, do_not_contact").eq("id", logRow.contact_id).maybeSingle();
+    const { data: contact } = await supabase.from("contacts").select("phone, phone_normalized, do_not_contact, auto_reply_enabled").eq("id", logRow.contact_id).maybeSingle();
     if (!contact || contact.do_not_contact) {
       await supabase.from("followup_logs").update({ delivery: "blocked", error: "do_not_contact" }).eq("id", logRow.id);
       return new Response(JSON.stringify({ error: "contact opted out" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (contact.auto_reply_enabled === false) {
+      await supabase.from("followup_logs").update({ delivery: "blocked", error: "auto_reply_muted" }).eq("id", logRow.id);
+      return new Response(JSON.stringify({ error: "contact muted (auto-reply toggle off)" }), { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     const phone = contact.phone_normalized || contact.phone;
     if (!phone) return new Response(JSON.stringify({ error: "no phone" }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });

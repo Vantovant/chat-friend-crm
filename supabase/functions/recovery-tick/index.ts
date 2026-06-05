@@ -123,12 +123,16 @@ Deno.serve(async (req) => {
       // Fetch contact
       const { data: contact } = await supabase
         .from("contacts")
-        .select("id, name, phone, phone_normalized")
+        .select("id, name, phone, phone_normalized, do_not_contact, auto_reply_enabled")
         .eq("id", row.contact_id)
         .maybeSingle();
 
       if (!contact) {
         await supabase.from("missed_inquiries").update({ status: "exhausted", last_error: "contact missing" }).eq("id", row.id);
+        failed++; continue;
+      }
+      if (contact.do_not_contact || contact.auto_reply_enabled === false) {
+        await supabase.from("missed_inquiries").update({ status: "stopped", last_error: contact.auto_reply_enabled === false ? "auto_reply_muted" : "do_not_contact" }).eq("id", row.id);
         failed++; continue;
       }
 

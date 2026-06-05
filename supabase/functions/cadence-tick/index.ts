@@ -185,7 +185,7 @@ Deno.serve(async (req) => {
       // Load contact + verify still eligible
       const { data: contact } = await sb
         .from("contacts")
-        .select("id, name, phone, phone_normalized, lead_type, do_not_contact, is_deleted")
+        .select("id, name, phone, phone_normalized, lead_type, do_not_contact, is_deleted, auto_reply_enabled")
         .eq("id", row.contact_id)
         .maybeSingle();
 
@@ -193,6 +193,18 @@ Deno.serve(async (req) => {
         await sb.from("prospect_cadence_state").update({
           status: "opted_out",
           pause_reason: "dnc_or_deleted",
+          next_send_at: null,
+          updated_at: now.toISOString(),
+        }).eq("id", row.id);
+        diag.skipped++;
+        continue;
+      }
+
+      // Honor the per-contact AI/Follow-up mute toggle (same switch as auto-reply)
+      if (contact.auto_reply_enabled === false) {
+        await sb.from("prospect_cadence_state").update({
+          status: "paused",
+          pause_reason: "auto_reply_muted",
           next_send_at: null,
           updated_at: now.toISOString(),
         }).eq("id", row.id);
