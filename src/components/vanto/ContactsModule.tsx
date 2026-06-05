@@ -6,7 +6,7 @@ import { normalizePhone, digitsOnly } from '@/lib/phone-utils';
 import {
   Search, Plus, Filter, Phone, Mail, MoreVertical, UserCheck, Loader2, X, Save, Trash2,
   AlertTriangle, Sparkles, Merge, Archive, CircleCheck, CircleDot, CircleX, CircleMinus,
-  MessageCircle, Eye, ArrowRightLeft, Tag, Download, ChevronDown, CheckSquare, Square
+  MessageCircle, Eye, ArrowRightLeft, Tag, Download, ChevronDown, CheckSquare, Square, BellOff, Bot
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { MergeContactsModal, DuplicateMergeModal, type IncomingContact } from './MergeContactsModal';
