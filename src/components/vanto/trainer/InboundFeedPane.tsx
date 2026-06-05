@@ -87,12 +87,37 @@ export default function InboundFeedPane({ channel, onCorrected }: { channel: Tra
   const loadGroups = async () => {
     setLoading(true);
 
-    // 1. Known groups we post scheduled content to (group_jid populated and active)
+    // 1. Only groups we ACTIVELY post scheduled content to (last 7 days).
+    //    These are the morning/noon/evening campaign groups — typically ~11.
+    //    All other groups are excluded from the trainer feed AND from auto-reply
+    //    (the whatsapp-auto-reply edge function only fires on 1-on-1 DMs, never groups).
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: scheduled, error: sErr } = await supabase
+      .from("scheduled_group_posts")
+      .select("target_group_jid")
+      .gte("scheduled_at", sevenDaysAgo)
+      .not("target_group_jid", "is", null);
+
+    if (sErr) {
+      toast({ title: "Failed to load scheduled groups", description: sErr.message, variant: "destructive" });
+      setGroupRows([]);
+      setLoading(false);
+      return;
+    }
+
+    const activeJids = Array.from(new Set((scheduled || []).map((s: any) => s.target_group_jid).filter(Boolean)));
+
+    if (activeJids.length === 0) {
+      setGroupRows([]);
+      setLoading(false);
+      return;
+    }
+
+    // 2. Resolve group names for those JIDs
     const { data: groups, error: gErr } = await supabase
       .from("whatsapp_groups")
-      .select("group_jid, group_name, is_active")
-      .eq("is_active", true)
-      .not("group_jid", "is", null);
+      .select("group_jid, group_name")
+      .in("group_jid", activeJids);
 
     if (gErr) {
       toast({ title: "Failed to load groups", description: gErr.message, variant: "destructive" });
@@ -103,13 +128,9 @@ export default function InboundFeedPane({ channel, onCorrected }: { channel: Tra
 
     const jidToName = new Map<string, string>();
     (groups || []).forEach((g: any) => { if (g.group_jid) jidToName.set(g.group_jid, g.group_name); });
-    const jids = Array.from(jidToName.keys());
+    activeJids.forEach((j) => { if (!jidToName.has(j)) jidToName.set(j, j); });
+    const jids = activeJids;
 
-    if (jids.length === 0) {
-      setGroupRows([]);
-      setLoading(false);
-      return;
-    }
 
     // 2. Recent inbound messages from those groups
     const { data: inbound, error: inErr } = await supabase
