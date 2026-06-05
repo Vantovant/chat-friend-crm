@@ -538,6 +538,14 @@
           </div>
           <button class="vanto-btn vanto-btn-primary" id="vanto-save">Save Contact</button>
         </div>
+        <div id="vanto-namesync-box" style="margin-top:14px;padding:10px;border:1px solid hsl(217,33%,17%);border-radius:8px;background:hsl(222,47%,8%);">
+          <div style="font-size:12px;color:hsl(215,20%,65%);margin-bottom:8px;">
+            <strong style="color:hsl(172,66%,55%);">📇 WhatsApp Name Sync</strong><br/>
+            Scan your chat list and copy the names you have saved on WhatsApp into the CRM. Never overwrites a name you already curated.
+          </div>
+          <button class="vanto-btn vanto-btn-primary" id="vanto-namesync-btn" style="margin-bottom:6px;">Sync names from WhatsApp</button>
+          <div id="vanto-namesync-status" style="font-size:11px;color:hsl(215,20%,55%);"></div>
+        </div>
       </div>
       <div class="vanto-footer">
         <a href="${DASHBOARD_URL}" target="_blank">Open Dashboard →</a>
@@ -597,6 +605,12 @@
     const saveGroupBtn = document.getElementById('vanto-save-group');
     if (saveGroupBtn) {
       saveGroupBtn.addEventListener('click', saveGroup);
+    }
+
+    // Bulk WhatsApp Name Sync button (Layer 2)
+    const nameSyncBtn = document.getElementById('vanto-namesync-btn');
+    if (nameSyncBtn) {
+      nameSyncBtn.addEventListener('click', () => runNameSync({ silent: false }));
     }
   }
 
