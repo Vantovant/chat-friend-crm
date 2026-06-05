@@ -1530,32 +1530,142 @@
   }
 
   function harvestVisibleChatRows(acc, stats) {
-    const pane =
-      document.querySelector('#pane-side') ||
-      document.querySelector('[aria-label="Chat list"]') ||
-      document.querySelector('[data-testid="chat-list"]');
+    const pane = getChatPane();
     if (!pane) return false;
-    let rows = pane.querySelectorAll('[role="listitem"]');
-    if (!rows.length) rows = pane.querySelectorAll('[role="row"]');
-    if (!rows.length) rows = pane.querySelectorAll('div[tabindex="-1"]');
+    const rows = getVisibleChatRows(pane);
     if (stats) stats.rowsSeen = (stats.rowsSeen || 0) + rows.length;
     rows.forEach((row) => {
+      if (isLikelyGroupRow(row)) { if (stats) stats.groupRows = (stats.groupRows || 0) + 1; return; }
       const phone = extractPhoneFromNode(row);
       if (!phone) { if (stats) stats.noPhone = (stats.noPhone || 0) + 1; return; }
-      let name = '';
-      const titleEl = row.querySelector('span[title]');
-      if (titleEl) name = (titleEl.getAttribute('title') || titleEl.textContent || '').trim();
-      if (!name) {
-        const aria = row.querySelector('[aria-label]');
-        if (aria) name = (aria.getAttribute('aria-label') || '').trim();
-      }
+      const name = extractNameFromChatRow(row);
       if (!name || isPhoneLikeName(name)) { if (stats) stats.phoneOnlyName = (stats.phoneOnlyName || 0) + 1; return; }
       acc.set(phone, name);
     });
     return true;
   }
 
-  async function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+  function extractPhoneFromText(text) {
+    const raw = String(text || '');
+    const matches = raw.match(/\+?\d[\d\s().-]{6,}\d/g) || [];
+    for (const match of matches) {
+      const digits = match.replace(/\D/g, '');
+      if (digits.length < 7 || digits.length > 15) continue;
+      if (/^(19|20)\d{2}$/.test(digits)) continue;
+      return digits;
+    }
+    return null;
+  }
+
+  function extractPhoneFromOpenChatText() {
+    const detected = detectPhoneNumber();
+    if (detected) return detected;
+    const zones = [
+      document.querySelector('#main header'),
+      document.querySelector('#main'),
+      document.querySelector('[data-testid="drawer-right"]'),
+      document.querySelector('[aria-label*="Contact info"]'),
+      document.querySelector('[aria-label*="Profile"]'),
+    ].filter(Boolean);
+    for (const zone of zones) {
+      const phone = extractPhoneFromText(zone.innerText || zone.textContent || '');
+      if (phone) return phone;
+    }
+    return null;
+  }
+
+  function clickLikeUser(el) {
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', inline: 'nearest' });
+    ['mousedown', 'mouseup', 'click'].forEach((type) => {
+      el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    });
+  }
+
+  async function waitForChatHeader(timeout = 3500) {
+    const started = Date.now();
+    while (Date.now() - started < timeout) {
+      if (document.querySelector('#main header')) return true;
+      await sleep(120);
+    }
+    return false;
+  }
+
+  async function openContactDetailsAndReadPhone() {
+    let phone = extractPhoneFromOpenChatText();
+    if (phone) return phone;
+
+    const header = document.querySelector('#main header');
+    if (!header) return null;
+    const target = header.querySelector('span[title]') || header.querySelector('[role="button"]') || header;
+    clickLikeUser(target);
+    await sleep(900);
+
+    phone = extractPhoneFromOpenChatText();
+
+    const closeButtons = Array.from(document.querySelectorAll('[aria-label="Close"], [aria-label="Back"], span[data-icon="x"], span[data-icon="back"]'));
+    const closeButton = closeButtons.find((el) => !sidebar || !sidebar.contains(el));
+    if (closeButton) {
+      clickLikeUser(closeButton.closest('button') || closeButton);
+      await sleep(250);
+    }
+
+    return phone;
+  }
+
+  async function scrapeByOpeningChats(acc, stats, { onProgress, maxChats = NAME_SYNC_OPEN_CHAT_LIMIT } = {}) {
+    const pane = getChatPane();
+    if (!pane) return;
+
+    const seen = new Set();
+    pane.scrollTop = 0;
+    await sleep(350);
+
+    let lastTop = -1;
+    let stableLoops = 0;
+    let opened = 0;
+    let iter = 0;
+
+    while (iter < 500 && opened < maxChats) {
+      iter++;
+      const rows = getVisibleChatRows(pane);
+      for (const row of rows) {
+        if (opened >= maxChats) break;
+        if (isLikelyGroupRow(row)) { stats.fallbackGroups = (stats.fallbackGroups || 0) + 1; continue; }
+        const name = extractNameFromChatRow(row);
+        if (!name || isPhoneLikeName(name)) { stats.fallbackNoName = (stats.fallbackNoName || 0) + 1; continue; }
+        const key = normalizeText(name) + '|' + (row.innerText || row.textContent || '').slice(0, 120);
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        clickLikeUser(row);
+        opened++;
+        stats.fallbackOpened = opened;
+        await waitForChatHeader(3500);
+        await sleep(450);
+
+        const phone = await openContactDetailsAndReadPhone();
+        if (phone) {
+          acc.set(phone, name);
+        } else {
+          stats.fallbackNoPhone = (stats.fallbackNoPhone || 0) + 1;
+        }
+        if (onProgress) onProgress(acc.size, opened, maxChats);
+      }
+
+      pane.scrollTop = pane.scrollTop + Math.max(420, pane.clientHeight - 80);
+      await sleep(300);
+      if (pane.scrollTop === lastTop) {
+        stableLoops++;
+        if (stableLoops >= 3) break;
+      } else {
+        stableLoops = 0;
+        lastTop = pane.scrollTop;
+      }
+    }
+
+    stats.fallbackLimited = opened >= maxChats;
+  }
 
   async function scrapeWhatsAppChats({ onProgress } = {}) {
     const pane =
