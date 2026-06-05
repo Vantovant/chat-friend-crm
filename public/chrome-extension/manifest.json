@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Vanto CRM — WhatsApp Sidebar (Lovable)",
-  "version": "6.3.1",
-  "description": "AI-powered CRM sidebar for WhatsApp Web - Lovable Edition v6.3.1 - Robust WhatsApp name scraper (handles new WA Web DOM, @lid/@s.whatsapp.net ids, diagnostic output)",
+  "version": "6.3.2",
+  "description": "AI-powered CRM sidebar for WhatsApp Web - Lovable Edition v6.3.2 - Name sync fallback opens 1-on-1 chats when WhatsApp hides phone IDs",
   "permissions": ["storage", "activeTab", "tabs", "alarms", "scripting"],
   "host_permissions": [
     "https://web.whatsapp.com/*",
