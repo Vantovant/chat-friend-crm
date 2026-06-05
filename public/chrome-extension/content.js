@@ -1562,7 +1562,6 @@
     if (detected) return detected;
     const zones = [
       document.querySelector('#main header'),
-      document.querySelector('#main'),
       document.querySelector('[data-testid="drawer-right"]'),
       document.querySelector('[aria-label*="Contact info"]'),
       document.querySelector('[aria-label*="Profile"]'),
@@ -1643,6 +1642,11 @@
         stats.fallbackOpened = opened;
         await waitForChatHeader(3500);
         await sleep(450);
+
+        if (detectGroupChat()) {
+          stats.fallbackGroupsOpened = (stats.fallbackGroupsOpened || 0) + 1;
+          continue;
+        }
 
         const phone = await openContactDetailsAndReadPhone();
         if (phone) {
