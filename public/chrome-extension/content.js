@@ -1,6 +1,7 @@
-// Vanto CRM Chrome Extension - Content Script v6.2.5
+// Vanto CRM Chrome Extension - Content Script v6.3.2
 // LOVABLE EDITION - Uses chat.onlinecourseformlm.com
 // v6.2.5: Fixed select_group stage - relaxed text matching for pipe symbols, better search result selectors
+// v6.3.2: Name sync fallback opens 1-on-1 chats when WhatsApp hides phone IDs from the chat list
 
 (function() {
   'use strict';
@@ -8,7 +9,7 @@
   // =====================================================
   // CONFIGURATION - LOVABLE EDITION
   // =====================================================
-  const VERSION = '6.2.6 (Lovable)';
+  const VERSION = '6.3.2 (Lovable)';
   const DASHBOARD_URL = 'https://chat.onlinecourseformlm.com';
   const DETECTION_DEBOUNCE_MS = 600;
   const POLLING_INTERVAL_MS = 1500;
