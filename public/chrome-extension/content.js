@@ -1667,14 +1667,11 @@
     stats.fallbackLimited = opened >= maxChats;
   }
 
-  async function scrapeWhatsAppChats({ onProgress } = {}) {
-    const pane =
-      document.querySelector('#pane-side') ||
-      document.querySelector('[aria-label="Chat list"]') ||
-      document.querySelector('[data-testid="chat-list"]');
+  async function scrapeWhatsAppChats({ onProgress, allowChatOpenFallback = false } = {}) {
+    const pane = getChatPane();
     if (!pane) throw new Error('Chat list not found. Open web.whatsapp.com and load your chats first.');
     const acc = new Map();
-    const stats = { rowsSeen: 0, noPhone: 0, phoneOnlyName: 0 };
+    const stats = { rowsSeen: 0, noPhone: 0, phoneOnlyName: 0, groupRows: 0 };
     pane.scrollTop = 0;
     await sleep(300);
     harvestVisibleChatRows(acc, stats);
@@ -1697,6 +1694,17 @@
       }
     }
     pane.scrollTop = 0;
+
+    if (acc.size === 0 && allowChatOpenFallback) {
+      namesyncStatus('WhatsApp hid phone IDs in the chat list. Opening 1-on-1 chats to read phone numbers…');
+      await scrapeByOpeningChats(acc, stats, {
+        onProgress: (found, opened, max) => {
+          if (onProgress) onProgress(found, opened, max);
+        },
+      });
+      pane.scrollTop = 0;
+    }
+
     log('[namesync] scrape stats', stats, 'pairs:', acc.size);
     return { pairs: Array.from(acc.entries()).map(([phone, name]) => ({ phone, name })), stats };
   }
@@ -1709,10 +1717,15 @@
     try {
       if (!silent) namesyncStatus('Scanning chats…');
       const { pairs, stats } = await scrapeWhatsAppChats({
-        onProgress: (n) => { if (!silent) namesyncStatus(`Scanning chats… ${n} so far`); },
+        allowChatOpenFallback: !silent,
+        onProgress: (n, opened, max) => {
+          if (!silent) {
+            namesyncStatus(opened ? `Opening chats… ${n} found (${opened}/${max} checked)` : `Scanning chats… ${n} so far`);
+          }
+        },
       });
       if (pairs.length === 0) {
-        const diag = `No chats found. Scanned ${stats.rowsSeen} rows (${stats.noPhone} without phone id, ${stats.phoneOnlyName} phone-only). Open WhatsApp Web, let the chat list fully load, then retry.`;
+        const diag = `No phone numbers found. WhatsApp hid phone IDs in ${stats.noPhone} scanned rows; opened ${stats.fallbackOpened || 0} chats and still could not read a phone. This means WhatsApp Web is not exposing your address-book numbers to the extension on this account/browser.`;
         if (!silent) namesyncStatus(diag);
         return { success: true, updated: 0, created: 0, stats };
       }
@@ -1723,7 +1736,8 @@
       });
       if (resp && resp.success) {
         const { updated = 0, created = 0, skipped = 0, errors = 0 } = resp.data || {};
-        if (!silent) namesyncStatus(`Done. ${updated} updated, ${created} created, ${skipped} skipped${errors ? `, ${errors} errors` : ''}.`);
+        const capped = stats.fallbackLimited ? ' Sync reached the safe limit; click again to continue deeper in the chat list.' : '';
+        if (!silent) namesyncStatus(`Done. ${updated} updated, ${created} created, ${skipped} skipped${errors ? `, ${errors} errors` : ''}.${capped}`);
         return { success: true, updated, created, skipped, errors };
       } else {
         const err = (resp && resp.error) || 'unknown_error';
