@@ -217,7 +217,7 @@ export default function InboundFeedPane({ channel, onCorrected }: { channel: Tra
           </h3>
           <p className="text-xs text-muted-foreground">
             {channel === "groups"
-              ? "Recent inbound messages from WhatsApp groups we post scheduled content to."
+              ? "Recent inbound messages from the scheduled-campaign groups only (morning/noon/evening). All other groups are excluded — they never receive auto-replies."
               : "Recent inbound messages where the AI auto-replied."}
           </p>
         </div>
