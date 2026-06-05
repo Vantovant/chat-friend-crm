@@ -628,14 +628,69 @@ async function ensureContentScriptInjected(tabId) {
 // =====================================================
 chrome.alarms.create('vanto-group-poll', { periodInMinutes: 1 });
 chrome.alarms.create('vanto-heartbeat', { periodInMinutes: 1 });
+// Layer 3: auto-sync WhatsApp contact names every 6 hours (only when a WA tab is open + user logged in)
+chrome.alarms.create('vanto-name-sync', { periodInMinutes: 360, delayInMinutes: 5 });
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'vanto-group-poll') {
     await pollDuePosts();
   } else if (alarm.name === 'vanto-heartbeat') {
     await sendHeartbeat();
+  } else if (alarm.name === 'vanto-name-sync') {
+    await triggerAutoNameSync();
   }
 });
+
+// Ping every open web.whatsapp.com tab and ask its content script to scrape + sync.
+async function triggerAutoNameSync() {
+  try {
+    const token = await refreshTokenIfNeeded();
+    if (!token) {
+      log('[auto-namesync] skipped — not logged in');
+      return;
+    }
+    const tabs = await chrome.tabs.query({ url: 'https://web.whatsapp.com/*' });
+    if (tabs.length === 0) {
+      log('[auto-namesync] skipped — no WhatsApp Web tab open');
+      return;
+    }
+    // Only send to the first WA tab to avoid duplicate parallel scrapes
+    try {
+      const resp = await chrome.tabs.sendMessage(tabs[0].id, { type: 'VANTO_RUN_NAME_SYNC' });
+      log('[auto-namesync] result:', resp);
+    } catch (e) {
+      log('[auto-namesync] tab not ready:', e?.message);
+    }
+  } catch (e) {
+    logError('[auto-namesync] error', e);
+  }
+}
+
+// Bulk name-sync handler — forwards scraped pairs to the edge function.
+async function handleBulkSyncNames(pairs, token) {
+  log('[bulk-namesync] sending', pairs?.length || 0, 'pairs to edge function');
+  try {
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/whatsapp-names-bulk-sync`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'apikey': SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ pairs }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      logError('[bulk-namesync] failed', data);
+      return { success: false, error: data?.error || `HTTP ${response.status}` };
+    }
+    log('[bulk-namesync] ok', data);
+    return { success: true, data };
+  } catch (e) {
+    logError('[bulk-namesync] error', e);
+    return { success: false, error: e.message };
+  }
+}
 
 async function sendHeartbeat() {
   const session = await getSession();
@@ -950,6 +1005,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'VANTO_POST_RESULT':
         log('Post result received:', message);
         result = { success: true };
+        break;
+
+      case 'VANTO_BULK_SYNC_NAMES':
+        const syncToken = await refreshTokenIfNeeded();
+        if (!syncToken) {
+          result = { success: false, error: 'Not authenticated' };
+        } else {
+          result = await handleBulkSyncNames(message.pairs || [], syncToken);
+        }
         break;
 
       default:
