@@ -1449,28 +1449,56 @@
     return false;
   }
 
-  function harvestVisibleChatRows(acc) {
-    // WA Web uses [role="listitem"] inside #pane-side for each chat row
-    const pane = document.querySelector('#pane-side');
-    if (!pane) return false;
-    const rows = pane.querySelectorAll('[role="listitem"]');
-    rows.forEach((row) => {
-      // Phone — first descendant with data-id="..._<digits>@c.us"
-      let phone = null;
-      const dataEls = row.querySelectorAll('[data-id]');
-      for (const el of dataEls) {
-        const did = el.getAttribute('data-id') || '';
-        // Skip groups
-        if (did.includes('@g.us')) return;
-        const m = did.match(/(\d{7,15})@c\.us/);
-        if (m) { phone = m[1]; break; }
+  // Extract a phone number (@c.us / @s.whatsapp.net) from anywhere on an
+  // element's attributes or anywhere in its subtree. Skips groups (@g.us).
+  function extractPhoneFromNode(root) {
+    if (!root) return null;
+    const stack = [root];
+    while (stack.length) {
+      const el = stack.pop();
+      if (!el || el.nodeType !== 1) continue;
+      const attrs = el.attributes;
+      if (attrs) {
+        for (let i = 0; i < attrs.length; i++) {
+          const v = attrs[i].value || '';
+          if (!v) continue;
+          if (v.includes('@g.us')) return null;
+          const m = v.match(/(\d{7,15})@(?:c\.us|s\.whatsapp\.net|lid)/);
+          if (m) return m[1];
+        }
       }
-      if (!phone) return;
-      // Name — first span[title]
+      for (let c = el.firstElementChild; c; c = c.nextElementSibling) stack.push(c);
+    }
+    try {
+      const html = root.outerHTML || '';
+      if (html.includes('@g.us')) return null;
+      const m = html.match(/(\d{7,15})@(?:c\.us|s\.whatsapp\.net|lid)/);
+      if (m) return m[1];
+    } catch { /* noop */ }
+    return null;
+  }
+
+  function harvestVisibleChatRows(acc, stats) {
+    const pane =
+      document.querySelector('#pane-side') ||
+      document.querySelector('[aria-label="Chat list"]') ||
+      document.querySelector('[data-testid="chat-list"]');
+    if (!pane) return false;
+    let rows = pane.querySelectorAll('[role="listitem"]');
+    if (!rows.length) rows = pane.querySelectorAll('[role="row"]');
+    if (!rows.length) rows = pane.querySelectorAll('div[tabindex="-1"]');
+    if (stats) stats.rowsSeen = (stats.rowsSeen || 0) + rows.length;
+    rows.forEach((row) => {
+      const phone = extractPhoneFromNode(row);
+      if (!phone) { if (stats) stats.noPhone = (stats.noPhone || 0) + 1; return; }
+      let name = '';
       const titleEl = row.querySelector('span[title]');
-      const name = titleEl ? (titleEl.getAttribute('title') || '').trim() : '';
-      if (!name || isPhoneLikeName(name)) return;
-      // Last-write wins per phone (most recent observation)
+      if (titleEl) name = (titleEl.getAttribute('title') || titleEl.textContent || '').trim();
+      if (!name) {
+        const aria = row.querySelector('[aria-label]');
+        if (aria) name = (aria.getAttribute('aria-label') || '').trim();
+      }
+      if (!name || isPhoneLikeName(name)) { if (stats) stats.phoneOnlyName = (stats.phoneOnlyName || 0) + 1; return; }
       acc.set(phone, name);
     });
     return true;
@@ -1479,33 +1507,37 @@
   async function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
   async function scrapeWhatsAppChats({ onProgress } = {}) {
-    const pane = document.querySelector('#pane-side');
-    if (!pane) throw new Error('Chat list not found. Open web.whatsapp.com first.');
+    const pane =
+      document.querySelector('#pane-side') ||
+      document.querySelector('[aria-label="Chat list"]') ||
+      document.querySelector('[data-testid="chat-list"]');
+    if (!pane) throw new Error('Chat list not found. Open web.whatsapp.com and load your chats first.');
     const acc = new Map();
+    const stats = { rowsSeen: 0, noPhone: 0, phoneOnlyName: 0 };
     pane.scrollTop = 0;
-    await sleep(200);
-    harvestVisibleChatRows(acc);
+    await sleep(300);
+    harvestVisibleChatRows(acc, stats);
     let lastTop = -1;
     let stableLoops = 0;
     let iter = 0;
-    const MAX_ITER = 400; // safety cap (~ several thousand chats)
+    const MAX_ITER = 400;
     while (iter < MAX_ITER) {
       iter++;
       pane.scrollTop = pane.scrollTop + Math.max(400, pane.clientHeight - 100);
-      await sleep(250);
-      harvestVisibleChatRows(acc);
+      await sleep(280);
+      harvestVisibleChatRows(acc, stats);
       if (onProgress) onProgress(acc.size);
       if (pane.scrollTop === lastTop) {
         stableLoops++;
-        if (stableLoops >= 3) break; // reached bottom
+        if (stableLoops >= 3) break;
       } else {
         stableLoops = 0;
         lastTop = pane.scrollTop;
       }
     }
-    // Scroll back to top
     pane.scrollTop = 0;
-    return Array.from(acc.entries()).map(([phone, name]) => ({ phone, name }));
+    log('[namesync] scrape stats', stats, 'pairs:', acc.size);
+    return { pairs: Array.from(acc.entries()).map(([phone, name]) => ({ phone, name })), stats };
   }
 
   async function runNameSync({ silent = false } = {}) {
@@ -1515,14 +1547,15 @@
     }
     try {
       if (!silent) namesyncStatus('Scanning chats…');
-      const pairs = await scrapeWhatsAppChats({
+      const { pairs, stats } = await scrapeWhatsAppChats({
         onProgress: (n) => { if (!silent) namesyncStatus(`Scanning chats… ${n} so far`); },
       });
-      if (!silent) namesyncStatus(`Found ${pairs.length} chats. Syncing to CRM…`);
       if (pairs.length === 0) {
-        if (!silent) namesyncStatus('No chats found. Make sure your chat list is loaded.');
-        return { success: true, updated: 0, created: 0 };
+        const diag = `No chats found. Scanned ${stats.rowsSeen} rows (${stats.noPhone} without phone id, ${stats.phoneOnlyName} phone-only). Open WhatsApp Web, let the chat list fully load, then retry.`;
+        if (!silent) namesyncStatus(diag);
+        return { success: true, updated: 0, created: 0, stats };
       }
+      if (!silent) namesyncStatus(`Found ${pairs.length} chats. Syncing to CRM…`);
       const resp = await chrome.runtime.sendMessage({
         type: 'VANTO_BULK_SYNC_NAMES',
         pairs,
