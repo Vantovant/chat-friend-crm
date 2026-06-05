@@ -6,7 +6,7 @@ import { normalizePhone, digitsOnly } from '@/lib/phone-utils';
 import {
   Search, Plus, Filter, Phone, Mail, MoreVertical, UserCheck, Loader2, X, Save, Trash2,
   AlertTriangle, Sparkles, Merge, Archive, CircleCheck, CircleDot, CircleX, CircleMinus,
-  MessageCircle, Eye, ArrowRightLeft, Tag, Download, ChevronDown, CheckSquare, Square
+  MessageCircle, Eye, ArrowRightLeft, Tag, Download, ChevronDown, CheckSquare, Square, BellOff, Bot
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { MergeContactsModal, DuplicateMergeModal, type IncomingContact } from './MergeContactsModal';
@@ -291,6 +291,24 @@ function BulkActionsBar({ selectedIds, contacts, profiles, userId, isAdmin, onDo
     onDone();
   };
 
+  const handleBulkAutoReply = async (enabled: boolean) => {
+    setProcessing(true);
+    const ids = Array.from(selectedIds);
+    const { error } = await supabase
+      .from('contacts')
+      .update({ auto_reply_enabled: enabled, updated_at: new Date().toISOString() } as any)
+      .in('id', ids);
+    if (error) {
+      toast({ title: 'Bulk auto-reply update failed', description: error.message, variant: 'destructive' });
+    } else {
+      for (const id of ids) await logActivity(id, 'auto_reply_toggled', userId, { enabled });
+      toast({ title: enabled ? `Auto-reply enabled for ${ids.length} contacts` : `Muted auto-reply for ${ids.length} contacts` });
+    }
+    setProcessing(false);
+    onDone();
+  };
+
+
   return (
     <div className="px-6 py-2 bg-primary/10 border-b border-primary/30 flex items-center gap-3 shrink-0">
       <span className="text-sm font-medium text-primary">{selectedIds.size} selected</span>
@@ -326,6 +344,12 @@ function BulkActionsBar({ selectedIds, contacts, profiles, userId, isAdmin, onDo
             </div>
           )}
         </div>
+        <button onClick={() => handleBulkAutoReply(false)} disabled={processing} title="Stop AI auto-reply for selected contacts" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/15 text-amber-500 border border-amber-500/30 hover:bg-amber-500/25 transition-colors disabled:opacity-60">
+          <BellOff size={12} /> Mute AI
+        </button>
+        <button onClick={() => handleBulkAutoReply(true)} disabled={processing} title="Re-enable AI auto-reply for selected contacts" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors disabled:opacity-60">
+          <Bot size={12} /> Unmute
+        </button>
         <button onClick={handleBulkDelete} disabled={processing} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-destructive/15 text-destructive border border-destructive/30 hover:bg-destructive/25 transition-colors disabled:opacity-60">
           <Trash2 size={12} /> Archive
         </button>

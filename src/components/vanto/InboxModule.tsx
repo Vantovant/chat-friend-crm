@@ -5,7 +5,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { temperatureBg, leadTypeBg, leadTypeLabels, LEAD_TYPES, type LeadTemperature, type LeadType } from '@/lib/vanto-data';
 import {
   Search, Phone, Video, MoreVertical, Send, Bot, Brain,
-  Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare, AlertTriangle, RotateCcw, ArrowLeft, X, Save, Pencil,
+  Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare, AlertTriangle, RotateCcw, ArrowLeft, X, Save, Pencil, BellOff,
 } from 'lucide-react';
 import { displayPhone } from '@/lib/phone-utils';
 import { isTestFixtureContact, type FixtureFilter } from '@/lib/test-fixture';
@@ -965,6 +965,11 @@ function ConvListItem({ conv, active, onClick, profiles }: {
               </span>
             )}
             {conv.contact?.name || 'Unknown'}
+            {(conv.contact as any)?.auto_reply_enabled === false && (
+              <span title="AI auto-reply MUTED for this contact" className="inline-flex items-center text-amber-500 shrink-0">
+                <BellOff size={11} />
+              </span>
+            )}
           </span>
           <span className="text-[10px] text-muted-foreground shrink-0 ml-1">{formatTime(conv.last_message_at)}</span>
         </div>

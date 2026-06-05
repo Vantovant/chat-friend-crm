@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
-import { Loader2, MessageSquare, RefreshCw, Link2, Search, ArrowLeft, Phone } from 'lucide-react';
+import { Loader2, MessageSquare, RefreshCw, Link2, Search, ArrowLeft, Phone, BellOff } from 'lucide-react';
 import { AutoReplyToggle } from './AutoReplyToggle';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -32,7 +32,7 @@ type UnmatchedRow = {
   linked_contact_id: string | null;
 };
 
-type ContactLite = { id: string; name: string; phone: string };
+type ContactLite = { id: string; name: string; phone: string; auto_reply_enabled?: boolean | null };
 
 type MaytapiMessageRow = {
   id: string;
@@ -120,7 +120,7 @@ export function MaytapiInboxModule() {
     if (ids.length) {
       const { data: cs } = await supabase
         .from('contacts')
-        .select('id, name, phone')
+        .select('id, name, phone, auto_reply_enabled')
         .in('id', ids);
       (cs || []).forEach((c: any) => { contacts[c.id] = c; });
     }
@@ -255,9 +255,14 @@ export function MaytapiInboxModule() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex justify-between gap-2">
-                            <p className="text-sm font-medium truncate">
+                            <p className="text-sm font-medium truncate flex items-center gap-1.5">
                               {c.contact?.name || 'Unknown contact'}
-                              <span className="ml-2 text-xs text-muted-foreground">{c.contact?.phone}</span>
+                              <span className="ml-1 text-xs text-muted-foreground">{c.contact?.phone}</span>
+                              {c.contact?.auto_reply_enabled === false && (
+                                <span title="AI auto-reply MUTED for this contact" className="inline-flex items-center text-amber-500 shrink-0">
+                                  <BellOff size={12} />
+                                </span>
+                              )}
                             </p>
                             <span className="text-xs text-muted-foreground shrink-0">{formatTime(c.latest.created_at)}</span>
                           </div>
