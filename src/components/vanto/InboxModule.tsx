@@ -19,6 +19,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { CopilotSidebar } from './CopilotSidebar';
 import { DictateMessage } from './DictateMessage';
+import { AutoReplyToggle } from './AutoReplyToggle';
 
 
 /* ── Types ── */
