@@ -6,10 +6,12 @@ import { toast } from '@/hooks/use-toast';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 /**
- * Per-contact "AI auto-reply" toggle.
+ * Per-contact "AI auto-reply + follow-up" mute toggle.
  * - Default ON for every contact (DB default true)
- * - When OFF: the whatsapp-auto-reply edge function skips this contact
- *   across every channel (Twilio DM, Maytapi DM, group reply matches).
+ * - When OFF: BOTH are suppressed for this contact across every channel:
+ *     1. AI auto-replies (whatsapp-auto-reply edge function)
+ *     2. Automated follow-up cadences (cadence-tick, recovery-tick,
+ *        fast-closer-tick, phase3-tick / phase3-send-suggested)
  * - Manual sending, Copilot drafts, trainer rules, Knowledge Vault all stay enabled.
  *
  * `compact=true` renders just an icon button (use in chat headers).
@@ -64,10 +66,10 @@ export function AutoReplyToggle({
         } as any);
       } catch { /* noop */ }
       toast({
-        title: next ? 'Auto-reply ON' : 'Auto-reply muted',
+        title: next ? 'AI + follow-ups ON' : 'AI + follow-ups muted',
         description: next
-          ? `AI will reply to ${contactName || 'this contact'} automatically.`
-          : `AI will NOT auto-reply to ${contactName || 'this contact'} on any channel.`,
+          ? `AI auto-replies and follow-up cadences are active for ${contactName || 'this contact'}.`
+          : `No AI auto-reply and no automated follow-ups will be sent to ${contactName || 'this contact'}.`,
       });
     }
     setBusy(false);
@@ -80,7 +82,7 @@ export function AutoReplyToggle({
     <button
       onClick={toggle}
       disabled={loading || busy}
-      title={isOn ? 'Auto-reply ON — click to mute' : 'Auto-reply MUTED — click to enable'}
+      title={isOn ? 'AI + follow-ups ON — click to mute' : 'AI + follow-ups MUTED — click to enable'}
       className={cn(
         'flex items-center gap-1.5 rounded-lg transition-colors shrink-0',
         compact ? 'p-1.5' : 'px-2.5 py-1.5 text-xs font-medium',
@@ -97,7 +99,7 @@ export function AutoReplyToggle({
       ) : (
         <BellOff size={compact ? 16 : 14} />
       )}
-      {!compact && <span>{isOn ? 'Auto-reply ON' : 'Muted'}</span>}
+      {!compact && <span>{isOn ? 'AI + follow-ups ON' : 'Muted'}</span>}
     </button>
   );
 
@@ -107,10 +109,10 @@ export function AutoReplyToggle({
     <TooltipProvider delayDuration={200}>
       <Tooltip>
         <TooltipTrigger asChild>{btn}</TooltipTrigger>
-        <TooltipContent side="bottom" className="text-xs max-w-[220px]">
+        <TooltipContent side="bottom" className="text-xs max-w-[240px]">
           {isOn
-            ? 'AI auto-reply is ON for this contact. Click to mute (family, friends, VIPs).'
-            : 'AI will NOT auto-reply to this contact. Click to re-enable.'}
+            ? 'AI auto-replies AND automated follow-up cadences are ON for this contact. Click to mute (family, friends, VIPs).'
+            : 'AI will NOT auto-reply and NO automated follow-ups will be sent. Click to re-enable.'}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
