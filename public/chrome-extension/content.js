@@ -1,6 +1,7 @@
-// Vanto CRM Chrome Extension - Content Script v6.2.5
+// Vanto CRM Chrome Extension - Content Script v6.3.2
 // LOVABLE EDITION - Uses chat.onlinecourseformlm.com
 // v6.2.5: Fixed select_group stage - relaxed text matching for pipe symbols, better search result selectors
+// v6.3.2: Name sync fallback opens 1-on-1 chats when WhatsApp hides phone IDs from the chat list
 
 (function() {
   'use strict';
@@ -8,7 +9,7 @@
   // =====================================================
   // CONFIGURATION - LOVABLE EDITION
   // =====================================================
-  const VERSION = '6.2.6 (Lovable)';
+  const VERSION = '6.3.2 (Lovable)';
   const DASHBOARD_URL = 'https://chat.onlinecourseformlm.com';
   const DETECTION_DEBOUNCE_MS = 600;
   const POLLING_INTERVAL_MS = 1500;
@@ -1432,14 +1433,17 @@
   // =====================================================
   // WHATSAPP NAME SYNC (Layer 2 + 3)
   // =====================================================
-  // Walks the chat-list pane in web.whatsapp.com, scrolls to the bottom,
-  // and harvests { phone, name } pairs for every 1-on-1 chat. Group chats
-  // (@g.us) are ignored. Names that look like phone numbers are ignored.
+  // Walks the chat-list pane in web.whatsapp.com and harvests { phone, name }
+  // pairs for every 1-on-1 chat. When WhatsApp hides phone IDs from list rows,
+  // the manual button uses a slower fallback: open each 1-on-1 chat and read the
+  // phone from the open chat/header/contact details. Group chats are ignored.
   function namesyncStatus(msg) {
     const el = document.getElementById('vanto-namesync-status');
     if (el) el.textContent = msg;
     log('[namesync]', msg);
   }
+
+  const NAME_SYNC_OPEN_CHAT_LIMIT = 450;
 
   function isPhoneLikeName(s) {
     if (!s) return true;
@@ -1447,6 +1451,53 @@
     if (!t) return true;
     if (/^\+?\d[\d\s\-().]{4,}$/.test(t)) return true;
     return false;
+  }
+
+  function getChatPane() {
+    return document.querySelector('#pane-side') ||
+      document.querySelector('[aria-label="Chat list"]') ||
+      document.querySelector('[data-testid="chat-list"]');
+  }
+
+  function getVisibleChatRows(pane) {
+    if (!pane) return [];
+    const selectors = ['[role="listitem"]', '[role="row"]', 'div[tabindex="-1"]'];
+    for (const selector of selectors) {
+      const rows = Array.from(pane.querySelectorAll(selector))
+        .filter((row) => row && row.getBoundingClientRect && row.getBoundingClientRect().height > 24);
+      if (rows.length) return rows;
+    }
+    return [];
+  }
+
+  function isLikelyGroupRow(row) {
+    if (!row) return false;
+    const html = row.outerHTML || '';
+    if (html.includes('@g.us')) return true;
+    if (row.querySelector('[data-icon="default-group"], [data-icon="group"], [data-testid*="group"]')) return true;
+    const text = (row.textContent || '').toLowerCase();
+    if (/\b\d+\s+participants\b/.test(text)) return true;
+    if (/\byou were added\b|\bcreated group\b|\bchanged this group\b/.test(text)) return true;
+    return false;
+  }
+
+  function extractNameFromChatRow(row) {
+    if (!row) return '';
+    const candidates = [];
+    row.querySelectorAll('span[title], [data-testid="cell-frame-title"], span[dir="auto"], [aria-label]').forEach((el) => {
+      const v = (el.getAttribute('title') || el.getAttribute('aria-label') || el.textContent || '').trim();
+      if (v) candidates.push(v);
+    });
+    const fallback = (row.innerText || row.textContent || '').split('\n').map((x) => x.trim()).filter(Boolean);
+    candidates.push(...fallback);
+    for (const raw of candidates) {
+      const name = sanitizeExtractedText(raw, 'Name sync row name');
+      if (!name || isPhoneLikeName(name)) continue;
+      if (/^(typing|online|yesterday|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i.test(name)) continue;
+      if (/^\d{1,2}:\d{2}/.test(name)) continue;
+      return name;
+    }
+    return '';
   }
 
   // Extract a phone number (@c.us / @s.whatsapp.net) from anywhere on an
@@ -1479,41 +1530,152 @@
   }
 
   function harvestVisibleChatRows(acc, stats) {
-    const pane =
-      document.querySelector('#pane-side') ||
-      document.querySelector('[aria-label="Chat list"]') ||
-      document.querySelector('[data-testid="chat-list"]');
+    const pane = getChatPane();
     if (!pane) return false;
-    let rows = pane.querySelectorAll('[role="listitem"]');
-    if (!rows.length) rows = pane.querySelectorAll('[role="row"]');
-    if (!rows.length) rows = pane.querySelectorAll('div[tabindex="-1"]');
+    const rows = getVisibleChatRows(pane);
     if (stats) stats.rowsSeen = (stats.rowsSeen || 0) + rows.length;
     rows.forEach((row) => {
+      if (isLikelyGroupRow(row)) { if (stats) stats.groupRows = (stats.groupRows || 0) + 1; return; }
       const phone = extractPhoneFromNode(row);
       if (!phone) { if (stats) stats.noPhone = (stats.noPhone || 0) + 1; return; }
-      let name = '';
-      const titleEl = row.querySelector('span[title]');
-      if (titleEl) name = (titleEl.getAttribute('title') || titleEl.textContent || '').trim();
-      if (!name) {
-        const aria = row.querySelector('[aria-label]');
-        if (aria) name = (aria.getAttribute('aria-label') || '').trim();
-      }
+      const name = extractNameFromChatRow(row);
       if (!name || isPhoneLikeName(name)) { if (stats) stats.phoneOnlyName = (stats.phoneOnlyName || 0) + 1; return; }
       acc.set(phone, name);
     });
     return true;
   }
 
-  async function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+  function extractPhoneFromText(text) {
+    const raw = String(text || '');
+    const matches = raw.match(/\+?\d[\d\s().-]{6,}\d/g) || [];
+    for (const match of matches) {
+      const digits = match.replace(/\D/g, '');
+      if (digits.length < 7 || digits.length > 15) continue;
+      if (/^(19|20)\d{2}$/.test(digits)) continue;
+      return digits;
+    }
+    return null;
+  }
 
-  async function scrapeWhatsAppChats({ onProgress } = {}) {
-    const pane =
-      document.querySelector('#pane-side') ||
-      document.querySelector('[aria-label="Chat list"]') ||
-      document.querySelector('[data-testid="chat-list"]');
+  function extractPhoneFromOpenChatText() {
+    const detected = detectPhoneNumber();
+    if (detected) return detected;
+    const zones = [
+      document.querySelector('#main header'),
+      document.querySelector('[data-testid="drawer-right"]'),
+      document.querySelector('[aria-label*="Contact info"]'),
+      document.querySelector('[aria-label*="Profile"]'),
+    ].filter(Boolean);
+    for (const zone of zones) {
+      const phone = extractPhoneFromText(zone.innerText || zone.textContent || '');
+      if (phone) return phone;
+    }
+    return null;
+  }
+
+  function clickLikeUser(el) {
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', inline: 'nearest' });
+    ['mousedown', 'mouseup', 'click'].forEach((type) => {
+      el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    });
+  }
+
+  async function waitForChatHeader(timeout = 3500) {
+    const started = Date.now();
+    while (Date.now() - started < timeout) {
+      if (document.querySelector('#main header')) return true;
+      await sleep(120);
+    }
+    return false;
+  }
+
+  async function openContactDetailsAndReadPhone() {
+    let phone = extractPhoneFromOpenChatText();
+    if (phone) return phone;
+
+    const header = document.querySelector('#main header');
+    if (!header) return null;
+    const target = header.querySelector('span[title]') || header.querySelector('[role="button"]') || header;
+    clickLikeUser(target);
+    await sleep(900);
+
+    phone = extractPhoneFromOpenChatText();
+
+    const closeButtons = Array.from(document.querySelectorAll('[aria-label="Close"], [aria-label="Back"], span[data-icon="x"], span[data-icon="back"]'));
+    const closeButton = closeButtons.find((el) => !sidebar || !sidebar.contains(el));
+    if (closeButton) {
+      clickLikeUser(closeButton.closest('button') || closeButton);
+      await sleep(250);
+    }
+
+    return phone;
+  }
+
+  async function scrapeByOpeningChats(acc, stats, { onProgress, maxChats = NAME_SYNC_OPEN_CHAT_LIMIT } = {}) {
+    const pane = getChatPane();
+    if (!pane) return;
+
+    const seen = new Set();
+    pane.scrollTop = 0;
+    await sleep(350);
+
+    let lastTop = -1;
+    let stableLoops = 0;
+    let opened = 0;
+    let iter = 0;
+
+    while (iter < 500 && opened < maxChats) {
+      iter++;
+      const rows = getVisibleChatRows(pane);
+      for (const row of rows) {
+        if (opened >= maxChats) break;
+        if (isLikelyGroupRow(row)) { stats.fallbackGroups = (stats.fallbackGroups || 0) + 1; continue; }
+        const name = extractNameFromChatRow(row);
+        if (!name || isPhoneLikeName(name)) { stats.fallbackNoName = (stats.fallbackNoName || 0) + 1; continue; }
+        const key = normalizeText(name) + '|' + (row.innerText || row.textContent || '').slice(0, 120);
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        clickLikeUser(row);
+        opened++;
+        stats.fallbackOpened = opened;
+        await waitForChatHeader(3500);
+        await sleep(450);
+
+        if (detectGroupChat()) {
+          stats.fallbackGroupsOpened = (stats.fallbackGroupsOpened || 0) + 1;
+          continue;
+        }
+
+        const phone = await openContactDetailsAndReadPhone();
+        if (phone) {
+          acc.set(phone, name);
+        } else {
+          stats.fallbackNoPhone = (stats.fallbackNoPhone || 0) + 1;
+        }
+        if (onProgress) onProgress(acc.size, opened, maxChats);
+      }
+
+      pane.scrollTop = pane.scrollTop + Math.max(420, pane.clientHeight - 80);
+      await sleep(300);
+      if (pane.scrollTop === lastTop) {
+        stableLoops++;
+        if (stableLoops >= 3) break;
+      } else {
+        stableLoops = 0;
+        lastTop = pane.scrollTop;
+      }
+    }
+
+    stats.fallbackLimited = opened >= maxChats;
+  }
+
+  async function scrapeWhatsAppChats({ onProgress, allowChatOpenFallback = false } = {}) {
+    const pane = getChatPane();
     if (!pane) throw new Error('Chat list not found. Open web.whatsapp.com and load your chats first.');
     const acc = new Map();
-    const stats = { rowsSeen: 0, noPhone: 0, phoneOnlyName: 0 };
+    const stats = { rowsSeen: 0, noPhone: 0, phoneOnlyName: 0, groupRows: 0 };
     pane.scrollTop = 0;
     await sleep(300);
     harvestVisibleChatRows(acc, stats);
@@ -1536,6 +1698,17 @@
       }
     }
     pane.scrollTop = 0;
+
+    if (acc.size === 0 && allowChatOpenFallback) {
+      namesyncStatus('WhatsApp hid phone IDs in the chat list. Opening 1-on-1 chats to read phone numbers…');
+      await scrapeByOpeningChats(acc, stats, {
+        onProgress: (found, opened, max) => {
+          if (onProgress) onProgress(found, opened, max);
+        },
+      });
+      pane.scrollTop = 0;
+    }
+
     log('[namesync] scrape stats', stats, 'pairs:', acc.size);
     return { pairs: Array.from(acc.entries()).map(([phone, name]) => ({ phone, name })), stats };
   }
@@ -1548,10 +1721,15 @@
     try {
       if (!silent) namesyncStatus('Scanning chats…');
       const { pairs, stats } = await scrapeWhatsAppChats({
-        onProgress: (n) => { if (!silent) namesyncStatus(`Scanning chats… ${n} so far`); },
+        allowChatOpenFallback: !silent,
+        onProgress: (n, opened, max) => {
+          if (!silent) {
+            namesyncStatus(opened ? `Opening chats… ${n} found (${opened}/${max} checked)` : `Scanning chats… ${n} so far`);
+          }
+        },
       });
       if (pairs.length === 0) {
-        const diag = `No chats found. Scanned ${stats.rowsSeen} rows (${stats.noPhone} without phone id, ${stats.phoneOnlyName} phone-only). Open WhatsApp Web, let the chat list fully load, then retry.`;
+        const diag = `No phone numbers found. WhatsApp hid phone IDs in ${stats.noPhone} scanned rows; opened ${stats.fallbackOpened || 0} chats and still could not read a phone. This means WhatsApp Web is not exposing your address-book numbers to the extension on this account/browser.`;
         if (!silent) namesyncStatus(diag);
         return { success: true, updated: 0, created: 0, stats };
       }
@@ -1562,7 +1740,8 @@
       });
       if (resp && resp.success) {
         const { updated = 0, created = 0, skipped = 0, errors = 0 } = resp.data || {};
-        if (!silent) namesyncStatus(`Done. ${updated} updated, ${created} created, ${skipped} skipped${errors ? `, ${errors} errors` : ''}.`);
+        const capped = stats.fallbackLimited ? ' Sync reached the safe limit; click again to continue deeper in the chat list.' : '';
+        if (!silent) namesyncStatus(`Done. ${updated} updated, ${created} created, ${skipped} skipped${errors ? `, ${errors} errors` : ''}.${capped}`);
         return { success: true, updated, created, skipped, errors };
       } else {
         const err = (resp && resp.error) || 'unknown_error';
