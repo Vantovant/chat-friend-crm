@@ -1433,14 +1433,17 @@
   // =====================================================
   // WHATSAPP NAME SYNC (Layer 2 + 3)
   // =====================================================
-  // Walks the chat-list pane in web.whatsapp.com, scrolls to the bottom,
-  // and harvests { phone, name } pairs for every 1-on-1 chat. Group chats
-  // (@g.us) are ignored. Names that look like phone numbers are ignored.
+  // Walks the chat-list pane in web.whatsapp.com and harvests { phone, name }
+  // pairs for every 1-on-1 chat. When WhatsApp hides phone IDs from list rows,
+  // the manual button uses a slower fallback: open each 1-on-1 chat and read the
+  // phone from the open chat/header/contact details. Group chats are ignored.
   function namesyncStatus(msg) {
     const el = document.getElementById('vanto-namesync-status');
     if (el) el.textContent = msg;
     log('[namesync]', msg);
   }
+
+  const NAME_SYNC_OPEN_CHAT_LIMIT = 450;
 
   function isPhoneLikeName(s) {
     if (!s) return true;
@@ -1448,6 +1451,53 @@
     if (!t) return true;
     if (/^\+?\d[\d\s\-().]{4,}$/.test(t)) return true;
     return false;
+  }
+
+  function getChatPane() {
+    return document.querySelector('#pane-side') ||
+      document.querySelector('[aria-label="Chat list"]') ||
+      document.querySelector('[data-testid="chat-list"]');
+  }
+
+  function getVisibleChatRows(pane) {
+    if (!pane) return [];
+    const selectors = ['[role="listitem"]', '[role="row"]', 'div[tabindex="-1"]'];
+    for (const selector of selectors) {
+      const rows = Array.from(pane.querySelectorAll(selector))
+        .filter((row) => row && row.getBoundingClientRect && row.getBoundingClientRect().height > 24);
+      if (rows.length) return rows;
+    }
+    return [];
+  }
+
+  function isLikelyGroupRow(row) {
+    if (!row) return false;
+    const html = row.outerHTML || '';
+    if (html.includes('@g.us')) return true;
+    if (row.querySelector('[data-icon="default-group"], [data-icon="group"], [data-testid*="group"]')) return true;
+    const text = (row.textContent || '').toLowerCase();
+    if (/\b\d+\s+participants\b/.test(text)) return true;
+    if (/\byou were added\b|\bcreated group\b|\bchanged this group\b/.test(text)) return true;
+    return false;
+  }
+
+  function extractNameFromChatRow(row) {
+    if (!row) return '';
+    const candidates = [];
+    row.querySelectorAll('span[title], [data-testid="cell-frame-title"], span[dir="auto"], [aria-label]').forEach((el) => {
+      const v = (el.getAttribute('title') || el.getAttribute('aria-label') || el.textContent || '').trim();
+      if (v) candidates.push(v);
+    });
+    const fallback = (row.innerText || row.textContent || '').split('\n').map((x) => x.trim()).filter(Boolean);
+    candidates.push(...fallback);
+    for (const raw of candidates) {
+      const name = sanitizeExtractedText(raw, 'Name sync row name');
+      if (!name || isPhoneLikeName(name)) continue;
+      if (/^(typing|online|yesterday|today|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i.test(name)) continue;
+      if (/^\d{1,2}:\d{2}/.test(name)) continue;
+      return name;
+    }
+    return '';
   }
 
   // Extract a phone number (@c.us / @s.whatsapp.net) from anywhere on an
