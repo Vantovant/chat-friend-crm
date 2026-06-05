@@ -1753,7 +1753,7 @@ Deno.serve(async (req) => {
       emergencyIntent = "where_to_buy"; emergencyIntentPattern = "where_to_buy_natural";
     } else if (/\bwhere.*(buy|get)|takealot|authentic|real|legit|original\b/i.test(inLow)) {
       emergencyIntent = "where_to_buy"; emergencyIntentPattern = "where_to_buy_short";
-    } else if (/\b(product range|what (do you|products do you) (sell|have|offer)|what products|product list|tell me about (the |your )?products|send (me )?(the )?(product )?(range|catalog|info))\b/i.test(inLow)) {
+    } else if (/\b(product range|what (do you|products do you) (sell|have|offer)|what products|product list|tell me about (the |your )?products|send (me )?(the )?(product )?(range|catalog|info)|medicine|medicines|remedy|remedies|wellness product|health product|drops)\b/i.test(inLow)) {
       emergencyIntent = "product_range"; emergencyIntentPattern = "product_range_natural";
     } else if (intent.isPricing || /\bprice|how much|cost\b/i.test(inLow)) {
       emergencyIntent = "price"; emergencyIntentPattern = "price";
