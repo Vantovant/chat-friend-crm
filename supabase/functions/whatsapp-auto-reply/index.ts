@@ -1949,6 +1949,8 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     const isFirstTouch = actionTaken === "first_touch_trust_message";
 
     // Quiet-hours check (22:00–06:00 SAST = UTC+2)
+    // Paid Twilio/Facebook ad leads must still receive the first trust reply immediately;
+    // otherwise overnight ad spend creates silent inboxes and lost prospects.
     const nowUtc = new Date();
     const sastHour = (nowUtc.getUTCHours() + 2) % 24;
     const inQuietHours = sastHour >= 22 || sastHour < 6;
@@ -1984,6 +1986,8 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     // No reply is downgraded to Prospector Drafts by default.
     const isTwilioChannel = channel === "twilio";
     const isMaytapiChannel = channel === "maytapi";
+    const bypassQuietHoursForPaidLead = isTwilioChannel || emergencyLane;
+    const quietHoursBlocked = inQuietHours && !bypassQuietHoursForPaidLead;
 
     const autoAllowed =
       // Path A — Level 2A first-touch trust auto-send
@@ -1994,7 +1998,7 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
         isFirstTouch &&
         autoChannels.includes(channel) &&
         !dnc &&
-        !inQuietHours &&
+        !quietHoursBlocked &&
         !hourlyExceeded
       )
       // Path B — Legacy KV auto-reply for non-first-touch on either channel
@@ -2002,7 +2006,7 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
         (isTwilioChannel || isMaytapiChannel) &&
         !isFirstTouch &&
         !dnc &&
-        !inQuietHours
+        !quietHoursBlocked
       );
 
     diag.l2_enabled = enabled;
@@ -2012,9 +2016,10 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     diag.l2_first_touch = isFirstTouch;
     diag.l2_dnc = dnc;
     diag.l2_quiet_hours = inQuietHours;
+    diag.l2_quiet_hours_bypassed_for_paid_lead = bypassQuietHoursForPaidLead;
     diag.l2_hourly_exceeded = hourlyExceeded;
     diag.l2_auto_allowed = autoAllowed;
-    diag.l2_legacy_kv_path = (isTwilioChannel || isMaytapiChannel) && !isFirstTouch && !dnc && !inQuietHours;
+    diag.l2_legacy_kv_path = (isTwilioChannel || isMaytapiChannel) && !isFirstTouch && !dnc && !quietHoursBlocked;
 
     if (!autoAllowed) {
       // ── Downgrade to DRAFT (ai_suggestions) ──
@@ -2025,7 +2030,7 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
         : mode !== "auto_first_touch" ? "mode_not_auto_first_touch"
         : !autoChannels.includes(channel) ? `channel_not_in_allowlist:${channel || "unknown"}`
         : dnc ? "dnc_blocked"
-        : inQuietHours ? "quiet_hours_22_06_sast"
+        : quietHoursBlocked ? "quiet_hours_22_06_sast"
         : hourlyExceeded ? `hourly_cap_${hourlyCap}_exceeded`
         : "policy_block";
 
