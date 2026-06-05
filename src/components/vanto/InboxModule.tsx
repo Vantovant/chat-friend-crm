@@ -5,7 +5,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { temperatureBg, leadTypeBg, leadTypeLabels, LEAD_TYPES, type LeadTemperature, type LeadType } from '@/lib/vanto-data';
 import {
   Search, Phone, Video, MoreVertical, Send, Bot, Brain,
-  Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare, AlertTriangle, RotateCcw, ArrowLeft, X, Save, Pencil,
+  Paperclip, Smile, Info, Loader2, UserCircle, MessageSquare, AlertTriangle, RotateCcw, ArrowLeft, X, Save, Pencil, BellOff,
 } from 'lucide-react';
 import { displayPhone } from '@/lib/phone-utils';
 import { isTestFixtureContact, type FixtureFilter } from '@/lib/test-fixture';
