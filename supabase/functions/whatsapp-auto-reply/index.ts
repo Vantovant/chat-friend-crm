@@ -1096,7 +1096,16 @@ Deno.serve(async (req) => {
       .from("auto_reply_events")
       .select("id", { count: "exact", head: true })
       .eq("conversation_id", conversation_id)
-      .eq("inbound_message_id", inbound_message_id);
+      .eq("inbound_message_id", inbound_message_id)
+      .in("action_taken", [
+        "one_shot_reply", "menu_sent", "knowledge_strict", "knowledge_assisted",
+        "ai_knowledge_reply", "knowledge_reply", "greeting_sent", "human_handover",
+        "call_me", "whatsapp_me", "available_at", "first_touch_trust_message",
+        "join_intent_trust_reply", "buy_intent_trust_reply", "product_info_trust_reply",
+        "price_clarify_trust_reply", "price_safety_fallback", "template_required_blocked",
+        "skipped_duplicate_recent", "skipped_admin_self", "contact_muted", "phone_muted",
+        "window_expired",
+      ]);
 
     if ((existingInboundCount || 0) > 0) {
       diag.result = "duplicate_inbound_ignored";
