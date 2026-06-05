@@ -255,9 +255,14 @@ export function MaytapiInboxModule() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex justify-between gap-2">
-                            <p className="text-sm font-medium truncate">
+                            <p className="text-sm font-medium truncate flex items-center gap-1.5">
                               {c.contact?.name || 'Unknown contact'}
-                              <span className="ml-2 text-xs text-muted-foreground">{c.contact?.phone}</span>
+                              <span className="ml-1 text-xs text-muted-foreground">{c.contact?.phone}</span>
+                              {c.contact?.auto_reply_enabled === false && (
+                                <span title="AI auto-reply MUTED for this contact" className="inline-flex items-center text-amber-500 shrink-0">
+                                  <BellOff size={12} />
+                                </span>
+                              )}
                             </p>
                             <span className="text-xs text-muted-foreground shrink-0">{formatTime(c.latest.created_at)}</span>
                           </div>
