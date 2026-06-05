@@ -104,16 +104,58 @@ export function InboxModule() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
 
-  /* ── Fetch conversations ── */
+  /* ── Fetch conversations (Twilio Inbox: exclude pure-Maytapi conversations) ── */
   const fetchConversations = useCallback(async () => {
     setLoading(true);
+
+    // 1) Find conversation IDs that have at least one non-Maytapi (Twilio/null) message.
+    const { data: twilioMsgs } = await supabase
+      .from('messages')
+      .select('conversation_id, content, created_at, provider')
+      .or('provider.is.null,provider.neq.maytapi')
+      .order('created_at', { ascending: false })
+      .limit(2000);
+
+    const twilioConvIds = new Set<string>();
+    const lastTwilioByConv = new Map<string, { content: string | null; at: string }>();
+    for (const m of (twilioMsgs ?? []) as Array<{ conversation_id: string; content: string | null; created_at: string }>) {
+      if (!twilioConvIds.has(m.conversation_id)) {
+        twilioConvIds.add(m.conversation_id);
+        lastTwilioByConv.set(m.conversation_id, { content: m.content, at: m.created_at });
+      }
+    }
+
+    if (twilioConvIds.size === 0) {
+      setConversations([]);
+      setLoading(false);
+      return;
+    }
+
+    // 2) Load only those conversations.
     const { data, error } = await supabase
       .from('conversations')
       .select('*, contact:contacts(*)')
+      .in('id', Array.from(twilioConvIds))
       .order('last_message_at', { ascending: false, nullsFirst: false })
-      .limit(200);
+      .limit(300);
+
     if (!error && data) {
-      const mapped = (data as unknown as Conversation[]).filter(c => c.contact);
+      // Override last_message preview with the latest *Twilio* message so the
+      // sidebar never shows a Maytapi message in the Twilio Inbox.
+      const mapped = (data as unknown as Conversation[])
+        .filter(c => c.contact)
+        .map(c => {
+          const lt = lastTwilioByConv.get(c.id);
+          return lt
+            ? { ...c, last_message: lt.content, last_message_at: lt.at }
+            : c;
+        })
+        .sort((a, b) => {
+          const ta = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+          const tb = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+          return tb - ta;
+        });
+
       setConversations(mapped);
       if (mapped.length > 0 && !selectedConvId) {
         setSelectedConvId(mapped[0].id);
