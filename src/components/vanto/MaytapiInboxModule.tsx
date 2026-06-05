@@ -7,6 +7,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
 import { Loader2, MessageSquare, RefreshCw, Link2, Search, ArrowLeft, Phone } from 'lucide-react';
+import { AutoReplyToggle } from './AutoReplyToggle';
 import { toast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 
