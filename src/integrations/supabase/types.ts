@@ -324,6 +324,27 @@ export type Database = {
           },
         ]
       }
+      auto_reply_optouts: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          phone_normalized: string
+          reason: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          phone_normalized: string
+          reason?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          phone_normalized?: string
+          reason?: string | null
+        }
+        Relationships: []
+      }
       automations: {
         Row: {
           action_description: string
@@ -454,6 +475,7 @@ export type Database = {
       contacts: {
         Row: {
           assigned_to: string | null
+          auto_reply_enabled: boolean
           avatar_url: string | null
           contact_confidence: string
           contact_source: string
@@ -486,6 +508,7 @@ export type Database = {
         }
         Insert: {
           assigned_to?: string | null
+          auto_reply_enabled?: boolean
           avatar_url?: string | null
           contact_confidence?: string
           contact_source?: string
@@ -518,6 +541,7 @@ export type Database = {
         }
         Update: {
           assigned_to?: string | null
+          auto_reply_enabled?: boolean
           avatar_url?: string | null
           contact_confidence?: string
           contact_source?: string

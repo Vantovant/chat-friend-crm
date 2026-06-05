@@ -1032,6 +1032,48 @@ Deno.serve(async (req) => {
     return jsonRes({ ok: true, auto_reply: false, reason: "Auto-reply is OFF" });
   }
 
+  // ── Per-contact / per-phone mute (family, friends, VIPs) ──
+  try {
+    if (contact_id) {
+      const { data: cMute } = await svc
+        .from("contacts")
+        .select("auto_reply_enabled")
+        .eq("id", contact_id)
+        .maybeSingle();
+      if (cMute && cMute.auto_reply_enabled === false) {
+        diag.result = "contact_muted";
+        console.log("[auto-reply] DIAG:", JSON.stringify(diag));
+        await svc.from("auto_reply_events").insert({
+          conversation_id,
+          inbound_message_id: inbound_message_id || null,
+          action_taken: "contact_muted",
+          reason: "contact.auto_reply_enabled=false",
+        });
+        return jsonRes({ ok: true, auto_reply: false, reason: "contact_muted" });
+      }
+    }
+    if (phone_e164) {
+      const { data: pMute } = await svc
+        .from("auto_reply_optouts")
+        .select("phone_normalized")
+        .eq("phone_normalized", phone_e164)
+        .maybeSingle();
+      if (pMute) {
+        diag.result = "phone_muted";
+        console.log("[auto-reply] DIAG:", JSON.stringify(diag));
+        await svc.from("auto_reply_events").insert({
+          conversation_id,
+          inbound_message_id: inbound_message_id || null,
+          action_taken: "phone_muted",
+          reason: "auto_reply_optouts match",
+        });
+        return jsonRes({ ok: true, auto_reply: false, reason: "phone_muted" });
+      }
+    }
+  } catch (e: any) {
+    diag.mute_check_error = e?.message || "unknown";
+  }
+
   // ── 24h window check ──
   const { data: conv } = await svc.from("conversations").select("id, last_inbound_at, created_at").eq("id", conversation_id).maybeSingle();
   if (!conv) {

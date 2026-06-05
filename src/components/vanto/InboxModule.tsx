@@ -19,6 +19,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { CopilotSidebar } from './CopilotSidebar';
 import { DictateMessage } from './DictateMessage';
+import { AutoReplyToggle } from './AutoReplyToggle';
 
 
 /* ── Types ── */
@@ -516,6 +517,9 @@ export function InboxModule() {
                           else toast({ title: 'No phone number', variant: 'destructive' });
                         }}
                       />
+                    )}
+                    {selected.contact?.id && (
+                      <AutoReplyToggle contactId={selected.contact.id} contactName={selected.contact?.name} compact />
                     )}
                     <button
                       onClick={async () => {
