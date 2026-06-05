@@ -120,7 +120,7 @@ export function MaytapiInboxModule() {
     if (ids.length) {
       const { data: cs } = await supabase
         .from('contacts')
-        .select('id, name, phone')
+        .select('id, name, phone, auto_reply_enabled')
         .in('id', ids);
       (cs || []).forEach((c: any) => { contacts[c.id] = c; });
     }
