@@ -291,6 +291,24 @@ function BulkActionsBar({ selectedIds, contacts, profiles, userId, isAdmin, onDo
     onDone();
   };
 
+  const handleBulkAutoReply = async (enabled: boolean) => {
+    setProcessing(true);
+    const ids = Array.from(selectedIds);
+    const { error } = await supabase
+      .from('contacts')
+      .update({ auto_reply_enabled: enabled, updated_at: new Date().toISOString() } as any)
+      .in('id', ids);
+    if (error) {
+      toast({ title: 'Bulk auto-reply update failed', description: error.message, variant: 'destructive' });
+    } else {
+      for (const id of ids) await logActivity(id, 'auto_reply_toggled', userId, { enabled });
+      toast({ title: enabled ? `Auto-reply enabled for ${ids.length} contacts` : `Muted auto-reply for ${ids.length} contacts` });
+    }
+    setProcessing(false);
+    onDone();
+  };
+
+
   return (
     <div className="px-6 py-2 bg-primary/10 border-b border-primary/30 flex items-center gap-3 shrink-0">
       <span className="text-sm font-medium text-primary">{selectedIds.size} selected</span>
