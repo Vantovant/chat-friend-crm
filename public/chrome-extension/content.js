@@ -1430,6 +1430,120 @@
   }
 
   // =====================================================
+  // WHATSAPP NAME SYNC (Layer 2 + 3)
+  // =====================================================
+  // Walks the chat-list pane in web.whatsapp.com, scrolls to the bottom,
+  // and harvests { phone, name } pairs for every 1-on-1 chat. Group chats
+  // (@g.us) are ignored. Names that look like phone numbers are ignored.
+  function namesyncStatus(msg) {
+    const el = document.getElementById('vanto-namesync-status');
+    if (el) el.textContent = msg;
+    log('[namesync]', msg);
+  }
+
+  function isPhoneLikeName(s) {
+    if (!s) return true;
+    const t = String(s).trim();
+    if (!t) return true;
+    if (/^\+?\d[\d\s\-().]{4,}$/.test(t)) return true;
+    return false;
+  }
+
+  function harvestVisibleChatRows(acc) {
+    // WA Web uses [role="listitem"] inside #pane-side for each chat row
+    const pane = document.querySelector('#pane-side');
+    if (!pane) return false;
+    const rows = pane.querySelectorAll('[role="listitem"]');
+    rows.forEach((row) => {
+      // Phone — first descendant with data-id="..._<digits>@c.us"
+      let phone = null;
+      const dataEls = row.querySelectorAll('[data-id]');
+      for (const el of dataEls) {
+        const did = el.getAttribute('data-id') || '';
+        // Skip groups
+        if (did.includes('@g.us')) return;
+        const m = did.match(/(\d{7,15})@c\.us/);
+        if (m) { phone = m[1]; break; }
+      }
+      if (!phone) return;
+      // Name — first span[title]
+      const titleEl = row.querySelector('span[title]');
+      const name = titleEl ? (titleEl.getAttribute('title') || '').trim() : '';
+      if (!name || isPhoneLikeName(name)) return;
+      // Last-write wins per phone (most recent observation)
+      acc.set(phone, name);
+    });
+    return true;
+  }
+
+  async function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+  async function scrapeWhatsAppChats({ onProgress } = {}) {
+    const pane = document.querySelector('#pane-side');
+    if (!pane) throw new Error('Chat list not found. Open web.whatsapp.com first.');
+    const acc = new Map();
+    pane.scrollTop = 0;
+    await sleep(200);
+    harvestVisibleChatRows(acc);
+    let lastTop = -1;
+    let stableLoops = 0;
+    let iter = 0;
+    const MAX_ITER = 400; // safety cap (~ several thousand chats)
+    while (iter < MAX_ITER) {
+      iter++;
+      pane.scrollTop = pane.scrollTop + Math.max(400, pane.clientHeight - 100);
+      await sleep(250);
+      harvestVisibleChatRows(acc);
+      if (onProgress) onProgress(acc.size);
+      if (pane.scrollTop === lastTop) {
+        stableLoops++;
+        if (stableLoops >= 3) break; // reached bottom
+      } else {
+        stableLoops = 0;
+        lastTop = pane.scrollTop;
+      }
+    }
+    // Scroll back to top
+    pane.scrollTop = 0;
+    return Array.from(acc.entries()).map(([phone, name]) => ({ phone, name }));
+  }
+
+  async function runNameSync({ silent = false } = {}) {
+    if (!session.token) {
+      if (!silent) namesyncStatus('Log in via the Vanto extension icon first.');
+      return { success: false, error: 'not_authenticated' };
+    }
+    try {
+      if (!silent) namesyncStatus('Scanning chats…');
+      const pairs = await scrapeWhatsAppChats({
+        onProgress: (n) => { if (!silent) namesyncStatus(`Scanning chats… ${n} so far`); },
+      });
+      if (!silent) namesyncStatus(`Found ${pairs.length} chats. Syncing to CRM…`);
+      if (pairs.length === 0) {
+        if (!silent) namesyncStatus('No chats found. Make sure your chat list is loaded.');
+        return { success: true, updated: 0, created: 0 };
+      }
+      const resp = await chrome.runtime.sendMessage({
+        type: 'VANTO_BULK_SYNC_NAMES',
+        pairs,
+      });
+      if (resp && resp.success) {
+        const { updated = 0, created = 0, skipped = 0, errors = 0 } = resp.data || {};
+        if (!silent) namesyncStatus(`Done. ${updated} updated, ${created} created, ${skipped} skipped${errors ? `, ${errors} errors` : ''}.`);
+        return { success: true, updated, created, skipped, errors };
+      } else {
+        const err = (resp && resp.error) || 'unknown_error';
+        if (!silent) namesyncStatus('Sync failed: ' + err);
+        return { success: false, error: err };
+      }
+    } catch (e) {
+      logError('Name sync error', e);
+      if (!silent) namesyncStatus('Error: ' + (e?.message || String(e)));
+      return { success: false, error: e?.message || String(e) };
+    }
+  }
+
+  // =====================================================
   // MESSAGE LISTENER
   // =====================================================
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
