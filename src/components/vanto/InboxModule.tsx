@@ -518,6 +518,9 @@ export function InboxModule() {
                         }}
                       />
                     )}
+                    {selected.contact?.id && (
+                      <AutoReplyToggle contactId={selected.contact.id} contactName={selected.contact?.name} compact />
+                    )}
                     <button
                       onClick={async () => {
                         if (!selectedConvId || aiLoading) return;
