@@ -1096,7 +1096,16 @@ Deno.serve(async (req) => {
       .from("auto_reply_events")
       .select("id", { count: "exact", head: true })
       .eq("conversation_id", conversation_id)
-      .eq("inbound_message_id", inbound_message_id);
+      .eq("inbound_message_id", inbound_message_id)
+      .in("action_taken", [
+        "one_shot_reply", "menu_sent", "knowledge_strict", "knowledge_assisted",
+        "ai_knowledge_reply", "knowledge_reply", "greeting_sent", "human_handover",
+        "call_me", "whatsapp_me", "available_at", "first_touch_trust_message",
+        "join_intent_trust_reply", "buy_intent_trust_reply", "product_info_trust_reply",
+        "price_clarify_trust_reply", "price_safety_fallback", "template_required_blocked",
+        "skipped_duplicate_recent", "skipped_admin_self", "contact_muted", "phone_muted",
+        "window_expired",
+      ]);
 
     if ((existingInboundCount || 0) > 0) {
       diag.result = "duplicate_inbound_ignored";
@@ -1744,7 +1753,7 @@ Deno.serve(async (req) => {
       emergencyIntent = "where_to_buy"; emergencyIntentPattern = "where_to_buy_natural";
     } else if (/\bwhere.*(buy|get)|takealot|authentic|real|legit|original\b/i.test(inLow)) {
       emergencyIntent = "where_to_buy"; emergencyIntentPattern = "where_to_buy_short";
-    } else if (/\b(product range|what (do you|products do you) (sell|have|offer)|what products|product list|tell me about (the |your )?products|send (me )?(the )?(product )?(range|catalog|info))\b/i.test(inLow)) {
+    } else if (/\b(product range|what (do you|products do you) (sell|have|offer)|what products|product list|tell me about (the |your )?products|send (me )?(the )?(product )?(range|catalog|info)|medicine|medicines|remedy|remedies|wellness product|health product|drops)\b/i.test(inLow)) {
       emergencyIntent = "product_range"; emergencyIntentPattern = "product_range_natural";
     } else if (intent.isPricing || /\bprice|how much|cost\b/i.test(inLow)) {
       emergencyIntent = "price"; emergencyIntentPattern = "price";
@@ -1758,8 +1767,13 @@ Deno.serve(async (req) => {
     diag.emergency_log_only = emergencyLogOnly;
     diag.emergency_lane_active = emergencyLane;
 
-    // If emergency lane is active but intent isn't in allowed list → downgrade to draft
-    if (emergencyLane && (!emergencyIntent || !allowedIntents.includes(emergencyIntent))) {
+    const emergencyIntentAllowed = !!emergencyIntent && allowedIntents.includes(emergencyIntent.toLowerCase());
+    const isFirstTouchTrustReply = actionTaken === "first_touch_trust_message";
+    diag.emergency_intent_allowed = emergencyIntentAllowed;
+
+    // If emergency lane is active but intent isn't in allowed list → downgrade to draft.
+    // Exception: first-touch paid leads must always receive the trust/opening reply.
+    if (emergencyLane && !isFirstTouchTrustReply && !emergencyIntentAllowed) {
       const skipReason = emergencyIntent
         ? `emergency_intent_not_allowed:${emergencyIntent}`
         : "emergency_intent_unrecognised";
@@ -1949,6 +1963,8 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     const isFirstTouch = actionTaken === "first_touch_trust_message";
 
     // Quiet-hours check (22:00–06:00 SAST = UTC+2)
+    // Paid Twilio/Facebook ad leads must still receive the first trust reply immediately;
+    // otherwise overnight ad spend creates silent inboxes and lost prospects.
     const nowUtc = new Date();
     const sastHour = (nowUtc.getUTCHours() + 2) % 24;
     const inQuietHours = sastHour >= 22 || sastHour < 6;
@@ -1984,6 +2000,8 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     // No reply is downgraded to Prospector Drafts by default.
     const isTwilioChannel = channel === "twilio";
     const isMaytapiChannel = channel === "maytapi";
+    const bypassQuietHoursForPaidLead = isTwilioChannel || emergencyLane;
+    const quietHoursBlocked = inQuietHours && !bypassQuietHoursForPaidLead;
 
     const autoAllowed =
       // Path A — Level 2A first-touch trust auto-send
@@ -1994,7 +2012,7 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
         isFirstTouch &&
         autoChannels.includes(channel) &&
         !dnc &&
-        !inQuietHours &&
+        !quietHoursBlocked &&
         !hourlyExceeded
       )
       // Path B — Legacy KV auto-reply for non-first-touch on either channel
@@ -2002,7 +2020,7 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
         (isTwilioChannel || isMaytapiChannel) &&
         !isFirstTouch &&
         !dnc &&
-        !inQuietHours
+        !quietHoursBlocked
       );
 
     diag.l2_enabled = enabled;
@@ -2012,9 +2030,10 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     diag.l2_first_touch = isFirstTouch;
     diag.l2_dnc = dnc;
     diag.l2_quiet_hours = inQuietHours;
+    diag.l2_quiet_hours_bypassed_for_paid_lead = bypassQuietHoursForPaidLead;
     diag.l2_hourly_exceeded = hourlyExceeded;
     diag.l2_auto_allowed = autoAllowed;
-    diag.l2_legacy_kv_path = (isTwilioChannel || isMaytapiChannel) && !isFirstTouch && !dnc && !inQuietHours;
+    diag.l2_legacy_kv_path = (isTwilioChannel || isMaytapiChannel) && !isFirstTouch && !dnc && !quietHoursBlocked;
 
     if (!autoAllowed) {
       // ── Downgrade to DRAFT (ai_suggestions) ──
@@ -2025,7 +2044,7 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
         : mode !== "auto_first_touch" ? "mode_not_auto_first_touch"
         : !autoChannels.includes(channel) ? `channel_not_in_allowlist:${channel || "unknown"}`
         : dnc ? "dnc_blocked"
-        : inQuietHours ? "quiet_hours_22_06_sast"
+        : quietHoursBlocked ? "quiet_hours_22_06_sast"
         : hourlyExceeded ? `hourly_cap_${hourlyCap}_exceeded`
         : "policy_block";
 
