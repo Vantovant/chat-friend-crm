@@ -522,16 +522,46 @@ Deno.serve(async (req) => {
       // Find or create contact by phone_normalized
       let { data: contact } = await supabase
         .from("contacts")
-        .select("id, assigned_to, created_by")
+        .select("id, name, assigned_to, created_by")
         .eq("phone_normalized", phoneE164)
         .eq("is_deleted", false)
         .maybeSingle();
 
-      if (!contact) {
+      // Layer 1: helpers for name auto-fill from WA push-name
+      const isPlaceholderName = (n: string | null | undefined): boolean => {
+        if (!n) return true;
+        const s = String(n).trim();
+        if (!s) return true;
+        if (/^\+?\d[\d\s\-().]{4,}$/.test(s)) return true;
+        if (s.toLowerCase() === 'unknown') return true;
+        return false;
+      };
+      const isRealPushName = (n: string): boolean =>
+        !!n && n.trim().length >= 2 && !isPlaceholderName(n);
+
+      if (contact) {
+        if (isRealPushName(senderName) && isPlaceholderName(contact.name)) {
+          const { error: nameErr } = await supabase
+            .from('contacts')
+            .update({ name: senderName, first_name: senderName.split(/\s+/)[0] || null })
+            .eq('id', contact.id);
+          if (!nameErr) {
+            console.log('[maytapi-inbound] Auto-filled name from WA pushname:', contact.name, '→', senderName);
+            try {
+              await supabase.from('contact_activity').insert({
+                contact_id: contact.id,
+                type: 'name_auto_synced',
+                metadata: { source: 'maytapi_pushname', old_name: contact.name, new_name: senderName },
+              } as any);
+            } catch { /* noop */ }
+          }
+        }
+      } else {
         const { data: newContact, error: ce } = await supabase
           .from("contacts")
           .insert({
             name: senderName,
+            first_name: isRealPushName(senderName) ? (senderName.split(/\s+/)[0] || null) : null,
             phone: phoneE164,
             phone_normalized: phoneE164,
             phone_raw: rawPhone,

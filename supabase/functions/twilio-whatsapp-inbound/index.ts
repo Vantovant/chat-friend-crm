@@ -117,11 +117,24 @@ Deno.serve(async (req) => {
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
   const svc = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
+  // Helper: detect placeholder names that should be replaced with a real WA push-name
+  const isPlaceholderName = (n: string | null | undefined): boolean => {
+    if (!n) return true;
+    const s = String(n).trim();
+    if (!s) return true;
+    // Only digits, +digits, or phone-like patterns count as placeholders
+    if (/^\+?\d[\d\s\-().]{4,}$/.test(s)) return true;
+    if (s.toLowerCase() === 'unknown') return true;
+    return false;
+  };
+  const isRealPushName = (n: string): boolean =>
+    !!n && n.trim().length >= 2 && !isPlaceholderName(n);
+
   // 1) Find or create contact
   let contactId: string;
   const { data: existing } = await svc
     .from('contacts')
-    .select('id')
+    .select('id, name')
     .eq('is_deleted', false)
     .or(`phone_normalized.eq.${phoneE164},phone_normalized.eq.${phoneDigits},whatsapp_id.eq.${phoneDigits}`)
     .limit(1)
@@ -129,6 +142,23 @@ Deno.serve(async (req) => {
 
   if (existing) {
     contactId = existing.id;
+    // Layer 1: auto-fill name from WhatsApp profile if our stored name is empty/phone-only
+    if (isRealPushName(profileName) && isPlaceholderName(existing.name)) {
+      const { error: nameErr } = await svc
+        .from('contacts')
+        .update({ name: profileName, first_name: profileName.split(/\s+/)[0] || null })
+        .eq('id', contactId);
+      if (!nameErr) {
+        console.log('[twilio-inbound] Auto-filled name from WA profile:', existing.name, '→', profileName);
+        try {
+          await svc.from('contact_activity').insert({
+            contact_id: contactId,
+            type: 'name_auto_synced',
+            metadata: { source: 'twilio_pushname', old_name: existing.name, new_name: profileName },
+          } as any);
+        } catch { /* noop */ }
+      }
+    }
   } else {
     // Auto-assign new inbound contacts to Vanto Vanto
     const VANTO_USER_ID = 'e336f0a0-ccf5-4992-9607-25c5bf590b11';
