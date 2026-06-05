@@ -32,7 +32,7 @@ type UnmatchedRow = {
   linked_contact_id: string | null;
 };
 
-type ContactLite = { id: string; name: string; phone: string };
+type ContactLite = { id: string; name: string; phone: string; auto_reply_enabled?: boolean | null };
 
 type MaytapiMessageRow = {
   id: string;
