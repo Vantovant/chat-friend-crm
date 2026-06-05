@@ -344,6 +344,12 @@ function BulkActionsBar({ selectedIds, contacts, profiles, userId, isAdmin, onDo
             </div>
           )}
         </div>
+        <button onClick={() => handleBulkAutoReply(false)} disabled={processing} title="Stop AI auto-reply for selected contacts" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-500/15 text-amber-500 border border-amber-500/30 hover:bg-amber-500/25 transition-colors disabled:opacity-60">
+          <BellOff size={12} /> Mute AI
+        </button>
+        <button onClick={() => handleBulkAutoReply(true)} disabled={processing} title="Re-enable AI auto-reply for selected contacts" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 hover:bg-emerald-500/25 transition-colors disabled:opacity-60">
+          <Bot size={12} /> Unmute
+        </button>
         <button onClick={handleBulkDelete} disabled={processing} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-destructive/15 text-destructive border border-destructive/30 hover:bg-destructive/25 transition-colors disabled:opacity-60">
           <Trash2 size={12} /> Archive
         </button>
