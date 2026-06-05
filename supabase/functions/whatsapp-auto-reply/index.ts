@@ -1767,8 +1767,13 @@ Deno.serve(async (req) => {
     diag.emergency_log_only = emergencyLogOnly;
     diag.emergency_lane_active = emergencyLane;
 
-    // If emergency lane is active but intent isn't in allowed list → downgrade to draft
-    if (emergencyLane && (!emergencyIntent || !allowedIntents.includes(emergencyIntent))) {
+    const emergencyIntentAllowed = !!emergencyIntent && allowedIntents.includes(emergencyIntent.toLowerCase());
+    const isFirstTouchTrustReply = actionTaken === "first_touch_trust_message";
+    diag.emergency_intent_allowed = emergencyIntentAllowed;
+
+    // If emergency lane is active but intent isn't in allowed list → downgrade to draft.
+    // Exception: first-touch paid leads must always receive the trust/opening reply.
+    if (emergencyLane && !isFirstTouchTrustReply && !emergencyIntentAllowed) {
       const skipReason = emergencyIntent
         ? `emergency_intent_not_allowed:${emergencyIntent}`
         : "emergency_intent_unrecognised";
