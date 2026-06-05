@@ -368,10 +368,13 @@ function ThreadView({
         <div className="w-9 h-9 rounded-full vanto-gradient flex items-center justify-center text-sm font-bold text-primary-foreground">
           {contact?.name?.[0]?.toUpperCase() ?? '?'}
         </div>
-        <div>
-          <p className="text-sm font-semibold">{contact?.name || 'Unknown'}</p>
-          <p className="text-xs text-muted-foreground">{contact?.phone || ''}</p>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold truncate">{contact?.name || 'Unknown'}</p>
+          <p className="text-xs text-muted-foreground truncate">{contact?.phone || ''}</p>
         </div>
+        {contact?.id && (
+          <AutoReplyToggle contactId={contact.id} contactName={contact.name} compact />
+        )}
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
         {items.map((m) => {
