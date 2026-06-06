@@ -58,7 +58,7 @@ export function AutoReplyTrainerModule() {
   const activeMeta = CHANNELS.find((c) => c.id === channel)!;
 
   return (
-    <div className="p-4 md:p-6 space-y-6 max-w-7xl mx-auto">
+    <div className="h-full overflow-y-auto p-4 md:p-6 space-y-6 max-w-7xl mx-auto">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
