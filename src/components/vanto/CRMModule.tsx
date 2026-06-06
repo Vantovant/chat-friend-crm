@@ -205,7 +205,7 @@ export function CRMModule() {
               </div>
               <div className="flex-1 space-y-2">
                 {unassigned.map(contact => (
-                  <ContactKanbanCard key={contact.id} contact={contact} stageColor="hsl(var(--muted-foreground))" onDragStart={handleDragStart} onDragEnd={handleDragEnd} isDragging={dragContactId === contact.id} />
+                  <ContactKanbanCard key={contact.id} contact={contact} stages={stages} stageColor="hsl(var(--muted-foreground))" onDragStart={handleDragStart} onDragEnd={handleDragEnd} isDragging={dragContactId === contact.id} onChangeStage={moveContactToStage} />
                 ))}
               </div>
             </div>
