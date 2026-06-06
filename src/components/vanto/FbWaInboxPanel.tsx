@@ -118,7 +118,7 @@ export function FbWaInboxPanel() {
     if ((data as any)?.ok === false) {
       toast({ title: 'Ingest error', description: (data as any).error ?? 'unknown', variant: 'destructive' }); return;
     }
-    toast({ title: 'Post stored', description: 'AI variants + auto-send will run in ~15s.' });
+    toast({ title: 'Post stored', description: 'AI variants will be prepared. WhatsApp dispatch must be scheduled manually.' });
     setInput('');
     setTimeout(load, 1500);
     setTimeout(load, 15000);
@@ -153,7 +153,7 @@ export function FbWaInboxPanel() {
     if (error) toast({ title: 'Failed', description: error.message, variant: 'destructive' });
     else {
       setInstantEnabled(next);
-      toast({ title: next ? 'Auto-send RESUMED' : 'EMERGENCY STOP active', description: next ? 'New FB posts will flow to WhatsApp groups.' : 'No new injections will be queued.' });
+      toast({ title: next ? 'Facebook dispatch unlocked' : 'EMERGENCY STOP active', description: next ? 'Manual scheduled dispatch can be used; instant blasting remains blocked.' : 'No new Facebook injections will be queued.' });
     }
   };
 
@@ -179,11 +179,11 @@ export function FbWaInboxPanel() {
           : <AlertTriangle size={18} className="text-red-400 mt-0.5" />}
         <div className="flex-1">
           <p className={`text-sm font-semibold ${instantEnabled ? 'text-emerald-300' : 'text-red-300'}`}>
-            {instantEnabled ? 'Auto-send is ACTIVE' : 'Emergency stop is ACTIVE'}
+            {instantEnabled ? 'Facebook dispatch is unlocked' : 'Emergency stop is ACTIVE'}
           </p>
           <p className={`text-xs ${instantEnabled ? 'text-emerald-300/80' : 'text-red-300/80'}`}>
             {instantEnabled
-              ? 'New Facebook posts are summarized and dispatched to the default WhatsApp groups automatically. Use emergency stop to halt.'
+              ? 'New Facebook posts are summarized for review. WhatsApp sending requires an explicit future schedule.'
               : 'No FB → WA injections will be queued. The morning/noon/evening scheduler is unaffected.'}
           </p>
         </div>
@@ -200,7 +200,7 @@ export function FbWaInboxPanel() {
         <div className="flex items-center justify-between mb-3">
           <div>
             <h3 className="text-base font-bold text-foreground">Default target groups</h3>
-            <p className="text-xs text-muted-foreground">FB-triggered posts auto-send to these groups (same list as your scheduler).</p>
+            <p className="text-xs text-muted-foreground">Approved groups for manually scheduled Facebook-to-WhatsApp posts.</p>
           </div>
           <button
             onClick={saveDefaultGroups} disabled={savingGroups}
@@ -265,7 +265,7 @@ export function FbWaInboxPanel() {
             className="flex items-center gap-2 px-4 py-2 rounded-lg vanto-gradient text-primary-foreground text-sm font-medium hover:opacity-90 disabled:opacity-50"
           >
             {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
-            Ingest & Auto-send
+            Ingest & Prepare
           </button>
         </div>
       </div>

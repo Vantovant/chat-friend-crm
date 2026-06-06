@@ -1,5 +1,5 @@
 // Phase 4: inject an approved fb_generated_post into scheduled_group_posts.
-// Spreads sends across groups by 8 seconds. Respects emergency stop + 6/day rate limit.
+// Requires an explicit future schedule and spreads sends safely across groups.
 // Does NOT touch maytapi-send-group or maytapi-schedule-content — drainer picks rows up.
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 import { createClient } from 'npm:@supabase/supabase-js@2';
@@ -8,8 +8,9 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 
-const SPACING_SECONDS = 8;
-const DAILY_LIMIT_PER_GROUP = 6;
+const SPACING_SECONDS = 15 * 60;
+const DAILY_LIMIT_PER_GROUP = 1;
+const MIN_LEAD_TIME_MS = 10 * 60 * 1000;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -56,6 +57,12 @@ Deno.serve(async (req) => {
       scheduled_at?: string;
     };
     if (!fb_generated_post_id) return json({ ok: false, error: 'fb_generated_post_id required' }, 200);
+    if (!scheduled_at) return json({ ok: false, error: 'scheduled_at required for Facebook WhatsApp dispatch' }, 400);
+    const baseTs = new Date(scheduled_at).getTime();
+    if (!Number.isFinite(baseTs)) return json({ ok: false, error: 'scheduled_at invalid' }, 400);
+    if (baseTs < Date.now() + MIN_LEAD_TIME_MS) {
+      return json({ ok: false, error: 'scheduled_at must be at least 10 minutes in the future' }, 400);
+    }
 
     // Load variant + linked source (for image_url)
     const { data: variant, error: vErr } = await admin
@@ -136,7 +143,6 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: 'daily_limit_reached_all_groups', blocked }, 200);
     }
 
-    const baseTs = scheduled_at ? new Date(scheduled_at).getTime() : Date.now() + SPACING_SECONDS * 1000;
     const rows: any[] = [];
     const logRows: any[] = [];
     const queuedAts: string[] = [];

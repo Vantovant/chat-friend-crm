@@ -1,0 +1,1 @@
+DROP TRIGGER IF EXISTS enforce_scheduled_group_safety_trigger ON public.scheduled_group_posts;
