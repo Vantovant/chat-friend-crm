@@ -53,12 +53,7 @@ export function CRMModule() {
 
   const handleDragEnd = () => setDragContactId(null);
 
-  const handleDrop = async (e: React.DragEvent, targetStageId: string | null) => {
-    e.preventDefault();
-    const contactId = e.dataTransfer.getData('text/plain');
-    if (!contactId) return;
-    setDragContactId(null);
-
+  const moveContactToStage = async (contactId: string, targetStageId: string | null) => {
     const contact = contacts.find(c => c.id === contactId);
     if (!contact || contact.stage_id === targetStageId) return;
 
@@ -75,13 +70,11 @@ export function CRMModule() {
       .eq('id', contactId);
 
     if (error) {
-      // Rollback
       setContacts(prev => prev.map(c => c.id === contactId ? { ...c, stage_id: oldStageId } : c));
       toast({ title: 'Failed to move contact', description: error.message, variant: 'destructive' });
       return;
     }
 
-    // Log activity
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       await supabase.from('contact_activity').insert({
@@ -94,6 +87,15 @@ export function CRMModule() {
 
     toast({ title: 'Contact moved', description: `${contact.name} → ${newStageName}` });
   };
+
+  const handleDrop = async (e: React.DragEvent, targetStageId: string | null) => {
+    e.preventDefault();
+    const contactId = e.dataTransfer.getData('text/plain');
+    setDragContactId(null);
+    if (!contactId) return;
+    await moveContactToStage(contactId, targetStageId);
+  };
+
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -173,6 +175,7 @@ export function CRMModule() {
               <KanbanColumn
                 key={stage.id}
                 stage={stage}
+                stages={stages}
                 contacts={stageContacts}
                 dragContactId={dragContactId}
                 onDragStart={handleDragStart}
@@ -180,7 +183,9 @@ export function CRMModule() {
                 onDrop={handleDrop}
                 onDragOver={handleDragOver}
                 onAddContact={() => openAddDeal(stage.id)}
+                onChangeStage={moveContactToStage}
               />
+
             );
           })}
 
@@ -200,7 +205,7 @@ export function CRMModule() {
               </div>
               <div className="flex-1 space-y-2">
                 {unassigned.map(contact => (
-                  <ContactKanbanCard key={contact.id} contact={contact} stageColor="hsl(var(--muted-foreground))" onDragStart={handleDragStart} onDragEnd={handleDragEnd} isDragging={dragContactId === contact.id} />
+                  <ContactKanbanCard key={contact.id} contact={contact} stages={stages} stageColor="hsl(var(--muted-foreground))" onDragStart={handleDragStart} onDragEnd={handleDragEnd} isDragging={dragContactId === contact.id} onChangeStage={moveContactToStage} />
                 ))}
               </div>
             </div>
@@ -240,11 +245,12 @@ function FilterChip({ label, active, onClick }: { label: string; active: boolean
   );
 }
 
-function KanbanColumn({ stage, contacts, dragContactId, onDragStart, onDragEnd, onDrop, onDragOver, onAddContact }: {
-  stage: Stage; contacts: ContactWithStage[]; dragContactId: string | null;
+function KanbanColumn({ stage, stages, contacts, dragContactId, onDragStart, onDragEnd, onDrop, onDragOver, onAddContact, onChangeStage }: {
+  stage: Stage; stages: Stage[]; contacts: ContactWithStage[]; dragContactId: string | null;
   onDragStart: (e: React.DragEvent, id: string) => void; onDragEnd: () => void;
   onDrop: (e: React.DragEvent, stageId: string) => void; onDragOver: (e: React.DragEvent) => void;
   onAddContact: () => void;
+  onChangeStage: (contactId: string, stageId: string | null) => void;
 }) {
   return (
     <div
@@ -266,17 +272,18 @@ function KanbanColumn({ stage, contacts, dragContactId, onDragStart, onDragEnd, 
       </div>
       <div className="flex-1 space-y-2 min-h-[60px]">
         {contacts.map(contact => (
-          <ContactKanbanCard key={contact.id} contact={contact} stageColor={stage.color || 'hsl(var(--primary))'} onDragStart={onDragStart} onDragEnd={onDragEnd} isDragging={dragContactId === contact.id} />
+          <ContactKanbanCard key={contact.id} contact={contact} stages={stages} stageColor={stage.color || 'hsl(var(--primary))'} onDragStart={onDragStart} onDragEnd={onDragEnd} isDragging={dragContactId === contact.id} onChangeStage={onChangeStage} />
         ))}
       </div>
     </div>
   );
 }
 
-function ContactKanbanCard({ contact, stageColor, onDragStart, onDragEnd, isDragging }: {
-  contact: ContactWithStage; stageColor: string;
+function ContactKanbanCard({ contact, stages, stageColor, onDragStart, onDragEnd, isDragging, onChangeStage }: {
+  contact: ContactWithStage; stages: Stage[]; stageColor: string;
   onDragStart: (e: React.DragEvent, id: string) => void; onDragEnd: () => void;
   isDragging: boolean;
+  onChangeStage: (contactId: string, stageId: string | null) => void;
 }) {
   return (
     <div
@@ -299,13 +306,29 @@ function ContactKanbanCard({ contact, stageColor, onDragStart, onDragEnd, isDrag
         </div>
         <GripVertical size={14} className="text-muted-foreground shrink-0" />
       </div>
-      <div className="flex items-center gap-1.5 flex-wrap">
+      <div className="flex items-center gap-1.5 flex-wrap mb-2">
         <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold border', temperatureBg[contact.temperature])}>
           {contact.temperature.toUpperCase()}
         </span>
         <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold border', leadTypeBg[contact.lead_type])}>
           {leadTypeLabels[contact.lead_type]}
         </span>
+      </div>
+      {/* Manual stage selector — alternative to drag-and-drop */}
+      <div onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
+        <label className="text-[9px] uppercase tracking-wide text-muted-foreground block mb-0.5">Move to stage</label>
+        <select
+          value={contact.stage_id || ''}
+          onChange={(e) => onChangeStage(contact.id, e.target.value || null)}
+          draggable={false}
+          onDragStart={(e) => e.preventDefault()}
+          className="w-full px-2 py-1 rounded-md bg-secondary border border-border text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+        >
+          <option value="">Unassigned</option>
+          {stages.map(s => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
       </div>
     </div>
   );
