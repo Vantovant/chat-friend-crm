@@ -175,6 +175,7 @@ export function CRMModule() {
               <KanbanColumn
                 key={stage.id}
                 stage={stage}
+                stages={stages}
                 contacts={stageContacts}
                 dragContactId={dragContactId}
                 onDragStart={handleDragStart}
@@ -182,7 +183,9 @@ export function CRMModule() {
                 onDrop={handleDrop}
                 onDragOver={handleDragOver}
                 onAddContact={() => openAddDeal(stage.id)}
+                onChangeStage={moveContactToStage}
               />
+
             );
           })}
 
