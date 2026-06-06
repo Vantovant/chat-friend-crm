@@ -8,9 +8,20 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
 
-const DISTRIBUTOR_KEYWORDS = [
-  'distributor', 'r375', 'membership', 'business', 'join', 'opportunity',
-  'earn', 'sponsor', 'income', 'sign up', 'register', 'partner',
+// Tight, word-boundary distributor intent keywords. Avoid generic words like
+// "business" or "join" that match casual replies and inflate the flag.
+const DISTRIBUTOR_PATTERNS: RegExp[] = [
+  /\bdistributor(s)?\b/i,
+  /\br\s?375\b/i,
+  /\bmembership\b/i,
+  /\bbusiness associate\b/i,
+  /\bjoin (aplgo|the business|as a distributor)\b/i,
+  /\bbusiness opportunity\b/i,
+  /\bearn (extra )?(income|money)\b/i,
+  /\bsponsor me\b/i,
+  /\bsign me up\b/i,
+  /\bregister (me )?as (a )?distributor\b/i,
+  /\bbecome (a )?(distributor|member|partner)\b/i,
 ];
 
 const HARD_CAP = 100;
@@ -47,8 +58,8 @@ type Row = Contact & {
 };
 
 function detectDistributor(c: Contact, thread: ThreadMsg[]): boolean {
-  const blob = `${c.notes || ''} ${c.tags?.join(' ') || ''} ${thread.map((m) => m.body).join(' ')}`.toLowerCase();
-  return DISTRIBUTOR_KEYWORDS.some((k) => blob.includes(k));
+  const blob = `${c.notes || ''} ${c.tags?.join(' ') || ''} ${thread.map((m) => m.body).join(' ')}`;
+  return DISTRIBUTOR_PATTERNS.some((rx) => rx.test(blob));
 }
 
 function fmtDate(s: string | null): string {
