@@ -67,6 +67,14 @@ type Row = Contact & {
 
 type MessageSort = 'none' | 'asc' | 'desc';
 
+type ConversationRow = { id: string; contact_id: string | null };
+type TwilioMessageRow = { conversation_id: string; content: string | null; is_outbound: boolean | null; created_at: string };
+type MaytapiMessageRow = { contact_id: string | null; phone_e164: string | null; direction: string | null; body: string | null; received_at: string };
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'unknown';
+}
+
 function detectDistributor(c: Contact, thread: ThreadMsg[]): boolean {
   const blob = `${c.lead_type || ''} ${c.interest || ''} ${c.notes || ''} ${c.tags?.join(' ') || ''} ${thread.map((m) => m.body).join(' ')}`;
   if (c.interest?.toLowerCase() === 'business') return true;
@@ -122,7 +130,8 @@ export function LeadCallReport() {
         .in('contact_id', ids);
       const convIdToContact = new Map<string, string>();
       const convIds: string[] = [];
-      (convs || []).forEach((c: any) => {
+      ((convs || []) as ConversationRow[]).forEach((c) => {
+        if (!c.contact_id) return;
         convIdToContact.set(c.id, c.contact_id);
         convIds.push(c.id);
       });
@@ -136,7 +145,7 @@ export function LeadCallReport() {
           .in('conversation_id', convIds)
           .order('created_at', { ascending: true })
           .limit(5000);
-        (msgs || []).forEach((m: any) => {
+        ((msgs || []) as TwilioMessageRow[]).forEach((m) => {
           const cid = convIdToContact.get(m.conversation_id);
           if (!cid) return;
           const arr = twilioByContact.get(cid) || [];
@@ -160,7 +169,7 @@ export function LeadCallReport() {
         .limit(5000);
       const phoneToContact = new Map<string, string>();
       all.forEach((c) => { if (c.phone_normalized) phoneToContact.set(c.phone_normalized, c.id); });
-      (mMsgs || []).forEach((m: any) => {
+      ((mMsgs || []) as MaytapiMessageRow[]).forEach((m) => {
         const cid = m.contact_id || (m.phone_e164 ? phoneToContact.get(m.phone_e164) : null);
         if (!cid) return;
         const arr = maytapiByContact.get(cid) || [];
@@ -209,9 +218,9 @@ export function LeadCallReport() {
       });
 
       setRows(selected);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('[LeadCallReport] load failed', e);
-      toast.error('Failed to load report: ' + (e?.message || 'unknown'));
+      toast.error('Failed to load report: ' + getErrorMessage(e));
     } finally {
       setLoading(false);
     }
