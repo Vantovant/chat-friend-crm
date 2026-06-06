@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2, Lock, MessageCircle, RefreshCw, Users, Wand2 } from "lucide-react";
+import { Check, Loader2, Lock, MessageCircle, RefreshCw, Users, Wand2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/hooks/use-current-user";
@@ -80,7 +80,20 @@ export default function InboundFeedPane({ channel, onCorrected }: { channel: Tra
       }
     }
 
-    setWaRows(rows.filter((r) => r.aiReply));
+    // Filter out replies already marked "Reply is correct"
+    const paired = rows.filter((r) => r.aiReply);
+    const replyIds = paired.map((r) => r.aiReply!.id);
+    let approvedSet = new Set<string>();
+    if (replyIds.length > 0) {
+      const { data: approved } = await supabase
+        .from("auto_reply_approved_replies" as any)
+        .select("message_id")
+        .eq("channel", channel)
+        .in("message_id", replyIds);
+      approvedSet = new Set((approved || []).map((a: any) => a.message_id));
+    }
+
+    setWaRows(paired.filter((r) => !approvedSet.has(r.aiReply!.id)));
     setLoading(false);
   };
 
