@@ -291,12 +291,20 @@ export default function InboundFeedPane({ channel, onCorrected }: { channel: Tra
                 ) : (
                   <p className="text-[11px] italic text-muted-foreground mb-2">No subsequent outbound reply in this group.</p>
                 )}
-                <button onClick={() => openGroupCorrect(r)}
-                  disabled={!canCorrect}
-                  title={canCorrect ? "Create an override training rule from this group reply" : "Admin or Super Admin role required to train rules"}
-                  className="text-xs px-2 h-7 rounded vanto-gradient text-primary-foreground font-medium inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed">
-                  {canCorrect ? <Wand2 size={12} /> : <Lock size={12} />} Correct this reply
-                </button>
+                <div className="flex gap-2 flex-wrap">
+                  <button onClick={() => openGroupCorrect(r)}
+                    disabled={!canCorrect}
+                    title={canCorrect ? "Create an override training rule from this group reply" : "Admin or Super Admin role required to train rules"}
+                    className="text-xs px-2 h-7 rounded vanto-gradient text-primary-foreground font-medium inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed">
+                    {canCorrect ? <Wand2 size={12} /> : <Lock size={12} />} Correct this reply
+                  </button>
+                  <button onClick={() => approveReply("groups", r.aiReply?.id)}
+                    disabled={!canCorrect || !r.aiReply}
+                    title="Mark this reply as correct so it stops appearing in the feed"
+                    className="text-xs px-2 h-7 rounded border border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10 font-medium inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <Check size={12} /> Reply is correct
+                  </button>
+                </div>
               </div>
             ))
           )
@@ -319,12 +327,20 @@ export default function InboundFeedPane({ channel, onCorrected }: { channel: Tra
                   <span className="font-semibold text-primary">AI: </span>{r.aiReply.content}
                 </p>
               )}
-              <button onClick={() => openWaCorrect(r)}
-                disabled={!canCorrect}
-                title={canCorrect ? "Create an override training rule from this reply" : "Admin or Super Admin role required to train rules"}
-                className="text-xs px-2 h-7 rounded vanto-gradient text-primary-foreground font-medium inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed">
-                {canCorrect ? <Wand2 size={12} /> : <Lock size={12} />} Correct this reply
-              </button>
+              <div className="flex gap-2 flex-wrap">
+                <button onClick={() => openWaCorrect(r)}
+                  disabled={!canCorrect}
+                  title={canCorrect ? "Create an override training rule from this reply" : "Admin or Super Admin role required to train rules"}
+                  className="text-xs px-2 h-7 rounded vanto-gradient text-primary-foreground font-medium inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed">
+                  {canCorrect ? <Wand2 size={12} /> : <Lock size={12} />} Correct this reply
+                </button>
+                <button onClick={() => approveReply(channel, r.aiReply?.id)}
+                  disabled={!canCorrect || !r.aiReply}
+                  title="Mark this reply as correct so it stops appearing in the feed"
+                  className="text-xs px-2 h-7 rounded border border-emerald-500/40 text-emerald-500 hover:bg-emerald-500/10 font-medium inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed">
+                  <Check size={12} /> Reply is correct
+                </button>
+              </div>
             </div>
           ))
         )}
