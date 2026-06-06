@@ -54,16 +54,21 @@ async function assertMaytapiReady(productId: string, phoneId: string, token: str
   }
 }
 
-function buildTrustHeader(proofUrl: string, tocUrl: string, localNumber: string): string {
-  return (
-    `${proofUrl}\n\n` +
-    `🌿 *APLGO Official Wellness Info*\n\n` +
-    `Hi, I'm *Vanto from Get Well Africa* — an accredited APLGO distributor.\n\n` +
-    `Shop: ${SHOP_URL}\n` +
-    `Learning guide: ${tocUrl}\n` +
-    (localNumber ? `Local support: ${localNumber}\n` : "") +
-    `\n— — —\n\n`
-  );
+// Lean wrapper: proof URL on top, message in middle, Shop + Local support at bottom.
+// We intentionally do NOT prepend "Hi, I'm Vanto from Get Well Africa — an accredited
+// APLGO distributor" on every message — the proof-page preview card already establishes
+// identity, and repeating the intro on every turn reads as robotic / spammy.
+function buildTrustWrap(
+  message: string,
+  proofUrl: string,
+  _tocUrl: string,
+  localNumber: string,
+): string {
+  const top = `${proofUrl}\n\n`;
+  const footerParts: string[] = [`Shop: ${SHOP_URL}`];
+  if (localNumber) footerParts.push(`Local support: ${localNumber}`);
+  const footer = `\n\n${footerParts.join("\n")}`;
+  return `${top}${message}${footer}`;
 }
 
 Deno.serve(async (req) => {
