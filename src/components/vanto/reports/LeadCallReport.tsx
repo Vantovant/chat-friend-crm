@@ -644,11 +644,83 @@ export function LeadCallReport() {
                   )}
                 </TableCell>
                 <TableCell className="py-2 text-xs text-right align-top">{r.thread.length}</TableCell>
+                <TableCell className="py-2 text-right align-top">
+                  <Button variant="ghost" size="sm" onClick={() => openEditor(r)} title="Edit lead type & notes — syncs to Contacts and CRM Pipeline">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
+
+      <Dialog open={!!editor} onOpenChange={(o) => !o && setEditor(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {editor ? `Edit — ${displayName(editor.row)}` : 'Edit contact'}
+            </DialogTitle>
+          </DialogHeader>
+          {editor && (
+            <div className="space-y-4">
+              <div className="text-xs text-muted-foreground">
+                {editor.row.phone || editor.row.phone_normalized || '—'} · saves to Contacts & CRM Pipeline
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Lead Type</label>
+                <select
+                  value={editor.lead_type}
+                  onChange={(e) => setEditor({ ...editor, lead_type: e.target.value as LeadType })}
+                  className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                >
+                  {LEAD_TYPES.map((lt) => (
+                    <option key={lt.value} value={lt.value}>{lt.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-muted-foreground">Notes</label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={pasteSummaryToNotes}
+                    disabled={!editor.row.summary}
+                    title={editor.row.summary ? 'Append AI summary to notes' : 'Generate summary first'}
+                  >
+                    <ClipboardPaste className="h-3.5 w-3.5 mr-1" />
+                    Paste AI summary
+                  </Button>
+                </div>
+                <textarea
+                  value={editor.notes}
+                  onChange={(e) => setEditor({ ...editor, notes: e.target.value })}
+                  rows={10}
+                  className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 resize-y font-mono"
+                  placeholder="Notes for this contact…"
+                />
+              </div>
+
+              {editor.row.summary && (
+                <details className="text-xs text-muted-foreground bg-secondary/30 rounded-lg p-3">
+                  <summary className="cursor-pointer text-foreground">AI summary preview</summary>
+                  <pre className="whitespace-pre-wrap mt-2">{summaryAsText(editor.row.summary)}</pre>
+                </details>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setEditor(null)} disabled={savingEdit}>Cancel</Button>
+            <Button onClick={saveEditor} disabled={savingEdit}>
+              {savingEdit ? 'Saving…' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
