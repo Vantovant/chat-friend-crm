@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Download, Printer, RefreshCw, Star, Phone } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, Printer, RefreshCw, Star, Phone } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
@@ -12,11 +12,19 @@ import { toast } from 'sonner';
 // "business" or "join" that match casual replies and inflate the flag.
 const DISTRIBUTOR_PATTERNS: RegExp[] = [
   /\bdistributor(s)?\b/i,
+  /\bdistributorship\b/i,
   /\br\s?375\b/i,
   /\bmembership\b/i,
+  /\bmember\s?(ship)? fee\b/i,
   /\bbusiness associate\b/i,
+  /\bbe(ing)? (a )?(distributor(s)?|member|business associate|partner)\b/i,
+  /\bhow (do|can) i (be|become|join|register|sign up)\b.*\b(distributor(s)?|member|business associate|partner)\b/i,
+  /\binterested\b.{0,80}\b(distributor(s)?|membership|member|business opportunity|business associate|partner)\b/i,
+  /\b(distributor(s)?|membership|business opportunity|business associate|partner)\b.{0,80}\binterested\b/i,
+  /\bi want to (be|become|join|register|sign up)\b.*\b(distributor(s)?|member|business associate|partner)\b/i,
   /\bjoin (aplgo|the business|as a distributor)\b/i,
   /\bbusiness opportunity\b/i,
+  /\bopportunity to earn\b/i,
   /\bearn (extra )?(income|money)\b/i,
   /\bsponsor me\b/i,
   /\bsign me up\b/i,
@@ -57,8 +65,19 @@ type Row = Contact & {
   thread: ThreadMsg[];
 };
 
+type MessageSort = 'none' | 'asc' | 'desc';
+
+type ConversationRow = { id: string; contact_id: string | null };
+type TwilioMessageRow = { conversation_id: string; content: string | null; is_outbound: boolean | null; created_at: string };
+type MaytapiMessageRow = { contact_id: string | null; phone_e164: string | null; direction: string | null; body: string | null; received_at: string };
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : 'unknown';
+}
+
 function detectDistributor(c: Contact, thread: ThreadMsg[]): boolean {
-  const blob = `${c.notes || ''} ${c.tags?.join(' ') || ''} ${thread.map((m) => m.body).join(' ')}`;
+  const blob = `${c.lead_type || ''} ${c.interest || ''} ${c.notes || ''} ${c.tags?.join(' ') || ''} ${thread.map((m) => m.body).join(' ')}`;
+  if (c.interest?.toLowerCase() === 'business') return true;
   return DISTRIBUTOR_PATTERNS.some((rx) => rx.test(blob));
 }
 
@@ -81,6 +100,7 @@ export function LeadCallReport() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<Row[]>([]);
   const [onlyDistributors, setOnlyDistributors] = useState(false);
+  const [messageSort, setMessageSort] = useState<MessageSort>('none');
   const [generating, setGenerating] = useState(false);
 
   async function load() {
@@ -110,7 +130,8 @@ export function LeadCallReport() {
         .in('contact_id', ids);
       const convIdToContact = new Map<string, string>();
       const convIds: string[] = [];
-      (convs || []).forEach((c: any) => {
+      ((convs || []) as ConversationRow[]).forEach((c) => {
+        if (!c.contact_id) return;
         convIdToContact.set(c.id, c.contact_id);
         convIds.push(c.id);
       });
@@ -124,7 +145,7 @@ export function LeadCallReport() {
           .in('conversation_id', convIds)
           .order('created_at', { ascending: true })
           .limit(5000);
-        (msgs || []).forEach((m: any) => {
+        ((msgs || []) as TwilioMessageRow[]).forEach((m) => {
           const cid = convIdToContact.get(m.conversation_id);
           if (!cid) return;
           const arr = twilioByContact.get(cid) || [];
@@ -148,7 +169,7 @@ export function LeadCallReport() {
         .limit(5000);
       const phoneToContact = new Map<string, string>();
       all.forEach((c) => { if (c.phone_normalized) phoneToContact.set(c.phone_normalized, c.id); });
-      (mMsgs || []).forEach((m: any) => {
+      ((mMsgs || []) as MaytapiMessageRow[]).forEach((m) => {
         const cid = m.contact_id || (m.phone_e164 ? phoneToContact.get(m.phone_e164) : null);
         if (!cid) return;
         const arr = maytapiByContact.get(cid) || [];
@@ -197,9 +218,9 @@ export function LeadCallReport() {
       });
 
       setRows(selected);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('[LeadCallReport] load failed', e);
-      toast.error('Failed to load report: ' + (e?.message || 'unknown'));
+      toast.error('Failed to load report: ' + getErrorMessage(e));
     } finally {
       setLoading(false);
     }
@@ -212,7 +233,18 @@ export function LeadCallReport() {
     [rows, onlyDistributors]
   );
 
+  const sortedFiltered = useMemo(() => {
+    if (messageSort === 'none') return filtered;
+    return [...filtered].sort((a, b) =>
+      messageSort === 'desc' ? b.thread.length - a.thread.length : a.thread.length - b.thread.length
+    );
+  }, [filtered, messageSort]);
+
   const distributorCount = rows.filter((r) => r.isDistributor).length;
+
+  function toggleMessageSort() {
+    setMessageSort((current) => (current === 'none' ? 'desc' : current === 'desc' ? 'asc' : 'none'));
+  }
 
   async function generatePDF() {
     setGenerating(true);
@@ -227,7 +259,7 @@ export function LeadCallReport() {
       doc.text('Vanto CRM — Lead Call Report', M, 50);
       doc.setFont('helvetica', 'normal').setFontSize(10).setTextColor(110);
       doc.text(`Generated ${now.toLocaleString('en-ZA')}`, M, 68);
-      doc.text(`Total contacts: ${filtered.length}  ·  Distributors: ${filtered.filter((r) => r.isDistributor).length}`, M, 82);
+      doc.text(`Total contacts: ${sortedFiltered.length}  ·  Distributors: ${sortedFiltered.filter((r) => r.isDistributor).length}`, M, 82);
       doc.text('Sorted: ★ Distributors first, then oldest first-inquiry first.', M, 96);
       doc.setTextColor(0);
 
@@ -235,7 +267,7 @@ export function LeadCallReport() {
       autoTable(doc, {
         startY: 116,
         head: [['#', '★', 'Name', 'Phone', 'Type', 'Temp', 'First Inquiry', 'Last Msg']],
-        body: filtered.map((r, i) => [
+        body: sortedFiltered.map((r, i) => [
           String(i + 1),
           r.isDistributor ? '★' : '',
           displayName(r).slice(0, 28),
@@ -251,7 +283,7 @@ export function LeadCallReport() {
       });
 
       // Per-contact details
-      filtered.forEach((r, i) => {
+      sortedFiltered.forEach((r, i) => {
         doc.addPage();
         let y = 50;
         doc.setFont('helvetica', 'bold').setFontSize(13);
@@ -302,7 +334,7 @@ export function LeadCallReport() {
       const fname = `lead-call-report-${now.toISOString().slice(0, 10)}.pdf`;
       doc.save(fname);
       toast.success(`Downloaded ${fname}`);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
       toast.error('PDF generation failed');
     } finally {
@@ -320,7 +352,7 @@ export function LeadCallReport() {
           <div>
             <h2 className="text-lg font-semibold text-foreground">Lead Call Report</h2>
             <p className="text-xs text-muted-foreground">
-              {loading ? 'Loading…' : `${filtered.length} of ${rows.length} contacts · ${distributorCount} distributors · cap ${HARD_CAP}`}
+              {loading ? 'Loading…' : `${sortedFiltered.length} of ${rows.length} contacts · ${distributorCount} distributors · cap ${HARD_CAP}`}
             </p>
           </div>
         </div>
@@ -335,7 +367,7 @@ export function LeadCallReport() {
           <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="h-4 w-4 mr-1" /> Print
           </Button>
-          <Button size="sm" onClick={generatePDF} disabled={generating || filtered.length === 0}>
+          <Button size="sm" onClick={generatePDF} disabled={generating || sortedFiltered.length === 0}>
             <Download className="h-4 w-4 mr-1" /> {generating ? 'Generating…' : 'Download PDF'}
           </Button>
         </div>
@@ -353,18 +385,28 @@ export function LeadCallReport() {
               <TableHead>Temp</TableHead>
               <TableHead>First Inquiry</TableHead>
               <TableHead>Last Msg</TableHead>
-              <TableHead className="text-right">Msgs</TableHead>
+              <TableHead className="text-right">
+                <button
+                  type="button"
+                  onClick={toggleMessageSort}
+                  className="ml-auto inline-flex items-center justify-end gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                  title="Sort by message count"
+                >
+                  Msgs
+                  {messageSort === 'desc' ? <ArrowDown className="h-3.5 w-3.5" /> : messageSort === 'asc' ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowUpDown className="h-3.5 w-3.5" />}
+                </button>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.length === 0 && !loading && (
+            {sortedFiltered.length === 0 && !loading && (
               <TableRow>
                 <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
                   No contacts match the current filter.
                 </TableCell>
               </TableRow>
             )}
-            {filtered.map((r, i) => (
+            {sortedFiltered.map((r, i) => (
               <TableRow key={r.id}>
                 <TableCell className="py-2 text-xs text-muted-foreground">{i + 1}</TableCell>
                 <TableCell className="py-2">
