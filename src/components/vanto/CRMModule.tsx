@@ -53,12 +53,7 @@ export function CRMModule() {
 
   const handleDragEnd = () => setDragContactId(null);
 
-  const handleDrop = async (e: React.DragEvent, targetStageId: string | null) => {
-    e.preventDefault();
-    const contactId = e.dataTransfer.getData('text/plain');
-    if (!contactId) return;
-    setDragContactId(null);
-
+  const moveContactToStage = async (contactId: string, targetStageId: string | null) => {
     const contact = contacts.find(c => c.id === contactId);
     if (!contact || contact.stage_id === targetStageId) return;
 
@@ -75,13 +70,11 @@ export function CRMModule() {
       .eq('id', contactId);
 
     if (error) {
-      // Rollback
       setContacts(prev => prev.map(c => c.id === contactId ? { ...c, stage_id: oldStageId } : c));
       toast({ title: 'Failed to move contact', description: error.message, variant: 'destructive' });
       return;
     }
 
-    // Log activity
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       await supabase.from('contact_activity').insert({
@@ -94,6 +87,15 @@ export function CRMModule() {
 
     toast({ title: 'Contact moved', description: `${contact.name} → ${newStageName}` });
   };
+
+  const handleDrop = async (e: React.DragEvent, targetStageId: string | null) => {
+    e.preventDefault();
+    const contactId = e.dataTransfer.getData('text/plain');
+    setDragContactId(null);
+    if (!contactId) return;
+    await moveContactToStage(contactId, targetStageId);
+  };
+
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
