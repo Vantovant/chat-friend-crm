@@ -210,6 +210,30 @@ export type Database = {
         }
         Relationships: []
       }
+      auto_reply_approved_replies: {
+        Row: {
+          approved_at: string
+          approved_by: string | null
+          channel: string
+          id: string
+          message_id: string
+        }
+        Insert: {
+          approved_at?: string
+          approved_by?: string | null
+          channel: string
+          id?: string
+          message_id: string
+        }
+        Update: {
+          approved_at?: string
+          approved_by?: string | null
+          channel?: string
+          id?: string
+          message_id?: string
+        }
+        Relationships: []
+      }
       auto_reply_corrections: {
         Row: {
           channel: string

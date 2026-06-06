@@ -5,7 +5,7 @@ import { toast } from "@/hooks/use-toast";
 import type { TrainerChannel } from "../AutoReplyTrainerModule";
 
 export type CorrectionTarget = {
-  channel: TrainerChannel;
+  channel: TrainerChannel | "all";
   originalMessage: string;
   originalReply: string;
   messageId: string | null;
