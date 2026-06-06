@@ -187,7 +187,19 @@ export default function InboundFeedPane({ channel, onCorrected }: { channel: Tra
       }
     }
 
-    setGroupRows(rows);
+    // Filter out replies already marked "Reply is correct"
+    const replyIds = rows.filter((r) => r.aiReply).map((r) => r.aiReply!.id);
+    let approvedSet = new Set<string>();
+    if (replyIds.length > 0) {
+      const { data: approved } = await supabase
+        .from("auto_reply_approved_replies" as any)
+        .select("message_id")
+        .eq("channel", "groups")
+        .in("message_id", replyIds);
+      approvedSet = new Set((approved || []).map((a: any) => a.message_id));
+    }
+
+    setGroupRows(rows.filter((r) => !r.aiReply || !approvedSet.has(r.aiReply.id)));
     setLoading(false);
   };
 
@@ -218,6 +230,19 @@ export default function InboundFeedPane({ channel, onCorrected }: { channel: Tra
       contactId: null,
       contactLabel: `${r.group_name} · ${r.phone_e164 || "unknown sender"}`,
     });
+  };
+
+  const approveReply = async (ch: TrainerChannel, replyId: string | undefined) => {
+    if (!replyId) return;
+    const { error } = await supabase
+      .from("auto_reply_approved_replies" as any)
+      .insert({ channel: ch, message_id: replyId });
+    if (error && !/duplicate key/i.test(error.message)) {
+      toast({ title: "Failed to mark as correct", description: error.message, variant: "destructive" });
+      return;
+    }
+    toast({ title: "Marked as correct", description: "This reply will no longer appear in the feed." });
+    refresh();
   };
 
   return (
