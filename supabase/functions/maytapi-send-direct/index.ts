@@ -54,16 +54,21 @@ async function assertMaytapiReady(productId: string, phoneId: string, token: str
   }
 }
 
-function buildTrustHeader(proofUrl: string, tocUrl: string, localNumber: string): string {
-  return (
-    `${proofUrl}\n\n` +
-    `🌿 *APLGO Official Wellness Info*\n\n` +
-    `Hi, I'm *Vanto from Get Well Africa* — an accredited APLGO distributor.\n\n` +
-    `Shop: ${SHOP_URL}\n` +
-    `Learning guide: ${tocUrl}\n` +
-    (localNumber ? `Local support: ${localNumber}\n` : "") +
-    `\n— — —\n\n`
-  );
+// Lean wrapper: proof URL on top, message in middle, Shop + Local support at bottom.
+// We intentionally do NOT prepend "Hi, I'm Vanto from Get Well Africa — an accredited
+// APLGO distributor" on every message — the proof-page preview card already establishes
+// identity, and repeating the intro on every turn reads as robotic / spammy.
+function buildTrustWrap(
+  message: string,
+  proofUrl: string,
+  _tocUrl: string,
+  localNumber: string,
+): string {
+  const top = `${proofUrl}\n\n`;
+  const footerParts: string[] = [`Shop: ${SHOP_URL}`];
+  if (localNumber) footerParts.push(`Local support: ${localNumber}`);
+  const footer = `\n\n${footerParts.join("\n")}`;
+  return `${top}${message}${footer}`;
 }
 
 Deno.serve(async (req) => {
@@ -137,59 +142,15 @@ Deno.serve(async (req) => {
           const TOC_URL = s.table_of_contents_url || SHOP_URL;
           const LOCAL_NUMBER = s.local_support_number || "+27 79 083 1530";
 
-          // If the message already contains the proof URL, don't double-stamp.
-          if (finalMessage.includes(PROOF_URL) || finalMessage.includes(SHOP_URL)) {
+          // If the message already contains the proof URL AND the shop URL, it has
+          // been wrapped upstream — don't double-stamp.
+          if (finalMessage.includes(PROOF_URL) && finalMessage.includes(SHOP_URL)) {
             trust_skip_reason = "message_already_contains_trust_links";
           } else {
-            // Look up the contact + conversation by normalized phone to check history
-            const e164 = cleanNumber.startsWith("+") ? cleanNumber : `+${cleanNumber}`;
-            const { data: contactRow } = await svc
-              .from("contacts")
-              .select("id")
-              .eq("is_deleted", false)
-              .or(
-                `phone_normalized.eq.${e164},phone_normalized.eq.${cleanNumber},whatsapp_id.eq.${cleanNumber}`,
-              )
-              .limit(1)
-              .maybeSingle();
-
-            let trustEverSent = false;
-            if (contactRow?.id) {
-              const { data: convRow } = await svc
-                .from("conversations")
-                .select("id")
-                .eq("contact_id", contactRow.id)
-                .order("updated_at", { ascending: false })
-                .limit(1)
-                .maybeSingle();
-              if (convRow?.id) {
-                // ⚠️ PER-CHANNEL trust check. The Twilio "campaign" number and the Maytapi
-                // local number show up as TWO DIFFERENT chats on the recipient's phone, so a
-                // trust header sent via Twilio is invisible from the Maytapi chat (and vice
-                // versa). Only count prior MAYTAPI outbounds when deciding if trust was
-                // already established on THIS channel.
-                const { data: priorOutbound } = await svc
-                  .from("messages")
-                  .select("content,provider")
-                  .eq("conversation_id", convRow.id)
-                  .eq("is_outbound", true)
-                  .eq("provider", "maytapi")
-                  .order("created_at", { ascending: false })
-                  .limit(20);
-                trustEverSent = !!(priorOutbound || []).find((m: any) => {
-                  const c = String(m?.content || "");
-                  return c.includes(PROOF_URL) || c.includes(SHOP_URL) || c.includes("vanto-zazi-bloom");
-                });
-              }
-            }
-
-            if (!trustEverSent) {
-              const header = buildTrustHeader(PROOF_URL, TOC_URL, LOCAL_NUMBER);
-              finalMessage = `${header}${finalMessage}`;
-              trust_header_applied = true;
-            } else {
-              trust_skip_reason = "trust_already_established_in_thread";
-            }
+            // Lean wrap on every send (proof URL on top, Shop + Local support at bottom).
+            // No "Hi I'm Vanto..." intro — proof preview card carries identity.
+            finalMessage = buildTrustWrap(finalMessage, PROOF_URL, TOC_URL, LOCAL_NUMBER);
+            trust_header_applied = true;
           }
         } else {
           trust_skip_reason = "no_service_role_in_env";

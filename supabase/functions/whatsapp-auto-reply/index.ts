@@ -1415,32 +1415,19 @@ Deno.serve(async (req) => {
     const isFirstReply = (priorOutbound || 0) === 0;
     diag.first_touch = isFirstReply;
 
-    // Build trust-first first-touch script (channel-aware)
+    // Build trust-first first-touch script (channel-aware).
+    // No "Hi I'm Vanto..." intro line — the proof-page preview card carries identity,
+    // and repeating it on every turn reads as robotic.
     const TRUST_BRIDGE_TWILIO =
       `This WhatsApp may appear from our campaign/system number, but I'll guide you personally from my local South African number as well.\n\n`;
     const buildFirstTouch = (twilioStyle: boolean) => {
       const bridge = twilioStyle ? TRUST_BRIDGE_TWILIO : "";
-      const intro = twilioStyle
-        ? `You can browse the full product shop here:`
-        : `Before I recommend anything, please feel free to browse first:\n\nProduct shop:`;
-      const tocLabel = twilioStyle
-        ? `You can also start with our learning guide here:`
-        : `Learning guide:`;
-      // Only emit the Learning guide line when TOC_URL is genuinely different
-      // from SHOP_URL — prevents the shop link appearing twice on first touch.
-      const tocBlock =
-        TOC_URL && TOC_URL.trim() && TOC_URL.trim() !== SHOP_URL
-          ? `${tocLabel}\n${TOC_URL}\n\n`
-          : "";
       return (
         `${PROOF_URL}\n\n` +
-        `🌿 *APLGO Official Wellness Info*\n\n` +
-        `Hi, I'm *Vanto from Get Well Africa* — an accredited APLGO distributor.\n\n` +
         `${bridge}` +
-        `${intro}\n${SHOP_URL}\n\n` +
-        `${tocBlock}` +
         `What would you like support with most — ${SUPPORT_MENU}?\n\n` +
-        `— Vanto\nLocal support: ${LOCAL_NUMBER}`
+        `Shop: ${SHOP_URL}\n` +
+        `Local support: ${LOCAL_NUMBER}`
       );
     };
 
@@ -1497,19 +1484,17 @@ Deno.serve(async (req) => {
     } else if (isProductInfoReq) {
       replyContent =
         `${PROOF_URL}\n\n` +
-        `Of course. Start here so you can see the full APLGO product shop:\n${SHOP_URL}\n\n` +
-        `You can also use this learning guide:\n${TOC_URL}\n\n` +
-        `Then tell me what you want support with most — ${SUPPORT_MENU} — and I'll point you to the right product.\n\n` +
-        `— Vanto`;
+        `Of course. Tell me what you want support with most — ${SUPPORT_MENU} — and I'll point you to the right product.\n\n` +
+        `Shop: ${SHOP_URL}\n` +
+        `Local support: ${LOCAL_NUMBER}`;
       diag.product_info_fallback = true;
       actionTaken = "product_info_trust_reply";
     } else if (isPriceNoContext) {
       replyContent =
         `${PROOF_URL}\n\n` +
         `I can help with price. Which product are you asking about?\n\n` +
-        `You can browse the full shop here:\n${SHOP_URL}\n\n` +
-        `And you can use the learning guide here:\n${TOC_URL}\n\n` +
-        `— Vanto`;
+        `Shop: ${SHOP_URL}\n` +
+        `Local support: ${LOCAL_NUMBER}`;
       diag.price_no_context_fallback = true;
       actionTaken = "price_clarify_trust_reply";
     }
@@ -1546,9 +1531,7 @@ Deno.serve(async (req) => {
       } catch (logErr: any) {
         console.warn("[auto-reply] failed to log price_safety_blocked event:", logErr?.message);
       }
-      replyContent =
-        `🌿 *APLGO Official Wellness Info*\nDistributor: *Vanto — Get Well Africa*\nAPLGO Sponsor Code: *787262*\n\n` +
-        safety.safeText;
+      replyContent = safety.safeText;
       actionTaken = "price_safety_fallback";
     }
   } catch (e: any) {
