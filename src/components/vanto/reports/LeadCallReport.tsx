@@ -334,7 +334,7 @@ export function LeadCallReport() {
       const fname = `lead-call-report-${now.toISOString().slice(0, 10)}.pdf`;
       doc.save(fname);
       toast.success(`Downloaded ${fname}`);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
       toast.error('PDF generation failed');
     } finally {
