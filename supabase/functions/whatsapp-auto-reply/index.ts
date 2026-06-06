@@ -647,7 +647,7 @@ async function loadTrainerRules(svc: any, channel: string = "maytapi"): Promise<
       .from("ai_trainer_rules")
       .select("id,title,triggers,product,instruction,priority,enabled,channel")
       .eq("enabled", true)
-      .eq("channel", channel);
+      .in("channel", [channel, "all"]);
     if (error) {
       console.error("[auto-reply] trainer rules load error:", error.message);
       return [];

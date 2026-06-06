@@ -50,11 +50,12 @@ async function run(svc: any, question: string, channel: string = "maytapi") {
   const trainerEnabled = flagRow ? (flagRow.value === "true" || flagRow.value === "1") : true;
   let rules: Trainer[] = [];
   if (trainerEnabled) {
+    const channelFilter = channel === "all" ? ["maytapi","twilio","facebook","groups","all"] : [channel, "all"];
     const { data: rulesData } = await svc
       .from("ai_trainer_rules")
       .select("title,triggers,product,instruction,priority,enabled")
       .eq("enabled", true)
-      .eq("channel", channel);
+      .in("channel", channelFilter);
     rules = rulesData || [];
   }
   const matched = matchTrainer(rules, question, product);
@@ -104,7 +105,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   const svc = createClient(SUPABASE_URL, SERVICE_ROLE);
   const body = await req.json().catch(()=>({}));
-  const channel: string = (body.channel === "twilio" || body.channel === "facebook") ? body.channel : "maytapi";
+  const channel: string = ["twilio","facebook","groups","all"].includes(body.channel) ? body.channel : "maytapi";
   const tests: string[] = body.questions || [
     "How do I join?",
     "I want to buy NRM",
