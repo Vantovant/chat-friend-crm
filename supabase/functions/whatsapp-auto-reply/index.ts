@@ -1531,9 +1531,7 @@ Deno.serve(async (req) => {
       } catch (logErr: any) {
         console.warn("[auto-reply] failed to log price_safety_blocked event:", logErr?.message);
       }
-      replyContent =
-        `🌿 *APLGO Official Wellness Info*\nDistributor: *Vanto — Get Well Africa*\nAPLGO Sponsor Code: *787262*\n\n` +
-        safety.safeText;
+      replyContent = safety.safeText;
       actionTaken = "price_safety_fallback";
     }
   } catch (e: any) {
