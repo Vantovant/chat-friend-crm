@@ -125,14 +125,14 @@ export function AutoReplyTrainerModule() {
               </button>
             </div>
 
-            {/* Sub-grid: feed | sandbox */}
+            {/* Sub-grid: feed | sandbox stack */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <InboundFeedPane channel={c.id} onCorrected={() => { /* noop */ }} />
-              <SandboxPane channel={c.id} />
+              <div className="space-y-6">
+                <SandboxPane channel={c.id} />
+                <UniversalSandboxPane />
+              </div>
             </div>
-
-            {/* Universal sandbox — saves corrections to every channel */}
-            <UniversalSandboxPane />
 
             <TrainerRulesPane channel={c.id} />
 
