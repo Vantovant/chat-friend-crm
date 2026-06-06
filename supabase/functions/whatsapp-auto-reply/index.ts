@@ -1484,19 +1484,17 @@ Deno.serve(async (req) => {
     } else if (isProductInfoReq) {
       replyContent =
         `${PROOF_URL}\n\n` +
-        `Of course. Start here so you can see the full APLGO product shop:\n${SHOP_URL}\n\n` +
-        `You can also use this learning guide:\n${TOC_URL}\n\n` +
-        `Then tell me what you want support with most — ${SUPPORT_MENU} — and I'll point you to the right product.\n\n` +
-        `— Vanto`;
+        `Of course. Tell me what you want support with most — ${SUPPORT_MENU} — and I'll point you to the right product.\n\n` +
+        `Shop: ${SHOP_URL}\n` +
+        `Local support: ${LOCAL_NUMBER}`;
       diag.product_info_fallback = true;
       actionTaken = "product_info_trust_reply";
     } else if (isPriceNoContext) {
       replyContent =
         `${PROOF_URL}\n\n` +
         `I can help with price. Which product are you asking about?\n\n` +
-        `You can browse the full shop here:\n${SHOP_URL}\n\n` +
-        `And you can use the learning guide here:\n${TOC_URL}\n\n` +
-        `— Vanto`;
+        `Shop: ${SHOP_URL}\n` +
+        `Local support: ${LOCAL_NUMBER}`;
       diag.price_no_context_fallback = true;
       actionTaken = "price_clarify_trust_reply";
     }
