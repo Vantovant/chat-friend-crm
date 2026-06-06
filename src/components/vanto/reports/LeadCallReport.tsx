@@ -341,7 +341,7 @@ export function LeadCallReport() {
           <div>
             <h2 className="text-lg font-semibold text-foreground">Lead Call Report</h2>
             <p className="text-xs text-muted-foreground">
-              {loading ? 'Loading…' : `${filtered.length} of ${rows.length} contacts · ${distributorCount} distributors · cap ${HARD_CAP}`}
+              {loading ? 'Loading…' : `${sortedFiltered.length} of ${rows.length} contacts · ${distributorCount} distributors · cap ${HARD_CAP}`}
             </p>
           </div>
         </div>
@@ -356,7 +356,7 @@ export function LeadCallReport() {
           <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="h-4 w-4 mr-1" /> Print
           </Button>
-          <Button size="sm" onClick={generatePDF} disabled={generating || filtered.length === 0}>
+          <Button size="sm" onClick={generatePDF} disabled={generating || sortedFiltered.length === 0}>
             <Download className="h-4 w-4 mr-1" /> {generating ? 'Generating…' : 'Download PDF'}
           </Button>
         </div>
@@ -374,18 +374,28 @@ export function LeadCallReport() {
               <TableHead>Temp</TableHead>
               <TableHead>First Inquiry</TableHead>
               <TableHead>Last Msg</TableHead>
-              <TableHead className="text-right">Msgs</TableHead>
+              <TableHead className="text-right">
+                <button
+                  type="button"
+                  onClick={toggleMessageSort}
+                  className="ml-auto inline-flex items-center justify-end gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                  title="Sort by message count"
+                >
+                  Msgs
+                  {messageSort === 'desc' ? <ArrowDown className="h-3.5 w-3.5" /> : messageSort === 'asc' ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowUpDown className="h-3.5 w-3.5" />}
+                </button>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.length === 0 && !loading && (
+            {sortedFiltered.length === 0 && !loading && (
               <TableRow>
                 <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
                   No contacts match the current filter.
                 </TableCell>
               </TableRow>
             )}
-            {filtered.map((r, i) => (
+            {sortedFiltered.map((r, i) => (
               <TableRow key={r.id}>
                 <TableCell className="py-2 text-xs text-muted-foreground">{i + 1}</TableCell>
                 <TableCell className="py-2">
