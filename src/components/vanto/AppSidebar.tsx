@@ -36,7 +36,7 @@ const navItems: NavItem[] = [
   { id: 'group-administrator', label: 'Group Administrator', icon: ShieldCheck, adminOnly: true },
   { id: 'integrations', label: 'Integrations', icon: Puzzle },
   { id: 'api-console', label: 'API Console', icon: Terminal },
-  { id: 'damage-control', label: 'Damage Control', icon: ShieldAlert, adminOnly: true },
+  { id: 'reports', label: 'Reports', icon: FileText, adminOnly: true },
   { id: 'review-queue', label: 'Review Queue', icon: ShieldCheck, adminOnly: true },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
