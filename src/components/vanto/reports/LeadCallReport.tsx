@@ -3,13 +3,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ArrowDown, ArrowUp, ArrowUpDown, Download, Printer, RefreshCw, Star, Phone } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, Printer, RefreshCw, Star, Phone, Sparkles } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
 
-// Tight, word-boundary distributor intent keywords. Avoid generic words like
-// "business" or "join" that match casual replies and inflate the flag.
+// Tight, word-boundary distributor intent keywords.
 const DISTRIBUTOR_PATTERNS: RegExp[] = [
   /\bdistributor(s)?\b/i,
   /\bdistributorship\b/i,
@@ -58,11 +57,22 @@ type ThreadMsg = {
   body: string;
 };
 
+type Summary = {
+  intent: string;
+  distributor_interest: 'yes' | 'no' | 'maybe';
+  key_questions: string[];
+  answers_given: string[];
+  open_items: string[];
+  last_status: string;
+  summary_text: string;
+};
+
 type Row = Contact & {
   isDistributor: boolean;
   firstInquiry: string | null;
   lastMessage: string | null;
   thread: ThreadMsg[];
+  summary?: Summary | null;
 };
 
 type MessageSort = 'none' | 'asc' | 'desc';
@@ -70,6 +80,7 @@ type MessageSort = 'none' | 'asc' | 'desc';
 type ConversationRow = { id: string; contact_id: string | null };
 type TwilioMessageRow = { conversation_id: string; content: string | null; is_outbound: boolean | null; created_at: string };
 type MaytapiMessageRow = { contact_id: string | null; phone_e164: string | null; direction: string | null; body: string | null; received_at: string };
+type CachedSummaryRow = { contact_id: string; summary: Summary };
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'unknown';
@@ -106,11 +117,13 @@ export function LeadCallReport() {
   const [lmFrom, setLmFrom] = useState('');
   const [lmTo, setLmTo] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [summarizing, setSummarizing] = useState(false);
+  const [summarizeProgress, setSummarizeProgress] = useState<{ done: number; total: number } | null>(null);
+  const [compactPdf, setCompactPdf] = useState(true);
 
   async function load() {
     setLoading(true);
     try {
-      // Pull contacts (most recently updated first, broad sweep)
       const { data: contacts, error: cErr } = await supabase
         .from('contacts')
         .select('id, name, first_name, last_name, phone, phone_normalized, email, lead_type, temperature, interest, tags, notes, created_at, updated_at')
@@ -119,15 +132,11 @@ export function LeadCallReport() {
         .limit(500);
       if (cErr) throw cErr;
       const all = (contacts || []) as Contact[];
-      if (all.length === 0) {
-        setRows([]);
-        return;
-      }
+      if (all.length === 0) { setRows([]); return; }
 
       const ids = all.map((c) => c.id);
       const phones = all.map((c) => c.phone_normalized).filter(Boolean) as string[];
 
-      // Conversations for these contacts (to get message thread)
       const { data: convs } = await supabase
         .from('conversations')
         .select('id, contact_id')
@@ -140,7 +149,6 @@ export function LeadCallReport() {
         convIds.push(c.id);
       });
 
-      // Twilio messages
       const twilioByContact = new Map<string, ThreadMsg[]>();
       if (convIds.length > 0) {
         const { data: msgs } = await supabase
@@ -153,17 +161,11 @@ export function LeadCallReport() {
           const cid = convIdToContact.get(m.conversation_id);
           if (!cid) return;
           const arr = twilioByContact.get(cid) || [];
-          arr.push({
-            ts: m.created_at,
-            direction: m.is_outbound ? 'out' : 'in',
-            channel: 'twilio',
-            body: m.content || '',
-          });
+          arr.push({ ts: m.created_at, direction: m.is_outbound ? 'out' : 'in', channel: 'twilio', body: m.content || '' });
           twilioByContact.set(cid, arr);
         });
       }
 
-      // Maytapi messages — match by contact_id OR phone_e164
       const maytapiByContact = new Map<string, ThreadMsg[]>();
       const { data: mMsgs } = await supabase
         .from('maytapi_messages')
@@ -177,18 +179,11 @@ export function LeadCallReport() {
         const cid = m.contact_id || (m.phone_e164 ? phoneToContact.get(m.phone_e164) : null);
         if (!cid) return;
         const arr = maytapiByContact.get(cid) || [];
-        arr.push({
-          ts: m.received_at,
-          direction: m.direction === 'outbound' ? 'out' : 'in',
-          channel: 'maytapi',
-          body: m.body || '',
-        });
+        arr.push({ ts: m.received_at, direction: m.direction === 'outbound' ? 'out' : 'in', channel: 'maytapi', body: m.body || '' });
         maytapiByContact.set(cid, arr);
       });
 
-      // Compose rows — restrict to contacts who first appeared via Twilio inbox
-      // (then their Maytapi messages get merged into the same thread).
-      const composed: Row[] = all
+      const composed: (Row & { _hasTwilio: boolean })[] = all
         .map((c) => {
           const twilio = twilioByContact.get(c.id) || [];
           const maytapi = maytapiByContact.get(c.id) || [];
@@ -202,11 +197,11 @@ export function LeadCallReport() {
             firstInquiry: firstInbound?.ts || c.created_at,
             lastMessage: lastMsg?.ts || null,
             thread,
-          } as Row & { _hasTwilio: boolean };
+            summary: null,
+          };
         })
         .filter((r) => r._hasTwilio);
 
-      // Selection: distributors first (always), then fill by last activity desc up to HARD_CAP
       const distributors = composed.filter((r) => r.isDistributor);
       const rest = composed
         .filter((r) => !r.isDistributor)
@@ -215,11 +210,22 @@ export function LeadCallReport() {
       const capRoom = Math.max(0, HARD_CAP - distributors.length);
       const selected = [...distributors, ...rest.slice(0, capRoom)];
 
-      // Final sort for display: distributors first, then by first inquiry ascending (oldest waiting first)
       selected.sort((a, b) => {
         if (a.isDistributor !== b.isDistributor) return a.isDistributor ? -1 : 1;
         return (a.firstInquiry || '').localeCompare(b.firstInquiry || '');
       });
+
+      // Load any cached summaries
+      const selIds = selected.map((r) => r.id);
+      if (selIds.length > 0) {
+        const { data: cachedRows } = await supabase
+          .from('lead_call_summaries')
+          .select('contact_id, summary')
+          .in('contact_id', selIds);
+        const map = new Map<string, Summary>();
+        ((cachedRows || []) as CachedSummaryRow[]).forEach((r) => map.set(r.contact_id, r.summary));
+        selected.forEach((r) => { r.summary = map.get(r.id) || null; });
+      }
 
       setRows(selected);
     } catch (e: unknown) {
@@ -249,9 +255,59 @@ export function LeadCallReport() {
   }, [filtered, messageSort]);
 
   const distributorCount = rows.filter((r) => r.isDistributor).length;
+  const missingSummaries = sortedFiltered.filter((r) => !r.summary).length;
 
   function toggleMessageSort() {
     setMessageSort((current) => (current === 'none' ? 'desc' : current === 'desc' ? 'asc' : 'none'));
+  }
+
+  async function summarizeOne(row: Row, force = false): Promise<Summary | null> {
+    try {
+      const { data, error } = await supabase.functions.invoke('summarize-lead-conversation', {
+        body: {
+          contact_id: row.id,
+          name: displayName(row),
+          messages: row.thread,
+          force,
+        },
+      });
+      if (error) throw error;
+      return (data?.summary as Summary) || null;
+    } catch (e) {
+      console.error('[summarize] failed for', row.id, e);
+      return null;
+    }
+  }
+
+  async function generateSummaries(missingOnly = true) {
+    const targets = missingOnly ? sortedFiltered.filter((r) => !r.summary) : sortedFiltered;
+    if (targets.length === 0) {
+      toast.info('All summaries already generated.');
+      return;
+    }
+    setSummarizing(true);
+    setSummarizeProgress({ done: 0, total: targets.length });
+    let done = 0;
+    const concurrency = 4;
+    let cursor = 0;
+    const updated = new Map<string, Summary>();
+
+    async function worker() {
+      while (cursor < targets.length) {
+        const idx = cursor++;
+        const row = targets[idx];
+        const s = await summarizeOne(row, !missingOnly);
+        if (s) updated.set(row.id, s);
+        done++;
+        setSummarizeProgress({ done, total: targets.length });
+      }
+    }
+    await Promise.all(Array.from({ length: concurrency }, worker));
+
+    setRows((prev) => prev.map((r) => (updated.has(r.id) ? { ...r, summary: updated.get(r.id)! } : r)));
+    setSummarizing(false);
+    setSummarizeProgress(null);
+    toast.success(`Summarized ${updated.size} of ${targets.length} leads.`);
   }
 
   async function generatePDF() {
@@ -259,87 +315,139 @@ export function LeadCallReport() {
     try {
       const doc = new jsPDF({ unit: 'pt', format: 'a4' });
       const W = doc.internal.pageSize.getWidth();
+      const H = doc.internal.pageSize.getHeight();
       const M = 36;
       const now = new Date();
 
-      // Cover
       doc.setFont('helvetica', 'bold').setFontSize(18);
       doc.text('Vanto CRM — Lead Call Report', M, 50);
       doc.setFont('helvetica', 'normal').setFontSize(10).setTextColor(110);
       doc.text(`Generated ${now.toLocaleString('en-ZA')}`, M, 68);
-      doc.text(`Total contacts: ${sortedFiltered.length}  ·  Distributors: ${sortedFiltered.filter((r) => r.isDistributor).length}`, M, 82);
+      doc.text(
+        `Total: ${sortedFiltered.length}  ·  Distributors: ${sortedFiltered.filter((r) => r.isDistributor).length}  ·  Mode: ${compactPdf ? 'Compact (AI summaries)' : 'Full (raw messages)'}`,
+        M, 82
+      );
       doc.text('Sorted: ★ Distributors first, then oldest first-inquiry first.', M, 96);
       doc.setTextColor(0);
 
-      // Summary table
       autoTable(doc, {
         startY: 116,
-        head: [['#', '★', 'Name', 'Phone', 'Type', 'Temp', 'First Inquiry', 'Last Msg']],
+        head: [['#', '★', 'Name', 'Phone', 'Type', 'First Inquiry', 'Last Msg', 'Msgs']],
         body: sortedFiltered.map((r, i) => [
           String(i + 1),
           r.isDistributor ? '★' : '',
           displayName(r).slice(0, 28),
           r.phone || r.phone_normalized || '—',
           r.lead_type || '—',
-          r.temperature || '—',
           fmtDate(r.firstInquiry),
           fmtDate(r.lastMessage),
+          String(r.thread.length),
         ]),
         styles: { fontSize: 8, cellPadding: 3 },
         headStyles: { fillColor: [30, 41, 59] },
         margin: { left: M, right: M },
       });
 
-      // Per-contact details
-      sortedFiltered.forEach((r, i) => {
-        doc.addPage();
-        let y = 50;
-        doc.setFont('helvetica', 'bold').setFontSize(13);
-        doc.text(`${i + 1}. ${r.isDistributor ? '★ ' : ''}${displayName(r)}`, M, y); y += 18;
-        doc.setFont('helvetica', 'normal').setFontSize(10);
-        const info: [string, string][] = [
-          ['Phone', r.phone || r.phone_normalized || '—'],
-          ['Email', r.email || '—'],
-          ['Lead Type', r.lead_type || '—'],
-          ['Temperature', r.temperature || '—'],
-          ['Interest', r.interest || '—'],
-          ['First Inquiry', fmtDate(r.firstInquiry)],
-          ['Last Message', fmtDate(r.lastMessage)],
-          ['Tags', (r.tags || []).join(', ') || '—'],
-        ];
-        info.forEach(([k, v]) => {
-          doc.setTextColor(110); doc.text(k, M, y);
-          doc.setTextColor(0); doc.text(String(v).slice(0, 90), M + 90, y);
-          y += 13;
-        });
-        if (r.notes) {
-          y += 4;
-          doc.setTextColor(110); doc.text('Notes', M, y);
+      if (compactPdf) {
+        // Compact mode: ~3-4 leads per page, AI summary only.
+        let y = H; // force new page on first
+        sortedFiltered.forEach((r, i) => {
+          const blockH = 175;
+          if (y + blockH > H - M) { doc.addPage(); y = 50; }
+
+          // Header line
+          doc.setFont('helvetica', 'bold').setFontSize(11).setTextColor(0);
+          const head = `${i + 1}. ${r.isDistributor ? '★ ' : ''}${displayName(r)}`;
+          doc.text(head, M, y);
+          doc.setFont('helvetica', 'normal').setFontSize(9).setTextColor(110);
+          const meta = `${r.phone || r.phone_normalized || '—'}  ·  ${r.lead_type || '—'}  ·  Msgs: ${r.thread.length}  ·  First: ${fmtDate(r.firstInquiry)}  ·  Last: ${fmtDate(r.lastMessage)}`;
+          doc.text(meta, M, y + 13);
+          y += 28;
           doc.setTextColor(0);
-          const lines = doc.splitTextToSize(r.notes, W - 2 * M - 90);
-          doc.text(lines, M + 90, y); y += lines.length * 12;
-        }
 
-        // Thread
-        y += 10;
-        doc.setFont('helvetica', 'bold').setFontSize(11);
-        doc.text(`Conversation (${r.thread.length} messages)`, M, y); y += 14;
-        doc.setFont('helvetica', 'normal').setFontSize(9);
-        if (r.thread.length === 0) {
-          doc.setTextColor(140); doc.text('No messages on record.', M, y); doc.setTextColor(0); y += 12;
-        } else {
-          for (const m of r.thread) {
-            const label = `[${fmtDate(m.ts)}] ${m.direction === 'in' ? '◀ IN ' : '▶ OUT'} (${m.channel})`;
-            doc.setTextColor(90); doc.text(label, M, y); y += 11;
+          const s = r.summary;
+          if (!s) {
+            doc.setFont('helvetica', 'italic').setFontSize(9).setTextColor(140);
+            doc.text('No AI summary yet — click "Generate summaries" to fill this in.', M, y);
             doc.setTextColor(0);
-            const body = doc.splitTextToSize(m.body || '(empty)', W - 2 * M);
-            doc.text(body, M, y); y += body.length * 11 + 4;
-            if (y > 780) { doc.addPage(); y = 50; }
-          }
-        }
-      });
+            y += 18;
+          } else {
+            doc.setFont('helvetica', 'bold').setFontSize(9);
+            doc.text(`Interest: `, M, y);
+            doc.setFont('helvetica', 'normal');
+            const intent = doc.splitTextToSize(`${s.intent}  ·  Distributor interest: ${s.distributor_interest.toUpperCase()}`, W - 2 * M - 50);
+            doc.text(intent, M + 50, y); y += intent.length * 11 + 2;
 
-      const fname = `lead-call-report-${now.toISOString().slice(0, 10)}.pdf`;
+            doc.setFont('helvetica', 'bold'); doc.text('Discussion:', M, y);
+            doc.setFont('helvetica', 'normal');
+            const body = doc.splitTextToSize(s.summary_text, W - 2 * M - 70);
+            doc.text(body, M + 70, y); y += body.length * 11 + 4;
+
+            if (s.key_questions.length) {
+              doc.setFont('helvetica', 'bold'); doc.text('Questions:', M, y);
+              doc.setFont('helvetica', 'normal');
+              const t = doc.splitTextToSize('• ' + s.key_questions.join('  • '), W - 2 * M - 70);
+              doc.text(t, M + 70, y); y += t.length * 11 + 2;
+            }
+            if (s.open_items.length) {
+              doc.setFont('helvetica', 'bold'); doc.text('Open / Next:', M, y);
+              doc.setFont('helvetica', 'normal');
+              const t = doc.splitTextToSize('• ' + s.open_items.join('  • '), W - 2 * M - 70);
+              doc.text(t, M + 70, y); y += t.length * 11 + 2;
+            }
+            doc.setFont('helvetica', 'bold'); doc.text('Status:', M, y);
+            doc.setFont('helvetica', 'normal');
+            const st = doc.splitTextToSize(s.last_status, W - 2 * M - 70);
+            doc.text(st, M + 70, y); y += st.length * 11 + 6;
+          }
+
+          // Divider
+          doc.setDrawColor(220); doc.line(M, y, W - M, y);
+          y += 14;
+        });
+      } else {
+        // Full mode (legacy): per-contact details + raw thread.
+        sortedFiltered.forEach((r, i) => {
+          doc.addPage();
+          let y = 50;
+          doc.setFont('helvetica', 'bold').setFontSize(13);
+          doc.text(`${i + 1}. ${r.isDistributor ? '★ ' : ''}${displayName(r)}`, M, y); y += 18;
+          doc.setFont('helvetica', 'normal').setFontSize(10);
+          const info: [string, string][] = [
+            ['Phone', r.phone || r.phone_normalized || '—'],
+            ['Email', r.email || '—'],
+            ['Lead Type', r.lead_type || '—'],
+            ['Temperature', r.temperature || '—'],
+            ['Interest', r.interest || '—'],
+            ['First Inquiry', fmtDate(r.firstInquiry)],
+            ['Last Message', fmtDate(r.lastMessage)],
+            ['Tags', (r.tags || []).join(', ') || '—'],
+          ];
+          info.forEach(([k, v]) => {
+            doc.setTextColor(110); doc.text(k, M, y);
+            doc.setTextColor(0); doc.text(String(v).slice(0, 90), M + 90, y);
+            y += 13;
+          });
+          y += 10;
+          doc.setFont('helvetica', 'bold').setFontSize(11);
+          doc.text(`Conversation (${r.thread.length} messages)`, M, y); y += 14;
+          doc.setFont('helvetica', 'normal').setFontSize(9);
+          if (r.thread.length === 0) {
+            doc.setTextColor(140); doc.text('No messages on record.', M, y); doc.setTextColor(0); y += 12;
+          } else {
+            for (const m of r.thread) {
+              const label = `[${fmtDate(m.ts)}] ${m.direction === 'in' ? '◀ IN ' : '▶ OUT'} (${m.channel})`;
+              doc.setTextColor(90); doc.text(label, M, y); y += 11;
+              doc.setTextColor(0);
+              const body = doc.splitTextToSize(m.body || '(empty)', W - 2 * M);
+              doc.text(body, M, y); y += body.length * 11 + 4;
+              if (y > H - 50) { doc.addPage(); y = 50; }
+            }
+          }
+        });
+      }
+
+      const fname = `lead-call-report-${compactPdf ? 'compact-' : ''}${now.toISOString().slice(0, 10)}.pdf`;
       doc.save(fname);
       toast.success(`Downloaded ${fname}`);
     } catch (e: unknown) {
@@ -360,7 +468,9 @@ export function LeadCallReport() {
           <div>
             <h2 className="text-lg font-semibold text-foreground">Lead Call Report</h2>
             <p className="text-xs text-muted-foreground">
-              {loading ? 'Loading…' : `${sortedFiltered.length} of ${rows.length} contacts · ${distributorCount} distributors · cap ${HARD_CAP}`}
+              {loading
+                ? 'Loading…'
+                : `${sortedFiltered.length} of ${rows.length} contacts · ${distributorCount} distributors · ${sortedFiltered.length - missingSummaries}/${sortedFiltered.length} summarized · cap ${HARD_CAP}`}
             </p>
           </div>
         </div>
@@ -369,8 +479,25 @@ export function LeadCallReport() {
             <Switch checked={onlyDistributors} onCheckedChange={setOnlyDistributors} />
             Only distributors
           </label>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Switch checked={compactPdf} onCheckedChange={setCompactPdf} />
+            Compact PDF
+          </label>
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
             <RefreshCw className={`h-4 w-4 mr-1 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => generateSummaries(true)}
+            disabled={summarizing || sortedFiltered.length === 0}
+          >
+            <Sparkles className={`h-4 w-4 mr-1 ${summarizing ? 'animate-pulse' : ''}`} />
+            {summarizing && summarizeProgress
+              ? `Summarizing ${summarizeProgress.done}/${summarizeProgress.total}…`
+              : missingSummaries > 0
+                ? `Generate summaries (${missingSummaries})`
+                : 'Regenerate summaries'}
           </Button>
           <Button variant="outline" size="sm" onClick={() => window.print()}>
             <Printer className="h-4 w-4 mr-1" /> Print
@@ -384,45 +511,21 @@ export function LeadCallReport() {
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1">
           <label className="text-xs text-muted-foreground">First Inquiry from</label>
-          <input
-            type="date"
-            className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground"
-            value={fiFrom}
-            onChange={(e) => setFiFrom(e.target.value)}
-          />
+          <input type="date" className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground" value={fiFrom} onChange={(e) => setFiFrom(e.target.value)} />
         </div>
         <div className="space-y-1">
           <label className="text-xs text-muted-foreground">First Inquiry to</label>
-          <input
-            type="date"
-            className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground"
-            value={fiTo}
-            onChange={(e) => setFiTo(e.target.value)}
-          />
+          <input type="date" className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground" value={fiTo} onChange={(e) => setFiTo(e.target.value)} />
         </div>
         <div className="space-y-1">
           <label className="text-xs text-muted-foreground">Last Msg from</label>
-          <input
-            type="date"
-            className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground"
-            value={lmFrom}
-            onChange={(e) => setLmFrom(e.target.value)}
-          />
+          <input type="date" className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground" value={lmFrom} onChange={(e) => setLmFrom(e.target.value)} />
         </div>
         <div className="space-y-1">
           <label className="text-xs text-muted-foreground">Last Msg to</label>
-          <input
-            type="date"
-            className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground"
-            value={lmTo}
-            onChange={(e) => setLmTo(e.target.value)}
-          />
+          <input type="date" className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground" value={lmTo} onChange={(e) => setLmTo(e.target.value)} />
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => { setFiFrom(''); setFiTo(''); setLmFrom(''); setLmTo(''); }}
-        >
+        <Button variant="ghost" size="sm" onClick={() => { setFiFrom(''); setFiTo(''); setLmFrom(''); setLmTo(''); }}>
           Reset dates
         </Button>
       </div>
@@ -436,9 +539,9 @@ export function LeadCallReport() {
               <TableHead>Name</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Type</TableHead>
-              <TableHead>Temp</TableHead>
               <TableHead>First Inquiry</TableHead>
               <TableHead>Last Msg</TableHead>
+              <TableHead className="min-w-[280px]">Summary</TableHead>
               <TableHead className="text-right">
                 <button
                   type="button"
@@ -462,17 +565,29 @@ export function LeadCallReport() {
             )}
             {sortedFiltered.map((r, i) => (
               <TableRow key={r.id}>
-                <TableCell className="py-2 text-xs text-muted-foreground">{i + 1}</TableCell>
-                <TableCell className="py-2">
+                <TableCell className="py-2 text-xs text-muted-foreground align-top">{i + 1}</TableCell>
+                <TableCell className="py-2 align-top">
                   {r.isDistributor && <Star className="h-3.5 w-3.5 text-amber-400 fill-amber-400" />}
                 </TableCell>
-                <TableCell className="py-2 font-medium">{displayName(r)}</TableCell>
-                <TableCell className="py-2 text-xs">{r.phone || r.phone_normalized || '—'}</TableCell>
-                <TableCell className="py-2 text-xs">{r.lead_type || '—'}</TableCell>
-                <TableCell className="py-2 text-xs capitalize">{r.temperature || '—'}</TableCell>
-                <TableCell className="py-2 text-xs">{fmtDate(r.firstInquiry)}</TableCell>
-                <TableCell className="py-2 text-xs">{fmtDate(r.lastMessage)}</TableCell>
-                <TableCell className="py-2 text-xs text-right">{r.thread.length}</TableCell>
+                <TableCell className="py-2 font-medium align-top">{displayName(r)}</TableCell>
+                <TableCell className="py-2 text-xs align-top">{r.phone || r.phone_normalized || '—'}</TableCell>
+                <TableCell className="py-2 text-xs align-top">{r.lead_type || '—'}</TableCell>
+                <TableCell className="py-2 text-xs align-top">{fmtDate(r.firstInquiry)}</TableCell>
+                <TableCell className="py-2 text-xs align-top">{fmtDate(r.lastMessage)}</TableCell>
+                <TableCell className="py-2 text-xs align-top">
+                  {r.summary ? (
+                    <div className="space-y-1">
+                      <div className="text-foreground">{r.summary.summary_text}</div>
+                      <div className="text-[10px] text-muted-foreground">
+                        Distributor interest: <span className="uppercase">{r.summary.distributor_interest}</span>
+                        {r.summary.open_items.length > 0 && <> · Next: {r.summary.open_items[0]}</>}
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="text-muted-foreground italic">Not summarized yet</span>
+                  )}
+                </TableCell>
+                <TableCell className="py-2 text-xs text-right align-top">{r.thread.length}</TableCell>
               </TableRow>
             ))}
           </TableBody>
