@@ -3,10 +3,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ArrowDown, ArrowUp, ArrowUpDown, Download, Printer, RefreshCw, Star, Phone, Sparkles } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, Printer, RefreshCw, Star, Phone, Sparkles, Pencil, ClipboardPaste } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
+import { LEAD_TYPES, type LeadType } from '@/lib/vanto-data';
 
 // Tight, word-boundary distributor intent keywords.
 const DISTRIBUTOR_PATTERNS: RegExp[] = [
@@ -120,6 +122,59 @@ export function LeadCallReport() {
   const [summarizing, setSummarizing] = useState(false);
   const [summarizeProgress, setSummarizeProgress] = useState<{ done: number; total: number } | null>(null);
   const [compactPdf, setCompactPdf] = useState(true);
+  const [editor, setEditor] = useState<{ row: Row; lead_type: LeadType; notes: string } | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  function summaryAsText(s: Summary | null | undefined): string {
+    if (!s) return '';
+    const parts = [
+      `[AI Summary]`,
+      s.summary_text,
+      s.intent ? `Interest: ${s.intent}` : '',
+      `Distributor interest: ${s.distributor_interest.toUpperCase()}`,
+      s.open_items.length ? `Next: ${s.open_items.join('; ')}` : '',
+      s.last_status ? `Status: ${s.last_status}` : '',
+    ].filter(Boolean);
+    return parts.join('\n');
+  }
+
+  function openEditor(row: Row) {
+    const allowed = LEAD_TYPES.map((l) => l.value);
+    const current = allowed.includes(row.lead_type as LeadType) ? (row.lead_type as LeadType) : 'prospect';
+    setEditor({ row, lead_type: current, notes: row.notes || '' });
+  }
+
+  function pasteSummaryToNotes() {
+    if (!editor) return;
+    const block = summaryAsText(editor.row.summary);
+    if (!block) { toast.info('No AI summary yet — generate it first.'); return; }
+    const stamp = new Date().toLocaleString('en-ZA');
+    const addition = `\n\n--- ${stamp} ---\n${block}`;
+    setEditor({ ...editor, notes: (editor.notes || '').trimEnd() + addition });
+  }
+
+  async function saveEditor() {
+    if (!editor) return;
+    setSavingEdit(true);
+    try {
+      const { error } = await supabase
+        .from('contacts')
+        .update({
+          lead_type: editor.lead_type,
+          notes: editor.notes.trim() || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', editor.row.id);
+      if (error) throw error;
+      setRows((prev) => prev.map((r) => r.id === editor.row.id ? { ...r, lead_type: editor.lead_type, notes: editor.notes.trim() || null } : r));
+      toast.success('Contact updated — visible in Contacts & CRM Pipeline.');
+      setEditor(null);
+    } catch (e) {
+      toast.error('Save failed: ' + getErrorMessage(e));
+    } finally {
+      setSavingEdit(false);
+    }
+  }
 
   async function load() {
     setLoading(true);
@@ -553,12 +608,13 @@ export function LeadCallReport() {
                   {messageSort === 'desc' ? <ArrowDown className="h-3.5 w-3.5" /> : messageSort === 'asc' ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowUpDown className="h-3.5 w-3.5" />}
                 </button>
               </TableHead>
+              <TableHead className="w-20 text-right">Edit</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {sortedFiltered.length === 0 && !loading && (
               <TableRow>
-                <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
                   No contacts match the current filter.
                 </TableCell>
               </TableRow>
@@ -588,11 +644,83 @@ export function LeadCallReport() {
                   )}
                 </TableCell>
                 <TableCell className="py-2 text-xs text-right align-top">{r.thread.length}</TableCell>
+                <TableCell className="py-2 text-right align-top">
+                  <Button variant="ghost" size="sm" onClick={() => openEditor(r)} title="Edit lead type & notes — syncs to Contacts and CRM Pipeline">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
+
+      <Dialog open={!!editor} onOpenChange={(o) => !o && setEditor(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              {editor ? `Edit — ${displayName(editor.row)}` : 'Edit contact'}
+            </DialogTitle>
+          </DialogHeader>
+          {editor && (
+            <div className="space-y-4">
+              <div className="text-xs text-muted-foreground">
+                {editor.row.phone || editor.row.phone_normalized || '—'} · saves to Contacts & CRM Pipeline
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Lead Type</label>
+                <select
+                  value={editor.lead_type}
+                  onChange={(e) => setEditor({ ...editor, lead_type: e.target.value as LeadType })}
+                  className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                >
+                  {LEAD_TYPES.map((lt) => (
+                    <option key={lt.value} value={lt.value}>{lt.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs text-muted-foreground">Notes</label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={pasteSummaryToNotes}
+                    disabled={!editor.row.summary}
+                    title={editor.row.summary ? 'Append AI summary to notes' : 'Generate summary first'}
+                  >
+                    <ClipboardPaste className="h-3.5 w-3.5 mr-1" />
+                    Paste AI summary
+                  </Button>
+                </div>
+                <textarea
+                  value={editor.notes}
+                  onChange={(e) => setEditor({ ...editor, notes: e.target.value })}
+                  rows={10}
+                  className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 resize-y font-mono"
+                  placeholder="Notes for this contact…"
+                />
+              </div>
+
+              {editor.row.summary && (
+                <details className="text-xs text-muted-foreground bg-secondary/30 rounded-lg p-3">
+                  <summary className="cursor-pointer text-foreground">AI summary preview</summary>
+                  <pre className="whitespace-pre-wrap mt-2">{summaryAsText(editor.row.summary)}</pre>
+                </details>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setEditor(null)} disabled={savingEdit}>Cancel</Button>
+            <Button onClick={saveEditor} disabled={savingEdit}>
+              {savingEdit ? 'Saving…' : 'Save'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
