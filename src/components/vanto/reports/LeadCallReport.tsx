@@ -608,12 +608,13 @@ export function LeadCallReport() {
                   {messageSort === 'desc' ? <ArrowDown className="h-3.5 w-3.5" /> : messageSort === 'asc' ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowUpDown className="h-3.5 w-3.5" />}
                 </button>
               </TableHead>
+              <TableHead className="w-20 text-right">Edit</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {sortedFiltered.length === 0 && !loading && (
               <TableRow>
-                <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
                   No contacts match the current filter.
                 </TableCell>
               </TableRow>
