@@ -122,6 +122,59 @@ export function LeadCallReport() {
   const [summarizing, setSummarizing] = useState(false);
   const [summarizeProgress, setSummarizeProgress] = useState<{ done: number; total: number } | null>(null);
   const [compactPdf, setCompactPdf] = useState(true);
+  const [editor, setEditor] = useState<{ row: Row; lead_type: LeadType; notes: string } | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  function summaryAsText(s: Summary | null | undefined): string {
+    if (!s) return '';
+    const parts = [
+      `[AI Summary]`,
+      s.summary_text,
+      s.intent ? `Interest: ${s.intent}` : '',
+      `Distributor interest: ${s.distributor_interest.toUpperCase()}`,
+      s.open_items.length ? `Next: ${s.open_items.join('; ')}` : '',
+      s.last_status ? `Status: ${s.last_status}` : '',
+    ].filter(Boolean);
+    return parts.join('\n');
+  }
+
+  function openEditor(row: Row) {
+    const allowed = LEAD_TYPES.map((l) => l.value);
+    const current = allowed.includes(row.lead_type as LeadType) ? (row.lead_type as LeadType) : 'prospect';
+    setEditor({ row, lead_type: current, notes: row.notes || '' });
+  }
+
+  function pasteSummaryToNotes() {
+    if (!editor) return;
+    const block = summaryAsText(editor.row.summary);
+    if (!block) { toast.info('No AI summary yet — generate it first.'); return; }
+    const stamp = new Date().toLocaleString('en-ZA');
+    const addition = `\n\n--- ${stamp} ---\n${block}`;
+    setEditor({ ...editor, notes: (editor.notes || '').trimEnd() + addition });
+  }
+
+  async function saveEditor() {
+    if (!editor) return;
+    setSavingEdit(true);
+    try {
+      const { error } = await supabase
+        .from('contacts')
+        .update({
+          lead_type: editor.lead_type,
+          notes: editor.notes.trim() || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', editor.row.id);
+      if (error) throw error;
+      setRows((prev) => prev.map((r) => r.id === editor.row.id ? { ...r, lead_type: editor.lead_type, notes: editor.notes.trim() || null } : r));
+      toast.success('Contact updated — visible in Contacts & CRM Pipeline.');
+      setEditor(null);
+    } catch (e) {
+      toast.error('Save failed: ' + getErrorMessage(e));
+    } finally {
+      setSavingEdit(false);
+    }
+  }
 
   async function load() {
     setLoading(true);
