@@ -220,20 +220,13 @@ Rules:
       return json({ ok: false, error: insErr.message }, 200);
     }
 
-    // Phase 5: always auto-inject the GROUP variant (full message) to WhatsApp groups.
-    // Other variants stay in the DB for reference but are not auto-dispatched.
+    // Safety update: do NOT auto-inject Facebook posts into WhatsApp groups.
+    // Approved variants stay available for manual scheduled dispatch only.
     const groupRow = (ins ?? []).find((r: any) => r.variant === 'group' && r.status === 'approved');
     if (groupRow) {
-      const injectUrl = `${SUPABASE_URL}/functions/v1/fb-inject-to-queue`;
-      const p = fetch(injectUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SERVICE_ROLE}` },
-        body: JSON.stringify({ fb_generated_post_id: groupRow.id }),
-      }).catch(e => console.error('[fb-summarize] inject err', e));
-      // @ts-ignore
-      if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(p);
+      console.log('[fb-summarize] group variant approved; manual scheduling required', { fb_generated_post_id: groupRow.id });
     } else {
-      console.warn('[fb-summarize] group variant not approved — skipping auto-inject', {
+      console.warn('[fb-summarize] group variant not approved', {
         statuses: (ins ?? []).map((r: any) => ({ v: r.variant, s: r.status })),
       });
     }
