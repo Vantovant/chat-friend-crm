@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import TrainerRulesPane from "./trainer/TrainerRulesPane";
 import InboundFeedPane from "./trainer/InboundFeedPane";
 import SandboxPane from "./trainer/SandboxPane";
+import UniversalSandboxPane from "./trainer/UniversalSandboxPane";
 import CorrectionsPane from "./trainer/CorrectionsPane";
 import { PlaybooksModule } from "./PlaybooksModule";
 
