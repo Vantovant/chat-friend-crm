@@ -161,22 +161,25 @@ export function LeadCallReport() {
         maytapiByContact.set(cid, arr);
       });
 
-      // Compose rows
-      const composed: Row[] = all.map((c) => {
-        const thread = [
-          ...(twilioByContact.get(c.id) || []),
-          ...(maytapiByContact.get(c.id) || []),
-        ].sort((a, b) => a.ts.localeCompare(b.ts));
-        const firstInbound = thread.find((m) => m.direction === 'in');
-        const lastMsg = thread[thread.length - 1];
-        return {
-          ...c,
-          isDistributor: detectDistributor(c, thread),
-          firstInquiry: firstInbound?.ts || c.created_at,
-          lastMessage: lastMsg?.ts || null,
-          thread,
-        };
-      });
+      // Compose rows — restrict to contacts who first appeared via Twilio inbox
+      // (then their Maytapi messages get merged into the same thread).
+      const composed: Row[] = all
+        .map((c) => {
+          const twilio = twilioByContact.get(c.id) || [];
+          const maytapi = maytapiByContact.get(c.id) || [];
+          const thread = [...twilio, ...maytapi].sort((a, b) => a.ts.localeCompare(b.ts));
+          const firstInbound = thread.find((m) => m.direction === 'in');
+          const lastMsg = thread[thread.length - 1];
+          return {
+            ...c,
+            _hasTwilio: twilio.length > 0,
+            isDistributor: detectDistributor(c, thread),
+            firstInquiry: firstInbound?.ts || c.created_at,
+            lastMessage: lastMsg?.ts || null,
+            thread,
+          } as Row & { _hasTwilio: boolean };
+        })
+        .filter((r) => r._hasTwilio);
 
       // Selection: distributors first (always), then fill by last activity desc up to HARD_CAP
       const distributors = composed.filter((r) => r.isDistributor);
