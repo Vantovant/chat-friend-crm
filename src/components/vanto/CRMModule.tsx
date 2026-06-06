@@ -240,11 +240,12 @@ function FilterChip({ label, active, onClick }: { label: string; active: boolean
   );
 }
 
-function KanbanColumn({ stage, contacts, dragContactId, onDragStart, onDragEnd, onDrop, onDragOver, onAddContact }: {
-  stage: Stage; contacts: ContactWithStage[]; dragContactId: string | null;
+function KanbanColumn({ stage, stages, contacts, dragContactId, onDragStart, onDragEnd, onDrop, onDragOver, onAddContact, onChangeStage }: {
+  stage: Stage; stages: Stage[]; contacts: ContactWithStage[]; dragContactId: string | null;
   onDragStart: (e: React.DragEvent, id: string) => void; onDragEnd: () => void;
   onDrop: (e: React.DragEvent, stageId: string) => void; onDragOver: (e: React.DragEvent) => void;
   onAddContact: () => void;
+  onChangeStage: (contactId: string, stageId: string | null) => void;
 }) {
   return (
     <div
