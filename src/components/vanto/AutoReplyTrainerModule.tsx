@@ -131,6 +131,9 @@ export function AutoReplyTrainerModule() {
               <SandboxPane channel={c.id} />
             </div>
 
+            {/* Universal sandbox — saves corrections to every channel */}
+            <UniversalSandboxPane />
+
             <TrainerRulesPane channel={c.id} />
 
             <CorrectionsPane channel={c.id} />
