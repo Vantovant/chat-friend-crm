@@ -232,10 +232,14 @@ export function LeadCallReport() {
 
   useEffect(() => { load(); }, []);
 
-  const filtered = useMemo(
-    () => (onlyDistributors ? rows.filter((r) => r.isDistributor) : rows),
-    [rows, onlyDistributors]
-  );
+  const filtered = useMemo(() => {
+    let out = onlyDistributors ? rows.filter((r) => r.isDistributor) : rows;
+    if (fiFrom) out = out.filter((r) => r.firstInquiry && r.firstInquiry.slice(0, 10) >= fiFrom);
+    if (fiTo) out = out.filter((r) => r.firstInquiry && r.firstInquiry.slice(0, 10) <= fiTo);
+    if (lmFrom) out = out.filter((r) => r.lastMessage && r.lastMessage.slice(0, 10) >= lmFrom);
+    if (lmTo) out = out.filter((r) => r.lastMessage && r.lastMessage.slice(0, 10) <= lmTo);
+    return out;
+  }, [rows, onlyDistributors, fiFrom, fiTo, lmFrom, lmTo]);
 
   const sortedFiltered = useMemo(() => {
     if (messageSort === 'none') return filtered;
@@ -375,6 +379,52 @@ export function LeadCallReport() {
             <Download className="h-4 w-4 mr-1" /> {generating ? 'Generating…' : 'Download PDF'}
           </Button>
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">First Inquiry from</label>
+          <input
+            type="date"
+            className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground"
+            value={fiFrom}
+            onChange={(e) => setFiFrom(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">First Inquiry to</label>
+          <input
+            type="date"
+            className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground"
+            value={fiTo}
+            onChange={(e) => setFiTo(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Last Msg from</label>
+          <input
+            type="date"
+            className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground"
+            value={lmFrom}
+            onChange={(e) => setLmFrom(e.target.value)}
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground">Last Msg to</label>
+          <input
+            type="date"
+            className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground"
+            value={lmTo}
+            onChange={(e) => setLmTo(e.target.value)}
+          />
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => { setFiFrom(''); setFiTo(''); setLmFrom(''); setLmTo(''); }}
+        >
+          Reset dates
+        </Button>
       </div>
 
       <div className="rounded-lg border border-border bg-card">
