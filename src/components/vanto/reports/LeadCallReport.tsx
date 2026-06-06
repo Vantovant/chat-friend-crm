@@ -8,9 +8,20 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
 
-const DISTRIBUTOR_KEYWORDS = [
-  'distributor', 'r375', 'membership', 'business', 'join', 'opportunity',
-  'earn', 'sponsor', 'income', 'sign up', 'register', 'partner',
+// Tight, word-boundary distributor intent keywords. Avoid generic words like
+// "business" or "join" that match casual replies and inflate the flag.
+const DISTRIBUTOR_PATTERNS: RegExp[] = [
+  /\bdistributor(s)?\b/i,
+  /\br\s?375\b/i,
+  /\bmembership\b/i,
+  /\bbusiness associate\b/i,
+  /\bjoin (aplgo|the business|as a distributor)\b/i,
+  /\bbusiness opportunity\b/i,
+  /\bearn (extra )?(income|money)\b/i,
+  /\bsponsor me\b/i,
+  /\bsign me up\b/i,
+  /\bregister (me )?as (a )?distributor\b/i,
+  /\bbecome (a )?(distributor|member|partner)\b/i,
 ];
 
 const HARD_CAP = 100;
@@ -47,8 +58,8 @@ type Row = Contact & {
 };
 
 function detectDistributor(c: Contact, thread: ThreadMsg[]): boolean {
-  const blob = `${c.notes || ''} ${c.tags?.join(' ') || ''} ${thread.map((m) => m.body).join(' ')}`.toLowerCase();
-  return DISTRIBUTOR_KEYWORDS.some((k) => blob.includes(k));
+  const blob = `${c.notes || ''} ${c.tags?.join(' ') || ''} ${thread.map((m) => m.body).join(' ')}`;
+  return DISTRIBUTOR_PATTERNS.some((rx) => rx.test(blob));
 }
 
 function fmtDate(s: string | null): string {
@@ -150,22 +161,25 @@ export function LeadCallReport() {
         maytapiByContact.set(cid, arr);
       });
 
-      // Compose rows
-      const composed: Row[] = all.map((c) => {
-        const thread = [
-          ...(twilioByContact.get(c.id) || []),
-          ...(maytapiByContact.get(c.id) || []),
-        ].sort((a, b) => a.ts.localeCompare(b.ts));
-        const firstInbound = thread.find((m) => m.direction === 'in');
-        const lastMsg = thread[thread.length - 1];
-        return {
-          ...c,
-          isDistributor: detectDistributor(c, thread),
-          firstInquiry: firstInbound?.ts || c.created_at,
-          lastMessage: lastMsg?.ts || null,
-          thread,
-        };
-      });
+      // Compose rows — restrict to contacts who first appeared via Twilio inbox
+      // (then their Maytapi messages get merged into the same thread).
+      const composed: Row[] = all
+        .map((c) => {
+          const twilio = twilioByContact.get(c.id) || [];
+          const maytapi = maytapiByContact.get(c.id) || [];
+          const thread = [...twilio, ...maytapi].sort((a, b) => a.ts.localeCompare(b.ts));
+          const firstInbound = thread.find((m) => m.direction === 'in');
+          const lastMsg = thread[thread.length - 1];
+          return {
+            ...c,
+            _hasTwilio: twilio.length > 0,
+            isDistributor: detectDistributor(c, thread),
+            firstInquiry: firstInbound?.ts || c.created_at,
+            lastMessage: lastMsg?.ts || null,
+            thread,
+          } as Row & { _hasTwilio: boolean };
+        })
+        .filter((r) => r._hasTwilio);
 
       // Selection: distributors first (always), then fill by last activity desc up to HARD_CAP
       const distributors = composed.filter((r) => r.isDistributor);
