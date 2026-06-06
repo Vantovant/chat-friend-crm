@@ -248,7 +248,7 @@ export function LeadCallReport() {
       doc.text('Vanto CRM — Lead Call Report', M, 50);
       doc.setFont('helvetica', 'normal').setFontSize(10).setTextColor(110);
       doc.text(`Generated ${now.toLocaleString('en-ZA')}`, M, 68);
-      doc.text(`Total contacts: ${filtered.length}  ·  Distributors: ${filtered.filter((r) => r.isDistributor).length}`, M, 82);
+      doc.text(`Total contacts: ${sortedFiltered.length}  ·  Distributors: ${sortedFiltered.filter((r) => r.isDistributor).length}`, M, 82);
       doc.text('Sorted: ★ Distributors first, then oldest first-inquiry first.', M, 96);
       doc.setTextColor(0);
 
@@ -256,7 +256,7 @@ export function LeadCallReport() {
       autoTable(doc, {
         startY: 116,
         head: [['#', '★', 'Name', 'Phone', 'Type', 'Temp', 'First Inquiry', 'Last Msg']],
-        body: filtered.map((r, i) => [
+        body: sortedFiltered.map((r, i) => [
           String(i + 1),
           r.isDistributor ? '★' : '',
           displayName(r).slice(0, 28),
@@ -272,7 +272,7 @@ export function LeadCallReport() {
       });
 
       // Per-contact details
-      filtered.forEach((r, i) => {
+      sortedFiltered.forEach((r, i) => {
         doc.addPage();
         let y = 50;
         doc.setFont('helvetica', 'bold').setFontSize(13);
