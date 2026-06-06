@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Download, Printer, RefreshCw, Star, Phone } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, Printer, RefreshCw, Star, Phone } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
@@ -12,11 +12,17 @@ import { toast } from 'sonner';
 // "business" or "join" that match casual replies and inflate the flag.
 const DISTRIBUTOR_PATTERNS: RegExp[] = [
   /\bdistributor(s)?\b/i,
+  /\bdistributorship\b/i,
   /\br\s?375\b/i,
   /\bmembership\b/i,
+  /\bmember\s?(ship)? fee\b/i,
   /\bbusiness associate\b/i,
+  /\bbe(ing)? (a )?(distributor|member|business associate|partner)\b/i,
+  /\binterested (in )?(being|becoming|as)?\s?(a )?(distributor|member|business associate|partner)\b/i,
+  /\bi want to (be|become|join|register|sign up)\b.*\b(distributor|member|business associate|partner)\b/i,
   /\bjoin (aplgo|the business|as a distributor)\b/i,
   /\bbusiness opportunity\b/i,
+  /\bopportunity to earn\b/i,
   /\bearn (extra )?(income|money)\b/i,
   /\bsponsor me\b/i,
   /\bsign me up\b/i,
@@ -57,8 +63,11 @@ type Row = Contact & {
   thread: ThreadMsg[];
 };
 
+type MessageSort = 'none' | 'asc' | 'desc';
+
 function detectDistributor(c: Contact, thread: ThreadMsg[]): boolean {
-  const blob = `${c.notes || ''} ${c.tags?.join(' ') || ''} ${thread.map((m) => m.body).join(' ')}`;
+  const blob = `${c.lead_type || ''} ${c.interest || ''} ${c.notes || ''} ${c.tags?.join(' ') || ''} ${thread.map((m) => m.body).join(' ')}`;
+  if (c.interest?.toLowerCase() === 'business') return true;
   return DISTRIBUTOR_PATTERNS.some((rx) => rx.test(blob));
 }
 
@@ -81,6 +90,7 @@ export function LeadCallReport() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<Row[]>([]);
   const [onlyDistributors, setOnlyDistributors] = useState(false);
+  const [messageSort, setMessageSort] = useState<MessageSort>('none');
   const [generating, setGenerating] = useState(false);
 
   async function load() {
@@ -212,7 +222,18 @@ export function LeadCallReport() {
     [rows, onlyDistributors]
   );
 
+  const sortedFiltered = useMemo(() => {
+    if (messageSort === 'none') return filtered;
+    return [...filtered].sort((a, b) =>
+      messageSort === 'desc' ? b.thread.length - a.thread.length : a.thread.length - b.thread.length
+    );
+  }, [filtered, messageSort]);
+
   const distributorCount = rows.filter((r) => r.isDistributor).length;
+
+  function toggleMessageSort() {
+    setMessageSort((current) => (current === 'none' ? 'desc' : current === 'desc' ? 'asc' : 'none'));
+  }
 
   async function generatePDF() {
     setGenerating(true);
