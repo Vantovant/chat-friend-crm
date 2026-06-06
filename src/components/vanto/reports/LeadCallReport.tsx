@@ -101,6 +101,10 @@ export function LeadCallReport() {
   const [rows, setRows] = useState<Row[]>([]);
   const [onlyDistributors, setOnlyDistributors] = useState(false);
   const [messageSort, setMessageSort] = useState<MessageSort>('none');
+  const [fiFrom, setFiFrom] = useState('');
+  const [fiTo, setFiTo] = useState('');
+  const [lmFrom, setLmFrom] = useState('');
+  const [lmTo, setLmTo] = useState('');
   const [generating, setGenerating] = useState(false);
 
   async function load() {
