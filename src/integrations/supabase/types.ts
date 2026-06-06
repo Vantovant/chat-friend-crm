@@ -1243,6 +1243,33 @@ export type Database = {
         }
         Relationships: []
       }
+      lead_call_summaries: {
+        Row: {
+          contact_id: string
+          generated_at: string
+          last_message_at: string | null
+          message_count: number
+          model: string | null
+          summary: Json
+        }
+        Insert: {
+          contact_id: string
+          generated_at?: string
+          last_message_at?: string | null
+          message_count?: number
+          model?: string | null
+          summary: Json
+        }
+        Update: {
+          contact_id?: string
+          generated_at?: string
+          last_message_at?: string | null
+          message_count?: number
+          model?: string | null
+          summary?: Json
+        }
+        Relationships: []
+      }
       learning_metrics: {
         Row: {
           agent_id: string | null

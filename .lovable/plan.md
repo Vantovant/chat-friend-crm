@@ -1,39 +1,65 @@
-## Plan: Reports module (replaces Damage Control)
+# Lead Call Report — AI Summarization Plan
 
-### 1. Sidebar + routing
-- Rename `damage-control` module to `reports` in `src/lib/vanto-data.ts` and `AppSidebar.tsx`.
-- Update label "Damage Control" → "Reports", icon → `FileText`.
-- In `App.tsx` (or wherever modules are rendered), swap `DamageControlModule` import for a new `ReportsModule`.
-- Delete old `DamageControlModule.tsx` (move logic only if needed — none required).
+## Problem
+Current PDF prints every WhatsApp message verbatim (Twilio + Maytapi). 94 contacts → 130 pages. Lots of noise: repeated Vanto/template messages, greetings, link previews. Hard to call from.
 
-### 2. New `ReportsModule.tsx` (hub)
-- Top-level page titled **Reports**.
-- Card grid of available reports. First card: **Lead Call Report** (open in same view). Placeholders for future reports (greyed out: "Coming soon" — Weekly Conversion, Group Activity, Distributor Pipeline).
-- Clicking Lead Call Report opens `<LeadCallReport />` inline (no router change needed).
+## Goal
+Replace the raw message dump with a **concise AI summary per contact** (3–6 lines) showing:
+- What the prospect asked / their core interest
+- What was answered / last position
+- Open question or next action
+- Distributor intent (Yes/No/Maybe)
 
-### 3. `LeadCallReport.tsx` component
-- **Source:** `contacts` table (no date filter by default) + `messages` + `maytapi_messages`.
-- **Selection logic (up to 100):**
-  1. Always include ALL contacts where distributor-intent detected (keywords in notes/messages: `distributor`, `R375`, `membership`, `business`, `join`, `opportunity`, `earn`, `sponsor`) OR `interest_topic='business'` from `prospector_damage_audit`.
-  2. Fill remaining slots with most recent inbound-active contacts (by latest message timestamp across both message tables), going back as far as needed — no week cutoff.
-  3. Hard cap **100**.
-- **Sort:** ★ Distributors first, then by earliest first-inquiry date ascending (oldest inquiry → top, so you call the longest-waiting first).
-- **UI:**
-  - Filters: source tag, channel (Twilio/Maytapi/both), temperature, "only distributors" toggle, date range (optional, default off).
-  - Preview table: #, ★, Name, Phone, Type, Temp, First Inquiry, Last Message.
-  - Buttons: **Download PDF**, **Print**, **Refresh**.
-- **PDF (client-side, jspdf + jspdf-autotable):**
-  - Cover/summary page (header, total, filter chips, generated timestamp).
-  - Summary table of all included contacts.
-  - One detail block per contact (page break every ~2 contacts): phone, email, type, temp, interest, first inquiry, tags, notes, full chronological thread (merged messages + maytapi_messages).
-  - Filename: `lead-call-report-YYYY-MM-DD.pdf`.
+Target: ~1 contact per page, full report ≤ ~25 pages for 94 leads.
 
-### 4. Out of scope
-- No schema changes.
-- No edits to auto-reply / Twilio / Maytapi / Damage audit pipelines.
-- Damage audit table (`prospector_damage_audit`) stays — only used as a read source for distributor detection.
+## Categorization
+- **UI (Reports module):** new "Summary" column + new compact PDF layout
+- **Backend (Edge Function + Lovable AI):** summarization endpoint
+- **DB:** small cache table so we don't re-summarize unchanged threads
+- **No DNS / email / RLS infra changes**
 
-### 5. Dependencies
-- Add `jspdf` and `jspdf-autotable` (client-side).
+## How it will work
 
-Reply **go** to build, or tell me to tweak the cap, sort, or selection rules.
+### 1. New edge function `summarize-lead-conversation`
+- Input: `contact_id`, ordered message list (Twilio + Maytapi merged, deduped)
+- Strips: outbound template/Vanto boilerplate repeats, link previews, "•", media-only entries
+- Calls Lovable AI (`google/gemini-3-flash-preview`) with a strict prompt returning JSON:
+  ```
+  { intent, distributor_interest, key_questions[], answers_given[],
+    open_items[], last_status, summary_text }
+  ```
+- Returns compact object; cost ~cheap per lead.
+
+### 2. Cache table `lead_call_summaries`
+Columns: `contact_id (pk)`, `summary jsonb`, `last_message_at`, `message_count`, `model`, `generated_at`.
+Re-summarize only when `last_message_at` or `message_count` changes. Saves credits + speed.
+
+### 3. UI changes in `LeadCallReport.tsx`
+- New **"Summary"** column (replaces the giant per-message expansion in PDF)
+- "Generate Summaries" button → batched calls (5 at a time, with progress bar)
+- Toggle: **Compact PDF (summaries)** vs **Full PDF (raw messages)** — keeps current behavior available
+- Distributor leads still pinned to top; existing filters/sorts preserved
+
+### 4. New PDF layout (compact)
+Per contact, one block:
+```
+#  Name  •  Phone  •  Distributor? Yes  •  Msgs: 14
+First inquiry: 2026-05-12   Last msg: 2026-06-04
+Interest: ...
+Discussion: 3–5 line AI summary
+Open / Next: ...
+```
+≈ 3–4 leads per page → ~25 pages for 94.
+
+## Build order
+1. Migration: create `lead_call_summaries` + grants + RLS
+2. Edge function `summarize-lead-conversation` (Lovable AI, JSON output)
+3. `LeadCallReport.tsx`: Summary column, batched generator, compact PDF mode
+4. QA on the attached 94-lead dataset; verify distributor pinning + page count
+
+## Out of scope
+- Editing Damage Control / other reports
+- Changing Twilio/Maytapi ingestion
+- Auto-running summaries on a schedule (manual button for now; can automate later)
+
+Approve and I'll build it.
