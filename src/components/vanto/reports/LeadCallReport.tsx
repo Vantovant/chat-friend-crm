@@ -182,16 +182,34 @@ export function LeadCallReport() {
     if (!editor) return;
     setSavingEdit(true);
     try {
+      const prevStageId = editor.row.stage_id || null;
+      const newStageId = editor.stage_id || null;
       const { error } = await supabase
         .from('contacts')
         .update({
           lead_type: editor.lead_type,
           notes: editor.notes.trim() || null,
+          stage_id: newStageId,
           updated_at: new Date().toISOString(),
         })
         .eq('id', editor.row.id);
       if (error) throw error;
-      setRows((prev) => prev.map((r) => r.id === editor.row.id ? { ...r, lead_type: editor.lead_type, notes: editor.notes.trim() || null } : r));
+
+      if (prevStageId !== newStageId) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const fromName = stages.find((s) => s.id === prevStageId)?.name || 'Unassigned';
+          const toName = stages.find((s) => s.id === newStageId)?.name || 'Unassigned';
+          await supabase.from('contact_activity').insert({
+            contact_id: editor.row.id,
+            performed_by: user.id,
+            type: 'stage_changed',
+            metadata: { from_stage: fromName, to_stage: toName, from_stage_id: prevStageId, to_stage_id: newStageId, source: 'lead_call_report' },
+          });
+        }
+      }
+
+      setRows((prev) => prev.map((r) => r.id === editor.row.id ? { ...r, lead_type: editor.lead_type, notes: editor.notes.trim() || null, stage_id: newStageId } : r));
       toast.success('Contact updated — visible in Contacts & CRM Pipeline.');
       setEditor(null);
     } catch (e) {
