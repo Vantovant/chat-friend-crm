@@ -24,7 +24,7 @@ const navItems: NavItem[] = [
   { id: 'inbox', label: 'Inbox', icon: MessageSquare },
   { id: 'maytapi-inbox', label: 'Maytapi Inbox', icon: MessageSquare },
   { id: 'plan', label: 'PLAN', icon: CalendarCheck },
-  { id: 'prospector-drafts', label: 'Prospector Drafts', icon: Brain },
+  { id: 'voice-diary', label: 'Voice Diary', icon: BookHeart },
   { id: 'contacts', label: 'Contacts', icon: Users },
   { id: 'crm', label: 'CRM', icon: BarChart3 },
   { id: 'automations', label: 'Automations', icon: Zap },
