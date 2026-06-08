@@ -253,8 +253,8 @@ function TodayTab({ tasksHook, remindersHook, meetingsHook, onOpenTask, onOpenRe
         {todayReminders.length === 0 ? <Empty label="No reminders for today." /> : (
           <ul className="space-y-1">
             {todayReminders.map((r: any) => (
-              <li key={r.id} className="flex items-center gap-2 p-2 rounded-lg hover:bg-secondary/40">
-                <button onClick={() => remindersHook.update(r.id, { is_done: true })} className="w-5 h-5 rounded-full border border-border" />
+              <li key={r.id} onClick={() => onOpenReminder?.(r.id)} className="flex items-center gap-2 p-2 rounded-lg hover:bg-secondary/40 cursor-pointer">
+                <button onClick={(e) => { e.stopPropagation(); remindersHook.update(r.id, { is_done: true }); }} className="w-5 h-5 rounded-full border border-border" />
                 <span className="text-sm flex-1">{r.title}</span>
                 <span className="text-xs text-muted-foreground">{new Date(r.reminder_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
               </li>
