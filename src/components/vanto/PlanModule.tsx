@@ -51,6 +51,14 @@ export function PlanModule() {
   const meetingsHook = useMeetings();
   const notesHook = useNotes();
 
+  // Drawer state
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  const [openReminderId, setOpenReminderId] = useState<string | null>(null);
+  const [openMeetingId, setOpenMeetingId] = useState<string | null>(null);
+  const openTask = useMemo(() => tasksHook.tasks.find((t: any) => t.id === openTaskId) || null, [tasksHook.tasks, openTaskId]);
+  const openReminder = useMemo(() => remindersHook.reminders.find((r: any) => r.id === openReminderId) || null, [remindersHook.reminders, openReminderId]);
+  const openMeeting = useMemo(() => meetingsHook.meetings.find((m: any) => m.id === openMeetingId) || null, [meetingsHook.meetings, openMeetingId]);
+
   useCommandBarHotkey(cmdOpen, setCmdOpen);
 
   return (
