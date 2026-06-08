@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Send, Bot, Loader2 } from 'lucide-react';
+import { Send, Bot, Loader2, Sparkles, Layers, Copy } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
 type Msg = { role: 'user' | 'assistant'; content: string };
 
@@ -61,11 +62,28 @@ Open reminders (${context.reminders.length}): ${context.reminders.map((r) => `${
           <div className="text-xs text-muted-foreground">Vanto CRM specialist · Secretary mode</div>
         </div>
       </div>
+      <div className="px-3 py-2 border-b border-border flex gap-1 flex-wrap">
+        <Button size="sm" variant="outline" disabled={loading}
+          onClick={() => send('Suggest a high-leverage prompt I should ask you right now, given my pipeline + tasks. Return ONLY the prompt text, ready to copy.')}>
+          <Sparkles className="h-3 w-3 mr-1" /> Suggest prompt
+        </Button>
+        <Button size="sm" variant="outline" disabled={loading}
+          onClick={() => send('Build me a phased plan (Phase 1, 2, 3…) to clear my current open tasks, follow-ups, and pipeline gaps over the next 2 weeks. For each phase: goal, deliverables, success metric, and a 1-line daily ritual.')}>
+          <Layers className="h-3 w-3 mr-1" /> Phase roadmap
+        </Button>
+      </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
         {messages.length === 0 && <p className="text-xs text-muted-foreground italic">Ask anything about your day, pipeline, or leads.</p>}
         {messages.map((m, i) => (
-          <div key={i} className={`text-sm rounded-lg p-2 ${m.role === 'user' ? 'bg-primary/15 text-foreground ml-6' : 'bg-secondary/40 text-foreground mr-6'}`}>
-            {m.content}
+          <div key={i} className={`group text-sm rounded-lg p-2 ${m.role === 'user' ? 'bg-primary/15 text-foreground ml-6' : 'bg-secondary/40 text-foreground mr-6'}`}>
+            <div className="whitespace-pre-wrap">{m.content}</div>
+            {m.role === 'assistant' && (
+              <button
+                onClick={() => { navigator.clipboard.writeText(m.content); toast.success('Copied'); }}
+                className="opacity-0 group-hover:opacity-100 transition text-[10px] text-muted-foreground hover:text-foreground mt-1 inline-flex items-center gap-1">
+                <Copy className="h-3 w-3" /> copy
+              </button>
+            )}
           </div>
         ))}
         {loading && <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /> thinking…</div>}
