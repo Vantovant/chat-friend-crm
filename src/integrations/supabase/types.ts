@@ -1760,6 +1760,7 @@ export type Database = {
           description: string | null
           end_time: string | null
           id: string
+          is_done: boolean
           location: string | null
           notes: string | null
           project_id: string | null
@@ -1774,6 +1775,7 @@ export type Database = {
           description?: string | null
           end_time?: string | null
           id?: string
+          is_done?: boolean
           location?: string | null
           notes?: string | null
           project_id?: string | null
@@ -1788,6 +1790,7 @@ export type Database = {
           description?: string | null
           end_time?: string | null
           id?: string
+          is_done?: boolean
           location?: string | null
           notes?: string | null
           project_id?: string | null
