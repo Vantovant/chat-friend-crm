@@ -201,6 +201,17 @@ Deno.serve(async (req) => {
           throw new Error("__SKIP_GROUP_ENGINE__");
         }
 
+        // Admin exclusion: never auto-reply to listed group admins (CSV of E.164 numbers).
+        const { data: adminExclRow } = await supabase
+          .from("integration_settings").select("value")
+          .eq("key", "zazi_group_admin_excluded_phones").maybeSingle();
+        const adminExcludedList = String(adminExclRow?.value || "")
+          .split(",").map((s) => normalizePhoneToE164(s.trim())).filter(Boolean);
+        if (senderE164 && adminExcludedList.includes(senderE164)) {
+          console.log("[group-engine] skip: sender is excluded group admin", senderE164);
+          throw new Error("__SKIP_GROUP_ENGINE__");
+        }
+
         // Global kill switch
         const { data: globalFlag } = await supabase
           .from("integration_settings").select("value")
