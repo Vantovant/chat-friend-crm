@@ -23,6 +23,7 @@ import { ReviewQueueModule } from '@/components/vanto/ReviewQueueModule';
 import { ReportsModule } from '@/components/vanto/ReportsModule';
 import { ProspectorDraftsModule } from '@/components/vanto/ProspectorDraftsModule';
 import { PlanModule } from '@/components/vanto/PlanModule';
+import { VoiceDiaryModule } from '@/components/vanto/VoiceDiaryModule';
 import { AuthPage } from '@/components/vanto/AuthPage';
 import { PageHelpButton } from '@/components/vanto/PageHelpButton';
 import type { Module } from '@/lib/vanto-data';
