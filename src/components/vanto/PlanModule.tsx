@@ -291,15 +291,15 @@ function TasksTab({ hook, onOpen }: any) {
           {groups[status].length === 0 ? <Empty label="No tasks." /> : (
             <ul className="space-y-1">
               {groups[status].map((t: any) => (
-                <li key={t.id} className="flex items-center gap-2 p-2 rounded-lg hover:bg-secondary/40">
-                  <button onClick={() => hook.update(t.id, { status: status === 'done' ? 'pending' : 'done' })}
+                <li key={t.id} onClick={() => onOpen?.(t.id)} className="flex items-center gap-2 p-2 rounded-lg hover:bg-secondary/40 cursor-pointer">
+                  <button onClick={(e) => { e.stopPropagation(); hook.update(t.id, { status: status === 'done' ? 'pending' : 'done' }); }}
                           className={`w-5 h-5 rounded border border-border flex items-center justify-center ${status === 'done' ? 'bg-primary/30' : ''}`}>
                     {status === 'done' && <Check className="h-3 w-3" />}
                   </button>
                   <span className={`px-1.5 py-0.5 text-[10px] rounded border ${PRIORITY_COLORS[t.priority]}`}>{t.priority}</span>
                   <span className={`text-sm flex-1 ${status === 'done' ? 'line-through text-muted-foreground' : 'text-foreground'}`}>{t.title}</span>
                   {t.source && t.source !== 'manual' && <span className="text-[10px] text-muted-foreground">via {t.source}</span>}
-                  <button onClick={() => hook.remove(t.id)} className="text-muted-foreground hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
+                  <button onClick={(e) => { e.stopPropagation(); hook.remove(t.id); }} className="text-muted-foreground hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
                 </li>
               ))}
             </ul>
