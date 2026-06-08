@@ -879,6 +879,29 @@ export function LeadCallReport() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SuggestedTasksDialog
+        open={suggestOpen}
+        onOpenChange={setSuggestOpen}
+        contactName={editor ? displayName(editor.row) : null}
+        tasks={suggestTasks}
+        onConfirm={async (picked) => {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) { toast.error('Not signed in'); return; }
+          const contactId = editor?.row?.id ?? null;
+          const contactName = editor ? displayName(editor.row) : null;
+          const rows = picked.map((t) => ({
+            user_id: user.id,
+            title: t.title,
+            priority: t.priority,
+            source: 'lead_call',
+            source_ref: { kind: 'lead_call', contact_id: contactId, contact_name: contactName },
+          }));
+          const { error: insErr } = await (supabase.from('plan_tasks' as any).insert(rows) as any);
+          if (insErr) { toast.error(insErr.message); return; }
+          toast.success(`Added ${rows.length} task${rows.length === 1 ? '' : 's'} to PLAN`);
+        }}
+      />
     </div>
   );
 }
