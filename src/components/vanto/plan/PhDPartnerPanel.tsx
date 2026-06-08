@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Send, Bot, Loader2, Sparkles, Layers, Copy } from 'lucide-react';
+import { Send, Bot, Loader2, Sparkles, Layers, Copy, Mic, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -10,7 +10,60 @@ export function PhDPartnerPanel({ context }: { context: { tasks: any[]; meetings
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [recording, setRecording] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const recRef = useRef<any>(null);
+  const baseRef = useRef<string>('');
+
+  const getSR = (): any =>
+    typeof window !== 'undefined'
+      ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+      : null;
+
+  const startDictate = () => {
+    const SR = getSR();
+    if (!SR) {
+      toast.error('Voice dictation not supported in this browser. Try Chrome.');
+      return;
+    }
+    try {
+      const rec = new SR();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = 'en-ZA';
+      baseRef.current = input ? input.trimEnd() + ' ' : '';
+      rec.onresult = (event: any) => {
+        let interim = '', final = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const t = event.results[i][0].transcript;
+          if (event.results[i].isFinal) final += t; else interim += t;
+        }
+        const combined = (baseRef.current + final + interim).replace(/\s+/g, ' ').trimStart();
+        setInput(combined);
+        if (final) baseRef.current = (baseRef.current + final + ' ').replace(/\s+/g, ' ');
+      };
+      rec.onerror = (e: any) => {
+        if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
+          toast.error('Microphone blocked. Allow mic permission in your browser.');
+        }
+        setRecording(false);
+      };
+      rec.onend = () => setRecording(false);
+      recRef.current = rec;
+      rec.start();
+      setRecording(true);
+    } catch {
+      setRecording(false);
+      toast.error('Could not start dictation');
+    }
+  };
+
+  const stopDictate = () => {
+    try { recRef.current?.stop(); } catch {}
+    setRecording(false);
+  };
+
+  useEffect(() => () => { try { recRef.current?.stop(); } catch {} }, []);
 
   // Morning briefing — once per day
   useEffect(() => {
@@ -89,8 +142,18 @@ Open reminders (${context.reminders.length}): ${context.reminders.map((r) => `${
         {loading && <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /> thinking…</div>}
         <div ref={endRef} />
       </div>
-      <form onSubmit={(e) => { e.preventDefault(); send(input); }} className="p-2 border-t border-border flex gap-1">
-        <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask the PhD Partner…" className="flex-1 bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm" />
+      <form onSubmit={(e) => { e.preventDefault(); if (recording) stopDictate(); send(input); }} className="p-2 border-t border-border flex gap-1">
+        <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={recording ? 'Listening… speak naturally' : 'Ask the PhD Partner…'} className="flex-1 bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm" />
+        <Button
+          type="button"
+          size="sm"
+          variant={recording ? 'destructive' : 'outline'}
+          onClick={recording ? stopDictate : startDictate}
+          title={recording ? 'Stop dictation' : 'Dictate'}
+          className={recording ? 'animate-pulse' : ''}
+        >
+          {recording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+        </Button>
         <Button type="submit" size="sm" disabled={loading || !input.trim()}><Send className="h-4 w-4" /></Button>
       </form>
     </div>
