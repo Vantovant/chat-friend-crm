@@ -109,6 +109,21 @@ function displayName(c: Contact): string {
   const fn = [c.first_name, c.last_name].filter(Boolean).join(' ').trim();
   return fn || c.phone || 'Unnamed';
 }
+function SortButton({ label, active, dir, onClick, align = 'left' }: { label: string; active: boolean; dir: SortDir; onClick: () => void; align?: 'left' | 'right' }) {
+  const Icon = !active || dir === 'none' ? ArrowUpDown : dir === 'desc' ? ArrowDown : ArrowUp;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium hover:bg-muted hover:text-foreground ${active && dir !== 'none' ? 'text-foreground' : 'text-muted-foreground'} ${align === 'right' ? 'ml-auto justify-end' : ''}`}
+      title={`Sort by ${label}`}
+    >
+      {label}
+      <Icon className="h-3.5 w-3.5" />
+    </button>
+  );
+}
+
 
 export function LeadCallReport() {
   const [loading, setLoading] = useState(true);
