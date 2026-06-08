@@ -48,6 +48,7 @@ type Contact = {
   interest: string | null;
   tags: string[] | null;
   notes: string | null;
+  stage_id: string | null;
   created_at: string;
   updated_at: string;
 };
