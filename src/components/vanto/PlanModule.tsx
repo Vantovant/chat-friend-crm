@@ -346,7 +346,7 @@ function RemindersTab({ hook, onOpen }: any) {
 }
 
 /* ----------------- MEETINGS ----------------- */
-function MeetingsTab({ hook }: any) {
+function MeetingsTab({ hook, onOpen }: any) {
   const [title, setTitle] = useState('');
   const [start, setStart] = useState(() => new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16));
   const [location, setLocation] = useState('');
