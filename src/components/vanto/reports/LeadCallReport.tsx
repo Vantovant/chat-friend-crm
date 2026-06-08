@@ -825,6 +825,41 @@ export function LeadCallReport() {
                       <ClipboardPaste className="h-3.5 w-3.5 mr-1" />
                       Append AI summary
                     </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!editor.notes?.trim()}
+                      title="Read these notes and suggest PLAN tasks (does not replace your notes)"
+                      onClick={async () => {
+                        try {
+                          const { data, error } = await supabase.functions.invoke('plan-ai-extract-actions', {
+                            body: { text: editor.notes, context: `contact ${editor.row?.name ?? editor.row?.first_name ?? ''} / lead_type ${editor.lead_type}` },
+                          });
+                          if (error) throw error;
+                          const tasks = (data as any)?.tasks || [];
+                          if (!tasks.length) { toast.info('No tasks detected in this note.'); return; }
+                          const ok = window.confirm(`Suggested ${tasks.length} task${tasks.length === 1 ? '' : 's'}:\n\n${tasks.map((t: any, i: number) => `${i + 1}. [${t.priority || 'medium'}] ${t.title}`).join('\n')}\n\nAdd them to PLAN?`);
+                          if (!ok) return;
+                          const { data: { user } } = await supabase.auth.getUser();
+                          if (!user) { toast.error('Not signed in'); return; }
+                          const rows = tasks.map((t: any) => ({
+                            user_id: user.id,
+                            title: t.title,
+                            priority: t.priority || 'medium',
+                            source: 'lead_call',
+                            source_ref: { kind: 'lead_call', contact_id: editor.row?.id ?? null },
+                          }));
+                          const { error: insErr } = await (supabase.from('plan_tasks' as any).insert(rows) as any);
+                          if (insErr) throw insErr;
+                          toast.success(`Added ${rows.length} task${rows.length === 1 ? '' : 's'} to PLAN`);
+                        } catch (e: any) {
+                          toast.error(e.message || 'Failed to suggest tasks');
+                        }
+                      }}
+                    >
+                      <Sparkles className="h-3.5 w-3.5 mr-1" /> Suggest tasks
+                    </Button>
                   </div>
                 </div>
                 <textarea

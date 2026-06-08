@@ -1753,6 +1753,180 @@ export type Database = {
         }
         Relationships: []
       }
+      plan_meetings: {
+        Row: {
+          attendees: Json
+          created_at: string
+          description: string | null
+          end_time: string | null
+          id: string
+          location: string | null
+          notes: string | null
+          project_id: string | null
+          start_time: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          attendees?: Json
+          created_at?: string
+          description?: string | null
+          end_time?: string | null
+          id?: string
+          location?: string | null
+          notes?: string | null
+          project_id?: string | null
+          start_time: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          attendees?: Json
+          created_at?: string
+          description?: string | null
+          end_time?: string | null
+          id?: string
+          location?: string | null
+          notes?: string | null
+          project_id?: string | null
+          start_time?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      plan_notes: {
+        Row: {
+          content: string | null
+          created_at: string
+          id: string
+          links_json: Json
+          note_date: string
+          structure_json: Json
+          structured_mode: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          content?: string | null
+          created_at?: string
+          id?: string
+          links_json?: Json
+          note_date?: string
+          structure_json?: Json
+          structured_mode?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          content?: string | null
+          created_at?: string
+          id?: string
+          links_json?: Json
+          note_date?: string
+          structure_json?: Json
+          structured_mode?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      plan_reminders: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          is_done: boolean
+          project_id: string | null
+          reminder_time: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_done?: boolean
+          project_id?: string | null
+          reminder_time: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_done?: boolean
+          project_id?: string | null
+          reminder_time?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      plan_tasks: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          description: string | null
+          due_date: string | null
+          estimated_minutes: number | null
+          id: string
+          order_index: number
+          priority: string
+          project_id: string | null
+          source: string
+          source_ref: Json | null
+          start_date: string | null
+          status: string
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          description?: string | null
+          due_date?: string | null
+          estimated_minutes?: number | null
+          id?: string
+          order_index?: number
+          priority?: string
+          project_id?: string | null
+          source?: string
+          source_ref?: Json | null
+          start_date?: string | null
+          status?: string
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          description?: string | null
+          due_date?: string | null
+          estimated_minutes?: number | null
+          id?: string
+          order_index?: number
+          priority?: string
+          project_id?: string | null
+          source?: string
+          source_ref?: Json | null
+          start_date?: string | null
+          status?: string
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       playbooks: {
         Row: {
           approved: boolean | null
