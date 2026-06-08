@@ -1,18 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarCheck, Plus, Check, Trash2, Bell, Calendar, ListTodo, NotebookPen, Sparkles, MessageSquare } from 'lucide-react';
+import { CalendarCheck, Plus, Check, Trash2, Bell, Calendar, ListTodo, NotebookPen, Sparkles, MessageSquare, Command as CommandIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTasks, useReminders, useMeetings, useNotes } from '@/hooks/usePlanData';
 import { PhDPartnerPanel } from './plan/PhDPartnerPanel';
+import { CommandBar, useCommandBarHotkey } from './plan/CommandBar';
+import { CommandMic } from './plan/CommandMic';
+import { CalendarTab } from './plan/CalendarTab';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
-type Tab = 'today' | 'tasks' | 'reminders' | 'meetings' | 'notes' | 'suggestions';
+type Tab = 'today' | 'tasks' | 'reminders' | 'meetings' | 'calendar' | 'notes' | 'suggestions';
 
 const TABS: { key: Tab; label: string; icon: any }[] = [
   { key: 'today', label: 'Today', icon: CalendarCheck },
   { key: 'tasks', label: 'Tasks', icon: ListTodo },
   { key: 'reminders', label: 'Reminders', icon: Bell },
   { key: 'meetings', label: 'Meetings', icon: Calendar },
+  { key: 'calendar', label: 'Calendar', icon: Calendar },
   { key: 'notes', label: 'Notes', icon: NotebookPen },
   { key: 'suggestions', label: 'AI Suggestions', icon: Sparkles },
 ];
