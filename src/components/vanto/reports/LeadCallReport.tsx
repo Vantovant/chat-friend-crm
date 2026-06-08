@@ -77,7 +77,8 @@ type Row = Contact & {
   summary?: Summary | null;
 };
 
-type MessageSort = 'none' | 'asc' | 'desc';
+type SortDir = 'none' | 'asc' | 'desc';
+type SortKey = 'msgs' | 'firstInquiry' | 'lastMessage';
 
 type ConversationRow = { id: string; contact_id: string | null };
 type TwilioMessageRow = { conversation_id: string; content: string | null; is_outbound: boolean | null; created_at: string };
@@ -108,12 +109,28 @@ function displayName(c: Contact): string {
   const fn = [c.first_name, c.last_name].filter(Boolean).join(' ').trim();
   return fn || c.phone || 'Unnamed';
 }
+function SortButton({ label, active, dir, onClick, align = 'left' }: { label: string; active: boolean; dir: SortDir; onClick: () => void; align?: 'left' | 'right' }) {
+  const Icon = !active || dir === 'none' ? ArrowUpDown : dir === 'desc' ? ArrowDown : ArrowUp;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium hover:bg-muted hover:text-foreground ${active && dir !== 'none' ? 'text-foreground' : 'text-muted-foreground'} ${align === 'right' ? 'ml-auto justify-end' : ''}`}
+      title={`Sort by ${label}`}
+    >
+      {label}
+      <Icon className="h-3.5 w-3.5" />
+    </button>
+  );
+}
+
 
 export function LeadCallReport() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<Row[]>([]);
   const [onlyDistributors, setOnlyDistributors] = useState(false);
-  const [messageSort, setMessageSort] = useState<MessageSort>('none');
+  const [sortKey, setSortKey] = useState<SortKey>('msgs');
+  const [sortDir, setSortDir] = useState<SortDir>('none');
   const [fiFrom, setFiFrom] = useState('');
   const [fiTo, setFiTo] = useState('');
   const [lmFrom, setLmFrom] = useState('');
@@ -303,17 +320,22 @@ export function LeadCallReport() {
   }, [rows, onlyDistributors, fiFrom, fiTo, lmFrom, lmTo]);
 
   const sortedFiltered = useMemo(() => {
-    if (messageSort === 'none') return filtered;
-    return [...filtered].sort((a, b) =>
-      messageSort === 'desc' ? b.thread.length - a.thread.length : a.thread.length - b.thread.length
-    );
-  }, [filtered, messageSort]);
+    if (sortDir === 'none') return filtered;
+    const dirMul = sortDir === 'asc' ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      if (sortKey === 'msgs') return (a.thread.length - b.thread.length) * dirMul;
+      const av = (sortKey === 'firstInquiry' ? a.firstInquiry : a.lastMessage) || '';
+      const bv = (sortKey === 'firstInquiry' ? b.firstInquiry : b.lastMessage) || '';
+      return av.localeCompare(bv) * dirMul;
+    });
+  }, [filtered, sortKey, sortDir]);
 
   const distributorCount = rows.filter((r) => r.isDistributor).length;
   const missingSummaries = sortedFiltered.filter((r) => !r.summary).length;
 
-  function toggleMessageSort() {
-    setMessageSort((current) => (current === 'none' ? 'desc' : current === 'desc' ? 'asc' : 'none'));
+  function toggleSort(key: SortKey) {
+    if (sortKey !== key) { setSortKey(key); setSortDir('desc'); return; }
+    setSortDir((d) => (d === 'none' ? 'desc' : d === 'desc' ? 'asc' : 'none'));
   }
 
   async function summarizeOne(row: Row, force = false): Promise<Summary | null> {
@@ -594,19 +616,15 @@ export function LeadCallReport() {
               <TableHead>Name</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Type</TableHead>
-              <TableHead>First Inquiry</TableHead>
-              <TableHead>Last Msg</TableHead>
+              <TableHead>
+                <SortButton label="First Inquiry" active={sortKey === 'firstInquiry'} dir={sortDir} onClick={() => toggleSort('firstInquiry')} />
+              </TableHead>
+              <TableHead>
+                <SortButton label="Last Msg" active={sortKey === 'lastMessage'} dir={sortDir} onClick={() => toggleSort('lastMessage')} />
+              </TableHead>
               <TableHead className="min-w-[280px]">Summary</TableHead>
               <TableHead className="text-right">
-                <button
-                  type="button"
-                  onClick={toggleMessageSort}
-                  className="ml-auto inline-flex items-center justify-end gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-                  title="Sort by message count"
-                >
-                  Msgs
-                  {messageSort === 'desc' ? <ArrowDown className="h-3.5 w-3.5" /> : messageSort === 'asc' ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowUpDown className="h-3.5 w-3.5" />}
-                </button>
+                <SortButton label="Msgs" active={sortKey === 'msgs'} dir={sortDir} onClick={() => toggleSort('msgs')} align="right" />
               </TableHead>
               <TableHead className="w-20 text-right">Edit</TableHead>
             </TableRow>
