@@ -41,23 +41,30 @@ function isOverdue(iso: string | null) {
 export function PlanModule() {
   const [tab, setTab] = useState<Tab>('today');
   const [showPartner, setShowPartner] = useState(true);
+  const [cmdOpen, setCmdOpen] = useState(false);
 
   const tasksHook = useTasks();
   const remindersHook = useReminders();
   const meetingsHook = useMeetings();
   const notesHook = useNotes();
 
+  useCommandBarHotkey(cmdOpen, setCmdOpen);
+
   return (
     <div className="h-full flex overflow-hidden">
       <div className="flex-1 overflow-y-auto p-4 md:p-6">
-        <header className="mb-4 flex items-center gap-3">
+        <header className="mb-4 flex items-center gap-3 flex-wrap">
           <div className="w-10 h-10 rounded-xl bg-primary/15 text-primary flex items-center justify-center">
             <CalendarCheck className="h-5 w-5" />
           </div>
-          <div className="flex-1">
+          <div className="flex-1 min-w-[200px]">
             <h1 className="text-xl font-semibold text-foreground">PLAN — Command Centre</h1>
             <p className="text-sm text-muted-foreground">Tasks, reminders, meetings & daily notes — with PhD Partner AI.</p>
           </div>
+          <Button variant="outline" size="sm" onClick={() => setCmdOpen(true)}>
+            <CommandIcon className="h-4 w-4 mr-1" /> Search <kbd className="ml-2 text-[10px] bg-secondary px-1 rounded">⌘K</kbd>
+          </Button>
+          <CommandMic tasksHook={tasksHook} remindersHook={remindersHook} meetingsHook={meetingsHook} />
           <Button variant="outline" size="sm" onClick={() => setShowPartner((s) => !s)}>
             <MessageSquare className="h-4 w-4 mr-1" /> {showPartner ? 'Hide' : 'Show'} PhD Partner
           </Button>
@@ -82,9 +89,20 @@ export function PlanModule() {
         {tab === 'tasks' && <TasksTab hook={tasksHook} />}
         {tab === 'reminders' && <RemindersTab hook={remindersHook} />}
         {tab === 'meetings' && <MeetingsTab hook={meetingsHook} />}
+        {tab === 'calendar' && <CalendarTab tasksHook={tasksHook} remindersHook={remindersHook} meetingsHook={meetingsHook} />}
         {tab === 'notes' && <NotesTab hook={notesHook} />}
         {tab === 'suggestions' && <SuggestionsTab onPromote={async (t) => { await tasksHook.create(t); toast.success('Added to Tasks'); }} />}
       </div>
+
+      <CommandBar
+        open={cmdOpen}
+        onOpenChange={setCmdOpen}
+        tasksHook={tasksHook}
+        remindersHook={remindersHook}
+        meetingsHook={meetingsHook}
+        notesHook={notesHook}
+        onNavigate={(t) => setTab(t as Tab)}
+      />
 
       {showPartner && (
         <aside className="hidden lg:flex w-[360px] border-l border-border bg-card/40 overflow-hidden">
