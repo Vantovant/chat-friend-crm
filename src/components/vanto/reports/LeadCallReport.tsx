@@ -140,8 +140,15 @@ export function LeadCallReport() {
   const [summarizing, setSummarizing] = useState(false);
   const [summarizeProgress, setSummarizeProgress] = useState<{ done: number; total: number } | null>(null);
   const [compactPdf, setCompactPdf] = useState(true);
-  const [editor, setEditor] = useState<{ row: Row; lead_type: LeadType; notes: string } | null>(null);
+  const [editor, setEditor] = useState<{ row: Row; lead_type: LeadType; notes: string; stage_id: string | null } | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [stages, setStages] = useState<{ id: string; name: string; color: string | null }[]>([]);
+
+  useEffect(() => {
+    supabase.from('pipeline_stages').select('id, name, color').order('stage_order').then(({ data }) => {
+      if (data) setStages(data as any);
+    });
+  }, []);
 
   function summaryAsText(s: Summary | null | undefined): string {
     if (!s) return '';
