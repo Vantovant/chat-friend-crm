@@ -6,6 +6,7 @@ import { PhDPartnerPanel } from './plan/PhDPartnerPanel';
 import { CommandBar, useCommandBarHotkey } from './plan/CommandBar';
 import { CommandMic } from './plan/CommandMic';
 import { CalendarTab } from './plan/CalendarTab';
+import { TaskDetailDrawer, ReminderDetailDrawer, MeetingDetailDrawer } from './plan/Drawers';
 import { buildPlanMarkdown, downloadPlanMarkdown } from './plan/planExport';
 import { downloadIcs } from './plan/icsExport';
 import { supabase } from '@/integrations/supabase/client';
@@ -49,6 +50,14 @@ export function PlanModule() {
   const remindersHook = useReminders();
   const meetingsHook = useMeetings();
   const notesHook = useNotes();
+
+  // Drawer state
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  const [openReminderId, setOpenReminderId] = useState<string | null>(null);
+  const [openMeetingId, setOpenMeetingId] = useState<string | null>(null);
+  const openTask = useMemo(() => tasksHook.tasks.find((t: any) => t.id === openTaskId) || null, [tasksHook.tasks, openTaskId]);
+  const openReminder = useMemo(() => remindersHook.reminders.find((r: any) => r.id === openReminderId) || null, [remindersHook.reminders, openReminderId]);
+  const openMeeting = useMemo(() => meetingsHook.meetings.find((m: any) => m.id === openMeetingId) || null, [meetingsHook.meetings, openMeetingId]);
 
   useCommandBarHotkey(cmdOpen, setCmdOpen);
 
@@ -103,10 +112,10 @@ export function PlanModule() {
           ))}
         </nav>
 
-        {tab === 'today' && <TodayTab tasksHook={tasksHook} remindersHook={remindersHook} meetingsHook={meetingsHook} />}
-        {tab === 'tasks' && <TasksTab hook={tasksHook} />}
-        {tab === 'reminders' && <RemindersTab hook={remindersHook} />}
-        {tab === 'meetings' && <MeetingsTab hook={meetingsHook} />}
+        {tab === 'today' && <TodayTab tasksHook={tasksHook} remindersHook={remindersHook} meetingsHook={meetingsHook} onOpenTask={setOpenTaskId} onOpenReminder={setOpenReminderId} onOpenMeeting={setOpenMeetingId} />}
+        {tab === 'tasks' && <TasksTab hook={tasksHook} onOpen={setOpenTaskId} />}
+        {tab === 'reminders' && <RemindersTab hook={remindersHook} onOpen={setOpenReminderId} />}
+        {tab === 'meetings' && <MeetingsTab hook={meetingsHook} onOpen={setOpenMeetingId} />}
         {tab === 'calendar' && <CalendarTab tasksHook={tasksHook} remindersHook={remindersHook} meetingsHook={meetingsHook} />}
         {tab === 'notes' && <NotesTab hook={notesHook} />}
         {tab === 'suggestions' && <SuggestionsTab onPromote={async (t) => { await tasksHook.create(t); toast.success('Added to Tasks'); }} />}
@@ -133,12 +142,38 @@ export function PlanModule() {
           />
         </aside>
       )}
+
+      <TaskDetailDrawer
+        task={openTask}
+        open={!!openTask}
+        onClose={() => setOpenTaskId(null)}
+        onUpdate={tasksHook.update}
+        onDelete={tasksHook.remove}
+        onConvertToReminder={async (input) => { await remindersHook.create(input); }}
+      />
+      <ReminderDetailDrawer
+        reminder={openReminder}
+        open={!!openReminder}
+        onClose={() => setOpenReminderId(null)}
+        onUpdate={remindersHook.update}
+        onDelete={remindersHook.remove}
+        onConvertToTask={async (input) => { await tasksHook.create({ ...input, priority: 'medium', source: 'reminder_convert' }); }}
+        onConvertToMeeting={async (input) => { await meetingsHook.create(input); }}
+      />
+      <MeetingDetailDrawer
+        meeting={openMeeting}
+        open={!!openMeeting}
+        onClose={() => setOpenMeetingId(null)}
+        onUpdate={meetingsHook.update}
+        onDelete={meetingsHook.remove}
+        onCreateTask={async (input) => { await tasksHook.create(input); }}
+      />
     </div>
   );
 }
 
 /* ----------------- TODAY ----------------- */
-function TodayTab({ tasksHook, remindersHook, meetingsHook }: any) {
+function TodayTab({ tasksHook, remindersHook, meetingsHook, onOpenTask, onOpenReminder, onOpenMeeting }: any) {
   const openTasks = tasksHook.tasks.filter((t: any) => t.status !== 'done' && (isToday(t.due_date) || isOverdue(t.due_date) || !t.due_date));
   const todayTasks = openTasks;
 
@@ -190,8 +225,8 @@ function TodayTab({ tasksHook, remindersHook, meetingsHook }: any) {
         {todayTasks.length === 0 ? <Empty label="Nothing due today. Add a task in the Tasks tab." /> : (
           <ul className="space-y-1">
             {todayTasks.map((t: any) => (
-              <li key={t.id} className="flex items-center gap-2 p-2 rounded-lg hover:bg-secondary/40">
-                <button onClick={() => tasksHook.update(t.id, { status: 'done' })} className="w-5 h-5 rounded border border-border hover:bg-primary/20 flex items-center justify-center"><Check className="h-3 w-3 opacity-0 group-hover:opacity-100" /></button>
+              <li key={t.id} onClick={() => onOpenTask?.(t.id)} className="flex items-center gap-2 p-2 rounded-lg hover:bg-secondary/40 cursor-pointer">
+                <button onClick={(e) => { e.stopPropagation(); tasksHook.update(t.id, { status: 'done' }); }} className="w-5 h-5 rounded border border-border hover:bg-primary/20 flex items-center justify-center"><Check className="h-3 w-3 opacity-0 group-hover:opacity-100" /></button>
                 <span className={`px-1.5 py-0.5 text-[10px] rounded border ${PRIORITY_COLORS[t.priority]}`}>{t.priority}</span>
                 <span className="text-sm text-foreground flex-1">{t.title}</span>
                 {isOverdue(t.due_date) && <span className="text-[10px] text-red-400">overdue</span>}
@@ -205,7 +240,7 @@ function TodayTab({ tasksHook, remindersHook, meetingsHook }: any) {
         {todayMeetings.length === 0 ? <Empty label="No meetings today." /> : (
           <ul className="space-y-1">
             {todayMeetings.map((m: any) => (
-              <li key={m.id} className="p-2 rounded-lg bg-secondary/30 text-sm">
+              <li key={m.id} onClick={() => onOpenMeeting?.(m.id)} className="p-2 rounded-lg bg-secondary/30 text-sm cursor-pointer hover:bg-secondary/50">
                 <div className="font-medium">{m.title}</div>
                 <div className="text-xs text-muted-foreground">{new Date(m.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{m.location ? ` · ${m.location}` : ''}</div>
               </li>
@@ -218,8 +253,8 @@ function TodayTab({ tasksHook, remindersHook, meetingsHook }: any) {
         {todayReminders.length === 0 ? <Empty label="No reminders for today." /> : (
           <ul className="space-y-1">
             {todayReminders.map((r: any) => (
-              <li key={r.id} className="flex items-center gap-2 p-2 rounded-lg hover:bg-secondary/40">
-                <button onClick={() => remindersHook.update(r.id, { is_done: true })} className="w-5 h-5 rounded-full border border-border" />
+              <li key={r.id} onClick={() => onOpenReminder?.(r.id)} className="flex items-center gap-2 p-2 rounded-lg hover:bg-secondary/40 cursor-pointer">
+                <button onClick={(e) => { e.stopPropagation(); remindersHook.update(r.id, { is_done: true }); }} className="w-5 h-5 rounded-full border border-border" />
                 <span className="text-sm flex-1">{r.title}</span>
                 <span className="text-xs text-muted-foreground">{new Date(r.reminder_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
               </li>
@@ -232,7 +267,7 @@ function TodayTab({ tasksHook, remindersHook, meetingsHook }: any) {
 }
 
 /* ----------------- TASKS ----------------- */
-function TasksTab({ hook }: any) {
+function TasksTab({ hook, onOpen }: any) {
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'urgent'>('medium');
   const groups: Record<string, any[]> = { pending: [], in_progress: [], done: [] };
@@ -256,15 +291,15 @@ function TasksTab({ hook }: any) {
           {groups[status].length === 0 ? <Empty label="No tasks." /> : (
             <ul className="space-y-1">
               {groups[status].map((t: any) => (
-                <li key={t.id} className="flex items-center gap-2 p-2 rounded-lg hover:bg-secondary/40">
-                  <button onClick={() => hook.update(t.id, { status: status === 'done' ? 'pending' : 'done' })}
+                <li key={t.id} onClick={() => onOpen?.(t.id)} className="flex items-center gap-2 p-2 rounded-lg hover:bg-secondary/40 cursor-pointer">
+                  <button onClick={(e) => { e.stopPropagation(); hook.update(t.id, { status: status === 'done' ? 'pending' : 'done' }); }}
                           className={`w-5 h-5 rounded border border-border flex items-center justify-center ${status === 'done' ? 'bg-primary/30' : ''}`}>
                     {status === 'done' && <Check className="h-3 w-3" />}
                   </button>
                   <span className={`px-1.5 py-0.5 text-[10px] rounded border ${PRIORITY_COLORS[t.priority]}`}>{t.priority}</span>
                   <span className={`text-sm flex-1 ${status === 'done' ? 'line-through text-muted-foreground' : 'text-foreground'}`}>{t.title}</span>
                   {t.source && t.source !== 'manual' && <span className="text-[10px] text-muted-foreground">via {t.source}</span>}
-                  <button onClick={() => hook.remove(t.id)} className="text-muted-foreground hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
+                  <button onClick={(e) => { e.stopPropagation(); hook.remove(t.id); }} className="text-muted-foreground hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
                 </li>
               ))}
             </ul>
@@ -276,7 +311,7 @@ function TasksTab({ hook }: any) {
 }
 
 /* ----------------- REMINDERS ----------------- */
-function RemindersTab({ hook }: any) {
+function RemindersTab({ hook, onOpen }: any) {
   const [title, setTitle] = useState('');
   const [time, setTime] = useState(() => {
     const d = new Date(Date.now() + 60 * 60 * 1000);
@@ -296,11 +331,11 @@ function RemindersTab({ hook }: any) {
         {hook.reminders.length === 0 ? <Empty label="No reminders yet." /> : (
           <ul className="space-y-1">
             {hook.reminders.map((r: any) => (
-              <li key={r.id} className={`flex items-center gap-2 p-2 rounded-lg hover:bg-secondary/40 ${r.is_done ? 'opacity-50' : ''}`}>
-                <button onClick={() => hook.update(r.id, { is_done: !r.is_done })} className={`w-5 h-5 rounded-full border border-border ${r.is_done ? 'bg-primary/30' : ''}`} />
+              <li key={r.id} onClick={() => onOpen?.(r.id)} className={`flex items-center gap-2 p-2 rounded-lg hover:bg-secondary/40 cursor-pointer ${r.is_done ? 'opacity-50' : ''}`}>
+                <button onClick={(e) => { e.stopPropagation(); hook.update(r.id, { is_done: !r.is_done }); }} className={`w-5 h-5 rounded-full border border-border ${r.is_done ? 'bg-primary/30' : ''}`} />
                 <span className={`text-sm flex-1 ${r.is_done ? 'line-through' : ''}`}>{r.title}</span>
                 <span className="text-xs text-muted-foreground">{new Date(r.reminder_time).toLocaleString()}</span>
-                <button onClick={() => hook.remove(r.id)} className="text-muted-foreground hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
+                <button onClick={(e) => { e.stopPropagation(); hook.remove(r.id); }} className="text-muted-foreground hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
               </li>
             ))}
           </ul>
@@ -311,7 +346,7 @@ function RemindersTab({ hook }: any) {
 }
 
 /* ----------------- MEETINGS ----------------- */
-function MeetingsTab({ hook }: any) {
+function MeetingsTab({ hook, onOpen }: any) {
   const [title, setTitle] = useState('');
   const [start, setStart] = useState(() => new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16));
   const [location, setLocation] = useState('');
@@ -330,18 +365,18 @@ function MeetingsTab({ hook }: any) {
         {hook.meetings.length === 0 ? <Empty label="No meetings scheduled." /> : (
           <ul className="space-y-1">
             {hook.meetings.map((m: any) => (
-              <li key={m.id} className="p-2 rounded-lg bg-secondary/30 flex items-center gap-2">
+              <li key={m.id} onClick={() => onOpen?.(m.id)} className="p-2 rounded-lg bg-secondary/30 flex items-center gap-2 cursor-pointer hover:bg-secondary/50">
                 <div className="flex-1">
-                  <div className="text-sm font-medium">{m.title}</div>
+                  <div className={`text-sm font-medium ${m.is_done ? 'line-through text-muted-foreground' : ''}`}>{m.title}</div>
                   <div className="text-xs text-muted-foreground">{new Date(m.start_time).toLocaleString()}{m.location ? ` · ${m.location}` : ''}</div>
                 </div>
                 <button
                   title="Download .ics"
-                  onClick={() => downloadIcs([m], `meeting-${(m.title || 'event').replace(/\s+/g, '-').toLowerCase()}.ics`)}
+                  onClick={(e) => { e.stopPropagation(); downloadIcs([m], `meeting-${(m.title || 'event').replace(/\s+/g, '-').toLowerCase()}.ics`); }}
                   className="text-muted-foreground hover:text-primary text-xs px-1.5 py-0.5 rounded border border-border">
                   .ics
                 </button>
-                <button onClick={() => hook.remove(m.id)} className="text-muted-foreground hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
+                <button onClick={(e) => { e.stopPropagation(); hook.remove(m.id); }} className="text-muted-foreground hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
               </li>
             ))}
           </ul>
