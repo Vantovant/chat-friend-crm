@@ -13,7 +13,7 @@ import { MergeContactsModal, DuplicateMergeModal, type IncomingContact } from '.
 import { useProfiles, profileLabel, type ProfileOption } from '@/hooks/use-profiles';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { downloadVCard, copyContactCard } from '@/lib/vcard';
-import { SuggestedTasksDialog, type SuggestedTaskInput } from './plan/SuggestedTasksDialog';
+import { SuggestedTasksPanel, type SuggestedTaskInput } from './plan/SuggestedTasksPanel';
 
 type Contact = {
   id: string;
