@@ -720,6 +720,7 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
                 toast({ title: `Added ${rows.length} task${rows.length === 1 ? '' : 's'} to PLAN` });
               }}
             />
+          )}
           {contact.whatsapp_id && (
             <div className="rounded-lg bg-secondary/40 border border-border px-3 py-2">
               <p className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">WhatsApp Internal ID</p>
