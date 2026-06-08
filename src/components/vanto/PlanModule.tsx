@@ -142,12 +142,41 @@ function TodayTab({ tasksHook, remindersHook, meetingsHook }: any) {
   const todayTasks = tasksHook.tasks.filter((t: any) => t.status !== 'done' && (isToday(t.due_date) || isOverdue(t.due_date) || !t.due_date)).slice(0, 8);
   const todayReminders = remindersHook.reminders.filter((r: any) => !r.is_done && isToday(r.reminder_time));
   const todayMeetings = meetingsHook.meetings.filter((m: any) => isToday(m.start_time));
+  const overdueCount = tasksHook.tasks.filter((t: any) => t.status !== 'done' && isOverdue(t.due_date)).length;
   const total = tasksHook.tasks.length;
   const done = tasksHook.tasks.filter((t: any) => t.status === 'done').length;
   const pct = total ? Math.round((done / total) * 100) : 0;
 
+  const today = todayStr();
+  const digestKey = `vanto.plan.digest.dismissed.${today}`;
+  const [dismissed, setDismissed] = useState<boolean>(() => typeof window !== 'undefined' && localStorage.getItem(digestKey) === '1');
+  const showDigest = !dismissed && (todayTasks.length + todayReminders.length + todayMeetings.length + overdueCount) > 0;
+
   return (
     <div className="space-y-4">
+      {showDigest && (
+        <div className="rounded-xl border border-primary/30 bg-primary/10 p-3 flex items-start gap-3">
+          <div className="w-8 h-8 rounded-lg bg-primary/20 text-primary flex items-center justify-center shrink-0">
+            <CalendarCheck className="h-4 w-4" />
+          </div>
+          <div className="flex-1 text-sm">
+            <div className="font-medium text-foreground">Morning digest — {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</div>
+            <div className="text-muted-foreground mt-0.5">
+              {overdueCount > 0 && <span className="text-red-400 font-medium">{overdueCount} overdue</span>}
+              {overdueCount > 0 && ' · '}
+              <span>{todayTasks.length} task{todayTasks.length === 1 ? '' : 's'} due today</span>
+              {todayMeetings.length > 0 && <> · {todayMeetings.length} meeting{todayMeetings.length === 1 ? '' : 's'}</>}
+              {todayReminders.length > 0 && <> · {todayReminders.length} reminder{todayReminders.length === 1 ? '' : 's'}</>}
+            </div>
+          </div>
+          <button
+            onClick={() => { localStorage.setItem(digestKey, '1'); setDismissed(true); }}
+            className="text-xs text-muted-foreground hover:text-foreground px-2 py-1"
+            aria-label="Dismiss digest"
+          >Dismiss</button>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard label="Today's Tasks" value={todayTasks.length} />
         <StatCard label="Reminders" value={todayReminders.length} />
