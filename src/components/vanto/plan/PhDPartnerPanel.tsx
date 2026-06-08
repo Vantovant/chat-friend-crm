@@ -10,7 +10,60 @@ export function PhDPartnerPanel({ context }: { context: { tasks: any[]; meetings
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [recording, setRecording] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
+  const recRef = useRef<any>(null);
+  const baseRef = useRef<string>('');
+
+  const getSR = (): any =>
+    typeof window !== 'undefined'
+      ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+      : null;
+
+  const startDictate = () => {
+    const SR = getSR();
+    if (!SR) {
+      toast.error('Voice dictation not supported in this browser. Try Chrome.');
+      return;
+    }
+    try {
+      const rec = new SR();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = 'en-ZA';
+      baseRef.current = input ? input.trimEnd() + ' ' : '';
+      rec.onresult = (event: any) => {
+        let interim = '', final = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const t = event.results[i][0].transcript;
+          if (event.results[i].isFinal) final += t; else interim += t;
+        }
+        const combined = (baseRef.current + final + interim).replace(/\s+/g, ' ').trimStart();
+        setInput(combined);
+        if (final) baseRef.current = (baseRef.current + final + ' ').replace(/\s+/g, ' ');
+      };
+      rec.onerror = (e: any) => {
+        if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
+          toast.error('Microphone blocked. Allow mic permission in your browser.');
+        }
+        setRecording(false);
+      };
+      rec.onend = () => setRecording(false);
+      recRef.current = rec;
+      rec.start();
+      setRecording(true);
+    } catch {
+      setRecording(false);
+      toast.error('Could not start dictation');
+    }
+  };
+
+  const stopDictate = () => {
+    try { recRef.current?.stop(); } catch {}
+    setRecording(false);
+  };
+
+  useEffect(() => () => { try { recRef.current?.stop(); } catch {} }, []);
 
   // Morning briefing — once per day
   useEffect(() => {
