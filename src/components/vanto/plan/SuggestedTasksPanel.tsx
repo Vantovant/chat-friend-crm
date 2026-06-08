@@ -90,7 +90,7 @@ export function SuggestedTasksPanel({ contactName, tasks, onClear, onConfirm }: 
         </button>
       </div>
 
-      <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+      <div className="space-y-1.5 max-h-[40vh] overflow-y-auto overscroll-contain pr-1">
         {rows.map((r, i) => (
           <div key={i} className="flex items-start gap-2 p-1.5 rounded hover:bg-secondary/40">
             <Checkbox
@@ -125,7 +125,7 @@ export function SuggestedTasksPanel({ contactName, tasks, onClear, onConfirm }: 
         ))}
       </div>
 
-      <div className="flex justify-end gap-2 pt-1">
+      <div className="sticky bottom-0 -mx-3 -mb-3 px-3 py-2 bg-primary/10 backdrop-blur border-t border-primary/30 flex justify-end gap-2 rounded-b-lg">
         <Button variant="ghost" size="sm" onClick={onClear} disabled={saving}>
           Cancel
         </Button>
@@ -133,6 +133,7 @@ export function SuggestedTasksPanel({ contactName, tasks, onClear, onConfirm }: 
           {saving ? 'Adding…' : `Add ${selectedCount} to PLAN`}
         </Button>
       </div>
+
     </div>
   );
 }
