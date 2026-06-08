@@ -24,14 +24,14 @@ interface Citation {
 }
 
 const suggestions = [
-  'Write a follow-up for cold leads',
-  'Analyze my pipeline health',
-  'Suggest best time to contact leads',
-  'Generate a WhatsApp campaign message',
-  'Help me score my leads',
-  'Draft an onboarding sequence',
-  'What products do we offer?',
-  'Explain the compensation plan',
+  'Brief me on today\'s PLAN priorities',
+  'What\'s the 24h Customer Care Window rule?',
+  'How does Zazi one-way sync work?',
+  'Explain the lead-type transitions',
+  'Audit my pipeline for stalled stages',
+  'Draft a re-engagement WA message for cold leads',
+  'What do our knowledge docs say about APLGO pricing?',
+  'List Workflow vs Automation differences',
 ];
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-chat`;
@@ -41,7 +41,7 @@ export function AIAgentModule() {
     {
       id: 'welcome',
       role: 'assistant',
-      content: "Hello! I'm **Vanto AI**, your CRM intelligence assistant. I'm now connected to your **Knowledge Vault** for factual answers about products, compensation plans, and more.\n\nI can help you:\n- 📝 Draft follow-ups & campaigns\n- 📊 Analyze pipeline health\n- 📖 Answer product questions from the knowledge base\n- ⚡ Suggest workflow automations\n\nWhat would you like to do?",
+      content: "Hello — I'm **Vanto AI · PhD Partner**, a senior specialist on every Vanto CRM module: Contacts, CRM Pipeline, Inbox, Reports, Lead Calls, Workflows, Automations, Group Campaigns, Knowledge Vault, Zazi Sync, RLS/roles, and the PLAN command centre.\n\nI'm wired into your **Knowledge Vault** (RAG) and respect every domain rule — phone normalisation, lead-type transitions, the 24-hour WA window, fb_auto_target_groups allowlist, soft-deletes, and the Zazi schema lock.\n\nAsk me anything — strategy, debugging, message drafting, or a today's-priorities briefing.",
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);

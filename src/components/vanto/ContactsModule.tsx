@@ -668,7 +668,43 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
             <input type="text" value={form.tags} onChange={e => set('tags', e.target.value)} placeholder="e.g. mlm, vip" className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 transition-colors" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-muted-foreground mb-1">Notes</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-medium text-muted-foreground">Notes</label>
+              <button
+                type="button"
+                disabled={!form.notes.trim()}
+                title="Read these notes and suggest PLAN tasks (does not replace your notes)"
+                onClick={async () => {
+                  try {
+                    const { data, error } = await supabase.functions.invoke('plan-ai-extract-actions', {
+                      body: { text: form.notes, context: `contact ${contact.name} / lead_type ${form.lead_type}` },
+                    });
+                    if (error) throw error;
+                    const tasks = (data as any)?.tasks || [];
+                    if (!tasks.length) { toast({ title: 'No tasks detected in this note.' }); return; }
+                    const ok = window.confirm(`Suggested ${tasks.length} task${tasks.length === 1 ? '' : 's'}:\n\n${tasks.map((t: any, i: number) => `${i + 1}. [${t.priority || 'medium'}] ${t.title}`).join('\n')}\n\nAdd them to PLAN?`);
+                    if (!ok) return;
+                    const { data: { user } } = await supabase.auth.getUser();
+                    if (!user) { toast({ title: 'Not signed in', variant: 'destructive' }); return; }
+                    const rows = tasks.map((t: any) => ({
+                      user_id: user.id,
+                      title: t.title,
+                      priority: t.priority || 'medium',
+                      source: 'contact_activity',
+                      source_ref: { kind: 'contact', contact_id: contact.id },
+                    }));
+                    const { error: insErr } = await (supabase.from('plan_tasks' as any).insert(rows) as any);
+                    if (insErr) throw insErr;
+                    toast({ title: `Added ${rows.length} task${rows.length === 1 ? '' : 's'} to PLAN` });
+                  } catch (e: any) {
+                    toast({ title: 'Failed to suggest tasks', description: e.message, variant: 'destructive' });
+                  }
+                }}
+                className="text-[11px] inline-flex items-center gap-1 text-primary hover:text-primary/80 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Sparkles className="h-3 w-3" /> Suggest tasks
+              </button>
+            </div>
             <textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={4} className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 resize-none" />
           </div>
           {contact.whatsapp_id && (
