@@ -750,26 +750,6 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
         <DeleteConfirmModal contact={contact} onClose={() => setShowDelete(false)} onDeleted={(id) => { onDeleted(id); onClose(); }} userId={userId} />
       )}
 
-      <SuggestedTasksDialog
-        open={suggestOpen}
-        onOpenChange={setSuggestOpen}
-        contactName={contact.name}
-        tasks={suggestTasks}
-        onConfirm={async (picked) => {
-          const { data: { user } } = await supabase.auth.getUser();
-          if (!user) { toast({ title: 'Not signed in', variant: 'destructive' }); return; }
-          const rows = picked.map((t) => ({
-            user_id: user.id,
-            title: t.title,
-            priority: t.priority,
-            source: 'contact_activity',
-            source_ref: { kind: 'contact', contact_id: contact.id, contact_name: contact.name },
-          }));
-          const { error: insErr } = await (supabase.from('plan_tasks' as any).insert(rows) as any);
-          if (insErr) { toast({ title: 'Failed to add tasks', description: insErr.message, variant: 'destructive' }); return; }
-          toast({ title: `Added ${rows.length} task${rows.length === 1 ? '' : 's'} to PLAN` });
-        }}
-      />
     </div>
   );
 }
