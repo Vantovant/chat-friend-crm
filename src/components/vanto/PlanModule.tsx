@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CalendarCheck, Plus, Check, Trash2, Bell, Calendar, ListTodo, NotebookPen, Sparkles, MessageSquare, Command as CommandIcon } from 'lucide-react';
+import { CalendarCheck, Plus, Check, Trash2, Bell, Calendar, ListTodo, NotebookPen, Sparkles, MessageSquare, Command as CommandIcon, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useTasks, useReminders, useMeetings, useNotes } from '@/hooks/usePlanData';
 import { PhDPartnerPanel } from './plan/PhDPartnerPanel';
 import { CommandBar, useCommandBarHotkey } from './plan/CommandBar';
 import { CommandMic } from './plan/CommandMic';
 import { CalendarTab } from './plan/CalendarTab';
+import { buildPlanMarkdown, downloadPlanMarkdown } from './plan/planExport';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -65,6 +66,22 @@ export function PlanModule() {
             <CommandIcon className="h-4 w-4 mr-1" /> Search <kbd className="ml-2 text-[10px] bg-secondary px-1 rounded">⌘K</kbd>
           </Button>
           <CommandMic tasksHook={tasksHook} remindersHook={remindersHook} meetingsHook={meetingsHook} />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const md = buildPlanMarkdown({
+                tasks: tasksHook.tasks,
+                reminders: remindersHook.reminders,
+                meetings: meetingsHook.meetings,
+                notes: notesHook.notes,
+              });
+              downloadPlanMarkdown(md);
+              toast.success('Plan downloaded');
+            }}
+          >
+            <Download className="h-4 w-4 mr-1" /> Download
+          </Button>
           <Button variant="outline" size="sm" onClick={() => setShowPartner((s) => !s)}>
             <MessageSquare className="h-4 w-4 mr-1" /> {showPartner ? 'Hide' : 'Show'} PhD Partner
           </Button>
