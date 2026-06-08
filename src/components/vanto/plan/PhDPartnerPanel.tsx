@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Send, Bot, Loader2, Sparkles, Layers, Copy } from 'lucide-react';
+import { Send, Bot, Loader2, Sparkles, Layers, Copy, Mic, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
