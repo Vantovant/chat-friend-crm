@@ -13,6 +13,7 @@ import { MergeContactsModal, DuplicateMergeModal, type IncomingContact } from '.
 import { useProfiles, profileLabel, type ProfileOption } from '@/hooks/use-profiles';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { downloadVCard, copyContactCard } from '@/lib/vcard';
+import { SuggestedTasksDialog, type SuggestedTaskInput } from './plan/SuggestedTasksDialog';
 
 type Contact = {
   id: string;
@@ -409,6 +410,9 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
   const [loadingActivity, setLoadingActivity] = useState(true);
   const canReassign = isAdmin || contact.created_by === userId || contact.assigned_to === userId || !contact.assigned_to;
 
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [suggestTasks, setSuggestTasks] = useState<SuggestedTaskInput[]>([]);
+
   const [stages, setStages] = useState<{ id: string; name: string; color: string | null; stage_order: number }[]>([]);
 
   const [form, setForm] = useState({
@@ -682,20 +686,8 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
                     if (error) throw error;
                     const tasks = (data as any)?.tasks || [];
                     if (!tasks.length) { toast({ title: 'No tasks detected in this note.' }); return; }
-                    const ok = window.confirm(`Suggested ${tasks.length} task${tasks.length === 1 ? '' : 's'}:\n\n${tasks.map((t: any, i: number) => `${i + 1}. [${t.priority || 'medium'}] ${t.title}`).join('\n')}\n\nAdd them to PLAN?`);
-                    if (!ok) return;
-                    const { data: { user } } = await supabase.auth.getUser();
-                    if (!user) { toast({ title: 'Not signed in', variant: 'destructive' }); return; }
-                    const rows = tasks.map((t: any) => ({
-                      user_id: user.id,
-                      title: t.title,
-                      priority: t.priority || 'medium',
-                      source: 'contact_activity',
-                      source_ref: { kind: 'contact', contact_id: contact.id },
-                    }));
-                    const { error: insErr } = await (supabase.from('plan_tasks' as any).insert(rows) as any);
-                    if (insErr) throw insErr;
-                    toast({ title: `Added ${rows.length} task${rows.length === 1 ? '' : 's'} to PLAN` });
+                    setSuggestTasks(tasks);
+                    setSuggestOpen(true);
                   } catch (e: any) {
                     toast({ title: 'Failed to suggest tasks', description: e.message, variant: 'destructive' });
                   }
@@ -757,6 +749,27 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
       {showDelete && (
         <DeleteConfirmModal contact={contact} onClose={() => setShowDelete(false)} onDeleted={(id) => { onDeleted(id); onClose(); }} userId={userId} />
       )}
+
+      <SuggestedTasksDialog
+        open={suggestOpen}
+        onOpenChange={setSuggestOpen}
+        contactName={contact.name}
+        tasks={suggestTasks}
+        onConfirm={async (picked) => {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) { toast({ title: 'Not signed in', variant: 'destructive' }); return; }
+          const rows = picked.map((t) => ({
+            user_id: user.id,
+            title: t.title,
+            priority: t.priority,
+            source: 'contact_activity',
+            source_ref: { kind: 'contact', contact_id: contact.id, contact_name: contact.name },
+          }));
+          const { error: insErr } = await (supabase.from('plan_tasks' as any).insert(rows) as any);
+          if (insErr) { toast({ title: 'Failed to add tasks', description: insErr.message, variant: 'destructive' }); return; }
+          toast({ title: `Added ${rows.length} task${rows.length === 1 ? '' : 's'} to PLAN` });
+        }}
+      />
     </div>
   );
 }

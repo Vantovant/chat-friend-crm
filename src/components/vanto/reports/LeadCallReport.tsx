@@ -9,6 +9,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
 import { LEAD_TYPES, type LeadType } from '@/lib/vanto-data';
+import { SuggestedTasksDialog, type SuggestedTaskInput } from '@/components/vanto/plan/SuggestedTasksDialog';
 
 // Tight, word-boundary distributor intent keywords.
 const DISTRIBUTOR_PATTERNS: RegExp[] = [
@@ -141,6 +142,8 @@ export function LeadCallReport() {
   const [summarizeProgress, setSummarizeProgress] = useState<{ done: number; total: number } | null>(null);
   const [compactPdf, setCompactPdf] = useState(true);
   const [editor, setEditor] = useState<{ row: Row; lead_type: LeadType; notes: string; stage_id: string | null } | null>(null);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [suggestTasks, setSuggestTasks] = useState<SuggestedTaskInput[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
   const [stages, setStages] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [dictating, setDictating] = useState(false);
@@ -834,25 +837,13 @@ export function LeadCallReport() {
                       onClick={async () => {
                         try {
                           const { data, error } = await supabase.functions.invoke('plan-ai-extract-actions', {
-                            body: { text: editor.notes, context: `contact ${editor.row?.name ?? editor.row?.first_name ?? ''} / lead_type ${editor.lead_type}` },
+                            body: { text: editor.notes, context: `contact ${displayName(editor.row)} / lead_type ${editor.lead_type}` },
                           });
                           if (error) throw error;
                           const tasks = (data as any)?.tasks || [];
                           if (!tasks.length) { toast.info('No tasks detected in this note.'); return; }
-                          const ok = window.confirm(`Suggested ${tasks.length} task${tasks.length === 1 ? '' : 's'}:\n\n${tasks.map((t: any, i: number) => `${i + 1}. [${t.priority || 'medium'}] ${t.title}`).join('\n')}\n\nAdd them to PLAN?`);
-                          if (!ok) return;
-                          const { data: { user } } = await supabase.auth.getUser();
-                          if (!user) { toast.error('Not signed in'); return; }
-                          const rows = tasks.map((t: any) => ({
-                            user_id: user.id,
-                            title: t.title,
-                            priority: t.priority || 'medium',
-                            source: 'lead_call',
-                            source_ref: { kind: 'lead_call', contact_id: editor.row?.id ?? null },
-                          }));
-                          const { error: insErr } = await (supabase.from('plan_tasks' as any).insert(rows) as any);
-                          if (insErr) throw insErr;
-                          toast.success(`Added ${rows.length} task${rows.length === 1 ? '' : 's'} to PLAN`);
+                          setSuggestTasks(tasks);
+                          setSuggestOpen(true);
                         } catch (e: any) {
                           toast.error(e.message || 'Failed to suggest tasks');
                         }
@@ -888,6 +879,29 @@ export function LeadCallReport() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SuggestedTasksDialog
+        open={suggestOpen}
+        onOpenChange={setSuggestOpen}
+        contactName={editor ? displayName(editor.row) : null}
+        tasks={suggestTasks}
+        onConfirm={async (picked) => {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (!user) { toast.error('Not signed in'); return; }
+          const contactId = editor?.row?.id ?? null;
+          const contactName = editor ? displayName(editor.row) : null;
+          const rows = picked.map((t) => ({
+            user_id: user.id,
+            title: t.title,
+            priority: t.priority,
+            source: 'lead_call',
+            source_ref: { kind: 'lead_call', contact_id: contactId, contact_name: contactName },
+          }));
+          const { error: insErr } = await (supabase.from('plan_tasks' as any).insert(rows) as any);
+          if (insErr) { toast.error(insErr.message); return; }
+          toast.success(`Added ${rows.length} task${rows.length === 1 ? '' : 's'} to PLAN`);
+        }}
+      />
     </div>
   );
 }
