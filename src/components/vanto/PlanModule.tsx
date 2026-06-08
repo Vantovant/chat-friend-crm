@@ -225,8 +225,8 @@ function TodayTab({ tasksHook, remindersHook, meetingsHook, onOpenTask, onOpenRe
         {todayTasks.length === 0 ? <Empty label="Nothing due today. Add a task in the Tasks tab." /> : (
           <ul className="space-y-1">
             {todayTasks.map((t: any) => (
-              <li key={t.id} className="flex items-center gap-2 p-2 rounded-lg hover:bg-secondary/40">
-                <button onClick={() => tasksHook.update(t.id, { status: 'done' })} className="w-5 h-5 rounded border border-border hover:bg-primary/20 flex items-center justify-center"><Check className="h-3 w-3 opacity-0 group-hover:opacity-100" /></button>
+              <li key={t.id} onClick={() => onOpenTask?.(t.id)} className="flex items-center gap-2 p-2 rounded-lg hover:bg-secondary/40 cursor-pointer">
+                <button onClick={(e) => { e.stopPropagation(); tasksHook.update(t.id, { status: 'done' }); }} className="w-5 h-5 rounded border border-border hover:bg-primary/20 flex items-center justify-center"><Check className="h-3 w-3 opacity-0 group-hover:opacity-100" /></button>
                 <span className={`px-1.5 py-0.5 text-[10px] rounded border ${PRIORITY_COLORS[t.priority]}`}>{t.priority}</span>
                 <span className="text-sm text-foreground flex-1">{t.title}</span>
                 {isOverdue(t.due_date) && <span className="text-[10px] text-red-400">overdue</span>}
