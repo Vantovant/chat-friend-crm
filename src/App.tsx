@@ -22,6 +22,7 @@ const App = () => (
           <Route path="/accept-invite" element={<AcceptInvite />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/maytapi-inbox" element={<Index />} />
+          <Route path="/plan" element={<Index />} />
           <Route path="/privacy" element={<Privacy />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
