@@ -77,7 +77,8 @@ type Row = Contact & {
   summary?: Summary | null;
 };
 
-type MessageSort = 'none' | 'asc' | 'desc';
+type SortDir = 'none' | 'asc' | 'desc';
+type SortKey = 'msgs' | 'firstInquiry' | 'lastMessage';
 
 type ConversationRow = { id: string; contact_id: string | null };
 type TwilioMessageRow = { conversation_id: string; content: string | null; is_outbound: boolean | null; created_at: string };
