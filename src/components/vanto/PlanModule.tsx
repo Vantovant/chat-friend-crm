@@ -112,10 +112,10 @@ export function PlanModule() {
           ))}
         </nav>
 
-        {tab === 'today' && <TodayTab tasksHook={tasksHook} remindersHook={remindersHook} meetingsHook={meetingsHook} />}
-        {tab === 'tasks' && <TasksTab hook={tasksHook} />}
-        {tab === 'reminders' && <RemindersTab hook={remindersHook} />}
-        {tab === 'meetings' && <MeetingsTab hook={meetingsHook} />}
+        {tab === 'today' && <TodayTab tasksHook={tasksHook} remindersHook={remindersHook} meetingsHook={meetingsHook} onOpenTask={setOpenTaskId} onOpenReminder={setOpenReminderId} onOpenMeeting={setOpenMeetingId} />}
+        {tab === 'tasks' && <TasksTab hook={tasksHook} onOpen={setOpenTaskId} />}
+        {tab === 'reminders' && <RemindersTab hook={remindersHook} onOpen={setOpenReminderId} />}
+        {tab === 'meetings' && <MeetingsTab hook={meetingsHook} onOpen={setOpenMeetingId} />}
         {tab === 'calendar' && <CalendarTab tasksHook={tasksHook} remindersHook={remindersHook} meetingsHook={meetingsHook} />}
         {tab === 'notes' && <NotesTab hook={notesHook} />}
         {tab === 'suggestions' && <SuggestionsTab onPromote={async (t) => { await tasksHook.create(t); toast.success('Added to Tasks'); }} />}
@@ -142,6 +142,32 @@ export function PlanModule() {
           />
         </aside>
       )}
+
+      <TaskDetailDrawer
+        task={openTask}
+        open={!!openTask}
+        onClose={() => setOpenTaskId(null)}
+        onUpdate={tasksHook.update}
+        onDelete={tasksHook.remove}
+        onConvertToReminder={async (input) => { await remindersHook.create(input); }}
+      />
+      <ReminderDetailDrawer
+        reminder={openReminder}
+        open={!!openReminder}
+        onClose={() => setOpenReminderId(null)}
+        onUpdate={remindersHook.update}
+        onDelete={remindersHook.remove}
+        onConvertToTask={async (input) => { await tasksHook.create({ ...input, priority: 'medium', source: 'reminder_convert' }); }}
+        onConvertToMeeting={async (input) => { await meetingsHook.create(input); }}
+      />
+      <MeetingDetailDrawer
+        meeting={openMeeting}
+        open={!!openMeeting}
+        onClose={() => setOpenMeetingId(null)}
+        onUpdate={meetingsHook.update}
+        onDelete={meetingsHook.remove}
+        onCreateTask={async (input) => { await tasksHook.create(input); }}
+      />
     </div>
   );
 }
