@@ -23,6 +23,7 @@ import { ReviewQueueModule } from '@/components/vanto/ReviewQueueModule';
 import { ReportsModule } from '@/components/vanto/ReportsModule';
 import { ProspectorDraftsModule } from '@/components/vanto/ProspectorDraftsModule';
 import { PlanModule } from '@/components/vanto/PlanModule';
+import { VoiceDiaryModule } from '@/components/vanto/VoiceDiaryModule';
 import { AuthPage } from '@/components/vanto/AuthPage';
 import { PageHelpButton } from '@/components/vanto/PageHelpButton';
 import type { Module } from '@/lib/vanto-data';
@@ -32,6 +33,7 @@ import { Bot } from 'lucide-react';
 const pathToModule: Record<string, Module> = {
   '/maytapi-inbox': 'maytapi-inbox',
   '/plan': 'plan',
+  '/voice-diary': 'voice-diary',
 };
 
 const Index = () => {
@@ -76,6 +78,7 @@ const Index = () => {
       case 'reports': return <ReportsModule />;
       case 'prospector-drafts': return <ProspectorDraftsModule />;
       case 'plan': return <PlanModule />;
+      case 'voice-diary': return <VoiceDiaryModule />;
       case 'settings': return <SettingsModule />;
       default: return <InboxModule />;
     }
