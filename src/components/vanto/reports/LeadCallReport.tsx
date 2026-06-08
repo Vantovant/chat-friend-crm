@@ -834,7 +834,7 @@ export function LeadCallReport() {
                       onClick={async () => {
                         try {
                           const { data, error } = await supabase.functions.invoke('plan-ai-extract-actions', {
-                            body: { text: editor.notes, context: `contact ${editor.row?.full_name ?? ''} / lead_type ${editor.lead_type}` },
+                            body: { text: editor.notes, context: `contact ${editor.row?.name ?? editor.row?.first_name ?? ''} / lead_type ${editor.lead_type}` },
                           });
                           if (error) throw error;
                           const tasks = (data as any)?.tasks || [];
