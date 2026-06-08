@@ -601,19 +601,15 @@ export function LeadCallReport() {
               <TableHead>Name</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Type</TableHead>
-              <TableHead>First Inquiry</TableHead>
-              <TableHead>Last Msg</TableHead>
+              <TableHead>
+                <SortButton label="First Inquiry" active={sortKey === 'firstInquiry'} dir={sortDir} onClick={() => toggleSort('firstInquiry')} />
+              </TableHead>
+              <TableHead>
+                <SortButton label="Last Msg" active={sortKey === 'lastMessage'} dir={sortDir} onClick={() => toggleSort('lastMessage')} />
+              </TableHead>
               <TableHead className="min-w-[280px]">Summary</TableHead>
               <TableHead className="text-right">
-                <button
-                  type="button"
-                  onClick={toggleMessageSort}
-                  className="ml-auto inline-flex items-center justify-end gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-                  title="Sort by message count"
-                >
-                  Msgs
-                  {messageSort === 'desc' ? <ArrowDown className="h-3.5 w-3.5" /> : messageSort === 'asc' ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowUpDown className="h-3.5 w-3.5" />}
-                </button>
+                <SortButton label="Msgs" active={sortKey === 'msgs'} dir={sortDir} onClick={() => toggleSort('msgs')} align="right" />
               </TableHead>
               <TableHead className="w-20 text-right">Edit</TableHead>
             </TableRow>
