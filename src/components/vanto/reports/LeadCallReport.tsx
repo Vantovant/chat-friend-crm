@@ -802,19 +802,30 @@ export function LeadCallReport() {
               </div>
 
               <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs text-muted-foreground">Notes (type your call notes here — saves to the contact)</label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={pasteSummaryToNotes}
-                    disabled={!editor.row.summary}
-                    title={editor.row.summary ? 'Append AI summary to notes' : 'Generate summary first'}
-                  >
-                    <ClipboardPaste className="h-3.5 w-3.5 mr-1" />
-                    Append AI summary
-                  </Button>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <label className="text-xs text-muted-foreground">Notes (type or dictate — saves to the contact)</label>
+                  <div className="flex items-center gap-2">
+                    {!dictating ? (
+                      <Button type="button" variant="outline" size="sm" onClick={startDictation} title="Dictate notes (voice → text)">
+                        <Mic className="h-3.5 w-3.5 mr-1" /> Dictate
+                      </Button>
+                    ) : (
+                      <Button type="button" variant="outline" size="sm" onClick={stopDictation} className="border-red-500/50 text-red-300 animate-pulse" title="Stop dictation">
+                        <Square className="h-3.5 w-3.5 mr-1" /> Stop
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={pasteSummaryToNotes}
+                      disabled={!editor.row.summary}
+                      title={editor.row.summary ? 'Append AI summary to notes' : 'Generate summary first'}
+                    >
+                      <ClipboardPaste className="h-3.5 w-3.5 mr-1" />
+                      Append AI summary
+                    </Button>
+                  </div>
                 </div>
                 <textarea
                   value={editor.notes}
