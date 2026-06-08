@@ -331,11 +331,11 @@ function RemindersTab({ hook, onOpen }: any) {
         {hook.reminders.length === 0 ? <Empty label="No reminders yet." /> : (
           <ul className="space-y-1">
             {hook.reminders.map((r: any) => (
-              <li key={r.id} className={`flex items-center gap-2 p-2 rounded-lg hover:bg-secondary/40 ${r.is_done ? 'opacity-50' : ''}`}>
-                <button onClick={() => hook.update(r.id, { is_done: !r.is_done })} className={`w-5 h-5 rounded-full border border-border ${r.is_done ? 'bg-primary/30' : ''}`} />
+              <li key={r.id} onClick={() => onOpen?.(r.id)} className={`flex items-center gap-2 p-2 rounded-lg hover:bg-secondary/40 cursor-pointer ${r.is_done ? 'opacity-50' : ''}`}>
+                <button onClick={(e) => { e.stopPropagation(); hook.update(r.id, { is_done: !r.is_done }); }} className={`w-5 h-5 rounded-full border border-border ${r.is_done ? 'bg-primary/30' : ''}`} />
                 <span className={`text-sm flex-1 ${r.is_done ? 'line-through' : ''}`}>{r.title}</span>
                 <span className="text-xs text-muted-foreground">{new Date(r.reminder_time).toLocaleString()}</span>
-                <button onClick={() => hook.remove(r.id)} className="text-muted-foreground hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
+                <button onClick={(e) => { e.stopPropagation(); hook.remove(r.id); }} className="text-muted-foreground hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
               </li>
             ))}
           </ul>
