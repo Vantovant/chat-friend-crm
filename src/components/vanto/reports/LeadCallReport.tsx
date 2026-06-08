@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { ArrowDown, ArrowUp, ArrowUpDown, Download, Printer, RefreshCw, Star, Phone, Sparkles, Pencil, ClipboardPaste } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, Printer, RefreshCw, Star, Phone, Sparkles, Pencil, ClipboardPaste, Mic, Square } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
@@ -143,6 +143,67 @@ export function LeadCallReport() {
   const [editor, setEditor] = useState<{ row: Row; lead_type: LeadType; notes: string; stage_id: string | null } | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [stages, setStages] = useState<{ id: string; name: string; color: string | null }[]>([]);
+  const [dictating, setDictating] = useState(false);
+  const recRef = useRef<any>(null);
+  const dictateBaseRef = useRef<string>('');
+
+  function getSpeechRecognition(): any {
+    if (typeof window === 'undefined') return null;
+    return (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition || null;
+  }
+
+  function startDictation() {
+    const SR = getSpeechRecognition();
+    if (!SR) {
+      toast.error('Voice dictation not supported in this browser. Use Chrome, or tap your phone keyboard mic.');
+      return;
+    }
+    if (!editor) return;
+    try {
+      const rec = new SR();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = 'en-ZA';
+      dictateBaseRef.current = editor.notes ? editor.notes.trimEnd() + ' ' : '';
+      rec.onresult = (event: any) => {
+        let interim = '';
+        let final = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const t = event.results[i][0].transcript;
+          if (event.results[i].isFinal) final += t;
+          else interim += t;
+        }
+        const combined = (dictateBaseRef.current + final + interim).replace(/[ \t]+/g, ' ');
+        setEditor((prev) => prev ? { ...prev, notes: combined } : prev);
+        if (final) dictateBaseRef.current = (dictateBaseRef.current + final + ' ').replace(/[ \t]+/g, ' ');
+      };
+      rec.onerror = (e: any) => {
+        if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
+          toast.error('Microphone blocked — allow mic permission in your browser.');
+        } else if (e?.error === 'no-speech') {
+          toast.message('No speech detected — try again.');
+        }
+        setDictating(false);
+      };
+      rec.onend = () => setDictating(false);
+      recRef.current = rec;
+      rec.start();
+      setDictating(true);
+    } catch (err) {
+      console.error('dictation start failed', err);
+      setDictating(false);
+      toast.error('Could not start dictation.');
+    }
+  }
+
+  function stopDictation() {
+    try { recRef.current?.stop(); } catch {}
+    setDictating(false);
+  }
+
+  useEffect(() => {
+    if (!editor && dictating) stopDictation();
+  }, [editor]);
 
   useEffect(() => {
     supabase.from('pipeline_stages').select('id, name, color').order('stage_order').then(({ data }) => {
@@ -741,19 +802,30 @@ export function LeadCallReport() {
               </div>
 
               <div className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs text-muted-foreground">Notes (type your call notes here — saves to the contact)</label>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={pasteSummaryToNotes}
-                    disabled={!editor.row.summary}
-                    title={editor.row.summary ? 'Append AI summary to notes' : 'Generate summary first'}
-                  >
-                    <ClipboardPaste className="h-3.5 w-3.5 mr-1" />
-                    Append AI summary
-                  </Button>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <label className="text-xs text-muted-foreground">Notes (type or dictate — saves to the contact)</label>
+                  <div className="flex items-center gap-2">
+                    {!dictating ? (
+                      <Button type="button" variant="outline" size="sm" onClick={startDictation} title="Dictate notes (voice → text)">
+                        <Mic className="h-3.5 w-3.5 mr-1" /> Dictate
+                      </Button>
+                    ) : (
+                      <Button type="button" variant="outline" size="sm" onClick={stopDictation} className="border-red-500/50 text-red-300 animate-pulse" title="Stop dictation">
+                        <Square className="h-3.5 w-3.5 mr-1" /> Stop
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={pasteSummaryToNotes}
+                      disabled={!editor.row.summary}
+                      title={editor.row.summary ? 'Append AI summary to notes' : 'Generate summary first'}
+                    >
+                      <ClipboardPaste className="h-3.5 w-3.5 mr-1" />
+                      Append AI summary
+                    </Button>
+                  </div>
                 </div>
                 <textarea
                   value={editor.notes}
