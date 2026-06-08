@@ -143,6 +143,67 @@ export function LeadCallReport() {
   const [editor, setEditor] = useState<{ row: Row; lead_type: LeadType; notes: string; stage_id: string | null } | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [stages, setStages] = useState<{ id: string; name: string; color: string | null }[]>([]);
+  const [dictating, setDictating] = useState(false);
+  const recRef = useRef<any>(null);
+  const dictateBaseRef = useRef<string>('');
+
+  function getSpeechRecognition(): any {
+    if (typeof window === 'undefined') return null;
+    return (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition || null;
+  }
+
+  function startDictation() {
+    const SR = getSpeechRecognition();
+    if (!SR) {
+      toast.error('Voice dictation not supported in this browser. Use Chrome, or tap your phone keyboard mic.');
+      return;
+    }
+    if (!editor) return;
+    try {
+      const rec = new SR();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = 'en-ZA';
+      dictateBaseRef.current = editor.notes ? editor.notes.trimEnd() + ' ' : '';
+      rec.onresult = (event: any) => {
+        let interim = '';
+        let final = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const t = event.results[i][0].transcript;
+          if (event.results[i].isFinal) final += t;
+          else interim += t;
+        }
+        const combined = (dictateBaseRef.current + final + interim).replace(/[ \t]+/g, ' ');
+        setEditor((prev) => prev ? { ...prev, notes: combined } : prev);
+        if (final) dictateBaseRef.current = (dictateBaseRef.current + final + ' ').replace(/[ \t]+/g, ' ');
+      };
+      rec.onerror = (e: any) => {
+        if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
+          toast.error('Microphone blocked — allow mic permission in your browser.');
+        } else if (e?.error === 'no-speech') {
+          toast.message('No speech detected — try again.');
+        }
+        setDictating(false);
+      };
+      rec.onend = () => setDictating(false);
+      recRef.current = rec;
+      rec.start();
+      setDictating(true);
+    } catch (err) {
+      console.error('dictation start failed', err);
+      setDictating(false);
+      toast.error('Could not start dictation.');
+    }
+  }
+
+  function stopDictation() {
+    try { recRef.current?.stop(); } catch {}
+    setDictating(false);
+  }
+
+  useEffect(() => {
+    if (!editor && dictating) stopDictation();
+  }, [editor]);
 
   useEffect(() => {
     supabase.from('pipeline_stages').select('id, name, color').order('stage_order').then(({ data }) => {
