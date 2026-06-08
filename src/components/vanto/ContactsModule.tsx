@@ -686,20 +686,8 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
                     if (error) throw error;
                     const tasks = (data as any)?.tasks || [];
                     if (!tasks.length) { toast({ title: 'No tasks detected in this note.' }); return; }
-                    const ok = window.confirm(`Suggested ${tasks.length} task${tasks.length === 1 ? '' : 's'}:\n\n${tasks.map((t: any, i: number) => `${i + 1}. [${t.priority || 'medium'}] ${t.title}`).join('\n')}\n\nAdd them to PLAN?`);
-                    if (!ok) return;
-                    const { data: { user } } = await supabase.auth.getUser();
-                    if (!user) { toast({ title: 'Not signed in', variant: 'destructive' }); return; }
-                    const rows = tasks.map((t: any) => ({
-                      user_id: user.id,
-                      title: t.title,
-                      priority: t.priority || 'medium',
-                      source: 'contact_activity',
-                      source_ref: { kind: 'contact', contact_id: contact.id },
-                    }));
-                    const { error: insErr } = await (supabase.from('plan_tasks' as any).insert(rows) as any);
-                    if (insErr) throw insErr;
-                    toast({ title: `Added ${rows.length} task${rows.length === 1 ? '' : 's'} to PLAN` });
+                    setSuggestTasks(tasks);
+                    setSuggestOpen(true);
                   } catch (e: any) {
                     toast({ title: 'Failed to suggest tasks', description: e.message, variant: 'destructive' });
                   }
