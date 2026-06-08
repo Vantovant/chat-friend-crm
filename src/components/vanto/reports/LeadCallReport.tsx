@@ -166,7 +166,7 @@ export function LeadCallReport() {
   function openEditor(row: Row) {
     const allowed = LEAD_TYPES.map((l) => l.value);
     const current = allowed.includes(row.lead_type as LeadType) ? (row.lead_type as LeadType) : 'prospect';
-    setEditor({ row, lead_type: current, notes: row.notes || '' });
+    setEditor({ row, lead_type: current, notes: row.notes || '', stage_id: row.stage_id || null });
   }
 
   function pasteSummaryToNotes() {
