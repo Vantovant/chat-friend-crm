@@ -712,22 +712,37 @@ export function LeadCallReport() {
                 {editor.row.phone || editor.row.phone_normalized || '—'} · saves to Contacts & CRM Pipeline
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Lead Type</label>
-                <select
-                  value={editor.lead_type}
-                  onChange={(e) => setEditor({ ...editor, lead_type: e.target.value as LeadType })}
-                  className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
-                >
-                  {LEAD_TYPES.map((lt) => (
-                    <option key={lt.value} value={lt.value}>{lt.label}</option>
-                  ))}
-                </select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Lead Type</label>
+                  <select
+                    value={editor.lead_type}
+                    onChange={(e) => setEditor({ ...editor, lead_type: e.target.value as LeadType })}
+                    className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                  >
+                    {LEAD_TYPES.map((lt) => (
+                      <option key={lt.value} value={lt.value}>{lt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">CRM Pipeline Stage</label>
+                  <select
+                    value={editor.stage_id || ''}
+                    onChange={(e) => setEditor({ ...editor, stage_id: e.target.value || null })}
+                    className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                  >
+                    <option value="">Unassigned</option>
+                    {stages.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs text-muted-foreground">Notes</label>
+                  <label className="text-xs text-muted-foreground">Notes (type your call notes here — saves to the contact)</label>
                   <Button
                     type="button"
                     variant="outline"
@@ -737,17 +752,18 @@ export function LeadCallReport() {
                     title={editor.row.summary ? 'Append AI summary to notes' : 'Generate summary first'}
                   >
                     <ClipboardPaste className="h-3.5 w-3.5 mr-1" />
-                    Paste AI summary
+                    Append AI summary
                   </Button>
                 </div>
                 <textarea
                   value={editor.notes}
                   onChange={(e) => setEditor({ ...editor, notes: e.target.value })}
                   rows={10}
-                  className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 resize-y font-mono"
-                  placeholder="Notes for this contact…"
+                  className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 resize-y"
+                  placeholder="Write your post-call notes here, or click Append AI summary to add the generated summary…"
                 />
               </div>
+
 
               {editor.row.summary && (
                 <details className="text-xs text-muted-foreground bg-secondary/30 rounded-lg p-3">
