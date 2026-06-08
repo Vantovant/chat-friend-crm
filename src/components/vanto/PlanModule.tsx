@@ -139,7 +139,9 @@ export function PlanModule() {
 
 /* ----------------- TODAY ----------------- */
 function TodayTab({ tasksHook, remindersHook, meetingsHook }: any) {
-  const todayTasks = tasksHook.tasks.filter((t: any) => t.status !== 'done' && (isToday(t.due_date) || isOverdue(t.due_date) || !t.due_date)).slice(0, 8);
+  const openTasks = tasksHook.tasks.filter((t: any) => t.status !== 'done' && (isToday(t.due_date) || isOverdue(t.due_date) || !t.due_date));
+  const todayTasks = openTasks;
+
   const todayReminders = remindersHook.reminders.filter((r: any) => !r.is_done && isToday(r.reminder_time));
   const todayMeetings = meetingsHook.meetings.filter((m: any) => isToday(m.start_time));
   const overdueCount = tasksHook.tasks.filter((t: any) => t.status !== 'done' && isOverdue(t.due_date)).length;
