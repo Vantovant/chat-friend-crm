@@ -125,7 +125,7 @@ export function SuggestedTasksPanel({ contactName, tasks, onClear, onConfirm }: 
         ))}
       </div>
 
-      <div className="flex justify-end gap-2 pt-1">
+      <div className="sticky bottom-0 -mx-3 -mb-3 px-3 py-2 bg-primary/10 backdrop-blur border-t border-primary/30 flex justify-end gap-2 rounded-b-lg">
         <Button variant="ghost" size="sm" onClick={onClear} disabled={saving}>
           Cancel
         </Button>
@@ -133,6 +133,7 @@ export function SuggestedTasksPanel({ contactName, tasks, onClear, onConfirm }: 
           {saving ? 'Adding…' : `Add ${selectedCount} to PLAN`}
         </Button>
       </div>
+
     </div>
   );
 }
