@@ -142,8 +142,18 @@ Open reminders (${context.reminders.length}): ${context.reminders.map((r) => `${
         {loading && <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /> thinking…</div>}
         <div ref={endRef} />
       </div>
-      <form onSubmit={(e) => { e.preventDefault(); send(input); }} className="p-2 border-t border-border flex gap-1">
-        <input value={input} onChange={(e) => setInput(e.target.value)} placeholder="Ask the PhD Partner…" className="flex-1 bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm" />
+      <form onSubmit={(e) => { e.preventDefault(); if (recording) stopDictate(); send(input); }} className="p-2 border-t border-border flex gap-1">
+        <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={recording ? 'Listening… speak naturally' : 'Ask the PhD Partner…'} className="flex-1 bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm" />
+        <Button
+          type="button"
+          size="sm"
+          variant={recording ? 'destructive' : 'outline'}
+          onClick={recording ? stopDictate : startDictate}
+          title={recording ? 'Stop dictation' : 'Dictate'}
+          className={recording ? 'animate-pulse' : ''}
+        >
+          {recording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+        </Button>
         <Button type="submit" size="sm" disabled={loading || !input.trim()}><Send className="h-4 w-4" /></Button>
       </form>
     </div>
