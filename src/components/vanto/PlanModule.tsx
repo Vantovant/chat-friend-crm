@@ -240,7 +240,7 @@ function TodayTab({ tasksHook, remindersHook, meetingsHook, onOpenTask, onOpenRe
         {todayMeetings.length === 0 ? <Empty label="No meetings today." /> : (
           <ul className="space-y-1">
             {todayMeetings.map((m: any) => (
-              <li key={m.id} className="p-2 rounded-lg bg-secondary/30 text-sm">
+              <li key={m.id} onClick={() => onOpenMeeting?.(m.id)} className="p-2 rounded-lg bg-secondary/30 text-sm cursor-pointer hover:bg-secondary/50">
                 <div className="font-medium">{m.title}</div>
                 <div className="text-xs text-muted-foreground">{new Date(m.start_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}{m.location ? ` · ${m.location}` : ''}</div>
               </li>
