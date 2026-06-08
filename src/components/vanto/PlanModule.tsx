@@ -311,7 +311,7 @@ function TasksTab({ hook, onOpen }: any) {
 }
 
 /* ----------------- REMINDERS ----------------- */
-function RemindersTab({ hook }: any) {
+function RemindersTab({ hook, onOpen }: any) {
   const [title, setTitle] = useState('');
   const [time, setTime] = useState(() => {
     const d = new Date(Date.now() + 60 * 60 * 1000);
