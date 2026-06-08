@@ -7,6 +7,7 @@ import { CommandBar, useCommandBarHotkey } from './plan/CommandBar';
 import { CommandMic } from './plan/CommandMic';
 import { CalendarTab } from './plan/CalendarTab';
 import { buildPlanMarkdown, downloadPlanMarkdown } from './plan/planExport';
+import { downloadIcs } from './plan/icsExport';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -303,6 +304,12 @@ function MeetingsTab({ hook }: any) {
                   <div className="text-sm font-medium">{m.title}</div>
                   <div className="text-xs text-muted-foreground">{new Date(m.start_time).toLocaleString()}{m.location ? ` · ${m.location}` : ''}</div>
                 </div>
+                <button
+                  title="Download .ics"
+                  onClick={() => downloadIcs([m], `meeting-${(m.title || 'event').replace(/\s+/g, '-').toLowerCase()}.ics`)}
+                  className="text-muted-foreground hover:text-primary text-xs px-1.5 py-0.5 rounded border border-border">
+                  .ics
+                </button>
                 <button onClick={() => hook.remove(m.id)} className="text-muted-foreground hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
               </li>
             ))}
