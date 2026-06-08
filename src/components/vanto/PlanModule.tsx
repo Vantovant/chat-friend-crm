@@ -267,7 +267,7 @@ function TodayTab({ tasksHook, remindersHook, meetingsHook, onOpenTask, onOpenRe
 }
 
 /* ----------------- TASKS ----------------- */
-function TasksTab({ hook }: any) {
+function TasksTab({ hook, onOpen }: any) {
   const [title, setTitle] = useState('');
   const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'urgent'>('medium');
   const groups: Record<string, any[]> = { pending: [], in_progress: [], done: [] };
