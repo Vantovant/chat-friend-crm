@@ -365,18 +365,18 @@ function MeetingsTab({ hook, onOpen }: any) {
         {hook.meetings.length === 0 ? <Empty label="No meetings scheduled." /> : (
           <ul className="space-y-1">
             {hook.meetings.map((m: any) => (
-              <li key={m.id} className="p-2 rounded-lg bg-secondary/30 flex items-center gap-2">
+              <li key={m.id} onClick={() => onOpen?.(m.id)} className="p-2 rounded-lg bg-secondary/30 flex items-center gap-2 cursor-pointer hover:bg-secondary/50">
                 <div className="flex-1">
-                  <div className="text-sm font-medium">{m.title}</div>
+                  <div className={`text-sm font-medium ${m.is_done ? 'line-through text-muted-foreground' : ''}`}>{m.title}</div>
                   <div className="text-xs text-muted-foreground">{new Date(m.start_time).toLocaleString()}{m.location ? ` · ${m.location}` : ''}</div>
                 </div>
                 <button
                   title="Download .ics"
-                  onClick={() => downloadIcs([m], `meeting-${(m.title || 'event').replace(/\s+/g, '-').toLowerCase()}.ics`)}
+                  onClick={(e) => { e.stopPropagation(); downloadIcs([m], `meeting-${(m.title || 'event').replace(/\s+/g, '-').toLowerCase()}.ics`); }}
                   className="text-muted-foreground hover:text-primary text-xs px-1.5 py-0.5 rounded border border-border">
                   .ics
                 </button>
-                <button onClick={() => hook.remove(m.id)} className="text-muted-foreground hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
+                <button onClick={(e) => { e.stopPropagation(); hook.remove(m.id); }} className="text-muted-foreground hover:text-red-400"><Trash2 className="h-3.5 w-3.5" /></button>
               </li>
             ))}
           </ul>
