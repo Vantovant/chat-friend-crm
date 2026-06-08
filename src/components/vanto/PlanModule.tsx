@@ -173,7 +173,7 @@ export function PlanModule() {
 }
 
 /* ----------------- TODAY ----------------- */
-function TodayTab({ tasksHook, remindersHook, meetingsHook }: any) {
+function TodayTab({ tasksHook, remindersHook, meetingsHook, onOpenTask, onOpenReminder, onOpenMeeting }: any) {
   const openTasks = tasksHook.tasks.filter((t: any) => t.status !== 'done' && (isToday(t.due_date) || isOverdue(t.due_date) || !t.due_date));
   const todayTasks = openTasks;
 
