@@ -6,6 +6,7 @@ import { PhDPartnerPanel } from './plan/PhDPartnerPanel';
 import { CommandBar, useCommandBarHotkey } from './plan/CommandBar';
 import { CommandMic } from './plan/CommandMic';
 import { CalendarTab } from './plan/CalendarTab';
+import { TaskDetailDrawer, ReminderDetailDrawer, MeetingDetailDrawer } from './plan/Drawers';
 import { buildPlanMarkdown, downloadPlanMarkdown } from './plan/planExport';
 import { downloadIcs } from './plan/icsExport';
 import { supabase } from '@/integrations/supabase/client';
