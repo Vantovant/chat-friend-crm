@@ -33,6 +33,7 @@ import { Bot } from 'lucide-react';
 const pathToModule: Record<string, Module> = {
   '/maytapi-inbox': 'maytapi-inbox',
   '/plan': 'plan',
+  '/voice-diary': 'voice-diary',
 };
 
 const Index = () => {
