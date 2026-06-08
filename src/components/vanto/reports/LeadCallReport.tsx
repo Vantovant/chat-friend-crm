@@ -224,7 +224,7 @@ export function LeadCallReport() {
     try {
       const { data: contacts, error: cErr } = await supabase
         .from('contacts')
-        .select('id, name, first_name, last_name, phone, phone_normalized, email, lead_type, temperature, interest, tags, notes, created_at, updated_at')
+        .select('id, name, first_name, last_name, phone, phone_normalized, email, lead_type, temperature, interest, tags, notes, stage_id, created_at, updated_at')
         .eq('is_deleted', false)
         .order('updated_at', { ascending: false })
         .limit(500);
