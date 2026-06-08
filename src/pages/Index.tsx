@@ -74,6 +74,7 @@ const Index = () => {
       case 'review-queue': return <ReviewQueueModule />;
       case 'reports': return <ReportsModule />;
       case 'prospector-drafts': return <ProspectorDraftsModule />;
+      case 'plan': return <PlanModule />;
       case 'settings': return <SettingsModule />;
       default: return <InboxModule />;
     }
