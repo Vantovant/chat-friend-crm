@@ -305,17 +305,22 @@ export function LeadCallReport() {
   }, [rows, onlyDistributors, fiFrom, fiTo, lmFrom, lmTo]);
 
   const sortedFiltered = useMemo(() => {
-    if (messageSort === 'none') return filtered;
-    return [...filtered].sort((a, b) =>
-      messageSort === 'desc' ? b.thread.length - a.thread.length : a.thread.length - b.thread.length
-    );
-  }, [filtered, messageSort]);
+    if (sortDir === 'none') return filtered;
+    const dirMul = sortDir === 'asc' ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      if (sortKey === 'msgs') return (a.thread.length - b.thread.length) * dirMul;
+      const av = (sortKey === 'firstInquiry' ? a.firstInquiry : a.lastMessage) || '';
+      const bv = (sortKey === 'firstInquiry' ? b.firstInquiry : b.lastMessage) || '';
+      return av.localeCompare(bv) * dirMul;
+    });
+  }, [filtered, sortKey, sortDir]);
 
   const distributorCount = rows.filter((r) => r.isDistributor).length;
   const missingSummaries = sortedFiltered.filter((r) => !r.summary).length;
 
-  function toggleMessageSort() {
-    setMessageSort((current) => (current === 'none' ? 'desc' : current === 'desc' ? 'asc' : 'none'));
+  function toggleSort(key: SortKey) {
+    if (sortKey !== key) { setSortKey(key); setSortDir('desc'); return; }
+    setSortDir((d) => (d === 'none' ? 'desc' : d === 'desc' ? 'asc' : 'none'));
   }
 
   async function summarizeOne(row: Row, force = false): Promise<Summary | null> {
