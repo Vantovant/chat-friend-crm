@@ -201,6 +201,17 @@ Deno.serve(async (req) => {
           throw new Error("__SKIP_GROUP_ENGINE__");
         }
 
+        // Admin exclusion: never auto-reply to listed group admins (CSV of E.164 numbers).
+        const { data: adminExclRow } = await supabase
+          .from("integration_settings").select("value")
+          .eq("key", "zazi_group_admin_excluded_phones").maybeSingle();
+        const adminExcludedList = String(adminExclRow?.value || "")
+          .split(",").map((s) => normalizePhoneToE164(s.trim())).filter(Boolean);
+        if (senderE164 && adminExcludedList.includes(senderE164)) {
+          console.log("[group-engine] skip: sender is excluded group admin", senderE164);
+          throw new Error("__SKIP_GROUP_ENGINE__");
+        }
+
         // Global kill switch
         const { data: globalFlag } = await supabase
           .from("integration_settings").select("value")
@@ -341,6 +352,7 @@ Deno.serve(async (req) => {
             "zazi_group_emergency_keywords",
             "zazi_group_emergency_whitelist_jids",
             "zazi_group_admin_phone",
+            "zazi_group_admin_excluded_phones",
             "local_support_number",
           ]);
         const gMap: Record<string, string> = {};
@@ -352,7 +364,17 @@ Deno.serve(async (req) => {
         const keywords = (gMap.zazi_group_emergency_keywords || "")
           .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
         const adminPhone = (gMap.zazi_group_admin_phone || "").replace(/\D/g, "");
+        const adminExcluded2 = (gMap.zazi_group_admin_excluded_phones || "")
+          .split(",").map(s => normalizePhoneToE164(s.trim())).filter(Boolean);
         const localSupport = gMap.local_support_number || "+27 79 083 1530";
+
+        const senderE164b = normalizePhoneToE164((payload.user?.phone || message.from || "").toString());
+        if (senderE164b && adminExcluded2.includes(senderE164b)) {
+          console.log("[group-keyword] skip: sender is excluded group admin", senderE164b);
+          return new Response(JSON.stringify({ ok: true, skipped: "admin_excluded" }), {
+            status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
 
         const inAuto = mode === "emergency_whitelist_auto";
         const groupAllowed = whitelistJids.includes(rawConversation);
