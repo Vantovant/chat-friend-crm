@@ -48,6 +48,7 @@ type Contact = {
   interest: string | null;
   tags: string[] | null;
   notes: string | null;
+  stage_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -139,8 +140,15 @@ export function LeadCallReport() {
   const [summarizing, setSummarizing] = useState(false);
   const [summarizeProgress, setSummarizeProgress] = useState<{ done: number; total: number } | null>(null);
   const [compactPdf, setCompactPdf] = useState(true);
-  const [editor, setEditor] = useState<{ row: Row; lead_type: LeadType; notes: string } | null>(null);
+  const [editor, setEditor] = useState<{ row: Row; lead_type: LeadType; notes: string; stage_id: string | null } | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [stages, setStages] = useState<{ id: string; name: string; color: string | null }[]>([]);
+
+  useEffect(() => {
+    supabase.from('pipeline_stages').select('id, name, color').order('stage_order').then(({ data }) => {
+      if (data) setStages(data as any);
+    });
+  }, []);
 
   function summaryAsText(s: Summary | null | undefined): string {
     if (!s) return '';
@@ -158,7 +166,7 @@ export function LeadCallReport() {
   function openEditor(row: Row) {
     const allowed = LEAD_TYPES.map((l) => l.value);
     const current = allowed.includes(row.lead_type as LeadType) ? (row.lead_type as LeadType) : 'prospect';
-    setEditor({ row, lead_type: current, notes: row.notes || '' });
+    setEditor({ row, lead_type: current, notes: row.notes || '', stage_id: row.stage_id || null });
   }
 
   function pasteSummaryToNotes() {
@@ -174,16 +182,34 @@ export function LeadCallReport() {
     if (!editor) return;
     setSavingEdit(true);
     try {
+      const prevStageId = editor.row.stage_id || null;
+      const newStageId = editor.stage_id || null;
       const { error } = await supabase
         .from('contacts')
         .update({
           lead_type: editor.lead_type,
           notes: editor.notes.trim() || null,
+          stage_id: newStageId,
           updated_at: new Date().toISOString(),
         })
         .eq('id', editor.row.id);
       if (error) throw error;
-      setRows((prev) => prev.map((r) => r.id === editor.row.id ? { ...r, lead_type: editor.lead_type, notes: editor.notes.trim() || null } : r));
+
+      if (prevStageId !== newStageId) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          const fromName = stages.find((s) => s.id === prevStageId)?.name || 'Unassigned';
+          const toName = stages.find((s) => s.id === newStageId)?.name || 'Unassigned';
+          await supabase.from('contact_activity').insert({
+            contact_id: editor.row.id,
+            performed_by: user.id,
+            type: 'stage_changed',
+            metadata: { from_stage: fromName, to_stage: toName, from_stage_id: prevStageId, to_stage_id: newStageId, source: 'lead_call_report' },
+          });
+        }
+      }
+
+      setRows((prev) => prev.map((r) => r.id === editor.row.id ? { ...r, lead_type: editor.lead_type, notes: editor.notes.trim() || null, stage_id: newStageId } : r));
       toast.success('Contact updated — visible in Contacts & CRM Pipeline.');
       setEditor(null);
     } catch (e) {
@@ -198,7 +224,7 @@ export function LeadCallReport() {
     try {
       const { data: contacts, error: cErr } = await supabase
         .from('contacts')
-        .select('id, name, first_name, last_name, phone, phone_normalized, email, lead_type, temperature, interest, tags, notes, created_at, updated_at')
+        .select('id, name, first_name, last_name, phone, phone_normalized, email, lead_type, temperature, interest, tags, notes, stage_id, created_at, updated_at')
         .eq('is_deleted', false)
         .order('updated_at', { ascending: false })
         .limit(500);
@@ -686,22 +712,37 @@ export function LeadCallReport() {
                 {editor.row.phone || editor.row.phone_normalized || '—'} · saves to Contacts & CRM Pipeline
               </div>
 
-              <div className="space-y-1">
-                <label className="text-xs text-muted-foreground">Lead Type</label>
-                <select
-                  value={editor.lead_type}
-                  onChange={(e) => setEditor({ ...editor, lead_type: e.target.value as LeadType })}
-                  className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
-                >
-                  {LEAD_TYPES.map((lt) => (
-                    <option key={lt.value} value={lt.value}>{lt.label}</option>
-                  ))}
-                </select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">Lead Type</label>
+                  <select
+                    value={editor.lead_type}
+                    onChange={(e) => setEditor({ ...editor, lead_type: e.target.value as LeadType })}
+                    className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                  >
+                    {LEAD_TYPES.map((lt) => (
+                      <option key={lt.value} value={lt.value}>{lt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs text-muted-foreground">CRM Pipeline Stage</label>
+                  <select
+                    value={editor.stage_id || ''}
+                    onChange={(e) => setEditor({ ...editor, stage_id: e.target.value || null })}
+                    className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50"
+                  >
+                    <option value="">Unassigned</option>
+                    {stages.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs text-muted-foreground">Notes</label>
+                  <label className="text-xs text-muted-foreground">Notes (type your call notes here — saves to the contact)</label>
                   <Button
                     type="button"
                     variant="outline"
@@ -711,17 +752,18 @@ export function LeadCallReport() {
                     title={editor.row.summary ? 'Append AI summary to notes' : 'Generate summary first'}
                   >
                     <ClipboardPaste className="h-3.5 w-3.5 mr-1" />
-                    Paste AI summary
+                    Append AI summary
                   </Button>
                 </div>
                 <textarea
                   value={editor.notes}
                   onChange={(e) => setEditor({ ...editor, notes: e.target.value })}
                   rows={10}
-                  className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 resize-y font-mono"
-                  placeholder="Notes for this contact…"
+                  className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 resize-y"
+                  placeholder="Write your post-call notes here, or click Append AI summary to add the generated summary…"
                 />
               </div>
+
 
               {editor.row.summary && (
                 <details className="text-xs text-muted-foreground bg-secondary/30 rounded-lg p-3">
