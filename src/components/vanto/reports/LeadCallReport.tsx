@@ -9,7 +9,7 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
 import { LEAD_TYPES, type LeadType } from '@/lib/vanto-data';
-import { SuggestedTasksDialog, type SuggestedTaskInput } from '@/components/vanto/plan/SuggestedTasksDialog';
+import { SuggestedTasksPanel, type SuggestedTaskInput } from '@/components/vanto/plan/SuggestedTasksPanel';
 
 // Tight, word-boundary distributor intent keywords.
 const DISTRIBUTOR_PATTERNS: RegExp[] = [
