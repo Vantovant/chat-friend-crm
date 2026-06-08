@@ -90,7 +90,7 @@ export function SuggestedTasksPanel({ contactName, tasks, onClear, onConfirm }: 
         </button>
       </div>
 
-      <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+      <div className="space-y-1.5 max-h-[40vh] overflow-y-auto overscroll-contain pr-1">
         {rows.map((r, i) => (
           <div key={i} className="flex items-start gap-2 p-1.5 rounded hover:bg-secondary/40">
             <Checkbox
