@@ -142,6 +142,8 @@ export function LeadCallReport() {
   const [summarizeProgress, setSummarizeProgress] = useState<{ done: number; total: number } | null>(null);
   const [compactPdf, setCompactPdf] = useState(true);
   const [editor, setEditor] = useState<{ row: Row; lead_type: LeadType; notes: string; stage_id: string | null } | null>(null);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [suggestTasks, setSuggestTasks] = useState<SuggestedTaskInput[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
   const [stages, setStages] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [dictating, setDictating] = useState(false);
