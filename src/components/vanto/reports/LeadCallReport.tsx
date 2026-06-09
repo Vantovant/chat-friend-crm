@@ -147,6 +147,7 @@ export function LeadCallReport() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [stages, setStages] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [dictating, setDictating] = useState(false);
+  const [search, setSearch] = useState('');
   const recRef = useRef<any>(null);
   const dictateBaseRef = useRef<string>('');
 
