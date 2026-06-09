@@ -32,11 +32,13 @@ export function VoiceDiaryModule() {
   const [filter, setFilter] = useState<Filter>('all');
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
-  const [interim, setInterim] = useState('');
   const [listening, setListening] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const recRef = useRef<any>(null);
   const committedRef = useRef('');        // text BEFORE current SR session (typed + prior sessions)
+  const contentRef = useRef('');          // visible textarea text, including live interim words
+  const sessionFinalRef = useRef('');
+  const sessionInterimRef = useRef('');
   const wasListeningRef = useRef(false);
   const restartTimerRef = useRef<any>(null);
   const lastResultAtRef = useRef<number>(0);
@@ -45,6 +47,26 @@ export function VoiceDiaryModule() {
     (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
   const supportsDictation = typeof window !== 'undefined' && !!getSR();
   const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
+
+  const cleanSpeechPart = (text: string) => text.replace(/\s+/g, ' ').trim();
+
+  const appendSpeechPart = (base: string, part: string) => {
+    const cleaned = cleanSpeechPart(part);
+    if (!cleaned) return base;
+    if (!base) return cleaned;
+    return `${base}${/[\s\n]$/.test(base) ? '' : ' '}${cleaned}`;
+  };
+
+  const updateContent = (next: string) => {
+    const normalized = next.replace(/[ \t]{2,}/g, ' ').trimStart();
+    contentRef.current = normalized;
+    setContent(normalized);
+  };
+
+  const resetSessionTranscript = () => {
+    sessionFinalRef.current = '';
+    sessionInterimRef.current = '';
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -84,10 +106,14 @@ export function VoiceDiaryModule() {
         if (e.results[i].isFinal) sessionFinal += (sessionFinal ? ' ' : '') + t;
         else sessionInterim += (sessionInterim ? ' ' : '') + t;
       }
-      const base = committedRef.current;
-      const sep = base && !base.endsWith(' ') ? ' ' : '';
-      setContent((base + sep + sessionFinal).replace(/\s+/g, ' ').trimStart());
-      setInterim(sessionInterim);
+      sessionFinalRef.current = sessionFinal;
+      sessionInterimRef.current = sessionInterim;
+
+      // Keep both final and live interim words inside the textarea itself.
+      // Pauses/restarts then append to the same paragraph instead of writing
+      // outside the box and later moving text back in.
+      const withFinal = appendSpeechPart(committedRef.current, sessionFinal);
+      updateContent(appendSpeechPart(withFinal, sessionInterim));
     };
 
     r.onerror = (ev: any) => {
@@ -103,15 +129,10 @@ export function VoiceDiaryModule() {
     };
 
     r.onend = () => {
-      // Commit this session's final text into committedRef so the next
-      // session starts with a clean results array but keeps what was said.
-      // We read what's currently in content (which already includes the session final).
-      committedRef.current = '';  // will be reset by handler below using setContent callback
-      setContent((curr) => {
-        committedRef.current = curr;
-        return curr;
-      });
-      setInterim('');
+      // Commit whatever is visible in the textarea, including live interim
+      // words, so the next speech session continues from the same paragraph.
+      committedRef.current = contentRef.current;
+      resetSessionTranscript();
 
       if (wasListeningRef.current) {
         // Auto-restart for long dictations (>60s). Small delay avoids
@@ -143,7 +164,8 @@ export function VoiceDiaryModule() {
     if (!SR) { toast.error('Dictation not supported in this browser. Try Chrome.'); return; }
     try {
       // Seed committed with whatever is already typed.
-      committedRef.current = content || '';
+      committedRef.current = contentRef.current || content || '';
+      resetSessionTranscript();
       wasListeningRef.current = true;
       recRef.current = buildRecognizer();
       recRef.current.start();
@@ -158,15 +180,16 @@ export function VoiceDiaryModule() {
     wasListeningRef.current = false;
     if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
     try { recRef.current?.stop(); } catch { /* ignore */ }
-    try { recRef.current?.abort?.(); } catch { /* ignore */ }
+    committedRef.current = contentRef.current;
+    resetSessionTranscript();
     setListening(false);
-    setInterim('');
   };
 
   useEffect(() => () => {
     wasListeningRef.current = false;
     if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
     try { recRef.current?.stop(); } catch { /* ignore */ }
+    try { recRef.current?.abort?.(); } catch { /* ignore */ }
   }, []);
 
   const save = async () => {
@@ -184,7 +207,7 @@ export function VoiceDiaryModule() {
     });
     if (error) { toast.error(error.message); return; }
     toast.success('Entry saved');
-    setTitle(''); setContent('');
+    setTitle(''); updateContent(''); committedRef.current = '';
     load();
   };
 
@@ -242,14 +265,14 @@ export function VoiceDiaryModule() {
         <Textarea
           placeholder={listening ? 'Listening… speak naturally' : 'What is on your mind?'}
           value={content}
-          onChange={(e) => setContent(e.target.value)}
+          onChange={(e) => {
+            updateContent(e.target.value);
+            if (!wasListeningRef.current) committedRef.current = e.target.value;
+          }}
           onKeyDown={onKey}
-          rows={5}
+          rows={8}
           className={listening ? 'border-destructive ring-1 ring-destructive/40 animate-pulse' : ''}
         />
-        {listening && interim && (
-          <p className="text-xs italic text-muted-foreground -mt-2">{interim}</p>
-        )}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             {supportsDictation && (
