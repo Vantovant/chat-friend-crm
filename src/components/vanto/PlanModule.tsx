@@ -76,7 +76,7 @@ export function PlanModule() {
           <Button variant="outline" size="sm" onClick={() => setCmdOpen(true)}>
             <CommandIcon className="h-4 w-4 mr-1" /> Search <kbd className="ml-2 text-[10px] bg-secondary px-1 rounded">⌘K</kbd>
           </Button>
-          <CommandMic tasksHook={tasksHook} remindersHook={remindersHook} meetingsHook={meetingsHook} />
+          {tab !== 'notes' && <CommandMic tasksHook={tasksHook} remindersHook={remindersHook} meetingsHook={meetingsHook} />}
           <Button
             variant="outline"
             size="sm"
