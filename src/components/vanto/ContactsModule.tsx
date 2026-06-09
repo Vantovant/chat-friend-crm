@@ -952,6 +952,51 @@ export function ContactsModule() {
     setLoading(false);
   };
 
+  // Cross-module quick-open: { contactId?, phone?, addIfMissing? }
+  useEffect(() => {
+    const handler = async (e: Event) => {
+      const detail = (e as CustomEvent).detail || {};
+      const { contactId, phone, addIfMissing } = detail as { contactId?: string; phone?: string; addIfMissing?: boolean };
+      const findIn = (list: Contact[]) => {
+        if (contactId) return list.find(c => c.id === contactId) || null;
+        if (phone) {
+          const digits = phone.replace(/\D/g, '');
+          return list.find(c =>
+            (c.phone_normalized || '').replace(/\D/g, '') === digits ||
+            (c.phone || '').replace(/\D/g, '') === digits ||
+            (c.phone_raw || '').replace(/\D/g, '') === digits
+          ) || null;
+        }
+        return null;
+      };
+      let match = findIn(contacts);
+      if (!match) {
+        // Fallback: query DB directly in case the contact is not in the cached list
+        let q = supabase.from('contacts').select('*').limit(1);
+        if (contactId) q = q.eq('id', contactId);
+        else if (phone) {
+          const digits = phone.replace(/\D/g, '');
+          q = q.or(`phone_normalized.ilike.%${digits}%,phone.ilike.%${digits}%,phone_raw.ilike.%${digits}%`);
+        }
+        const { data } = await q;
+        if (data && data.length) {
+          match = data[0] as Contact;
+          setContacts(prev => prev.find(c => c.id === match!.id) ? prev : [match!, ...prev]);
+        }
+      }
+      if (match) {
+        setSelectedContact(match);
+      } else if (addIfMissing) {
+        setShowAddModal(true);
+      } else {
+        toast({ title: 'Contact not found', description: phone || contactId || '' });
+      }
+    };
+    window.addEventListener('vanto:open-contact', handler as EventListener);
+    return () => window.removeEventListener('vanto:open-contact', handler as EventListener);
+  }, [contacts, toast]);
+
+
   const dupIds = useMemo(() => findDuplicateIds(contacts), [contacts]);
   const dupGroupCount = useMemo(() => countDuplicateGroups(contacts), [contacts]);
 
