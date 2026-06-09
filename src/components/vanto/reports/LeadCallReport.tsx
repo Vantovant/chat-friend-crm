@@ -772,9 +772,52 @@ export function LeadCallReport() {
           </DialogHeader>
           {editor && (
             <div className="space-y-4">
-              <div className="text-xs text-muted-foreground">
-                {editor.row.phone || editor.row.phone_normalized || '—'} · saves to Contacts & CRM Pipeline
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="text-xs text-muted-foreground">
+                  {editor.row.phone || editor.row.phone_normalized || '—'} · saves to Contacts & CRM Pipeline
+                </div>
+                <div className="flex items-center gap-2">
+                  {editor.row.id ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      title="Open this person in Contacts (edit name, tags, owner, etc.)"
+                      onClick={() => {
+                        const cid = editor.row.id;
+                        const phone = editor.row.phone || editor.row.phone_normalized || '';
+                        window.dispatchEvent(new CustomEvent('vanto:navigate', { detail: { module: 'contacts' } }));
+                        setTimeout(() => {
+                          window.dispatchEvent(new CustomEvent('vanto:open-contact', {
+                            detail: { contactId: cid, phone },
+                          }));
+                        }, 80);
+                      }}
+                    >
+                      <UserCog className="h-3.5 w-3.5 mr-1" /> Open in Contacts
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      title="Add this person to Contacts"
+                      onClick={() => {
+                        const phone = editor.row.phone || editor.row.phone_normalized || '';
+                        window.dispatchEvent(new CustomEvent('vanto:navigate', { detail: { module: 'contacts' } }));
+                        setTimeout(() => {
+                          window.dispatchEvent(new CustomEvent('vanto:open-contact', {
+                            detail: { phone, addIfMissing: true },
+                          }));
+                        }, 80);
+                      }}
+                    >
+                      <UserPlus className="h-3.5 w-3.5 mr-1" /> Add to Contacts
+                    </Button>
+                  )}
+                </div>
               </div>
+
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1">
