@@ -271,7 +271,27 @@ export function MaytapiInboxModule() {
                           </p>
                           <p className="text-[10px] text-muted-foreground mt-1">{c.count} message{c.count !== 1 ? 's' : ''}</p>
                         </div>
+                        {c.contact?.id && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="shrink-0"
+                            title="Edit this contact in Contacts"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              window.dispatchEvent(new CustomEvent('vanto:navigate', { detail: { module: 'contacts' } }));
+                              setTimeout(() => {
+                                window.dispatchEvent(new CustomEvent('vanto:open-contact', {
+                                  detail: { contactId: c.contact!.id, phone: c.contact!.phone },
+                                }));
+                              }, 80);
+                            }}
+                          >
+                            <UserCog size={14} />
+                          </Button>
+                        )}
                       </li>
+
                     );
                   })}
                 </ul>
