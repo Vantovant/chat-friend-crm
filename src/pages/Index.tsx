@@ -57,6 +57,17 @@ const Index = () => {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Global navigation event — used by cross-module quick links (e.g. Reports → Contacts)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {};
+      if (detail.module) setActiveModule(detail.module as Module);
+    };
+    window.addEventListener('vanto:navigate', handler as EventListener);
+    return () => window.removeEventListener('vanto:navigate', handler as EventListener);
+  }, []);
+
+
   const renderModule = () => {
     switch (activeModule) {
       case 'dashboard': return <DashboardModule />;
