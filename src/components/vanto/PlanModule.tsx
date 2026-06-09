@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { CalendarCheck, Plus, Check, Trash2, Bell, Calendar, ListTodo, NotebookPen, Sparkles, MessageSquare, Command as CommandIcon, Download } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { CalendarCheck, Plus, Check, Trash2, Bell, Calendar, ListTodo, NotebookPen, Sparkles, MessageSquare, Command as CommandIcon, Download, Mic, Square } from 'lucide-react';
+import { SuggestedTasksPanel } from './plan/SuggestedTasksPanel';
 import { Button } from '@/components/ui/button';
 import { useTasks, useReminders, useMeetings, useNotes } from '@/hooks/usePlanData';
 import { PhDPartnerPanel } from './plan/PhDPartnerPanel';
