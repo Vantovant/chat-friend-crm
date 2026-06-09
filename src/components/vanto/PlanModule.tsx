@@ -392,7 +392,47 @@ function NotesTab({ hook }: any) {
   const today = todayStr();
   const todayNote = useMemo(() => hook.notes.find((n: any) => n.note_date === today), [hook.notes, today]);
   const [content, setContent] = useState(todayNote?.content || '');
-  useEffect(() => { setContent(todayNote?.content || ''); }, [todayNote?.id]);
+  const [listening, setListening] = useState(false);
+  const [extracting, setExtracting] = useState(false);
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [suggestTasks, setSuggestTasks] = useState<any[]>([]);
+
+  const recRef = useRef<any>(null);
+  const contentRef = useRef('');
+  const committedRef = useRef('');
+  const sessionFinalRef = useRef('');
+  const sessionInterimRef = useRef('');
+  const wasListeningRef = useRef(false);
+  const restartTimerRef = useRef<any>(null);
+  const lastResultAtRef = useRef<number>(0);
+
+  const getSR = () => (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+  const supportsDictation = typeof window !== 'undefined' && !!getSR();
+  const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
+
+  const cleanSpeechPart = (text: string) => text.replace(/\s+/g, ' ').trim();
+  const appendSpeechPart = (base: string, part: string) => {
+    const cleaned = cleanSpeechPart(part);
+    if (!cleaned) return base;
+    if (!base) return cleaned;
+    return `${base}${/[\s\n]$/.test(base) ? '' : ' '}${cleaned}`;
+  };
+  const updateContent = (next: string) => {
+    const normalized = next.replace(/[ \t]{2,}/g, ' ').trimStart();
+    contentRef.current = normalized;
+    setContent(normalized);
+  };
+  const resetSessionTranscript = () => {
+    sessionFinalRef.current = '';
+    sessionInterimRef.current = '';
+  };
+
+  useEffect(() => {
+    setContent(todayNote?.content || '');
+    contentRef.current = todayNote?.content || '';
+    committedRef.current = todayNote?.content || '';
+  }, [todayNote?.id]); // eslint-disable-line
+
   // Debounced autosave
   useEffect(() => {
     if (content === (todayNote?.content || '')) return;
@@ -400,13 +440,177 @@ function NotesTab({ hook }: any) {
     return () => clearTimeout(t);
   }, [content]); // eslint-disable-line
 
+  const buildRecognizer = () => {
+    const SR = getSR();
+    const r = new SR();
+    r.lang = 'en-ZA';
+    r.continuous = !isAndroid;
+    r.interimResults = true;
+    r.maxAlternatives = 1;
+
+    r.onresult = (e: any) => {
+      lastResultAtRef.current = Date.now();
+      let sessionFinal = '';
+      let sessionInterim = '';
+      for (let i = 0; i < e.results.length; i++) {
+        const t = (e.results[i][0]?.transcript || '').trim();
+        if (!t) continue;
+        if (e.results[i].isFinal) sessionFinal += (sessionFinal ? ' ' : '') + t;
+        else sessionInterim += (sessionInterim ? ' ' : '') + t;
+      }
+      sessionFinalRef.current = sessionFinal;
+      sessionInterimRef.current = sessionInterim;
+      const withFinal = appendSpeechPart(committedRef.current, sessionFinal);
+      updateContent(appendSpeechPart(withFinal, sessionInterim));
+    };
+
+    r.onerror = (ev: any) => {
+      if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
+        toast.error('Microphone blocked. Allow mic access in your browser.');
+        wasListeningRef.current = false;
+        setListening(false);
+      } else if (ev?.error === 'network') {
+        toast.error('Speech network error. Check connection.');
+      }
+    };
+
+    r.onend = () => {
+      committedRef.current = contentRef.current;
+      resetSessionTranscript();
+      if (wasListeningRef.current) {
+        if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+        restartTimerRef.current = setTimeout(() => {
+          if (!wasListeningRef.current) return;
+          try { recRef.current = buildRecognizer(); recRef.current.start(); }
+          catch {
+            restartTimerRef.current = setTimeout(() => {
+              if (!wasListeningRef.current) return;
+              try { recRef.current = buildRecognizer(); recRef.current.start(); } catch { /* give up */ }
+            }, 400);
+          }
+        }, 120);
+      } else {
+        setListening(false);
+      }
+    };
+    return r;
+  };
+
+  const startDictate = () => {
+    const SR = getSR();
+    if (!SR) { toast.error('Dictation not supported in this browser. Try Chrome.'); return; }
+    try {
+      committedRef.current = contentRef.current || content || '';
+      resetSessionTranscript();
+      wasListeningRef.current = true;
+      recRef.current = buildRecognizer();
+      recRef.current.start();
+      setListening(true);
+    } catch (e: any) {
+      wasListeningRef.current = false;
+      toast.error(e?.message || 'Could not start dictation');
+    }
+  };
+
+  const stopDictate = () => {
+    wasListeningRef.current = false;
+    if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
+    try { recRef.current?.stop(); } catch { /* ignore */ }
+    committedRef.current = contentRef.current;
+    resetSessionTranscript();
+    setListening(false);
+  };
+
+  useEffect(() => () => {
+    wasListeningRef.current = false;
+    if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+    try { recRef.current?.stop(); } catch { /* ignore */ }
+    try { recRef.current?.abort?.(); } catch { /* ignore */ }
+  }, []);
+
+  const extractTasks = async () => {
+    if (!content.trim()) { toast.info('Write or dictate a note first.'); return; }
+    if (listening) stopDictate();
+    setExtracting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('plan-ai-extract-actions', {
+        body: { text: content, context: `daily note ${today}` },
+      });
+      if (error) throw error;
+      const tasks = (data as any)?.tasks || [];
+      if (!tasks.length) { toast.info('No tasks detected in this note.'); return; }
+      setSuggestTasks(tasks);
+      setSuggestOpen(true);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to extract tasks');
+    } finally {
+      setExtracting(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <Card title={`Daily Note — ${today}`}>
-        <textarea value={content} onChange={(e) => setContent(e.target.value)} rows={12}
-          placeholder="Wins, blockers, next steps, gratitude…" className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm resize-y" />
-        <div className="text-xs text-muted-foreground mt-1">Autosaves as you type.</div>
+        <div className="flex items-center justify-end gap-2 mb-2 flex-wrap">
+          {supportsDictation && (
+            listening ? (
+              <Button type="button" variant="outline" size="sm" onClick={stopDictate} className="border-red-500/50 text-red-300 animate-pulse">
+                <Square className="h-3.5 w-3.5 mr-1" /> Stop
+              </Button>
+            ) : (
+              <Button type="button" variant="outline" size="sm" onClick={startDictate} title="Dictate note (voice → text)">
+                <Mic className="h-3.5 w-3.5 mr-1" /> Dictate
+              </Button>
+            )
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={extractTasks}
+            disabled={extracting || !content.trim()}
+            title="Read this note and suggest PLAN tasks"
+          >
+            <Sparkles className="h-3.5 w-3.5 mr-1" /> {extracting ? 'Scanning…' : 'Extract tasks'}
+          </Button>
+        </div>
+        <textarea
+          value={content}
+          onChange={(e) => {
+            updateContent(e.target.value);
+            if (!wasListeningRef.current) committedRef.current = e.target.value;
+          }}
+          rows={12}
+          placeholder={listening ? 'Listening… speak naturally' : 'Wins, blockers, next steps, gratitude…'}
+          className={`w-full bg-secondary/60 border rounded-lg px-3 py-2 text-sm resize-y ${listening ? 'border-red-500/60 ring-1 ring-red-500/30' : 'border-border'}`}
+        />
+        <div className="text-xs text-muted-foreground mt-1">
+          {listening ? <span className="text-red-400">● Recording — speak naturally; pauses are fine.</span> : 'Autosaves as you type.'}
+        </div>
       </Card>
+
+      {suggestOpen && suggestTasks.length > 0 && (
+        <SuggestedTasksPanel
+          contactName={null}
+          tasks={suggestTasks}
+          onClear={() => { setSuggestOpen(false); setSuggestTasks([]); }}
+          onConfirm={async (picked) => {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) { toast.error('Not signed in'); return; }
+            const rows = picked.map((t) => ({
+              user_id: user.id,
+              title: t.title,
+              priority: t.priority,
+              source: 'daily_note',
+              source_ref: { kind: 'daily_note', note_date: today },
+            }));
+            const { error: insErr } = await (supabase.from('plan_tasks' as any).insert(rows) as any);
+            if (insErr) { toast.error(insErr.message); return; }
+            toast.success(`Added ${rows.length} task${rows.length === 1 ? '' : 's'} to PLAN`);
+          }}
+        />
+      )}
+
       <Card title="Recent">
         {hook.notes.length === 0 ? <Empty label="No notes yet." /> : (
           <ul className="space-y-1">
@@ -422,6 +626,7 @@ function NotesTab({ hook }: any) {
     </div>
   );
 }
+
 
 /* ----------------- SUGGESTIONS ----------------- */
 function SuggestionsTab({ onPromote }: { onPromote: (t: any) => Promise<void> }) {
