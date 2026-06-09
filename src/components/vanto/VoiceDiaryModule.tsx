@@ -36,12 +36,15 @@ export function VoiceDiaryModule() {
   const [listening, setListening] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const recRef = useRef<any>(null);
-  const baseRef = useRef('');
+  const committedRef = useRef('');        // text BEFORE current SR session (typed + prior sessions)
   const wasListeningRef = useRef(false);
+  const restartTimerRef = useRef<any>(null);
+  const lastResultAtRef = useRef<number>(0);
 
   const getSR = () =>
     (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
   const supportsDictation = typeof window !== 'undefined' && !!getSR();
+  const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -59,52 +62,112 @@ export function VoiceDiaryModule() {
 
   useEffect(() => { load(); }, [load]);
 
+  const buildRecognizer = () => {
+    const SR = getSR();
+    const r = new SR();
+    r.lang = 'en-ZA';
+    // Continuous mode is unreliable on Android Chrome and causes runaway duplicates
+    // ("I I am I am now I am now using"). Use single-utterance + auto-restart instead.
+    r.continuous = !isAndroid;
+    r.interimResults = true;
+    r.maxAlternatives = 1;
+
+    r.onresult = (e: any) => {
+      lastResultAtRef.current = Date.now();
+      // Rebuild from the FULL results list this session — never append deltas.
+      // This kills the Android "growing-final" duplication bug.
+      let sessionFinal = '';
+      let sessionInterim = '';
+      for (let i = 0; i < e.results.length; i++) {
+        const t = (e.results[i][0]?.transcript || '').trim();
+        if (!t) continue;
+        if (e.results[i].isFinal) sessionFinal += (sessionFinal ? ' ' : '') + t;
+        else sessionInterim += (sessionInterim ? ' ' : '') + t;
+      }
+      const base = committedRef.current;
+      const sep = base && !base.endsWith(' ') ? ' ' : '';
+      setContent((base + sep + sessionFinal).replace(/\s+/g, ' ').trimStart());
+      setInterim(sessionInterim);
+    };
+
+    r.onerror = (ev: any) => {
+      if (ev?.error === 'not-allowed' || ev?.error === 'service-not-allowed') {
+        toast.error('Microphone blocked. Allow mic access in your browser.');
+        wasListeningRef.current = false;
+        setListening(false);
+      } else if (ev?.error === 'no-speech' || ev?.error === 'aborted') {
+        // benign — onend will restart if still listening
+      } else if (ev?.error === 'network') {
+        toast.error('Speech network error. Check connection.');
+      }
+    };
+
+    r.onend = () => {
+      // Commit this session's final text into committedRef so the next
+      // session starts with a clean results array but keeps what was said.
+      // We read what's currently in content (which already includes the session final).
+      committedRef.current = '';  // will be reset by handler below using setContent callback
+      setContent((curr) => {
+        committedRef.current = curr;
+        return curr;
+      });
+      setInterim('');
+
+      if (wasListeningRef.current) {
+        // Auto-restart for long dictations (>60s). Small delay avoids
+        // "InvalidStateError: recognition has already started" on some browsers.
+        if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+        restartTimerRef.current = setTimeout(() => {
+          if (!wasListeningRef.current) return;
+          try {
+            recRef.current = buildRecognizer();
+            recRef.current.start();
+          } catch {
+            // last-ditch: try again shortly
+            restartTimerRef.current = setTimeout(() => {
+              if (!wasListeningRef.current) return;
+              try { recRef.current = buildRecognizer(); recRef.current.start(); } catch { /* give up */ }
+            }, 400);
+          }
+        }, 120);
+      } else {
+        setListening(false);
+      }
+    };
+
+    return r;
+  };
+
   const startDictate = () => {
     const SR = getSR();
-    if (!SR) { toast.error('Dictation not supported in this browser'); return; }
+    if (!SR) { toast.error('Dictation not supported in this browser. Try Chrome.'); return; }
     try {
-      const r = new SR();
-      r.lang = 'en-ZA';
-      r.continuous = true;
-      r.interimResults = true;
-      baseRef.current = content ? content + (content.endsWith(' ') ? '' : ' ') : '';
-      r.onresult = (e: any) => {
-        let finalT = '', interimT = '';
-        for (let i = e.resultIndex; i < e.results.length; i++) {
-          const t = e.results[i][0].transcript;
-          if (e.results[i].isFinal) finalT += t + ' '; else interimT += t;
-        }
-        if (finalT) { baseRef.current += finalT; setContent(baseRef.current); }
-        setInterim(interimT);
-      };
-      r.onerror = (ev: any) => {
-        if (ev?.error === 'not-allowed') toast.error('Microphone blocked. Allow mic access.');
-      };
-      r.onend = () => {
-        if (wasListeningRef.current) {
-          try { r.start(); } catch { /* swallow */ }
-        } else {
-          setListening(false);
-          setInterim('');
-        }
-      };
+      // Seed committed with whatever is already typed.
+      committedRef.current = content || '';
       wasListeningRef.current = true;
-      r.start();
-      recRef.current = r;
+      recRef.current = buildRecognizer();
+      recRef.current.start();
       setListening(true);
     } catch (e: any) {
+      wasListeningRef.current = false;
       toast.error(e?.message || 'Could not start dictation');
     }
   };
 
   const stopDictate = () => {
     wasListeningRef.current = false;
+    if (restartTimerRef.current) { clearTimeout(restartTimerRef.current); restartTimerRef.current = null; }
     try { recRef.current?.stop(); } catch { /* ignore */ }
+    try { recRef.current?.abort?.(); } catch { /* ignore */ }
     setListening(false);
     setInterim('');
   };
 
-  useEffect(() => () => { wasListeningRef.current = false; try { recRef.current?.stop(); } catch { /* ignore */ } }, []);
+  useEffect(() => () => {
+    wasListeningRef.current = false;
+    if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+    try { recRef.current?.stop(); } catch { /* ignore */ }
+  }, []);
 
   const save = async () => {
     const text = content.trim();
