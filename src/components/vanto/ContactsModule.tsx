@@ -14,6 +14,7 @@ import { useProfiles, profileLabel, type ProfileOption } from '@/hooks/use-profi
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { downloadVCard, copyContactCard } from '@/lib/vcard';
 import { SuggestedTasksPanel, type SuggestedTaskInput } from './plan/SuggestedTasksPanel';
+import { DictationMic } from './DictationMic';
 
 type Contact = {
   id: string;
