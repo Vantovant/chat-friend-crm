@@ -14,6 +14,7 @@ import { useProfiles, profileLabel, type ProfileOption } from '@/hooks/use-profi
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { downloadVCard, copyContactCard } from '@/lib/vcard';
 import { SuggestedTasksPanel, type SuggestedTaskInput } from './plan/SuggestedTasksPanel';
+import { DictationMic } from './DictationMic';
 
 type Contact = {
   id: string;
@@ -674,28 +675,31 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs font-medium text-muted-foreground">Notes</label>
-              <button
-                type="button"
-                disabled={!form.notes.trim()}
-                title="Read these notes and suggest PLAN tasks (does not replace your notes)"
-                onClick={async () => {
-                  try {
-                    const { data, error } = await supabase.functions.invoke('plan-ai-extract-actions', {
-                      body: { text: form.notes, context: `contact ${contact.name} / lead_type ${form.lead_type}` },
-                    });
-                    if (error) throw error;
-                    const tasks = (data as any)?.tasks || [];
-                    if (!tasks.length) { toast({ title: 'No tasks detected in this note.' }); return; }
-                    setSuggestTasks(tasks);
-                    setSuggestOpen(true);
-                  } catch (e: any) {
-                    toast({ title: 'Failed to suggest tasks', description: e.message, variant: 'destructive' });
-                  }
-                }}
-                className="text-[11px] inline-flex items-center gap-1 text-primary hover:text-primary/80 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <Sparkles className="h-3 w-3" /> Suggest tasks
-              </button>
+              <div className="flex items-center gap-2">
+                <DictationMic value={form.notes} onChange={(v) => set('notes', v)} />
+                <button
+                  type="button"
+                  disabled={!form.notes.trim()}
+                  title="Read these notes and suggest PLAN tasks (does not replace your notes)"
+                  onClick={async () => {
+                    try {
+                      const { data, error } = await supabase.functions.invoke('plan-ai-extract-actions', {
+                        body: { text: form.notes, context: `contact ${contact.name} / lead_type ${form.lead_type}` },
+                      });
+                      if (error) throw error;
+                      const tasks = (data as any)?.tasks || [];
+                      if (!tasks.length) { toast({ title: 'No tasks detected in this note.' }); return; }
+                      setSuggestTasks(tasks);
+                      setSuggestOpen(true);
+                    } catch (e: any) {
+                      toast({ title: 'Failed to suggest tasks', description: e.message, variant: 'destructive' });
+                    }
+                  }}
+                  className="text-[11px] inline-flex items-center gap-1 text-primary hover:text-primary/80 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <Sparkles className="h-3 w-3" /> Suggest tasks
+                </button>
+              </div>
             </div>
             <textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={4} className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 resize-none" />
           </div>
