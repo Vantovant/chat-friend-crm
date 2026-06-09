@@ -407,8 +407,19 @@ export function LeadCallReport() {
     if (fiTo) out = out.filter((r) => r.firstInquiry && r.firstInquiry.slice(0, 10) <= fiTo);
     if (lmFrom) out = out.filter((r) => r.lastMessage && r.lastMessage.slice(0, 10) >= lmFrom);
     if (lmTo) out = out.filter((r) => r.lastMessage && r.lastMessage.slice(0, 10) <= lmTo);
+    const q = search.trim().toLowerCase();
+    if (q) {
+      const qDigits = q.replace(/\D/g, '');
+      out = out.filter((r) => {
+        const name = `${r.name || ''} ${r.first_name || ''} ${r.last_name || ''}`.toLowerCase();
+        if (name.includes(q)) return true;
+        const phoneDigits = (r.phone || '').replace(/\D/g, '');
+        if (qDigits && phoneDigits.includes(qDigits)) return true;
+        return false;
+      });
+    }
     return out;
-  }, [rows, onlyDistributors, fiFrom, fiTo, lmFrom, lmTo]);
+  }, [rows, onlyDistributors, fiFrom, fiTo, lmFrom, lmTo, search]);
 
   const sortedFiltered = useMemo(() => {
     if (sortDir === 'none') return filtered;
