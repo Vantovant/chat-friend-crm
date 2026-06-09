@@ -207,7 +207,7 @@ export function VoiceDiaryModule() {
     });
     if (error) { toast.error(error.message); return; }
     toast.success('Entry saved');
-    setTitle(''); setContent('');
+    setTitle(''); updateContent(''); committedRef.current = '';
     load();
   };
 
