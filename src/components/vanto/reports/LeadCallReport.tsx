@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { ArrowDown, ArrowUp, ArrowUpDown, Download, Printer, RefreshCw, Star, Phone, Sparkles, Pencil, ClipboardPaste, Mic, Square, UserCog, UserPlus } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, Printer, RefreshCw, Star, Phone, Sparkles, Pencil, ClipboardPaste, Mic, Square, UserCog, UserPlus, Search, X } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { toast } from 'sonner';
@@ -147,6 +147,7 @@ export function LeadCallReport() {
   const [savingEdit, setSavingEdit] = useState(false);
   const [stages, setStages] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [dictating, setDictating] = useState(false);
+  const [search, setSearch] = useState('');
   const recRef = useRef<any>(null);
   const dictateBaseRef = useRef<string>('');
 
@@ -406,8 +407,19 @@ export function LeadCallReport() {
     if (fiTo) out = out.filter((r) => r.firstInquiry && r.firstInquiry.slice(0, 10) <= fiTo);
     if (lmFrom) out = out.filter((r) => r.lastMessage && r.lastMessage.slice(0, 10) >= lmFrom);
     if (lmTo) out = out.filter((r) => r.lastMessage && r.lastMessage.slice(0, 10) <= lmTo);
+    const q = search.trim().toLowerCase();
+    if (q) {
+      const qDigits = q.replace(/\D/g, '');
+      out = out.filter((r) => {
+        const name = `${r.name || ''} ${r.first_name || ''} ${r.last_name || ''}`.toLowerCase();
+        if (name.includes(q)) return true;
+        const phoneDigits = (r.phone || '').replace(/\D/g, '');
+        if (qDigits && phoneDigits.includes(qDigits)) return true;
+        return false;
+      });
+    }
     return out;
-  }, [rows, onlyDistributors, fiFrom, fiTo, lmFrom, lmTo]);
+  }, [rows, onlyDistributors, fiFrom, fiTo, lmFrom, lmTo, search]);
 
   const sortedFiltered = useMemo(() => {
     if (sortDir === 'none') return filtered;
@@ -695,6 +707,26 @@ export function LeadCallReport() {
         <Button variant="ghost" size="sm" onClick={() => { setFiFrom(''); setFiTo(''); setLmFrom(''); setLmTo(''); }}>
           Reset dates
         </Button>
+        <div className="relative ml-auto w-full sm:w-72">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search name or phone…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-9 w-full rounded-md border border-input bg-background pl-8 pr-8 py-1 text-sm text-foreground"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              aria-label="Clear search"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="rounded-lg border border-border bg-card">
