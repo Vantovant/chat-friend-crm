@@ -707,6 +707,26 @@ export function LeadCallReport() {
         <Button variant="ghost" size="sm" onClick={() => { setFiFrom(''); setFiTo(''); setLmFrom(''); setLmTo(''); }}>
           Reset dates
         </Button>
+        <div className="relative ml-auto w-full sm:w-72">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search name or phone…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-9 w-full rounded-md border border-input bg-background pl-8 pr-8 py-1 text-sm text-foreground"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              aria-label="Clear search"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="rounded-lg border border-border bg-card">
