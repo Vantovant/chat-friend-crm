@@ -379,8 +379,26 @@ function ThreadView({
           <p className="text-xs text-muted-foreground truncate">{contact?.phone || ''}</p>
         </div>
         {contact?.id && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent('vanto:navigate', { detail: { module: 'contacts' } }));
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent('vanto:open-contact', {
+                  detail: { contactId: contact.id, phone: contact.phone },
+                }));
+              }, 80);
+            }}
+            title="Open this contact in Contacts (edit name, details, etc.)"
+          >
+            <UserCog size={14} className="mr-1" /> Edit contact
+          </Button>
+        )}
+        {contact?.id && (
           <AutoReplyToggle contactId={contact.id} contactName={contact.name} compact />
         )}
+
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
         {items.map((m) => {
