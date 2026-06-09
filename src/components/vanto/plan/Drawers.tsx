@@ -6,8 +6,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import {
-  Check, Edit2, Trash2, Clock, ArrowRightLeft, CalendarPlus, Sparkles, ListPlus, Save, X,
+  Check, Edit2, Trash2, Clock, ArrowRightLeft, CalendarPlus, Sparkles, ListPlus, Save, X, UserCog,
 } from 'lucide-react';
+
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
