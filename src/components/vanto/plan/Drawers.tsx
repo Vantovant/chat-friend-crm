@@ -97,6 +97,29 @@ export function TaskDetailDrawer({
               <Field label="Created">{format(new Date(task.created_at), 'MMM d, yyyy')}</Field>
               <Field label="Source">{task.source || 'manual'}</Field>
             </div>
+            {task.source_ref?.contact_id && (
+              <div className="rounded-lg border border-primary/40 bg-primary/5 p-3 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Linked contact</p>
+                  <p className="text-sm font-medium truncate">{task.source_ref?.contact_name || 'Open contact'}</p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const contactId = task.source_ref.contact_id;
+                    window.dispatchEvent(new CustomEvent('vanto:navigate', { detail: { module: 'contacts' } }));
+                    setTimeout(() => {
+                      window.dispatchEvent(new CustomEvent('vanto:open-contact', { detail: { contactId } }));
+                    }, 80);
+                    onClose();
+                  }}
+                >
+                  <UserCog className="h-4 w-4 mr-1" /> Edit Contact
+                </Button>
+              </div>
+            )}
+
           </div>
         ) : (
           <div className="mt-4 space-y-3">
