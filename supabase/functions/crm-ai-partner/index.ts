@@ -386,11 +386,12 @@ Deno.serve(async (req) => {
   const rawPrompt = String(lastUser?.content || '');
   const { cleaned, tags } = parseTags(rawPrompt);
   const mode = detectMode(cleaned || rawPrompt, tags, isAdmin);
+  const scope = detectInboxScope(cleaned || rawPrompt, tags);
 
-  console.log(`[crm-ai-partner] user=${userId} mode=${mode} tags=${JSON.stringify(tags)}`);
+  console.log(`[crm-ai-partner] user=${userId} mode=${mode} tags=${JSON.stringify(tags)} scope=${JSON.stringify(scope)}`);
 
   // Retrieve
-  const { context, meta } = await retrieveAll(admin, userId, cleaned || rawPrompt, mode, isAdmin);
+  const { context, meta } = await retrieveAll(admin, userId, cleaned || rawPrompt, mode, isAdmin, scope);
 
   let systemContent = SYSTEM_PROMPT;
   if (mode === 'daily_review') systemContent += DAILY_REVIEW_SUPPLEMENT;
