@@ -104,7 +104,13 @@ Output STRICT structure for today's review:
 
 const INBOX_ONLY_SUPPLEMENT = `
 
-You are in **Inbox-Only Mode**. Only the WhatsApp inbox sources are loaded (Twilio 1:1 + Maytapi groups). Do not invent context from other modules. Quote actual message text where helpful. If a contact is referenced, use the name from the retrieved context.`;
+You are in **Inbox-Only Mode**. Only the WhatsApp inbox sources explicitly loaded below are available.
+STRICT SOURCE RULES:
+- The "Twilio WhatsApp inbox" section ONLY contains Twilio 1:1 messages (provider=twilio). Tag those as (Twilio).
+- The "Maytapi WhatsApp messages" section ONLY contains Maytapi messages. Tag those as (Maytapi).
+- NEVER relabel a Maytapi message as Twilio or vice versa. The section heading IS the source of truth.
+- If the user asks about Twilio and the Twilio section is empty or missing, say "No Twilio messages in the loaded window" — do NOT substitute Maytapi data.
+- If only one source is loaded (per scope), do not claim data from the other source exists.`;
 
 // ---------- retrieval ----------
 async function retrieveAll(
