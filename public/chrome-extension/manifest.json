@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Vanto CRM — WhatsApp Sidebar (Lovable)",
-  "version": "6.3.2",
-  "description": "AI-powered CRM sidebar for WhatsApp Web - Lovable Edition v6.3.2 - Name sync fallback opens 1-on-1 chats when WhatsApp hides phone IDs",
-  "permissions": ["storage", "activeTab", "tabs", "alarms", "scripting"],
+  "name": "Vanto CRM — WhatsApp Sidebar (MVP)",
+  "version": "7.0.0",
+  "description": "Lightweight MVP: capture the open WhatsApp chat contact (name + phone) into Vanto CRM. No chat scanning, no automation.",
+  "permissions": ["storage", "activeTab"],
   "host_permissions": [
     "https://web.whatsapp.com/*",
     "https://nqyyvqcmcyggvlcswkio.supabase.co/*"
