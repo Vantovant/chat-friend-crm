@@ -30,7 +30,16 @@ const ReportsModule = lazy(() => import('@/components/vanto/ReportsModule').then
 const ProspectorDraftsModule = lazy(() => import('@/components/vanto/ProspectorDraftsModule').then(m => ({ default: m.ProspectorDraftsModule })));
 const PlanModule = lazy(() => import('@/components/vanto/PlanModule').then(m => ({ default: m.PlanModule })));
 const VoiceDiaryModule = lazy(() => import('@/components/vanto/VoiceDiaryModule').then(m => ({ default: m.VoiceDiaryModule })));
+
 import { Bot } from 'lucide-react';
+
+const ModuleFallback = () => (
+  <div className="h-full w-full flex items-center justify-center">
+    <div className="w-10 h-10 rounded-xl vanto-gradient flex items-center justify-center shadow animate-pulse">
+      <Bot size={20} className="text-primary-foreground" />
+    </div>
+  </div>
+);
 
 const pathToModule: Record<string, Module> = {
   '/maytapi-inbox': 'maytapi-inbox',
