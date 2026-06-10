@@ -132,7 +132,7 @@ const Index = () => {
           <div className="absolute top-14 right-2 z-30">
             <PageHelpButton page={activeModule} />
           </div>
-          {renderModule()}
+          <Suspense fallback={<ModuleFallback />}>{renderModule()}</Suspense>
         </main>
       </div>
     );
@@ -145,7 +145,7 @@ const Index = () => {
         <div className="absolute top-3 right-3 z-30">
           <PageHelpButton page={activeModule} />
         </div>
-        {renderModule()}
+        <Suspense fallback={<ModuleFallback />}>{renderModule()}</Suspense>
       </main>
     </div>
   );
