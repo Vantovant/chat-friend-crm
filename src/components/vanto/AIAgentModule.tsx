@@ -5,6 +5,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import ReactMarkdown from 'react-markdown';
 import { DictateMessage } from './DictateMessage';
+import { PhDPartnerTab } from './ai-agent/PhDPartnerTab';
 
 interface AIMessage {
   id: string;
@@ -47,7 +48,7 @@ export function AIAgentModule() {
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'chat' | 'config'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'partner' | 'config'>('chat');
   const [crmContext, setCrmContext] = useState('');
   const [showDictate, setShowDictate] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(true);
@@ -255,13 +256,13 @@ export function AIAgentModule() {
           </div>
         </div>
         <div className="flex gap-1 shrink-0">
-          {(['chat', 'config'] as const).map(tab => (
+          {(['chat', 'partner', 'config'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={cn('px-2.5 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors capitalize', activeTab === tab ? 'bg-primary/15 text-primary border border-primary/30' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60')}
             >
-              {tab === 'chat' ? '💬 Chat' : '⚙️ Config'}
+              {tab === 'chat' ? '💬 Classic' : tab === 'partner' ? '🎓 PhD Partner' : '⚙️ Config'}
             </button>
           ))}
         </div>
@@ -442,6 +443,8 @@ export function AIAgentModule() {
             </div>
           </div>
         </>
+      ) : activeTab === 'partner' ? (
+        <PhDPartnerTab />
       ) : (
         <div className="flex-1 overflow-y-auto p-6 space-y-4">
           <AIConfigSection title="Model Settings">

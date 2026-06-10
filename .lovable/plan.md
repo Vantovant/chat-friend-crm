@@ -1,82 +1,62 @@
-# PLAN Module for Vanto CRM — Build Plan
+## Vanto CRM — AI Agent Upgrade (PhD Partner Mode)
 
-Adapted from Zazi Mail's Plan spec, fitted to Vanto CRM's domain (WhatsApp/MLM CRM, lead pipeline, reports, contacts, Lovable AI Gateway).
+**User priority:** the AI Agent must be **fully able to read WhatsApp chats** from both the Twilio inbox (`messages`/`conversations`) and the Maytapi inbox (`maytapi_messages`). The PDF spec is the broader target; this plan ships the WhatsApp-reading capability first inside a non-destructive new mode.
 
-## Goal
+Issue category: **Backend (edge function + retrieval) + UI (new tab in AI Agent page)**.
 
-Replace the **Maytapi Unmatched** sidebar entry with a new **PLAN** Command Centre that:
-- Manages tasks, reminders, meetings, daily notes for the operator.
-- Reads **Lead Call Report notes** (and contact notes) to auto-suggest tasks — without overwriting existing notes flow.
-- Connects to the existing **AI Agent**, upgraded to a "PhD specialist" on all Vanto modules (Contacts, CRM pipeline, Reports, Inbox, Workflows, Automations, Group Campaigns, Knowledge Vault, Zazi sync).
-- Embeds a **PhD Partner** side-panel inside PLAN that uses the upgraded agent.
+### Preservation rule (from spec §5)
+- `AIAgentModule.tsx` and `ai-chat` edge function stay **untouched**.
+- New work ships as a second tab inside the AI Agent page → "PhD Partner".
 
-Maytapi Unmatched stays in the database and remains reachable via Settings (kept, just removed from main nav) — no data loss.
+---
 
-## Phases
+### Phase 1 — WhatsApp-aware retrieval (this turn)
 
-### Phase 1 — Database & Backend
-1. Migration: create `plan_tasks`, `plan_reminders`, `plan_meetings`, `plan_notes` (4 tables, RLS scoped to `auth.uid()`, GRANTs to authenticated + service_role, `updated_at` triggers, indexes per spec).
-2. Add `source_ref jsonb` on `plan_tasks` to link tasks back to a contact / lead_call_summary / message (Vanto-specific addition).
-3. Edge function `plan-ai-extract-actions`: takes raw text (note / dictated voice / report summary), returns structured `{tasks[], reminders[], meetings[]}`. Uses Lovable AI Gateway (`google/gemini-3-flash-preview`). POPIA redaction of phone/email before model call.
-4. Edge function `plan-suggest-from-notes`: scheduled-callable; reads recent `lead_call_summaries` + `contact_activity` notes for the user, returns suggested tasks (no auto-insert; user confirms).
-5. Upgrade existing `ai-chat` edge function: extend system prompt to "PhD specialist" covering all Vanto modules, lead types, MLM pipeline (Prospect → Registered → Purchase_Nostatus → Purchase_Status), Twilio/Maytapi delivery rules, Zazi sync. Add `mode: 'plan_partner'` that injects PLAN context (top 10 pending tasks, next 5 meetings, today's reminders, last 5 lead-call notes).
+**1. New edge function `crm-ai-partner`**
+- Validates JWT via `supabase.auth.getUser()`.
+- Server-side intent detection (regex packs from spec §10) → modes: `daily_review`, `inbox_only`, `trainer` (admin), default `crm_strategist`.
+- Parallel retrieval (`Promise.all`, 10 KB cap, PII redaction for phone/email/IDs):
+  1. `contacts` (filter `is_deleted=false`, optional tag/segment filter)
+  2. `pipeline_stages` counts
+  3. **`messages` (Twilio 1:1)** — last 100, joined to `contacts` for name, with `direction`, `body`, `created_at`, 24h-window flag
+  4. **`maytapi_messages`** — last 100, with `group_name`, `from_name`, `body`, `direction`, `timestamp`
+  5. `conversations` — last 50 with `unread_count`, `last_message`, `status`
+  6. `ai_suggestions` (pending Master Prospector drafts)
+  7. `ai_trainer_rules` (admin only)
+  8. `knowledge_files` + `search_knowledge` RPC (explicit `@doc:` / `refer to "X"` detection)
+  9. `lead_call_summaries` (last 30 days)
+  10. `plan_tasks` / `plan_reminders` / `plan_meetings`
+- Inbox-only mode skips everything except the two WhatsApp sources.
+- Stream via SSE: `{type:"text"}` deltas + final `{type:"retrieval_meta"}` frame.
+- Model: `google/gemini-2.5-flash` (chat). Handle 429/402 explicitly.
+- System prompt = CRM Strategist variant from spec §1.5 (13 rules, retargeted at CRM modules).
 
-### Phase 2 — Sidebar swap & route
-1. `src/lib/vanto-data.ts`: replace `'maytapi-unmatched'` with `'plan'` in the `Module` union (keep the maytapi-unmatched module type so existing code compiles; just remove from sidebar nav).
-2. `AppSidebar.tsx`: replace the Maytapi Unmatched entry with **PLAN** (icon: `CalendarCheck` or `ListTodo`).
-3. `Index.tsx`: route `'plan'` → `<PlanModule />`.
-4. Add deep route `/plan` in `App.tsx`.
+**2. DB migration — thread persistence**
+- `crm_partner_threads` (id, user_id, title, pinned, archived, last_message_at, timestamps)
+- `crm_partner_messages` (id, thread_id, user_id, role, content, retrieval_meta jsonb, created_at)
+- RLS: every row scoped to `auth.uid()`. Grants for `authenticated` + `service_role`.
 
-### Phase 3 — PLAN module UI
-1. `src/hooks/usePlanData.ts` — `useTasks`, `useReminders`, `useMeetings`, `useNotes` (matching spec §5; dedup guard on task `create`).
-2. `src/components/vanto/plan/PlanModule.tsx` — header + tabs (URL-driven `?tab=`): **Today / Tasks / Reminders / Meetings / Calendar / Notes / Suggestions**.
-3. Sub-components: `TodayTab`, `TasksTab`, `RemindersTab`, `MeetingsTab`, `CalendarTab`, `NotesTab`, `SuggestionsTab`.
-4. `CommandBar` (Cmd+K) overlay — unified search across tasks/reminders/meetings/notes + quick-create + nav.
-5. `CommandMic` — voice intent (Web Speech API) → `plan-ai-extract-actions` → confirm card → insert (never auto-commit).
-6. `InsiderPanel` → **"PhD Partner"** side rail: chat thread powered by upgraded `ai-chat` with `mode: 'plan_partner'`. Secretary Mode toggle (morning briefing once per day, persisted to localStorage).
+**3. UI — new tab in AI Agent page**
+- `src/components/vanto/ai-agent/PhDPartnerTab.tsx` — chat panel with:
+  - Threads sidebar (list, new, pin, archive, auto-title from first prompt)
+  - SSE streaming renderer (reuse react-markdown)
+  - Context-tag chips: `@all-contacts`, `@inbox`, `@maytapi`, `@knowledge`, `@trainer` (admin), inline tag parsing
+  - Retrieval-meta badges under each assistant message ("Sources: inbox, maytapi, knowledge_base")
+  - Reuse `DictationMic` for voice input
+- `AIAgentModule.tsx` gets a `Tabs` wrapper: **Classic AI Agent** (unchanged) | **PhD Partner**.
 
-### Phase 4 — Reports & Contacts wiring (no-replace)
-1. In `LeadCallReport.tsx`: add a **"Suggest tasks from this note"** button next to the existing Notes textarea. Calls `plan-ai-extract-actions` with the note + contact context. Returns confirm card → on accept inserts into `plan_tasks` with `source_ref = {kind:'lead_call', contact_id, summary_id}`. Existing notes-to-contact behaviour is untouched.
-2. In `ContactsModule` contact drawer (lightweight): add the same "Suggest tasks" affordance on the notes field.
-3. **Suggestions tab** in PLAN: lists pending suggestions from `plan-suggest-from-notes` across all recent notes — user one-click promotes to a real task.
+**Acceptance for Phase 1:**
+- Ask "summarise my WhatsApp inbox today" → answer cites real Twilio + Maytapi messages from the database.
+- Ask "what's happening in group X" → pulls Maytapi messages for that group.
+- Existing Classic AI Agent tab works exactly as before.
+- Threads persist across reload, RLS-scoped.
 
-### Phase 5 — AI Agent upgrade
-1. `AIAgentModule.tsx`: extend system prompt to PhD-specialist persona; add module-aware tools (lookup contact, lookup pipeline stage, summarise inbox for a number, list today's PLAN items).
-2. Knowledge Vault: ensure module spec docs (`docs/MODULE_SPECS.md`, etc.) are seeded as a `vanto_internal` collection so RAG citations work for "how does X work in Vanto?".
-3. PhD Partner panel in PLAN consumes the same agent backend — single source of truth.
+---
 
-### Phase 6 — QA & download
-1. Smoke test: cross-user RLS, dedup, Cmd+K speed, voice → confirm round-trip, calendar dot rendering, note autosave (~800ms), Suggestion promote → task insert, PhD Partner morning briefing.
-2. Generate a downloadable PDF copy of this plan into `/mnt/documents/Vanto_PLAN_Spec_v1.pdf` so you can share it.
+### Phase 2 (later, not this turn)
+- Structured tool-call modes: `weekly_pipeline_focus`, `pipeline_scan`, `compare_segments`.
+- `crm_partner_scores` + `crm_partner_score_history` + Scores tab.
+- `crm_partner_briefing_settings` + Briefing tab (weekly digest via WA/email).
+- Central Brain admin mode.
 
-## Vanto-specific deltas vs Zazi spec
-
-| Area | Vanto change |
-|---|---|
-| Source | `plan_tasks.source` adds `'lead_call'` and `'contact_activity'` |
-| Linking | `source_ref jsonb` on tasks to reach back to `contacts` / `lead_call_summaries` |
-| AI Provider | Lovable AI Gateway (no extra secrets); model `google/gemini-3-flash-preview` |
-| Domain prompt | PhD specialist trained on MLM lead types, APLGO product, Twilio + Maytapi delivery rules, Zazi sync |
-| Suggestions | Driven by lead-call notes + contact_activity (Vanto's audit trail), not generic email |
-| Sidebar | Replace Maytapi Unmatched (kept in DB; not deleted) with PLAN |
-
-## Technical notes
-
-- All 4 PLAN tables use the exact RLS + GRANT pattern from §4.5 of the spec.
-- No CHECK constraints with `now()`; use trigger validators if needed.
-- Edge functions reuse existing `LOVABLE_API_KEY` secret. No new secrets required.
-- `plan-ai-extract-actions` must redact `+\d{7,}` and email regex before sending text to the model.
-- Insert workflow always uses a **confirmation card**; never auto-write from voice/AI.
-- PhD Partner panel is route-scoped to PLAN — global help button stays unchanged elsewhere.
-
-## Deliverables on approval
-
-- 1 migration (4 tables, policies, grants, triggers, indexes)
-- 2 new edge functions + 1 upgraded (`ai-chat`)
-- 1 new sidebar entry + 1 route
-- ~10 new React files under `src/components/vanto/plan/`
-- 1 hook file `usePlanData.ts`
-- 2 minor edits: `LeadCallReport.tsx`, `ContactsModule.tsx` (additive only)
-- Downloadable spec PDF at `/mnt/documents/Vanto_PLAN_Spec_v1.pdf`
-
-Approve to proceed, or tell me which phases to defer.
+I will start with the DB migration, then the edge function, then the UI tab.
