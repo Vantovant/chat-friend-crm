@@ -256,13 +256,13 @@ export function AIAgentModule() {
           </div>
         </div>
         <div className="flex gap-1 shrink-0">
-          {(['chat', 'config'] as const).map(tab => (
+          {(['chat', 'partner', 'config'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={cn('px-2.5 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-colors capitalize', activeTab === tab ? 'bg-primary/15 text-primary border border-primary/30' : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60')}
             >
-              {tab === 'chat' ? '💬 Chat' : '⚙️ Config'}
+              {tab === 'chat' ? '💬 Classic' : tab === 'partner' ? '🎓 PhD Partner' : '⚙️ Config'}
             </button>
           ))}
         </div>
