@@ -5,8 +5,8 @@ import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { ArrowDown, ArrowUp, ArrowUpDown, Download, Printer, RefreshCw, Star, Phone, Sparkles, Pencil, ClipboardPaste, Mic, Square, UserCog, UserPlus, Search, X } from 'lucide-react';
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
+// jspdf + jspdf-autotable are dynamically imported inside generatePDF()
+// to keep them out of the initial bundle (heavy on Android first paint).
 import { toast } from 'sonner';
 import { LEAD_TYPES, type LeadType } from '@/lib/vanto-data';
 import { SuggestedTasksPanel, type SuggestedTaskInput } from '@/components/vanto/plan/SuggestedTasksPanel';
@@ -492,6 +492,10 @@ export function LeadCallReport() {
   async function generatePDF() {
     setGenerating(true);
     try {
+      const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+        import('jspdf'),
+        import('jspdf-autotable'),
+      ]);
       const doc = new jsPDF({ unit: 'pt', format: 'a4' });
       const W = doc.internal.pageSize.getWidth();
       const H = doc.internal.pageSize.getHeight();
