@@ -48,7 +48,7 @@ export function AIAgentModule() {
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'chat' | 'config'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'partner' | 'config'>('chat');
   const [crmContext, setCrmContext] = useState('');
   const [showDictate, setShowDictate] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(true);
