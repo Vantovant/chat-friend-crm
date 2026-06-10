@@ -113,6 +113,7 @@ async function retrieveAll(
   prompt: string,
   mode: string,
   isAdmin: boolean,
+  scope: { twilio: boolean; maytapi: boolean },
 ) {
   const sources: string[] = [];
   const sections: string[] = [];
@@ -121,6 +122,7 @@ async function retrieveAll(
     data_sources: [],
     docs_used: [],
     missing_docs: [],
+    inbox_scope: scope,
   };
 
   const todayStart = new Date();
@@ -131,56 +133,69 @@ async function retrieveAll(
 
   const tasks: Promise<void>[] = [];
 
-  // 1. Twilio inbox messages (last 80, joined contact name)
-  tasks.push(
-    (async () => {
-      const limit = mode === 'daily_review' ? 60 : 80;
-      const { data, error } = await admin
-        .from('messages')
-        .select('id, content, is_outbound, status, created_at, provider, conversation_id, conversations:conversation_id(contact_id, last_message_at, contacts:contact_id(name, phone_normalized, lead_type))')
-        .order('created_at', { ascending: false })
-        .limit(limit);
-      if (error || !data?.length) return;
-      const lines = data
-        .filter((m: any) => m.content)
-        .map((m: any) => {
-          const c = m.conversations?.contacts;
-          const who = c?.name || c?.phone_normalized || 'unknown';
-          const dir = m.is_outbound ? 'AGENT→' : '→PROSPECT';
-          const ts = new Date(m.created_at).toISOString().slice(5, 16).replace('T', ' ');
-          return `[${ts}] ${dir} ${redact(who)} (Twilio): ${redact(String(m.content).slice(0, 220))}`;
-        });
-      if (lines.length) {
-        sections.push(`## Twilio WhatsApp inbox (last ${lines.length})\n${lines.join('\n')}`);
-        sources.push('twilio_inbox');
-      }
-    })(),
-  );
+  // 1. Twilio inbox messages — STRICTLY provider='twilio'
+  if (scope.twilio) {
+    tasks.push(
+      (async () => {
+        const limit = mode === 'daily_review' ? 60 : 80;
+        const { data, error } = await admin
+          .from('messages')
+          .select('id, content, is_outbound, status, created_at, provider, conversation_id, conversations:conversation_id(contact_id, last_message_at, contacts:contact_id(name, phone_normalized, lead_type))')
+          .eq('provider', 'twilio')
+          .order('created_at', { ascending: false })
+          .limit(limit);
+        if (error || !data?.length) {
+          if (error) console.error('[crm-ai-partner] twilio query error', error);
+          return;
+        }
+        const lines = data
+          .filter((m: any) => m.content)
+          .map((m: any) => {
+            const c = m.conversations?.contacts;
+            const who = c?.name || c?.phone_normalized || 'unknown';
+            const dir = m.is_outbound ? 'AGENT→' : '→PROSPECT';
+            const ts = new Date(m.created_at).toISOString().slice(5, 16).replace('T', ' ');
+            return `[${ts}] ${dir} ${redact(who)} (Twilio): ${redact(String(m.content).slice(0, 220))}`;
+          });
+        if (lines.length) {
+          sections.push(`## Twilio WhatsApp inbox (last ${lines.length}, provider=twilio ONLY)\n${lines.join('\n')}`);
+          sources.push('twilio_inbox');
+        } else {
+          sections.push(`## Twilio WhatsApp inbox\n(no Twilio messages found)`);
+        }
+      })(),
+    );
+  }
 
-  // 2. Maytapi group + 1:1 messages (last 80)
-  tasks.push(
-    (async () => {
-      const limit = mode === 'daily_review' ? 60 : 80;
-      const { data, error } = await admin
-        .from('maytapi_messages')
-        .select('id, body, direction, received_at, phone_e164, conversation_key, contact_id, contacts:contact_id(name)')
-        .order('received_at', { ascending: false })
-        .limit(limit);
-      if (error || !data?.length) return;
-      const lines = data
-        .filter((m: any) => m.body)
-        .map((m: any) => {
-          const name = m.contacts?.name || m.phone_e164 || m.conversation_key || 'unknown';
-          const dir = m.direction === 'out' ? 'AGENT→' : '→PROSPECT';
-          const ts = m.received_at ? new Date(m.received_at).toISOString().slice(5, 16).replace('T', ' ') : '?';
-          return `[${ts}] ${dir} ${redact(name)} (Maytapi): ${redact(String(m.body).slice(0, 220))}`;
-        });
-      if (lines.length) {
-        sections.push(`## Maytapi WhatsApp messages (last ${lines.length})\n${lines.join('\n')}`);
-        sources.push('maytapi');
-      }
-    })(),
-  );
+  // 2. Maytapi messages — from messages table (provider='maytapi') + maytapi_messages
+  if (scope.maytapi) {
+    tasks.push(
+      (async () => {
+        const limit = mode === 'daily_review' ? 60 : 80;
+        // Prefer dedicated maytapi_messages table
+        const { data: mt } = await admin
+          .from('maytapi_messages')
+          .select('id, body, direction, received_at, phone_e164, conversation_key, contact_id, contacts:contact_id(name)')
+          .order('received_at', { ascending: false })
+          .limit(limit);
+        const lines: string[] = [];
+        if (mt?.length) {
+          for (const m of mt) {
+            if (!m.body) continue;
+            const name = m.contacts?.name || m.phone_e164 || m.conversation_key || 'unknown';
+            const dir = m.direction === 'out' ? 'AGENT→' : '→PROSPECT';
+            const ts = m.received_at ? new Date(m.received_at).toISOString().slice(5, 16).replace('T', ' ') : '?';
+            lines.push(`[${ts}] ${dir} ${redact(name)} (Maytapi): ${redact(String(m.body).slice(0, 220))}`);
+          }
+        }
+        if (lines.length) {
+          sections.push(`## Maytapi WhatsApp messages (last ${lines.length})\n${lines.join('\n')}`);
+          sources.push('maytapi');
+        }
+      })(),
+    );
+  }
+
 
   if (!skipMost) {
     // 3. Conversation overview (active + unread)
