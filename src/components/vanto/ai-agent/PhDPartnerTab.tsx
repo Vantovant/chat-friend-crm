@@ -295,15 +295,13 @@ export function PhDPartnerTab() {
         {/* Mobile top bar with history toggle + tags */}
         <div className="px-2 py-2 border-b border-border flex items-center gap-1.5 shrink-0 overflow-x-auto">
           {isMobile && (
-            <SheetTrigger asChild>
-              <button
-                onClick={() => setHistoryOpen(true)}
-                className="flex items-center gap-1 px-2 py-1 rounded-md bg-primary/15 text-primary border border-primary/30 text-[11px] font-medium shrink-0"
-                title="Chat history"
-              >
-                <History size={12} /> History
-              </button>
-            </SheetTrigger>
+            <button
+              onClick={() => setHistoryOpen(true)}
+              className="flex items-center gap-1 px-2 py-1 rounded-md bg-primary/15 text-primary border border-primary/30 text-[11px] font-medium shrink-0"
+              title="Chat history"
+            >
+              <History size={12} /> History
+            </button>
           )}
           <div className="flex flex-wrap gap-1.5">
             {TAG_CHIPS.map(({ tag, label, icon: Icon }) => {
