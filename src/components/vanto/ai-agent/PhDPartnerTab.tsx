@@ -1,13 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Bot, Send, Loader2, Plus, Pin, PinOff, Archive, Trash2,
-  MessageCircle, Inbox as InboxIcon, Users, BookOpen, GraduationCap, Database,
+  MessageCircle, Inbox as InboxIcon, Users, BookOpen, GraduationCap, Database, History,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import ReactMarkdown from 'react-markdown';
 import { DictationMic } from '../DictationMic';
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface Thread {
   id: string;
@@ -36,6 +38,7 @@ const TAG_CHIPS: { tag: string; label: string; icon: any }[] = [
 ];
 
 export function PhDPartnerTab() {
+  const isMobile = useIsMobile();
   const [threads, setThreads] = useState<Thread[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<PartnerMessage[]>([]);
@@ -43,12 +46,12 @@ export function PhDPartnerTab() {
   const [activeTags, setActiveTags] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [streaming, setStreaming] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const scroll = useCallback(() => endRef.current?.scrollIntoView({ behavior: 'smooth' }), []);
 
-  // Load threads
   const loadThreads = useCallback(async () => {
     const { data, error } = await supabase
       .from('crm_partner_threads')
@@ -66,7 +69,6 @@ export function PhDPartnerTab() {
 
   useEffect(() => { loadThreads(); }, [loadThreads]);
 
-  // Load messages for active thread
   useEffect(() => {
     if (!activeId) { setMessages([]); return; }
     (async () => {
@@ -94,6 +96,7 @@ export function PhDPartnerTab() {
     setThreads(t => [data as Thread, ...t]);
     setActiveId(data.id);
     setMessages([]);
+    setHistoryOpen(false);
   };
 
   const togglePin = async (t: Thread) => {
@@ -117,6 +120,11 @@ export function PhDPartnerTab() {
     setActiveTags(prev => prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]);
   };
 
+  const selectThread = (id: string) => {
+    setActiveId(id);
+    setHistoryOpen(false);
+  };
+
   const send = async () => {
     const text = input.trim();
     if (!text || loading || streaming) return;
@@ -124,7 +132,6 @@ export function PhDPartnerTab() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { toast({ title: 'Sign in required', variant: 'destructive' }); return; }
 
-    // create thread if none
     if (!threadId) {
       const { data, error } = await supabase
         .from('crm_partner_threads')
@@ -136,7 +143,6 @@ export function PhDPartnerTab() {
       setThreads(t => [data as Thread, ...t]);
       setActiveId(threadId);
     } else if (messages.length === 0) {
-      // auto-title from first prompt
       await supabase.from('crm_partner_threads').update({ title: text.slice(0, 60) }).eq('id', threadId);
       setThreads(prev => prev.map(t => t.id === threadId ? { ...t, title: text.slice(0, 60) } : t));
     }
@@ -153,12 +159,10 @@ export function PhDPartnerTab() {
     setInput('');
     setLoading(true);
 
-    // persist user msg
     await supabase.from('crm_partner_messages').insert({
       thread_id: threadId, user_id: session.user.id, role: 'user', content: promptWithTags,
     });
 
-    // assistant placeholder
     const aiId = `tmp-ai-${Date.now()}`;
     setMessages(prev => [...prev, { id: aiId, role: 'assistant', content: '', created_at: new Date().toISOString() }]);
 
@@ -210,7 +214,6 @@ export function PhDPartnerTab() {
       if (meta) {
         setMessages(prev => prev.map(m => m.id === aiId ? { ...m, retrieval_meta: meta } : m));
       }
-      // refresh thread list ordering
       loadThreads();
     } catch (err: any) {
       toast({ title: 'AI error', description: err.message || 'failed', variant: 'destructive' });
@@ -223,72 +226,105 @@ export function PhDPartnerTab() {
     }
   };
 
+  const ThreadList = (
+    <>
+      <div className="p-2 border-b border-border">
+        <button
+          onClick={newThread}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/15 hover:bg-primary/25 text-primary text-xs font-medium border border-primary/30"
+        >
+          <Plus size={14} /> New thread
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-1.5 space-y-1">
+        {threads.length === 0 && (
+          <p className="text-[11px] text-muted-foreground p-2">No threads yet. Start one →</p>
+        )}
+        {threads.map(t => (
+          <div
+            key={t.id}
+            className={cn(
+              'group flex items-center gap-1 rounded-md px-2 py-1.5 text-xs cursor-pointer hover:bg-secondary',
+              activeId === t.id && 'bg-primary/15 text-primary',
+            )}
+            onClick={() => selectThread(t.id)}
+          >
+            <MessageCircle size={11} className="shrink-0" />
+            <span className="flex-1 truncate" title={t.title}>{t.title}</span>
+            {t.pinned && <Pin size={10} className="text-amber-500 shrink-0" />}
+            <div className="flex gap-0.5 opacity-70">
+              <button onClick={(e) => { e.stopPropagation(); togglePin(t); }} title={t.pinned ? 'Unpin' : 'Pin'} className="p-1 hover:text-amber-500">
+                {t.pinned ? <PinOff size={12} /> : <Pin size={12} />}
+              </button>
+              <button onClick={(e) => { e.stopPropagation(); archiveThread(t); }} title="Archive" className="p-1 hover:text-muted-foreground">
+                <Archive size={12} />
+              </button>
+              <button onClick={(e) => { e.stopPropagation(); deleteThread(t); }} title="Delete" className="p-1 hover:text-destructive">
+                <Trash2 size={12} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+
   return (
     <div className="flex h-full min-h-0">
-      {/* Threads sidebar */}
-      <aside className="w-56 border-r border-border flex flex-col shrink-0 bg-secondary/20">
-        <div className="p-2 border-b border-border">
-          <button
-            onClick={newThread}
-            className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/15 hover:bg-primary/25 text-primary text-xs font-medium border border-primary/30"
-          >
-            <Plus size={14} /> New thread
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto p-1.5 space-y-1">
-          {threads.length === 0 && (
-            <p className="text-[11px] text-muted-foreground p-2">No threads yet. Start one →</p>
-          )}
-          {threads.map(t => (
-            <div
-              key={t.id}
-              className={cn(
-                'group flex items-center gap-1 rounded-md px-2 py-1.5 text-xs cursor-pointer hover:bg-secondary',
-                activeId === t.id && 'bg-primary/15 text-primary',
-              )}
-              onClick={() => setActiveId(t.id)}
-            >
-              <MessageCircle size={11} className="shrink-0" />
-              <span className="flex-1 truncate" title={t.title}>{t.title}</span>
-              {t.pinned && <Pin size={10} className="text-amber-500 shrink-0" />}
-              <div className="hidden group-hover:flex gap-0.5">
-                <button onClick={(e) => { e.stopPropagation(); togglePin(t); }} title={t.pinned ? 'Unpin' : 'Pin'} className="p-0.5 hover:text-amber-500">
-                  {t.pinned ? <PinOff size={10} /> : <Pin size={10} />}
-                </button>
-                <button onClick={(e) => { e.stopPropagation(); archiveThread(t); }} title="Archive" className="p-0.5 hover:text-muted-foreground">
-                  <Archive size={10} />
-                </button>
-                <button onClick={(e) => { e.stopPropagation(); deleteThread(t); }} title="Delete" className="p-0.5 hover:text-destructive">
-                  <Trash2 size={10} />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </aside>
+      {/* Desktop sidebar */}
+      {!isMobile && (
+        <aside className="w-56 border-r border-border flex flex-col shrink-0 bg-secondary/20">
+          {ThreadList}
+        </aside>
+      )}
+
+      {/* Mobile drawer */}
+      {isMobile && (
+        <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
+          <SheetContent side="left" className="p-0 w-72 flex flex-col bg-background">
+            <SheetHeader className="px-3 py-2 border-b border-border">
+              <SheetTitle className="text-sm">Chat history</SheetTitle>
+            </SheetHeader>
+            {ThreadList}
+          </SheetContent>
+        </Sheet>
+      )}
 
       {/* Chat panel */}
-      <div className="flex-1 flex flex-col min-h-0">
-        {/* Tag chips */}
-        <div className="px-3 py-2 border-b border-border flex flex-wrap gap-1.5 shrink-0">
-          {TAG_CHIPS.map(({ tag, label, icon: Icon }) => {
-            const on = activeTags.includes(tag);
-            return (
+      <div className="flex-1 flex flex-col min-h-0 w-full">
+        {/* Mobile top bar with history toggle + tags */}
+        <div className="px-2 py-2 border-b border-border flex items-center gap-1.5 shrink-0 overflow-x-auto">
+          {isMobile && (
+            <SheetTrigger asChild>
               <button
-                key={tag}
-                onClick={() => toggleTag(tag)}
-                className={cn(
-                  'flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium border transition-colors',
-                  on
-                    ? 'bg-primary/20 border-primary/40 text-primary'
-                    : 'bg-secondary/40 border-border text-muted-foreground hover:text-foreground',
-                )}
-                title={`Tag: ${tag}`}
+                onClick={() => setHistoryOpen(true)}
+                className="flex items-center gap-1 px-2 py-1 rounded-md bg-primary/15 text-primary border border-primary/30 text-[11px] font-medium shrink-0"
+                title="Chat history"
               >
-                <Icon size={10} /> {label}
+                <History size={12} /> History
               </button>
-            );
-          })}
+            </SheetTrigger>
+          )}
+          <div className="flex flex-wrap gap-1.5">
+            {TAG_CHIPS.map(({ tag, label, icon: Icon }) => {
+              const on = activeTags.includes(tag);
+              return (
+                <button
+                  key={tag}
+                  onClick={() => toggleTag(tag)}
+                  className={cn(
+                    'flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium border transition-colors shrink-0',
+                    on
+                      ? 'bg-primary/20 border-primary/40 text-primary'
+                      : 'bg-secondary/40 border-border text-muted-foreground hover:text-foreground',
+                  )}
+                  title={`Tag: ${tag}`}
+                >
+                  <Icon size={10} /> {label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Messages */}
@@ -361,12 +397,12 @@ export function PhDPartnerTab() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
               }}
-              placeholder="Ask about inbox, groups, pipeline, plan… (Enter to send)"
+              placeholder="Ask about inbox, groups, pipeline, plan…"
               rows={2}
-              className="flex-1 resize-none rounded-lg bg-secondary/40 border border-border px-3 py-2 text-sm focus:outline-none focus:border-primary"
+              className="flex-1 resize-none rounded-lg bg-secondary/40 border border-border px-3 py-2 text-sm focus:outline-none focus:border-primary min-w-0"
               disabled={loading || streaming}
             />
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-1.5 shrink-0">
               <DictationMic value={input} onChange={setInput} />
               <button
                 onClick={send}
