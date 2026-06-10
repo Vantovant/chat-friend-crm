@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
 import ReactMarkdown from 'react-markdown';
-import { DictationMic } from './DictationMic';
+import { DictationMic } from '../DictationMic';
 
 interface Thread {
   id: string;
