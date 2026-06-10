@@ -42,11 +42,20 @@ const TRAINER_PATTERNS = [
 
 function detectMode(prompt: string, tags: string[], isAdmin: boolean) {
   if (tags.includes('@trainer') && isAdmin) return 'trainer' as const;
-  if (tags.includes('@inbox') || tags.includes('@maytapi')) return 'inbox_only' as const;
+  if (tags.includes('@inbox') || tags.includes('@twilio') || tags.includes('@maytapi')) return 'inbox_only' as const;
   if (DAILY_REVIEW_PATTERNS.some((rx) => rx.test(prompt))) return 'daily_review' as const;
   if (INBOX_ONLY_PATTERNS.some((rx) => rx.test(prompt))) return 'inbox_only' as const;
   if (isAdmin && TRAINER_PATTERNS.some((rx) => rx.test(prompt))) return 'trainer' as const;
   return 'crm_strategist' as const;
+}
+
+// Which inbox sources to load. Default both; @twilio or @maytapi narrows it; prompt keywords also narrow.
+function detectInboxScope(prompt: string, tags: string[]): { twilio: boolean; maytapi: boolean } {
+  const wantTwilio = tags.includes('@twilio') || /\btwilio\b/i.test(prompt);
+  const wantMaytapi = tags.includes('@maytapi') || /\bmaytapi\b|\bgroup\s+(?:chat|messages|activity)\b/i.test(prompt);
+  if (wantTwilio && !wantMaytapi) return { twilio: true, maytapi: false };
+  if (wantMaytapi && !wantTwilio) return { twilio: false, maytapi: true };
+  return { twilio: true, maytapi: true };
 }
 
 // ---------- PII redaction ----------
