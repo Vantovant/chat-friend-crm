@@ -1,34 +1,45 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { AppSidebar } from '@/components/vanto/AppSidebar';
-import { DashboardModule } from '@/components/vanto/DashboardModule';
-import { InboxModule } from '@/components/vanto/InboxModule';
-import { MaytapiInboxModule } from '@/components/vanto/MaytapiInboxModule';
-import { MaytapiUnmatchedModule } from '@/components/vanto/MaytapiUnmatchedModule';
-import { ContactsModule } from '@/components/vanto/ContactsModule';
-import { CRMModule } from '@/components/vanto/CRMModule';
-import { AutomationsModule } from '@/components/vanto/AutomationsModule';
-import { AIAgentModule } from '@/components/vanto/AIAgentModule';
-import { KnowledgeVaultModule } from '@/components/vanto/KnowledgeVaultModule';
-import { PlaybooksModule } from '@/components/vanto/PlaybooksModule';
-import { AutoReplyTrainerModule } from '@/components/vanto/AutoReplyTrainerModule';
-import { WorkflowsModule } from '@/components/vanto/WorkflowsModule';
-import { IntegrationsModule } from '@/components/vanto/IntegrationsModule';
-import { APIConsoleModule } from '@/components/vanto/APIConsoleModule';
-import { SettingsModule } from '@/components/vanto/SettingsModule';
-import { GroupCampaignsModule } from '@/components/vanto/GroupCampaignsModule';
-import { GroupAdministratorModule } from '@/components/vanto/GroupAdministratorModule';
-import { ReviewQueueModule } from '@/components/vanto/ReviewQueueModule';
-import { ReportsModule } from '@/components/vanto/ReportsModule';
-import { ProspectorDraftsModule } from '@/components/vanto/ProspectorDraftsModule';
-import { PlanModule } from '@/components/vanto/PlanModule';
-import { VoiceDiaryModule } from '@/components/vanto/VoiceDiaryModule';
 import { AuthPage } from '@/components/vanto/AuthPage';
 import { PageHelpButton } from '@/components/vanto/PageHelpButton';
 import type { Module } from '@/lib/vanto-data';
 import type { Session } from '@supabase/supabase-js';
+
+// Heavy modules — code-split so the initial bundle stays small on Android
+const DashboardModule = lazy(() => import('@/components/vanto/DashboardModule').then(m => ({ default: m.DashboardModule })));
+const InboxModule = lazy(() => import('@/components/vanto/InboxModule').then(m => ({ default: m.InboxModule })));
+const MaytapiInboxModule = lazy(() => import('@/components/vanto/MaytapiInboxModule').then(m => ({ default: m.MaytapiInboxModule })));
+const MaytapiUnmatchedModule = lazy(() => import('@/components/vanto/MaytapiUnmatchedModule').then(m => ({ default: m.MaytapiUnmatchedModule })));
+const ContactsModule = lazy(() => import('@/components/vanto/ContactsModule').then(m => ({ default: m.ContactsModule })));
+const CRMModule = lazy(() => import('@/components/vanto/CRMModule').then(m => ({ default: m.CRMModule })));
+const AutomationsModule = lazy(() => import('@/components/vanto/AutomationsModule').then(m => ({ default: m.AutomationsModule })));
+const AIAgentModule = lazy(() => import('@/components/vanto/AIAgentModule').then(m => ({ default: m.AIAgentModule })));
+const KnowledgeVaultModule = lazy(() => import('@/components/vanto/KnowledgeVaultModule').then(m => ({ default: m.KnowledgeVaultModule })));
+const PlaybooksModule = lazy(() => import('@/components/vanto/PlaybooksModule').then(m => ({ default: m.PlaybooksModule })));
+const AutoReplyTrainerModule = lazy(() => import('@/components/vanto/AutoReplyTrainerModule').then(m => ({ default: m.AutoReplyTrainerModule })));
+const WorkflowsModule = lazy(() => import('@/components/vanto/WorkflowsModule').then(m => ({ default: m.WorkflowsModule })));
+const IntegrationsModule = lazy(() => import('@/components/vanto/IntegrationsModule').then(m => ({ default: m.IntegrationsModule })));
+const APIConsoleModule = lazy(() => import('@/components/vanto/APIConsoleModule').then(m => ({ default: m.APIConsoleModule })));
+const SettingsModule = lazy(() => import('@/components/vanto/SettingsModule').then(m => ({ default: m.SettingsModule })));
+const GroupCampaignsModule = lazy(() => import('@/components/vanto/GroupCampaignsModule').then(m => ({ default: m.GroupCampaignsModule })));
+const GroupAdministratorModule = lazy(() => import('@/components/vanto/GroupAdministratorModule').then(m => ({ default: m.GroupAdministratorModule })));
+const ReviewQueueModule = lazy(() => import('@/components/vanto/ReviewQueueModule').then(m => ({ default: m.ReviewQueueModule })));
+const ReportsModule = lazy(() => import('@/components/vanto/ReportsModule').then(m => ({ default: m.ReportsModule })));
+const ProspectorDraftsModule = lazy(() => import('@/components/vanto/ProspectorDraftsModule').then(m => ({ default: m.ProspectorDraftsModule })));
+const PlanModule = lazy(() => import('@/components/vanto/PlanModule').then(m => ({ default: m.PlanModule })));
+const VoiceDiaryModule = lazy(() => import('@/components/vanto/VoiceDiaryModule').then(m => ({ default: m.VoiceDiaryModule })));
+
 import { Bot } from 'lucide-react';
+
+const ModuleFallback = () => (
+  <div className="h-full w-full flex items-center justify-center">
+    <div className="w-10 h-10 rounded-xl vanto-gradient flex items-center justify-center shadow animate-pulse">
+      <Bot size={20} className="text-primary-foreground" />
+    </div>
+  </div>
+);
 
 const pathToModule: Record<string, Module> = {
   '/maytapi-inbox': 'maytapi-inbox',
@@ -121,7 +132,7 @@ const Index = () => {
           <div className="absolute top-14 right-2 z-30">
             <PageHelpButton page={activeModule} />
           </div>
-          {renderModule()}
+          <Suspense fallback={<ModuleFallback />}>{renderModule()}</Suspense>
         </main>
       </div>
     );
@@ -134,7 +145,7 @@ const Index = () => {
         <div className="absolute top-3 right-3 z-30">
           <PageHelpButton page={activeModule} />
         </div>
-        {renderModule()}
+        <Suspense fallback={<ModuleFallback />}>{renderModule()}</Suspense>
       </main>
     </div>
   );
