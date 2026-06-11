@@ -19,6 +19,9 @@ import {
 import { Button } from '@/components/ui/button';
 import { CopilotSidebar } from './CopilotSidebar';
 import { DictationMic } from './DictationMic';
+import { ContactPlanQuickAdd } from './plan/ContactPlanQuickAdd';
+import { SuggestedPlanItemsPanel } from './plan/SuggestedPlanItemsPanel';
+import { Sparkles } from 'lucide-react';
 import { DictateMessage } from './DictateMessage';
 import { AutoReplyToggle } from './AutoReplyToggle';
 
