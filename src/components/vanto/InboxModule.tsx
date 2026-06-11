@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { CopilotSidebar } from './CopilotSidebar';
+import { DictationMic } from './DictationMic';
 import { DictateMessage } from './DictateMessage';
 import { AutoReplyToggle } from './AutoReplyToggle';
 
