@@ -247,6 +247,35 @@ async function retrieveAll(
       })(),
     );
 
+
+
+    // 4b. Recently amended contact notes — so the agent can answer "how many notes have I updated"
+    tasks.push(
+      (async () => {
+        const since = new Date(Date.now() - 7 * 86400e3).toISOString();
+        const { data, error } = await admin
+          .from('contacts')
+          .select('name, phone_normalized, lead_type, notes, updated_at')
+          .eq('is_deleted', false)
+          .not('notes', 'is', null)
+          .neq('notes', '')
+          .gte('updated_at', since)
+          .order('updated_at', { ascending: false })
+          .limit(40);
+        if (error) { console.error('[crm-ai-partner] contacts notes error', error); return; }
+        if (!data?.length) return;
+        const lines = data.map((c: any) => {
+          const who = c.name || c.phone_normalized || 'unknown';
+          const ts = c.updated_at ? new Date(c.updated_at).toISOString().slice(0, 16).replace('T', ' ') : '?';
+          const note = String(c.notes || '').replace(/\s+/g, ' ').slice(0, 220);
+          return `- [${ts}] ${redact(who)} [${c.lead_type || '?'}]: ${redact(note)}`;
+        });
+        sections.push(`## Recently amended contact notes (last 7d, ${data.length} contacts)\n${lines.join('\n')}`);
+        sources.push('contact_notes');
+      })(),
+    );
+
+
     // 5. Pending Master Prospector drafts
     tasks.push(
       (async () => {
