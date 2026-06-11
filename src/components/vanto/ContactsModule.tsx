@@ -416,7 +416,6 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
   const canReassign = isAdmin || contact.created_by === userId || contact.assigned_to === userId || !contact.assigned_to;
 
   const [suggestOpen, setSuggestOpen] = useState(false);
-  const [suggestTasks, setSuggestTasks] = useState<SuggestedTaskInput[]>([]);
 
   const [stages, setStages] = useState<{ id: string; name: string; color: string | null; stage_order: number }[]>([]);
 
