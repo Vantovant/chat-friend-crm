@@ -64,16 +64,21 @@ export function DictationMic({
     r.maxAlternatives = 1;
 
     r.onresult = (e: any) => {
+      // Only process results from resultIndex forward to avoid re-committing
+      // previously finalized segments (which caused duplicated sentences).
       let sf = '';
       let si = '';
-      for (let i = 0; i < e.results.length; i++) {
+      const startIdx = typeof e.resultIndex === 'number' ? e.resultIndex : 0;
+      for (let i = startIdx; i < e.results.length; i++) {
         const t = (e.results[i][0]?.transcript || '').trim();
         if (!t) continue;
         if (e.results[i].isFinal) sf += (sf ? ' ' : '') + t;
         else si += (si ? ' ' : '') + t;
       }
-      const withFinal = append(committedRef.current, sf);
-      update(append(withFinal, si));
+      // Commit new finals to committedRef immediately so they aren't re-added
+      // on the next onresult event.
+      if (sf) committedRef.current = append(committedRef.current, sf);
+      update(append(committedRef.current, si));
     };
 
     r.onerror = (ev: any) => {
