@@ -49,12 +49,14 @@ function detectMode(prompt: string, tags: string[], isAdmin: boolean) {
   return 'crm_strategist' as const;
 }
 
-// Which inbox sources to load. Default both; @twilio or @maytapi narrows it; prompt keywords also narrow.
-function detectInboxScope(prompt: string, tags: string[]): { twilio: boolean; maytapi: boolean } {
-  const wantTwilio = tags.includes('@twilio') || /\btwilio\b/i.test(prompt);
-  const wantMaytapi = tags.includes('@maytapi') || /\bmaytapi\b|\bgroup\s+(?:chat|messages|activity)\b/i.test(prompt);
-  if (wantTwilio && !wantMaytapi) return { twilio: true, maytapi: false };
-  if (wantMaytapi && !wantTwilio) return { twilio: false, maytapi: true };
+// Which inbox sources to load. Default = BOTH. Only explicit @twilio / @maytapi tags narrow scope.
+// Plain prompt keywords like "twilio" or "maytapi" do NOT narrow — both inboxes stay loaded so
+// the agent can answer follow-up questions about either source.
+function detectInboxScope(_prompt: string, tags: string[]): { twilio: boolean; maytapi: boolean } {
+  const onlyTwilio = tags.includes('@twilio') && !tags.includes('@maytapi');
+  const onlyMaytapi = tags.includes('@maytapi') && !tags.includes('@twilio');
+  if (onlyTwilio) return { twilio: true, maytapi: false };
+  if (onlyMaytapi) return { twilio: false, maytapi: true };
   return { twilio: true, maytapi: true };
 }
 
