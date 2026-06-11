@@ -245,6 +245,9 @@ async function retrieveAll(
         sections.push(`## Pipeline snapshot\n${stageLines.join('\n')}\n\n**By lead type:**\n${typeLines.join('\n')}`);
         sources.push('pipeline');
       })(),
+    );
+
+
 
     // 4b. Recently amended contact notes — so the agent can answer "how many notes have I updated"
     tasks.push(
