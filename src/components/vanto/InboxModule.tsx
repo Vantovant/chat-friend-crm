@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { CopilotSidebar } from './CopilotSidebar';
+import { DictationMic } from './DictationMic';
 import { DictateMessage } from './DictateMessage';
 import { AutoReplyToggle } from './AutoReplyToggle';
 
@@ -1310,13 +1311,18 @@ function ContactInfoPanel({ contact, profiles, stages, isAdmin, reassigning, onR
 
       {/* Notes */}
       <div className="vanto-card p-3 space-y-2">
-        <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Notes</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Notes</p>
+          {editing && (
+            <DictationMic value={form.notes} onChange={(next) => set('notes', next)} />
+          )}
+        </div>
         {editing ? (
           <textarea
             value={form.notes}
             onChange={e => set('notes', e.target.value)}
             rows={4}
-            placeholder="Add notes about this prospect..."
+            placeholder="Add notes about this prospect... (tap Dictate to speak)"
             className={cn(inputCls, 'resize-y')}
           />
         ) : (
