@@ -684,53 +684,29 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
                 <button
                   type="button"
                   disabled={!form.notes.trim()}
-                  title="Read these notes and suggest PLAN tasks (does not replace your notes)"
-                  onClick={async () => {
-                    try {
-                      const { data, error } = await supabase.functions.invoke('plan-ai-extract-actions', {
-                        body: { text: form.notes, context: `contact ${contact.name} / lead_type ${form.lead_type}` },
-                      });
-                      if (error) throw error;
-                      const tasks = (data as any)?.tasks || [];
-                      if (!tasks.length) { toast({ title: 'No tasks detected in this note.' }); return; }
-                      setSuggestTasks(tasks);
-                      setSuggestOpen(true);
-                    } catch (e: any) {
-                      toast({ title: 'Failed to suggest tasks', description: e.message, variant: 'destructive' });
-                    }
-                  }}
+                  title="Read these notes and suggest PLAN tasks, reminders & meetings"
+                  onClick={() => setSuggestOpen(true)}
                   className="text-[11px] inline-flex items-center gap-1 text-primary hover:text-primary/80 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  <Sparkles className="h-3 w-3" /> Suggest tasks
+                  <Sparkles className="h-3 w-3" /> Suggest plan items
                 </button>
               </div>
             </div>
             <textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={4} className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 resize-none" />
           </div>
 
-          {suggestOpen && suggestTasks.length > 0 && (
-            <SuggestedTasksPanel
+          {suggestOpen && form.notes.trim() && (
+            <SuggestedPlanItemsPanel
+              contactId={contact.id}
               contactName={contact.name}
-              tasks={suggestTasks}
-              onClear={() => { setSuggestOpen(false); setSuggestTasks([]); }}
-              onConfirm={async (picked) => {
-                const { data: { user } } = await supabase.auth.getUser();
-                if (!user) { toast({ title: 'Not signed in', variant: 'destructive' }); return; }
-                const rows = picked.map((t) => ({
-                  user_id: user.id,
-                  title: t.title,
-                  priority: t.priority,
-                  source: 'contact_activity',
-                  source_ref: { kind: 'contact', contact_id: contact.id, contact_name: contact.name },
-                }));
-                const { error: insErr } = await (supabase.from('plan_tasks' as any).insert(rows) as any);
-                if (insErr) { toast({ title: 'Failed to add tasks', description: insErr.message, variant: 'destructive' }); return; }
-                toast({ title: `Added ${rows.length} task${rows.length === 1 ? '' : 's'} to PLAN` });
-              }}
+              notes={form.notes}
+              leadType={form.lead_type}
+              onClose={() => setSuggestOpen(false)}
             />
-           )}
+          )}
 
-          <ContactPlanQuickAdd contact={contact} />
+          <ContactPlanQuickAdd contactId={contact.id} contactName={contact.name} />
+
 
           {contact.whatsapp_id && (
             <div className="rounded-lg bg-secondary/40 border border-border px-3 py-2">
