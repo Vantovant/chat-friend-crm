@@ -19,6 +19,9 @@ import {
 import { Button } from '@/components/ui/button';
 import { CopilotSidebar } from './CopilotSidebar';
 import { DictationMic } from './DictationMic';
+import { ContactPlanQuickAdd } from './plan/ContactPlanQuickAdd';
+import { SuggestedPlanItemsPanel } from './plan/SuggestedPlanItemsPanel';
+import { Sparkles } from 'lucide-react';
 import { DictateMessage } from './DictateMessage';
 import { AutoReplyToggle } from './AutoReplyToggle';
 
@@ -1110,6 +1113,7 @@ function ContactInfoPanel({ contact, profiles, stages, isAdmin, reassigning, onR
 }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [suggestOpen, setSuggestOpen] = useState(false);
   const [form, setForm] = useState({
     name: contact.name,
     email: contact.email ?? '',
@@ -1311,11 +1315,22 @@ function ContactInfoPanel({ contact, profiles, stages, isAdmin, reassigning, onR
 
       {/* Notes */}
       <div className="vanto-card p-3 space-y-2">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
           <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">Notes</p>
-          {editing && (
-            <DictationMic value={form.notes} onChange={(next) => set('notes', next)} />
-          )}
+          <div className="flex items-center gap-2">
+            {editing && (
+              <DictationMic value={form.notes} onChange={(next) => set('notes', next)} />
+            )}
+            <button
+              type="button"
+              disabled={!(editing ? form.notes : contact.notes)?.trim()}
+              title="Read these notes and suggest PLAN tasks, reminders & meetings"
+              onClick={() => setSuggestOpen(true)}
+              className="text-[11px] inline-flex items-center gap-1 text-primary hover:text-primary/80 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Sparkles className="h-3 w-3" /> Suggest plan items
+            </button>
+          </div>
         </div>
         {editing ? (
           <textarea
@@ -1329,6 +1344,19 @@ function ContactInfoPanel({ contact, profiles, stages, isAdmin, reassigning, onR
           <p className="text-xs text-muted-foreground whitespace-pre-wrap">{contact.notes || <span className="italic">No notes</span>}</p>
         )}
       </div>
+
+      {suggestOpen && ((editing ? form.notes : contact.notes) || '').trim() && (
+        <SuggestedPlanItemsPanel
+          contactId={contact.id}
+          contactName={contact.name}
+          notes={(editing ? form.notes : contact.notes) || ''}
+          leadType={form.lead_type}
+          onClose={() => setSuggestOpen(false)}
+        />
+      )}
+
+      {/* Plan quick-add (Task / Reminder / Meeting) */}
+      <ContactPlanQuickAdd contactId={contact.id} contactName={contact.name} />
     </div>
   );
 }

@@ -13,7 +13,9 @@ import { MergeContactsModal, DuplicateMergeModal, type IncomingContact } from '.
 import { useProfiles, profileLabel, type ProfileOption } from '@/hooks/use-profiles';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import { downloadVCard, copyContactCard } from '@/lib/vcard';
-import { SuggestedTasksPanel, type SuggestedTaskInput } from './plan/SuggestedTasksPanel';
+
+import { SuggestedPlanItemsPanel } from './plan/SuggestedPlanItemsPanel';
+import { ContactPlanQuickAdd } from './plan/ContactPlanQuickAdd';
 import { DictationMic } from './DictationMic';
 
 type Contact = {
@@ -399,128 +401,8 @@ function MoreActionsMenu({ contact, profiles, isAdmin, userId, canReassign, onAc
   );
 }
 
-// ── Contact Plan Quick-Add (Task / Reminder / Meeting tied to this contact) ──
-function ContactPlanQuickAdd({ contact }: { contact: Contact }) {
-  const { toast } = useToast();
-  const [tab, setTab] = useState<'task' | 'reminder' | 'meeting'>('task');
-  const [saving, setSaving] = useState(false);
-  const [title, setTitle] = useState('');
-  const [when, setWhen] = useState('');
-  const [priority, setPriority] = useState<'low' | 'medium' | 'high' | 'urgent'>('medium');
-  const [location, setLocation] = useState('');
-
-  const reset = () => { setTitle(''); setWhen(''); setLocation(''); setPriority('medium'); };
-
-  const submit = async () => {
-    if (!title.trim()) { toast({ title: 'Title required', variant: 'destructive' }); return; }
-    setSaving(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('Not signed in');
-      const source_ref = { kind: 'contact', contact_id: contact.id, contact_name: contact.name };
-      if (tab === 'task') {
-        const payload: any = { user_id: user.id, title: title.trim(), priority, source: 'contact_drawer', source_ref };
-        if (when) payload.due_date = new Date(when).toISOString();
-        const { error } = await (supabase.from('plan_tasks' as any).insert(payload) as any);
-        if (error) throw error;
-        toast({ title: 'Task added to PLAN' });
-      } else if (tab === 'reminder') {
-        if (!when) { toast({ title: 'Pick a date/time', variant: 'destructive' }); setSaving(false); return; }
-        const { error } = await (supabase.from('plan_reminders' as any).insert({
-          user_id: user.id, title: title.trim(), reminder_time: new Date(when).toISOString(),
-          description: `Contact: ${contact.name}`,
-        }) as any);
-        if (error) throw error;
-        toast({ title: 'Reminder set' });
-      } else {
-        if (!when) { toast({ title: 'Pick a start time', variant: 'destructive' }); setSaving(false); return; }
-        const { error } = await (supabase.from('plan_meetings' as any).insert({
-          user_id: user.id, title: title.trim(), start_time: new Date(when).toISOString(),
-          location: location.trim() || null, description: `Contact: ${contact.name}`,
-        }) as any);
-        if (error) throw error;
-        toast({ title: 'Meeting added' });
-      }
-      reset();
-    } catch (e: any) {
-      toast({ title: 'Failed to save', description: e.message, variant: 'destructive' });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const tabBtn = (k: typeof tab, label: string) => (
-    <button
-      type="button"
-      onClick={() => setTab(k)}
-      className={cn(
-        'px-2.5 py-1 text-[11px] rounded-md border transition-colors',
-        tab === k ? 'bg-primary text-primary-foreground border-primary' : 'bg-secondary/40 border-border text-muted-foreground hover:text-foreground'
-      )}
-    >{label}</button>
-  );
-
-  return (
-    <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-2">
-      <div className="flex items-center justify-between">
-        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Plan for this contact</h4>
-        <div className="flex items-center gap-1">
-          {tabBtn('task', 'Task')}
-          {tabBtn('reminder', 'Reminder')}
-          {tabBtn('meeting', 'Meeting')}
-        </div>
-      </div>
-      <input
-        type="text"
-        value={title}
-        onChange={e => setTitle(e.target.value)}
-        placeholder={tab === 'task' ? 'e.g. Follow up about APLGO brochure' : tab === 'reminder' ? 'e.g. Call back at 3pm' : 'e.g. Zoom intro call'}
-        className="w-full bg-background/60 border border-border rounded-md px-2.5 py-1.5 text-xs text-foreground outline-none focus:border-primary/50"
-      />
-      <div className="grid grid-cols-2 gap-2">
-        <input
-          type="datetime-local"
-          value={when}
-          onChange={e => setWhen(e.target.value)}
-          className="bg-background/60 border border-border rounded-md px-2.5 py-1.5 text-xs text-foreground outline-none focus:border-primary/50"
-        />
-        {tab === 'task' ? (
-          <select
-            value={priority}
-            onChange={e => setPriority(e.target.value as any)}
-            className="bg-background/60 border border-border rounded-md px-2.5 py-1.5 text-xs text-foreground outline-none focus:border-primary/50"
-          >
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-            <option value="urgent">Urgent</option>
-          </select>
-        ) : tab === 'meeting' ? (
-          <input
-            type="text"
-            value={location}
-            onChange={e => setLocation(e.target.value)}
-            placeholder="Location / link"
-            className="bg-background/60 border border-border rounded-md px-2.5 py-1.5 text-xs text-foreground outline-none focus:border-primary/50"
-          />
-        ) : <div />}
-      </div>
-      <div className="flex justify-end">
-        <button
-          type="button"
-          disabled={saving}
-          onClick={submit}
-          className="inline-flex items-center gap-1.5 text-[11px] px-3 py-1.5 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-        >
-          {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plus className="h-3 w-3" />}
-          Add {tab}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // ── Contact Detail Drawer ──────────────────────────────────────────────────────
+
 
 function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, isAdmin, profiles }: {
   contact: Contact; onClose: () => void; onUpdated: (c: Contact) => void; onDeleted: (id: string) => void;
@@ -534,7 +416,6 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
   const canReassign = isAdmin || contact.created_by === userId || contact.assigned_to === userId || !contact.assigned_to;
 
   const [suggestOpen, setSuggestOpen] = useState(false);
-  const [suggestTasks, setSuggestTasks] = useState<SuggestedTaskInput[]>([]);
 
   const [stages, setStages] = useState<{ id: string; name: string; color: string | null; stage_order: number }[]>([]);
 
@@ -802,53 +683,29 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
                 <button
                   type="button"
                   disabled={!form.notes.trim()}
-                  title="Read these notes and suggest PLAN tasks (does not replace your notes)"
-                  onClick={async () => {
-                    try {
-                      const { data, error } = await supabase.functions.invoke('plan-ai-extract-actions', {
-                        body: { text: form.notes, context: `contact ${contact.name} / lead_type ${form.lead_type}` },
-                      });
-                      if (error) throw error;
-                      const tasks = (data as any)?.tasks || [];
-                      if (!tasks.length) { toast({ title: 'No tasks detected in this note.' }); return; }
-                      setSuggestTasks(tasks);
-                      setSuggestOpen(true);
-                    } catch (e: any) {
-                      toast({ title: 'Failed to suggest tasks', description: e.message, variant: 'destructive' });
-                    }
-                  }}
+                  title="Read these notes and suggest PLAN tasks, reminders & meetings"
+                  onClick={() => setSuggestOpen(true)}
                   className="text-[11px] inline-flex items-center gap-1 text-primary hover:text-primary/80 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  <Sparkles className="h-3 w-3" /> Suggest tasks
+                  <Sparkles className="h-3 w-3" /> Suggest plan items
                 </button>
               </div>
             </div>
             <textarea value={form.notes} onChange={e => set('notes', e.target.value)} rows={4} className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 resize-none" />
           </div>
 
-          {suggestOpen && suggestTasks.length > 0 && (
-            <SuggestedTasksPanel
+          {suggestOpen && form.notes.trim() && (
+            <SuggestedPlanItemsPanel
+              contactId={contact.id}
               contactName={contact.name}
-              tasks={suggestTasks}
-              onClear={() => { setSuggestOpen(false); setSuggestTasks([]); }}
-              onConfirm={async (picked) => {
-                const { data: { user } } = await supabase.auth.getUser();
-                if (!user) { toast({ title: 'Not signed in', variant: 'destructive' }); return; }
-                const rows = picked.map((t) => ({
-                  user_id: user.id,
-                  title: t.title,
-                  priority: t.priority,
-                  source: 'contact_activity',
-                  source_ref: { kind: 'contact', contact_id: contact.id, contact_name: contact.name },
-                }));
-                const { error: insErr } = await (supabase.from('plan_tasks' as any).insert(rows) as any);
-                if (insErr) { toast({ title: 'Failed to add tasks', description: insErr.message, variant: 'destructive' }); return; }
-                toast({ title: `Added ${rows.length} task${rows.length === 1 ? '' : 's'} to PLAN` });
-              }}
+              notes={form.notes}
+              leadType={form.lead_type}
+              onClose={() => setSuggestOpen(false)}
             />
-           )}
+          )}
 
-          <ContactPlanQuickAdd contact={contact} />
+          <ContactPlanQuickAdd contactId={contact.id} contactName={contact.name} />
+
 
           {contact.whatsapp_id && (
             <div className="rounded-lg bg-secondary/40 border border-border px-3 py-2">
