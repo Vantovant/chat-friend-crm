@@ -1113,6 +1113,7 @@ function ContactInfoPanel({ contact, profiles, stages, isAdmin, reassigning, onR
 }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [suggestOpen, setSuggestOpen] = useState(false);
   const [form, setForm] = useState({
     name: contact.name,
     email: contact.email ?? '',
