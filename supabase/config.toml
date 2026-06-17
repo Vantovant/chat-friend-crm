@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.fb-inject-to-queue]
 verify_jwt = false
+
+[functions.calendar-webhook]
+verify_jwt = false
