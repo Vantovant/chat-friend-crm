@@ -16,6 +16,7 @@ import { downloadVCard, copyContactCard } from '@/lib/vcard';
 
 import { SuggestedPlanItemsPanel } from './plan/SuggestedPlanItemsPanel';
 import { ContactPlanQuickAdd } from './plan/ContactPlanQuickAdd';
+import { MeetingQuickAdd } from './MeetingQuickAdd';
 import { DictationMic } from './DictationMic';
 
 type Contact = {
@@ -705,6 +706,10 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
           )}
 
           <ContactPlanQuickAdd contactId={contact.id} contactName={contact.name} />
+
+          <MeetingQuickAdd contactId={contact.id} contactName={contact.name} contactEmail={contact.email} />
+
+
 
 
           {contact.whatsapp_id && (
