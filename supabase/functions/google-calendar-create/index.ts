@@ -97,38 +97,49 @@ Deno.serve(async (req) => {
       `💡 When you add it, Google will ask for your email. ` +
       `This helps us send you reminders and updates.`;
 
-    // ── Send via existing send-message (needs a conversation_id) ──
+    // ── Send via Maytapi (no 24h restriction) ──
     let waSent = false;
     let waReason: string | null = null;
+    let waMsgId: string | null = null;
+
     if (contactId) {
-      const { data: conv } = await service
-        .from('conversations')
-        .select('id, last_inbound_at')
-        .eq('contact_id', contactId)
-        .order('last_inbound_at', { ascending: false, nullsFirst: false })
-        .limit(1)
+      const { data: contactRow } = await service
+        .from('contacts')
+        .select('phone_normalized, phone, whatsapp_id')
+        .eq('id', contactId)
         .maybeSingle();
 
-      if (!conv) {
-        waReason = 'no_conversation';
+      const rawPhone: string | null =
+        contactRow?.phone_normalized || contactRow?.whatsapp_id || contactRow?.phone || null;
+
+      if (!rawPhone) {
+        waReason = 'no_phone';
       } else {
-        try {
-          const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-message`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-vanto-internal-key': SERVICE_KEY,
-            },
-            body: JSON.stringify({ conversation_id: conv.id, content: waMessage }),
-          });
-          const sendJson = await sendRes.json().catch(() => ({}));
-          if (sendRes.ok && sendJson?.ok !== false) {
-            waSent = true;
-          } else {
-            waReason = sendJson?.code || `http_${sendRes.status}`;
+        const toNumber = String(rawPhone).replace(/[^\d+]/g, '').replace(/^\+/, '');
+        const PRODUCT_ID = Deno.env.get('MAYTAPI_PRODUCT_ID');
+        const PHONE_ID = Deno.env.get('MAYTAPI_PHONE_ID');
+        const MAYTAPI_TOKEN = Deno.env.get('MAYTAPI_API_TOKEN');
+        if (!PRODUCT_ID || !PHONE_ID || !MAYTAPI_TOKEN) {
+          waReason = 'maytapi_not_configured';
+        } else {
+          try {
+            const url = `https://api.maytapi.com/api/${PRODUCT_ID}/${PHONE_ID}/sendMessage`;
+            const resp = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'x-maytapi-key': MAYTAPI_TOKEN },
+              body: JSON.stringify({ to_number: toNumber, type: 'text', message: waMessage }),
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (resp.ok && data?.success !== false) {
+              waSent = true;
+              waMsgId = data?.data?.msgId || null;
+            } else {
+              waReason = data?.message || `http_${resp.status}`;
+              console.error('Maytapi send failed', resp.status, data);
+            }
+          } catch (e) {
+            waReason = `maytapi_error:${String((e as Error)?.message || e)}`;
           }
-        } catch (e) {
-          waReason = `invoke_error:${String((e as Error)?.message || e)}`;
         }
       }
     }
@@ -177,6 +188,8 @@ Deno.serve(async (req) => {
           attendee_email: contactEmail || null,
           whatsapp_sent: waSent,
           whatsapp_reason: waReason,
+          whatsapp_provider: 'maytapi',
+          whatsapp_msg_id: waMsgId,
           watch_registered: watchRegistered,
         },
       });
@@ -194,7 +207,7 @@ Deno.serve(async (req) => {
 
     return json({
       eventId, htmlLink, start: event.start, end: event.end,
-      whatsappSent: waSent, whatsappReason: waReason,
+      whatsappSent: waSent, whatsappReason: waReason, whatsappProvider: 'maytapi',
       emailInviteSent: !!contactEmail,
       watchRegistered,
     });
