@@ -189,34 +189,46 @@ async function retrieveAll(
     );
   }
 
-  // 2. Maytapi messages — from messages table (provider='maytapi') + maytapi_messages
+  // 2. Maytapi messages (1:1 + groups) — robust query without embed join
   if (scope.maytapi) {
     tasks.push(
       (async () => {
         const limit = mode === 'daily_review' ? 60 : 80;
-        // Prefer dedicated maytapi_messages table
-        const { data: mt } = await admin
+        const { data: mt, error } = await admin
           .from('maytapi_messages')
-          .select('id, body, direction, received_at, phone_e164, conversation_key, contact_id, contacts:contact_id(name)')
+          .select('id, body, direction, received_at, phone_e164, conversation_key, contact_id')
           .order('received_at', { ascending: false })
           .limit(limit);
+        if (error) console.error('[crm-ai-partner] maytapi query error', error);
+
+        // Resolve contact names in a separate query (avoids FK-embed failures)
+        const contactIds = Array.from(new Set((mt || []).map((m: any) => m.contact_id).filter(Boolean)));
+        const nameById: Record<string, string> = {};
+        if (contactIds.length) {
+          const { data: cs } = await admin.from('contacts').select('id, name').in('id', contactIds);
+          for (const c of cs || []) nameById[c.id] = c.name;
+        }
+
         const lines: string[] = [];
-        if (mt?.length) {
-          for (const m of mt) {
-            if (!m.body) continue;
-            const name = m.contacts?.name || m.phone_e164 || m.conversation_key || 'unknown';
-            const dir = m.direction === 'out' ? 'AGENT→' : '→PROSPECT';
-            const ts = m.received_at ? new Date(m.received_at).toISOString().slice(5, 16).replace('T', ' ') : '?';
-            lines.push(`[${ts}] ${dir} ${redact(name)} (Maytapi): ${redact(String(m.body).slice(0, 220))}`);
-          }
+        for (const m of mt || []) {
+          if (!m.body) continue;
+          const isGroup = typeof m.conversation_key === 'string' && m.conversation_key.endsWith('@g.us');
+          const who = nameById[m.contact_id] || m.phone_e164 || m.conversation_key || 'unknown';
+          const dir = m.direction === 'out' || m.direction === 'outbound' ? 'AGENT→' : '→PROSPECT';
+          const ts = m.received_at ? new Date(m.received_at).toISOString().slice(5, 16).replace('T', ' ') : '?';
+          const tag = isGroup ? 'Maytapi/group' : 'Maytapi/1:1';
+          lines.push(`[${ts}] ${dir} ${redact(who)} (${tag}): ${redact(String(m.body).slice(0, 220))}`);
         }
         if (lines.length) {
-          sections.push(`## Maytapi WhatsApp messages (last ${lines.length})\n${lines.join('\n')}`);
-          sources.push('maytapi');
+          sections.push(`## Maytapi WhatsApp messages — 1:1 + groups (last ${lines.length})\n${lines.join('\n')}`);
+        } else {
+          sections.push(`## Maytapi WhatsApp messages — 1:1 + groups\n(no Maytapi messages in the loaded window)`);
         }
+        sources.push('maytapi');
       })(),
     );
   }
+
 
 
   if (!skipMost) {
