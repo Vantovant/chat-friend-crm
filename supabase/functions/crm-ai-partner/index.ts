@@ -79,8 +79,10 @@ function parseTags(prompt: string): { cleaned: string; tags: string[] } {
 // ---------- system prompt ----------
 const SYSTEM_PROMPT = `You are the **Chief CRM Strategist for Vanto CRM** — a persistent AI co-founder for an MLM/WhatsApp-first APLGO sales operation.
 
+You have FULL READ ACCESS to every Vanto surface: contacts, pipeline stages, plans/tasks, knowledge vault, AI trainer rules, Master Prospector activity, contact activity audit, and BOTH WhatsApp channels — **Twilio (1:1 Business API)** AND **Maytapi (1:1 + groups via WhatsApp Web)**. Both inboxes are loaded into context by default on every request. Never tell the user you lack access to Maytapi (or Twilio) — if a specific section appears empty, say "no messages in the loaded window" instead of claiming the channel is unavailable.
+
 Operating rules:
-1. Cross-reference contacts, pipeline stages, inbox conversations (Twilio 1:1), Maytapi group messages, knowledge vault, AI trainer rules, and Master Prospector activity.
+1. Cross-reference contacts, pipeline stages, Twilio 1:1 inbox, Maytapi 1:1 + group messages, knowledge vault, AI trainer rules, plan tasks, and Master Prospector activity.
 2. Never propose actions that violate the WhatsApp 24h Customer Care Window.
 3. Never bypass RLS or surface another agent's private data.
 4. Never invent contact names, phone numbers, or message content. If a fact is not in the retrieved context, say so.
@@ -91,7 +93,7 @@ Operating rules:
 9. When recommending outbound messages, draft them in operator voice ("Get Well Africa" / APLGO).
 10. For group campaigns, respect the locked allowlist and 6h spacing rule.
 11. If knowledge vault docs are cited in the context, reference them by title.
-12. When asked for "today" / "what's happening", cross-reference inbox + maytapi + plan tasks + reminders.
+12. When asked for "today" / "what's happening", cross-reference Twilio + Maytapi + plan tasks + reminders.
 13. If unsure, say "I don't know — check X" rather than guess.`;
 
 const DAILY_REVIEW_SUPPLEMENT = `
@@ -187,34 +189,46 @@ async function retrieveAll(
     );
   }
 
-  // 2. Maytapi messages — from messages table (provider='maytapi') + maytapi_messages
+  // 2. Maytapi messages (1:1 + groups) — robust query without embed join
   if (scope.maytapi) {
     tasks.push(
       (async () => {
         const limit = mode === 'daily_review' ? 60 : 80;
-        // Prefer dedicated maytapi_messages table
-        const { data: mt } = await admin
+        const { data: mt, error } = await admin
           .from('maytapi_messages')
-          .select('id, body, direction, received_at, phone_e164, conversation_key, contact_id, contacts:contact_id(name)')
+          .select('id, body, direction, received_at, phone_e164, conversation_key, contact_id')
           .order('received_at', { ascending: false })
           .limit(limit);
+        if (error) console.error('[crm-ai-partner] maytapi query error', error);
+
+        // Resolve contact names in a separate query (avoids FK-embed failures)
+        const contactIds = Array.from(new Set((mt || []).map((m: any) => m.contact_id).filter(Boolean)));
+        const nameById: Record<string, string> = {};
+        if (contactIds.length) {
+          const { data: cs } = await admin.from('contacts').select('id, name').in('id', contactIds);
+          for (const c of cs || []) nameById[c.id] = c.name;
+        }
+
         const lines: string[] = [];
-        if (mt?.length) {
-          for (const m of mt) {
-            if (!m.body) continue;
-            const name = m.contacts?.name || m.phone_e164 || m.conversation_key || 'unknown';
-            const dir = m.direction === 'out' ? 'AGENT→' : '→PROSPECT';
-            const ts = m.received_at ? new Date(m.received_at).toISOString().slice(5, 16).replace('T', ' ') : '?';
-            lines.push(`[${ts}] ${dir} ${redact(name)} (Maytapi): ${redact(String(m.body).slice(0, 220))}`);
-          }
+        for (const m of mt || []) {
+          if (!m.body) continue;
+          const isGroup = typeof m.conversation_key === 'string' && m.conversation_key.endsWith('@g.us');
+          const who = nameById[m.contact_id] || m.phone_e164 || m.conversation_key || 'unknown';
+          const dir = m.direction === 'out' || m.direction === 'outbound' ? 'AGENT→' : '→PROSPECT';
+          const ts = m.received_at ? new Date(m.received_at).toISOString().slice(5, 16).replace('T', ' ') : '?';
+          const tag = isGroup ? 'Maytapi/group' : 'Maytapi/1:1';
+          lines.push(`[${ts}] ${dir} ${redact(who)} (${tag}): ${redact(String(m.body).slice(0, 220))}`);
         }
         if (lines.length) {
-          sections.push(`## Maytapi WhatsApp messages (last ${lines.length})\n${lines.join('\n')}`);
-          sources.push('maytapi');
+          sections.push(`## Maytapi WhatsApp messages — 1:1 + groups (last ${lines.length})\n${lines.join('\n')}`);
+        } else {
+          sections.push(`## Maytapi WhatsApp messages — 1:1 + groups\n(no Maytapi messages in the loaded window)`);
         }
+        sources.push('maytapi');
       })(),
     );
   }
+
 
 
   if (!skipMost) {
