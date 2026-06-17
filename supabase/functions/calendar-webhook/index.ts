@@ -42,8 +42,21 @@ Deno.serve(async (req) => {
       return new Response('ok', { status: 200, headers: corsHeaders });
     }
 
+    // Resolve configured public calendar id (falls back to primary)
+    let calendarId = 'primary';
+    try {
+      const { data: setting } = await service
+        .from('integration_settings')
+        .select('value')
+        .eq('key', 'public_calendar_id')
+        .maybeSingle();
+      const raw = (setting?.value ?? '').toString().trim();
+      if (raw) calendarId = raw;
+    } catch (_e) { /* ignore */ }
+    const calendarPath = encodeURIComponent(calendarId);
+
     const evRes = await fetch(
-      `${GATEWAY_URL}/calendars/primary/events/${encodeURIComponent(channelToken)}`,
+      `${GATEWAY_URL}/calendars/${calendarPath}/events/${encodeURIComponent(channelToken)}`,
       {
         method: 'GET',
         headers: {
