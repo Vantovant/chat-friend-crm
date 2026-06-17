@@ -445,6 +445,18 @@ export function KnowledgeVaultModule() {
                         {f.mode === 'strict' && (
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-500/15 text-amber-500 border border-amber-500/30">STRICT</span>
                         )}
+                        {(f.tags || []).some(t => t === 'source:drive' || t.startsWith('drive:')) && (() => {
+                          const linkTag = (f.tags || []).find(t => t.startsWith('drive_link:'));
+                          const url = linkTag ? linkTag.slice('drive_link:'.length) : null;
+                          const badge = (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-sky-500/15 text-sky-500 border border-sky-500/30 inline-flex items-center gap-1">
+                              📁 Linked from Drive
+                            </span>
+                          );
+                          return url ? (
+                            <a href={url} target="_blank" rel="noreferrer" title="Open in Google Drive">{badge}</a>
+                          ) : badge;
+                        })()}
                         {isExpired && (
                           <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-destructive/15 text-destructive border border-destructive/30">EXPIRED</span>
                         )}
