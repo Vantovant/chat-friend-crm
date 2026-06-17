@@ -114,6 +114,18 @@ STRICT SOURCE RULES:
 - If the user asks about Twilio and the Twilio section is empty or missing, say "No Twilio messages in the loaded window" — do NOT substitute Maytapi data.
 - If only one source is loaded (per scope), do not claim data from the other source exists.`;
 
+const GROUNDING_SUPPLEMENT = `
+
+# Grounding & Citation Rules (Phase 4)
+You are grounded on Vanto's real corpus: Knowledge Vault (Drive PDFs), Contact Activity (meetings, doc generations, sheet imports, calendar email capture), Pipeline, Inbox, and Plan.
+
+You MUST:
+1. Cite the source of every factual claim inline using square-bracket tags that match the section heading you read it from, e.g. [Knowledge Vault: <title>], [Contact Activity: <type>], [Pipeline], [Twilio], [Maytapi], [Plan].
+2. Never invent prices, dosages, product names, or compensation rules. If the answer is not in the loaded context, reply: "Not in the loaded corpus — escalate to a human."
+3. When quoting a Knowledge Vault chunk, use ≤25 words verbatim then paraphrase.
+4. End every answer with a short "Sources" list of the distinct citations used.`;
+
+
 // ---------- retrieval ----------
 async function retrieveAll(
   admin: any,
@@ -349,6 +361,29 @@ async function retrieveAll(
       })(),
     );
 
+    // 8b. Contact activity (Phase 4 grounding) — meetings, doc generations, sheet imports, email capture
+    tasks.push(
+      (async () => {
+        const since = new Date(Date.now() - 30 * 86400e3).toISOString();
+        const { data } = await admin
+          .from('contact_activity')
+          .select('contact_id, type, metadata, created_at, contacts:contact_id(name, phone_normalized)')
+          .gte('created_at', since)
+          .in('type', ['meeting_scheduled', 'meeting_accepted', 'meeting_declined', 'email_captured', 'doc_generated', 'sheet_sync_import'])
+          .order('created_at', { ascending: false })
+          .limit(30);
+        if (!data?.length) return;
+        const lines = data.map((a: any) => {
+          const who = a.contacts?.name || a.contacts?.phone_normalized || a.contact_id?.slice(0, 8);
+          const ts = a.created_at?.slice(0, 16).replace('T', ' ') || '?';
+          const detail = redact(JSON.stringify(a.metadata || {}).slice(0, 160));
+          return `- [${ts}] ${a.type} • ${redact(who)} • ${detail}`;
+        });
+        sections.push(`## Contact Activity (last 30d)\n${lines.join('\n')}`);
+        sources.push('contact_activity');
+      })(),
+    );
+
     // 9. Trainer rules (admin only)
     if (mode === 'trainer' || isAdmin) {
       tasks.push(
@@ -430,7 +465,7 @@ Deno.serve(async (req) => {
   // Retrieve
   const { context, meta } = await retrieveAll(admin, userId, cleaned || rawPrompt, mode, isAdmin, scope);
 
-  let systemContent = SYSTEM_PROMPT;
+  let systemContent = SYSTEM_PROMPT + GROUNDING_SUPPLEMENT;
   if (mode === 'daily_review') systemContent += DAILY_REVIEW_SUPPLEMENT;
   if (mode === 'inbox_only') systemContent += INBOX_ONLY_SUPPLEMENT;
   if (context) systemContent += `\n\n---\n# Live CRM Context (mode=${mode})\n${context}`;
