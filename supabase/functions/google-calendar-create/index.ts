@@ -61,6 +61,7 @@ Deno.serve(async (req) => {
       end: { dateTime: end.toISOString(), timeZone: TIMEZONE },
       reminders: { useDefault: true },
       guestsCanSeeOtherGuests: false,
+      visibility: "public",
     };
     if (contactEmail) {
       eventBody.attendees = [{ email: contactEmail, displayName: contactName || undefined }];
