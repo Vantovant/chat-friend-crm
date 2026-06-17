@@ -103,7 +103,7 @@ export function MeetingQuickAdd({ contactId, contactName, contactEmail }: Props)
             <p className="text-foreground">✅ Calendar event created (SAST).</p>
             <p className={result.whatsappSent ? 'text-emerald-500' : 'text-amber-500'}>
               {result.whatsappSent
-                ? '📱 WhatsApp invite sent to prospect.'
+                ? '📱 WhatsApp invite sent via Maytapi (no 24h limit).'
                 : `⚠️ WhatsApp not sent${result.whatsappReason ? ` — ${result.whatsappReason}` : ''}.`}
             </p>
             <p className="text-xs text-muted-foreground">
