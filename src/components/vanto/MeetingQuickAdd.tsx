@@ -31,7 +31,12 @@ export function MeetingQuickAdd({ contactId, contactName, contactEmail }: Props)
   const [startLocal, setStartLocal] = useState(defaultStartLocal());
   const [duration, setDuration] = useState<30 | 60>(60);
   const [saving, setSaving] = useState(false);
-  const [result, setResult] = useState<{ htmlLink: string } | null>(null);
+  const [result, setResult] = useState<{
+    htmlLink: string;
+    whatsappSent: boolean;
+    whatsappReason: string | null;
+    emailInviteSent: boolean;
+  } | null>(null);
 
   const reset = () => {
     setTitle(`Meeting with ${contactName}`);
@@ -59,9 +64,18 @@ export function MeetingQuickAdd({ contactId, contactName, contactEmail }: Props)
         },
       });
       if (error) throw error;
-      if ((data as any)?.error) throw new Error((data as any).error);
-      setResult({ htmlLink: (data as any).htmlLink });
-      toast({ title: 'Meeting scheduled', description: contactEmail ? `Invite sent to ${contactEmail}` : 'Added to your Google Calendar.' });
+      const d = data as any;
+      if (d?.error) throw new Error(d.error);
+      setResult({
+        htmlLink: d.htmlLink,
+        whatsappSent: !!d.whatsappSent,
+        whatsappReason: d.whatsappReason || null,
+        emailInviteSent: !!d.emailInviteSent,
+      });
+      toast({
+        title: 'Meeting scheduled',
+        description: d.whatsappSent ? 'WhatsApp invite sent.' : 'Event created. WhatsApp not sent — see details.',
+      });
     } catch (e: any) {
       toast({ title: 'Failed to schedule', description: e?.message || 'Calendar request failed.', variant: 'destructive' });
     } finally {
@@ -85,8 +99,18 @@ export function MeetingQuickAdd({ contactId, contactName, contactEmail }: Props)
         </DialogHeader>
 
         {result ? (
-          <div className="space-y-3 text-sm">
-            <p className="text-foreground">Meeting created on Google Calendar (SAST).</p>
+          <div className="space-y-2 text-sm">
+            <p className="text-foreground">✅ Calendar event created (SAST).</p>
+            <p className={result.whatsappSent ? 'text-emerald-500' : 'text-amber-500'}>
+              {result.whatsappSent
+                ? '📱 WhatsApp invite sent to prospect.'
+                : `⚠️ WhatsApp not sent${result.whatsappReason ? ` — ${result.whatsappReason}` : ''}.`}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {result.emailInviteSent
+                ? '✉️ Email invite sent to contact as backup.'
+                : '✉️ No email on file — it will be captured when the prospect adds the event to their calendar.'}
+            </p>
             <a
               href={result.htmlLink}
               target="_blank"
@@ -95,9 +119,6 @@ export function MeetingQuickAdd({ contactId, contactName, contactEmail }: Props)
             >
               Open in Google Calendar <ExternalLink className="h-3 w-3" />
             </a>
-            {!contactEmail && (
-              <p className="text-xs text-muted-foreground">No email on contact — no invite was sent.</p>
-            )}
           </div>
         ) : (
           <div className="space-y-3">
