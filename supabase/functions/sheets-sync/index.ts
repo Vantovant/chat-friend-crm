@@ -330,15 +330,19 @@ Deno.serve(async (req) => {
 
   // Best-effort audit log
   try {
+    const imp = result.import || {};
+    const exp = result.export || {};
+    const total = (exp.exported || 0) + (imp.imported || 0) + (imp.skipped || 0);
     await supa.from("sync_runs").insert({
       source: "sheets-sync",
-      status: ok ? "success" : "error",
+      total,
+      synced: (exp.exported || 0) + (imp.imported || 0),
+      skipped: imp.skipped || 0,
+      errors: errMsg ? [errMsg, ...(imp.errors || [])] : (imp.errors || []),
       started_at: startedAt,
       finished_at: new Date().toISOString(),
-      payload: result,
-      error: errMsg,
     });
-  } catch (_) { /* swallow — table shape may vary */ }
+  } catch (_) { /* swallow */ }
 
   return json(result, ok ? 200 : 500);
 });
