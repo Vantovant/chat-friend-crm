@@ -188,6 +188,8 @@ Deno.serve(async (req) => {
           attendee_email: contactEmail || null,
           whatsapp_sent: waSent,
           whatsapp_reason: waReason,
+          whatsapp_provider: 'maytapi',
+          whatsapp_msg_id: waMsgId,
           watch_registered: watchRegistered,
         },
       });
@@ -205,7 +207,7 @@ Deno.serve(async (req) => {
 
     return json({
       eventId, htmlLink, start: event.start, end: event.end,
-      whatsappSent: waSent, whatsappReason: waReason,
+      whatsappSent: waSent, whatsappReason: waReason, whatsappProvider: 'maytapi',
       emailInviteSent: !!contactEmail,
       watchRegistered,
     });
