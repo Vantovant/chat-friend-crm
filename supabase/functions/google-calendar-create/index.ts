@@ -167,7 +167,7 @@ Deno.serve(async (req) => {
       const channelId = crypto.randomUUID();
       const webhookUrl = `${SUPABASE_URL}/functions/v1/calendar-webhook`;
       const watchRes = await fetch(
-        `${GATEWAY_URL}/calendars/primary/events/watch`,
+        `${GATEWAY_URL}/calendars/${calendarPath}/events/watch`,
         {
           method: 'POST',
           headers: {
