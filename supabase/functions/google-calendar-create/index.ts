@@ -53,6 +53,22 @@ Deno.serve(async (req) => {
     const GCAL_KEY = Deno.env.get('GOOGLE_CALENDAR_API_KEY');
     if (!LOVABLE_API_KEY || !GCAL_KEY) return json({ error: 'Calendar connector not configured' }, 500);
 
+    // ── Resolve calendar ID (public calendar preferred; falls back to primary) ──
+    let calendarId = 'primary';
+    try {
+      const { data: setting } = await service
+        .from('integration_settings')
+        .select('value')
+        .eq('key', 'public_calendar_id')
+        .maybeSingle();
+      const raw = (setting?.value ?? '').toString().trim();
+      if (raw) calendarId = raw;
+    } catch (e) {
+      console.warn('public_calendar_id lookup failed; using primary', e);
+    }
+    const calendarPath = encodeURIComponent(calendarId);
+    console.log('Using Google Calendar ID:', calendarId);
+
     // ── Create event ──
     const eventBody: Record<string, unknown> = {
       summary: title,
@@ -69,7 +85,7 @@ Deno.serve(async (req) => {
 
     const sendUpdates = contactEmail ? 'all' : 'none';
     const gcalRes = await fetch(
-      `${GATEWAY_URL}/calendars/primary/events?sendUpdates=${sendUpdates}`,
+      `${GATEWAY_URL}/calendars/${calendarPath}/events?sendUpdates=${sendUpdates}`,
       {
         method: 'POST',
         headers: {
