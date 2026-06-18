@@ -139,26 +139,35 @@ Deno.serve(async (req) => {
     // Skip WA send entirely; cascade to SMS then email
     await logAttempt('whatsapp', false, { code: 'OUTSIDE_WINDOW_NO_TEMPLATE' });
 
-    // SMS fallback via Twilio
-    let smsOk = false; let smsData: any = null; let smsStatus = 0;
-    try {
-      const smsParams = new URLSearchParams();
-      smsParams.set('To', toE164);
-      if (TWILIO_MESSAGING_SERVICE_SID) smsParams.set('MessagingServiceSid', TWILIO_MESSAGING_SERVICE_SID);
-      smsParams.set('Body', `🔔 ${alertText}`);
-      const auth = btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`);
-      const smsRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
-        method: 'POST',
-        headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: smsParams,
-      });
-      smsStatus = smsRes.status;
-      smsData = await smsRes.json();
-      smsOk = smsRes.ok && !smsData?.error_code;
-    } catch (e: any) {
-      smsData = { error: e?.message };
+    // SMS fallback DISABLED — Twilio messaging service has no SA-capable SMS sender
+    // (always fails with error 21704). Skip directly to email fallback to eliminate noise.
+    // To re-enable, set integration_settings.enable_sms_fallback = 'true' and add a SA sender.
+    let smsOk = false; let smsData: any = { skipped: true, reason: 'sms_fallback_disabled_no_sa_sender' }; let smsStatus = 0;
+    const { data: smsFlag } = await sb
+      .from('integration_settings')
+      .select('value')
+      .eq('key', 'enable_sms_fallback')
+      .maybeSingle();
+    if (smsFlag?.value === 'true') {
+      try {
+        const smsParams = new URLSearchParams();
+        smsParams.set('To', toE164);
+        if (TWILIO_MESSAGING_SERVICE_SID) smsParams.set('MessagingServiceSid', TWILIO_MESSAGING_SERVICE_SID);
+        smsParams.set('Body', `🔔 ${alertText}`);
+        const auth = btoa(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`);
+        const smsRes = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`, {
+          method: 'POST',
+          headers: { 'Authorization': `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: smsParams,
+        });
+        smsStatus = smsRes.status;
+        smsData = await smsRes.json();
+        smsOk = smsRes.ok && !smsData?.error_code;
+      } catch (e: any) {
+        smsData = { error: e?.message };
+      }
     }
-    await logAttempt('sms', smsOk, { sid: smsData?.sid, status: smsData?.status, error_code: smsData?.error_code, http: smsStatus });
+    await logAttempt('sms', smsOk, { sid: smsData?.sid, status: smsData?.status, error_code: smsData?.error_code, http: smsStatus, skipped: smsData?.skipped });
 
     // Email fallback via Resend (only if SMS failed and key present)
     let emailOk = false; let emailInfo: any = null;

@@ -6,6 +6,15 @@ verify_jwt = false
 [functions.twilio-msg-status]
 verify_jwt = false
 
+[functions.twilio-whatsapp-inbound]
+verify_jwt = false
+
+[functions.twilio-whatsapp-status]
+verify_jwt = false
+
+[functions.maytapi-webhook-inbound]
+verify_jwt = false
+
 [functions.maytapi-dispatcher]
 verify_jwt = false
 
