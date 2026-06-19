@@ -131,27 +131,31 @@ Deno.serve(async (req) => {
         const dateStr = baseUTC.toISOString().split("T")[0];
         const dayOfWeek = baseUTC.getUTCDay(); // 0=Sun, matches the SAST calendar date
 
-        // Morning post at 07:00 SAST (05:00 UTC)
-        const morningIdx = (morningStart + i) % 30;
-        rows.push({
-          user_id,
-          target_group_name: groupName,
-          target_group_jid: groupJid,
-          message_content: MORNING_MESSAGES[morningIdx],
-          scheduled_at: `${dateStr}T05:00:00+00:00`,
-          status: "pending",
-        });
+        // Morning + Midday: Mon–Sat only (skip Sundays per user rule 2026-06-19;
+        // Sundays are rest days for product/biz content — Sunday evening Zoom still runs).
+        if (dayOfWeek !== 0) {
+          // Morning post at 07:00 SAST (05:00 UTC)
+          const morningIdx = (morningStart + i) % 30;
+          rows.push({
+            user_id,
+            target_group_name: groupName,
+            target_group_jid: groupJid,
+            message_content: MORNING_MESSAGES[morningIdx],
+            scheduled_at: `${dateStr}T05:00:00+00:00`,
+            status: "pending",
+          });
 
-        // Midday post at 12:00 SAST (10:00 UTC)
-        const middayIdx = (morningStart + i) % 30;
-        rows.push({
-          user_id,
-          target_group_name: groupName,
-          target_group_jid: groupJid,
-          message_content: MIDDAY_MESSAGES[middayIdx],
-          scheduled_at: `${dateStr}T10:00:00+00:00`,
-          status: "pending",
-        });
+          // Midday post at 12:00 SAST (10:00 UTC)
+          const middayIdx = (morningStart + i) % 30;
+          rows.push({
+            user_id,
+            target_group_name: groupName,
+            target_group_jid: groupJid,
+            message_content: MIDDAY_MESSAGES[middayIdx],
+            scheduled_at: `${dateStr}T10:00:00+00:00`,
+            status: "pending",
+          });
+        }
 
         // Evening post at 17:00 SAST (15:00 UTC)
         const eveningMsg = EVENING_MESSAGES[dayOfWeek];
