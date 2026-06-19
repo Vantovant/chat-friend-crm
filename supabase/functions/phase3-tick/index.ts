@@ -18,6 +18,24 @@ function renderTemplate(text: string, vars: Record<string, string>): string {
   return text.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k) => vars[k] ?? "");
 }
 
+// Quiet hours: 22:00–06:00 SAST (UTC+2, no DST). Mirrors cadence-tick / fast-closer-tick.
+function isQuietHoursSAST(d: Date): boolean {
+  const h = (d.getUTCHours() + 2) % 24;
+  return h >= 22 || h < 6;
+}
+
+// Returns the next 06:00 SAST as ISO.
+function nextSixAmSastIso(d: Date): string {
+  const sast = new Date(d.getTime() + 2 * 3600000);
+  const y = sast.getUTCFullYear();
+  const m = sast.getUTCMonth();
+  const day = sast.getUTCDate();
+  const h = sast.getUTCHours();
+  const today6UtcMs = Date.UTC(y, m, day, 4, 0, 0); // 06:00 SAST = 04:00 UTC
+  const target = h < 6 ? today6UtcMs : today6UtcMs + 24 * 3600000;
+  return new Date(target).toISOString();
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
@@ -26,7 +44,32 @@ Deno.serve(async (req) => {
     const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-    const nowIso = new Date().toISOString();
+    const now = new Date();
+    const nowIso = now.toISOString();
+
+    // ── Quiet hours guard (22:00–06:00 SAST) ──
+    // Skip during quiet hours and reschedule any already-due rows to 06:00 SAST
+    // so we don't flood the moment we exit quiet hours.
+    if (isQuietHoursSAST(now)) {
+      const sixAm = nextSixAmSastIso(now);
+      const { data: stuck } = await supabase
+        .from("missed_inquiries")
+        .select("id")
+        .eq("cadence", "phase3_2_24_72")
+        .eq("status", "active")
+        .lte("next_send_at", nowIso)
+        .limit(500);
+      if (stuck && stuck.length > 0) {
+        await supabase
+          .from("missed_inquiries")
+          .update({ next_send_at: sixAm })
+          .in("id", stuck.map((r: any) => r.id));
+      }
+      return new Response(JSON.stringify({
+        success: true, skipped: true, reason: "quiet_hours_sast",
+        rescheduled: stuck?.length || 0, next_run_at: sixAm,
+      }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     // ── GOVERNANCE GATE (Level 2A lock + Option B pause) ──
     const { data: gateRows } = await supabase
