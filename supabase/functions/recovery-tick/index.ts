@@ -167,7 +167,18 @@ Deno.serve(async (req) => {
       }
 
       const firstName = (contact.name || "there").split(" ")[0];
-      const message = await draftMessage(firstName, row.last_inbound_snippet || "", stepIdx);
+      let message = await draftMessage(firstName, row.last_inbound_snippet || "", stepIdx);
+
+      // ── WhatsApp group invite (organic, soft, capped) ──
+      const inviteResult = await maybeAppendGroupInvite(supabase, message, {
+        contactId: contact.id,
+        phoneNormalized: contact.phone_normalized || null,
+        leadType: contact.lead_type || null,
+        followupStep: stepIdx + 1,
+        lastGroupInviteAt: contact.last_group_invite_at || null,
+      });
+      message = inviteResult.message;
+      const groupInviteAppended = inviteResult.appended;
 
       // Send via Maytapi direct
       const sendResp = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
