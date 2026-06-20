@@ -75,12 +75,13 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const { to_number, message, skip_trust_header } = await req.json();
+    const { to_number, message, skip_trust_header, attach_image_url } = await req.json();
     if (!to_number || !message) {
       return new Response(JSON.stringify({ error: "to_number and message required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
 
     if (isExpiredOneDaySaleMessage(String(message))) {
       return new Response(JSON.stringify({
