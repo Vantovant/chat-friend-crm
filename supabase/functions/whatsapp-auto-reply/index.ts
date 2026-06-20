@@ -1430,7 +1430,7 @@ Deno.serve(async (req) => {
     // PROOF-URL PREVIEW SUSPENDED 2026-06-20 — link card was not rendering reliably.
     // Identity is now carried by an explicit intro line that also flags the Twilio number.
     const IDENTITY_INTRO =
-      `Hi, this is *Vanto from K12 Africa* — an accredited APLGO distributor.\n`;
+      `Hi, this is *Vanto from GetWellAfrica* — an accredited APLGO distributor.\n`;
     const TRUST_BRIDGE_TWILIO =
       `You may receive a WhatsApp or call from our Twilio campaign number, but I'll guide you personally from my local South African number as well.\n\n`;
     const buildFirstTouch = (twilioStyle: boolean) => {

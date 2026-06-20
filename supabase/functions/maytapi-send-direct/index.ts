@@ -65,7 +65,7 @@ function buildTrustWrap(
   localNumber: string,
 ): string {
   const intro =
-    `Hi, this is *Vanto from K12 Africa* — an accredited APLGO distributor.\n` +
+    `Hi, this is *Vanto from GetWellAfrica* — an accredited APLGO distributor.\n` +
     `You may also receive a call or WhatsApp from our Twilio number on our behalf.\n\n`;
   const footerParts: string[] = [`Shop: ${SHOP_URL}`];
   if (localNumber) footerParts.push(`Local support: ${localNumber}`);
@@ -208,7 +208,7 @@ Deno.serve(async (req) => {
 
           // If the message already contains the identity intro AND the shop URL, it has
           // been wrapped upstream — don't double-stamp.
-          const INTRO_SIG = "Vanto from K12 Africa";
+          const INTRO_SIG = "Vanto from GetWellAfrica";
           if (finalMessage.includes(INTRO_SIG) && finalMessage.includes(SHOP_URL)) {
             trust_skip_reason = "message_already_contains_trust_intro";
           } else {
