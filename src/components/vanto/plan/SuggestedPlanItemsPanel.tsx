@@ -180,8 +180,7 @@ export function SuggestedPlanItemsPanel({
                   <div className="flex-1 space-y-1">
                     <Input value={r.title} onChange={e => setTasks(rs => rs.map((x, idx) => idx === i ? { ...x, title: e.target.value } : x))} className="text-xs h-8" />
                     <div className="grid grid-cols-2 gap-1.5">
-                      <input type="datetime-local" value={r.when} onChange={e => setTasks(rs => rs.map((x, idx) => idx === i ? { ...x, when: e.target.value } : x))}
-                        className="bg-background/60 border border-border rounded-md px-2 py-1 text-[11px] text-foreground outline-none focus:border-primary/50" />
+                      <DateTimePicker value={r.when} onChange={v => setTasks(rs => rs.map((x, idx) => idx === i ? { ...x, when: v } : x))} placeholder="Pick due date" />
                       <div className="flex items-center gap-1 flex-wrap">
                         {PRIORITIES.map(p => (
                           <button key={p} type="button" onClick={() => setTasks(rs => rs.map((x, idx) => idx === i ? { ...x, priority: p } : x))}
