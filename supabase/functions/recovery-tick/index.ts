@@ -253,6 +253,10 @@ Deno.serve(async (req) => {
         attempt_outcome: sendResp.ok ? "delivered" : "failed",
       });
 
+      if (sendResp.ok && groupInviteAppended) {
+        await markGroupInvited(supabase, contact.id);
+      }
+
       if (sendResp.ok) sent++; else failed++;
     }
 
