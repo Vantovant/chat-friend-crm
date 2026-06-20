@@ -124,7 +124,7 @@ Deno.serve(async (req) => {
       // Fetch contact
       const { data: contact } = await supabase
         .from("contacts")
-        .select("id, name, phone, phone_normalized, do_not_contact, auto_reply_enabled")
+        .select("id, name, phone, phone_normalized, do_not_contact, auto_reply_enabled, lead_type, last_group_invite_at")
         .eq("id", row.contact_id)
         .maybeSingle();
 
