@@ -54,21 +54,23 @@ async function assertMaytapiReady(productId: string, phoneId: string, token: str
   }
 }
 
-// Lean wrapper: proof URL on top, message in middle, Shop + Local support at bottom.
-// We intentionally do NOT prepend "Hi, I'm Vanto from Get Well Africa — an accredited
-// APLGO distributor" on every message — the proof-page preview card already establishes
-// identity, and repeating the intro on every turn reads as robotic / spammy.
+// Lean wrapper: identity intro on top, message in middle, Shop + Local support at bottom.
+// NOTE (2026-06-20): Proof-URL preview card has been SUSPENDED — the link preview was
+// not rendering reliably. Identity is now carried by an explicit intro line so the
+// recipient still knows who is messaging them (and that a Twilio number may call).
 function buildTrustWrap(
   message: string,
-  proofUrl: string,
+  _proofUrl: string,
   _tocUrl: string,
   localNumber: string,
 ): string {
-  const top = `${proofUrl}\n\n`;
+  const intro =
+    `Hi, this is *Vanto from K12 Africa* — an accredited APLGO distributor.\n` +
+    `You may also receive a call or WhatsApp from our Twilio number on our behalf.\n\n`;
   const footerParts: string[] = [`Shop: ${SHOP_URL}`];
   if (localNumber) footerParts.push(`Local support: ${localNumber}`);
   const footer = `\n\n${footerParts.join("\n")}`;
-  return `${top}${message}${footer}`;
+  return `${intro}${message}${footer}`;
 }
 
 Deno.serve(async (req) => {
