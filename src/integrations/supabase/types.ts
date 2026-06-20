@@ -514,9 +514,13 @@ export type Database = {
           id: string
           interest: Database["public"]["Enums"]["interest_level"]
           is_deleted: boolean
+          last_distributor_invite_at: string | null
           last_group_invite_at: string | null
           last_name: string | null
+          last_opportunity_invite_at: string | null
+          last_sponsor_invite_at: string | null
           last_synced_at: string | null
+          last_training_invite_at: string | null
           lead_type: Database["public"]["Enums"]["lead_type"]
           name: string
           name_needs_confirmation: boolean
@@ -548,9 +552,13 @@ export type Database = {
           id?: string
           interest?: Database["public"]["Enums"]["interest_level"]
           is_deleted?: boolean
+          last_distributor_invite_at?: string | null
           last_group_invite_at?: string | null
           last_name?: string | null
+          last_opportunity_invite_at?: string | null
+          last_sponsor_invite_at?: string | null
           last_synced_at?: string | null
+          last_training_invite_at?: string | null
           lead_type?: Database["public"]["Enums"]["lead_type"]
           name: string
           name_needs_confirmation?: boolean
@@ -582,9 +590,13 @@ export type Database = {
           id?: string
           interest?: Database["public"]["Enums"]["interest_level"]
           is_deleted?: boolean
+          last_distributor_invite_at?: string | null
           last_group_invite_at?: string | null
           last_name?: string | null
+          last_opportunity_invite_at?: string | null
+          last_sponsor_invite_at?: string | null
           last_synced_at?: string | null
+          last_training_invite_at?: string | null
           lead_type?: Database["public"]["Enums"]["lead_type"]
           name?: string
           name_needs_confirmation?: boolean
