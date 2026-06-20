@@ -165,14 +165,20 @@ Deno.serve(async (req) => {
 
     const url = `https://api.maytapi.com/api/${PRODUCT_ID}/${PHONE_ID}/sendMessage`;
 
-    // Detect a leading URL → send as a link preview so WhatsApp renders the OG card
-    // for the distributor-proof page (vanto-zazi-bloom.lovable.app, etc.).
-    // Maytapi link payload: { type: "link", message: "<url>", text: "<full body>" }
+    // Send modes (priority order):
+    //   1) attach_image_url present → type:media (image attached, text as caption).
+    //      Most reliable preview because no scraping is required.
+    //   2) leading URL detected     → type:link (WhatsApp/Maytapi try to fetch OG card).
+    //   3) otherwise                → type:text.
     const leadingUrlMatch = finalMessage.trim().match(/^(https?:\/\/[^\s]+)/i);
-    const usePreview = !!leadingUrlMatch;
-    const payload: Record<string, unknown> = usePreview
-      ? { to_number: cleanNumber, type: "link", message: leadingUrlMatch![1], text: finalMessage }
-      : { to_number: cleanNumber, type: "text", message: finalMessage };
+    const useMedia = typeof attach_image_url === "string" && /^https?:\/\//i.test(attach_image_url);
+    const usePreview = !useMedia && !!leadingUrlMatch;
+    const payload: Record<string, unknown> = useMedia
+      ? { to_number: cleanNumber, type: "media", message: attach_image_url, text: finalMessage }
+      : usePreview
+        ? { to_number: cleanNumber, type: "link", message: leadingUrlMatch![1], text: finalMessage }
+        : { to_number: cleanNumber, type: "text", message: finalMessage };
+
 
     const resp = await fetch(url, {
       method: "POST",
