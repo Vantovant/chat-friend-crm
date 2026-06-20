@@ -63,6 +63,10 @@ async function loadSettings(svc: any): Promise<Record<string, string>> {
       "distributor_invite_line",
       "opportunity_invite_intro",
       "training_invite_intro",
+      "sponsor_cta_enabled",
+      "sponsor_cta_cooldown_days",
+      "sponsor_cta_min_followup_step",
+      "sponsor_cta_line",
     ]);
   const map: Record<string, string> = {};
   (data || []).forEach((r: any) => { map[r.key] = r.value; });
