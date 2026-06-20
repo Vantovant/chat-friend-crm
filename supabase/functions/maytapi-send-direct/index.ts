@@ -206,13 +206,14 @@ Deno.serve(async (req) => {
           const TOC_URL = s.table_of_contents_url || SHOP_URL;
           const LOCAL_NUMBER = s.local_support_number || "+27 79 083 1530";
 
-          // If the message already contains the proof URL AND the shop URL, it has
+          // If the message already contains the identity intro AND the shop URL, it has
           // been wrapped upstream — don't double-stamp.
-          if (finalMessage.includes(PROOF_URL) && finalMessage.includes(SHOP_URL)) {
-            trust_skip_reason = "message_already_contains_trust_links";
+          const INTRO_SIG = "Vanto from K12 Africa";
+          if (finalMessage.includes(INTRO_SIG) && finalMessage.includes(SHOP_URL)) {
+            trust_skip_reason = "message_already_contains_trust_intro";
           } else {
-            // Lean wrap on every send (proof URL on top, Shop + Local support at bottom).
-            // No "Hi I'm Vanto..." intro — proof preview card carries identity.
+            // Lean wrap on every send (identity intro on top, Shop + Local support at bottom).
+            // Proof-URL preview SUSPENDED 2026-06-20 — identity carried by intro line.
             finalMessage = buildTrustWrap(finalMessage, PROOF_URL, TOC_URL, LOCAL_NUMBER);
             trust_header_applied = true;
           }
