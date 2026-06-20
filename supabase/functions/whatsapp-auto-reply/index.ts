@@ -1497,7 +1497,7 @@ Deno.serve(async (req) => {
       actionTaken = "buy_intent_trust_reply";
     } else if (isProductInfoReq) {
       replyContent =
-        `${PROOF_URL}\n\n` +
+        `${IDENTITY_INTRO}\n` +
         `Of course. Tell me what you want support with most — ${SUPPORT_MENU} — and I'll point you to the right product.\n\n` +
         `Shop: ${SHOP_URL}\n` +
         `Local support: ${LOCAL_NUMBER}`;
@@ -1505,7 +1505,7 @@ Deno.serve(async (req) => {
       actionTaken = "product_info_trust_reply";
     } else if (isPriceNoContext) {
       replyContent =
-        `${PROOF_URL}\n\n` +
+        `${IDENTITY_INTRO}\n` +
         `I can help with price. Which product are you asking about?\n\n` +
         `Shop: ${SHOP_URL}\n` +
         `Local support: ${LOCAL_NUMBER}`;
