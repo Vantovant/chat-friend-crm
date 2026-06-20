@@ -202,10 +202,12 @@ Deno.serve(async (req) => {
         trust_skip_reason,
         sent_length: finalMessage.length,
         link_preview: usePreview,
+        media_attached: useMedia,
         raw: data,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
+
   } catch (err) {
     console.error("maytapi-send-direct error:", err);
     return new Response(JSON.stringify({ error: err instanceof Error ? err.message : "Unknown" }), {
