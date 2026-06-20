@@ -514,6 +514,7 @@ export type Database = {
           id: string
           interest: Database["public"]["Enums"]["interest_level"]
           is_deleted: boolean
+          last_group_invite_at: string | null
           last_name: string | null
           last_synced_at: string | null
           lead_type: Database["public"]["Enums"]["lead_type"]
@@ -547,6 +548,7 @@ export type Database = {
           id?: string
           interest?: Database["public"]["Enums"]["interest_level"]
           is_deleted?: boolean
+          last_group_invite_at?: string | null
           last_name?: string | null
           last_synced_at?: string | null
           lead_type?: Database["public"]["Enums"]["lead_type"]
@@ -580,6 +582,7 @@ export type Database = {
           id?: string
           interest?: Database["public"]["Enums"]["interest_level"]
           is_deleted?: boolean
+          last_group_invite_at?: string | null
           last_name?: string | null
           last_synced_at?: string | null
           lead_type?: Database["public"]["Enums"]["lead_type"]

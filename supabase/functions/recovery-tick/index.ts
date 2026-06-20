@@ -1,5 +1,6 @@
 // Cron-driven: process due missed_inquiries, draft via Lovable AI, send via Maytapi, advance step.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { maybeAppendGroupInvite, markGroupInvited } from "../_shared/group-invite.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -123,7 +124,7 @@ Deno.serve(async (req) => {
       // Fetch contact
       const { data: contact } = await supabase
         .from("contacts")
-        .select("id, name, phone, phone_normalized, do_not_contact, auto_reply_enabled")
+        .select("id, name, phone, phone_normalized, do_not_contact, auto_reply_enabled, lead_type, last_group_invite_at")
         .eq("id", row.contact_id)
         .maybeSingle();
 
@@ -166,7 +167,18 @@ Deno.serve(async (req) => {
       }
 
       const firstName = (contact.name || "there").split(" ")[0];
-      const message = await draftMessage(firstName, row.last_inbound_snippet || "", stepIdx);
+      let message = await draftMessage(firstName, row.last_inbound_snippet || "", stepIdx);
+
+      // ── WhatsApp group invite (organic, soft, capped) ──
+      const inviteResult = await maybeAppendGroupInvite(supabase, message, {
+        contactId: contact.id,
+        phoneNormalized: contact.phone_normalized || null,
+        leadType: contact.lead_type || null,
+        followupStep: stepIdx + 1,
+        lastGroupInviteAt: contact.last_group_invite_at || null,
+      });
+      message = inviteResult.message;
+      const groupInviteAppended = inviteResult.appended;
 
       // Send via Maytapi direct
       const sendResp = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
@@ -240,6 +252,10 @@ Deno.serve(async (req) => {
         governance_flags: { option_b_paused: false },
         attempt_outcome: sendResp.ok ? "delivered" : "failed",
       });
+
+      if (sendResp.ok && groupInviteAppended) {
+        await markGroupInvited(supabase, contact.id);
+      }
 
       if (sendResp.ok) sent++; else failed++;
     }

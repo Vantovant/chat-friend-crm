@@ -5,6 +5,7 @@
 // Does NOT touch legacy 5-step rows.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { maybeAppendGroupInvite, markGroupInvited } from "../_shared/group-invite.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -105,7 +106,7 @@ Deno.serve(async (req) => {
 
       const { data: contact } = await supabase
         .from("contacts")
-        .select("id, name, phone, phone_normalized, do_not_contact, auto_reply_enabled")
+        .select("id, name, phone, phone_normalized, do_not_contact, auto_reply_enabled, lead_type, last_group_invite_at")
         .eq("id", row.contact_id)
         .maybeSingle();
 
@@ -192,7 +193,19 @@ Deno.serve(async (req) => {
       }
 
       const firstName = (contact.name || "there").split(" ")[0];
-      const message = renderTemplate(tpl.template_text, { name: firstName, first_name: firstName, topic: row.topic || "" });
+      let message = renderTemplate(tpl.template_text, { name: firstName, first_name: firstName, topic: row.topic || "" });
+
+      // ── WhatsApp group invite (organic, soft, capped) ──
+      const inviteResult = await maybeAppendGroupInvite(supabase, message, {
+        contactId: contact.id,
+        phoneNormalized: contact.phone_normalized || null,
+        leadType: contact.lead_type || null,
+        followupStep: stepIdx + 1,
+        lastGroupInviteAt: contact.last_group_invite_at || null,
+      });
+      message = inviteResult.message;
+      const groupInviteAppended = inviteResult.appended;
+
       let isAuto = tpl.send_mode === "auto";
 
       // Governance downgrade — Phase 3 cannot auto-send unless flag explicitly = 'auto'
@@ -311,6 +324,10 @@ Deno.serve(async (req) => {
           status: isLast && sendResp.ok ? "exhausted" : "active",
           last_error: sendResp.ok ? null : newAttempt.error,
         }).eq("id", row.id);
+
+        if (sendResp.ok && groupInviteAppended) {
+          await markGroupInvited(supabase, contact.id);
+        }
 
         if (sendResp.ok) auto_sent++; else failed++;
       } else {
