@@ -193,7 +193,19 @@ Deno.serve(async (req) => {
       }
 
       const firstName = (contact.name || "there").split(" ")[0];
-      const message = renderTemplate(tpl.template_text, { name: firstName, first_name: firstName, topic: row.topic || "" });
+      let message = renderTemplate(tpl.template_text, { name: firstName, first_name: firstName, topic: row.topic || "" });
+
+      // ── WhatsApp group invite (organic, soft, capped) ──
+      const inviteResult = await maybeAppendGroupInvite(supabase, message, {
+        contactId: contact.id,
+        phoneNormalized: contact.phone_normalized || null,
+        leadType: contact.lead_type || null,
+        followupStep: stepIdx + 1,
+        lastGroupInviteAt: contact.last_group_invite_at || null,
+      });
+      message = inviteResult.message;
+      const groupInviteAppended = inviteResult.appended;
+
       let isAuto = tpl.send_mode === "auto";
 
       // Governance downgrade — Phase 3 cannot auto-send unless flag explicitly = 'auto'
