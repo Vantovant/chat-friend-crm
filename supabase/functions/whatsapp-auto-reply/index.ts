@@ -2208,6 +2208,16 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
       menu_option: intent.intent, knowledge_query: intent.query?.slice(0, 200) || null, knowledge_found: knowledgeFound,
     });
 
+    // Stamp intent-invite cooldown only after confirmed dispatch
+    if (_intentDetected && contact_id) {
+      try {
+        const { markIntentInvited } = await import("../_shared/intent-links.ts");
+        await markIntentInvited(svc, contact_id, _intentDetected);
+      } catch (e: any) {
+        console.warn("[auto-reply] markIntentInvited failed (non-fatal):", e?.message);
+      }
+    }
+
     // Emergency-lane audit on successful auto-send
     if (emergencyLane && !emergencyUnsafeBlocked) {
       try {
