@@ -325,6 +325,10 @@ Deno.serve(async (req) => {
           last_error: sendResp.ok ? null : newAttempt.error,
         }).eq("id", row.id);
 
+        if (sendResp.ok && groupInviteAppended) {
+          await markGroupInvited(supabase, contact.id);
+        }
+
         if (sendResp.ok) auto_sent++; else failed++;
       } else {
         // Suggest mode — log + advance step but do NOT send
