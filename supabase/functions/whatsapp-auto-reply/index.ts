@@ -985,6 +985,17 @@ Deno.serve(async (req) => {
 
   const svc = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
+  // ── Master kill switch (emergency_all_auto_paused) ──
+  try {
+    const { isEmergencyPaused } = await import("../_shared/emergency-guard.ts");
+    if (await isEmergencyPaused(svc)) {
+      console.log("[whatsapp-auto-reply] emergency_all_auto_paused=true — no reply will be sent");
+      return jsonRes({ ok: true, sent: false, paused: true, reason: "emergency_all_auto_paused" }, 200);
+    }
+  } catch (err) {
+    console.warn("[whatsapp-auto-reply] emergency guard failed open:", (err as Error).message);
+  }
+
   const diag: Record<string, any> = {
     phone: phone_e164, conversation_id, contact_id: contact_id || "none",
     inbound_text: (inbound_content || "").slice(0, 100),
