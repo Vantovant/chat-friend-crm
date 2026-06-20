@@ -1,5 +1,6 @@
 // Cron-driven: process due missed_inquiries, draft via Lovable AI, send via Maytapi, advance step.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { maybeAppendGroupInvite, markGroupInvited } from "../_shared/group-invite.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
