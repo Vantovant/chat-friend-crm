@@ -75,7 +75,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const { to_number, message, skip_trust_header, attach_image_url } = await req.json();
+    const { to_number, message, skip_trust_header, attach_image_url, contact_id: bodyContactId, skip_rate_limit } = await req.json();
     if (!to_number || !message) {
       return new Response(JSON.stringify({ error: "to_number and message required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -98,6 +98,49 @@ Deno.serve(async (req) => {
       }
     } catch (err) {
       console.warn("[maytapi-send-direct] emergency guard failed open:", (err as Error).message);
+    }
+
+    // ── Atomic per-contact rate-limit reserve (30/5min + 100/24h, configurable) ──
+    // Acts as the central choke point for all outbound sends.
+    let _reservedContactId: string | null = null;
+    if (!skip_rate_limit) {
+      try {
+        const SUPABASE_URL_RL = Deno.env.get("SUPABASE_URL");
+        const SERVICE_ROLE_RL = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+        if (SUPABASE_URL_RL && SERVICE_ROLE_RL) {
+          const svcRl = createClient(SUPABASE_URL_RL, SERVICE_ROLE_RL);
+          let contactIdForRl: string | null = bodyContactId || null;
+          if (!contactIdForRl) {
+            const normalized = "+" + String(to_number).replace(/[^\d]/g, "");
+            const { data: cRow } = await svcRl
+              .from("contacts")
+              .select("id")
+              .eq("phone_normalized", normalized)
+              .maybeSingle();
+            contactIdForRl = cRow?.id || null;
+          }
+          if (contactIdForRl) {
+            const { reserveMessageSlot, logRateLimited } = await import("../_shared/rate-limit.ts");
+            const r = await reserveMessageSlot(svcRl, contactIdForRl);
+            if (!r.ok) {
+              await logRateLimited(svcRl, contactIdForRl, r.reason || "unknown", r.retry_after, { caller: "maytapi-send-direct" });
+              console.log(`[maytapi-send-direct] rate-limited contact=${contactIdForRl} reason=${r.reason} retry_after=${r.retry_after}`);
+              return new Response(JSON.stringify({
+                success: false,
+                rate_limited: true,
+                reason: r.reason,
+                retry_after: r.retry_after,
+                contact_id: contactIdForRl,
+              }), {
+                status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+              });
+            }
+            _reservedContactId = contactIdForRl;
+          }
+        }
+      } catch (err) {
+        console.warn("[maytapi-send-direct] rate-limit reserve failed open:", (err as Error).message);
+      }
     }
 
 
