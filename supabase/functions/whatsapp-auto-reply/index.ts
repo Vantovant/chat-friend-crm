@@ -2125,6 +2125,41 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     diag.l2_gate_error = e?.message;
   }
 
+  // ── Unmanned-prospector intent links (sponsor signup + Zoom invites) ──
+  // If the inbound message signals distributor / opportunity / training intent,
+  // append the sponsor "secure your seat" link FIRST and then the matching
+  // Zoom meeting link. Cooldown + opt-out + duplicate-URL guards in helper.
+  let _intentDetected: "distributor" | "opportunity" | "training" | null = null;
+  try {
+    const { detectInboundIntent, maybeAppendIntentInvite } = await import("../_shared/intent-links.ts");
+    _intentDetected = detectInboundIntent(inbound_content || "");
+    if (_intentDetected && contact_id) {
+      const { data: cRow } = await svc
+        .from("contacts")
+        .select("lead_type, last_sponsor_invite_at, last_opportunity_invite_at, last_training_invite_at, last_distributor_invite_at")
+        .eq("id", contact_id)
+        .maybeSingle();
+      const res = await maybeAppendIntentInvite(svc, replyContent, _intentDetected, {
+        contactId: contact_id,
+        phoneNormalized: phone_e164,
+        leadType: (cRow as any)?.lead_type ?? null,
+        lastSponsorInviteAt: (cRow as any)?.last_sponsor_invite_at ?? null,
+        lastOpportunityInviteAt: (cRow as any)?.last_opportunity_invite_at ?? null,
+        lastTrainingInviteAt: (cRow as any)?.last_training_invite_at ?? null,
+        lastDistributorInviteAt: (cRow as any)?.last_distributor_invite_at ?? null,
+      });
+      if (res.appended) {
+        replyContent = res.message;
+        diag.intent_invite_appended = _intentDetected;
+      } else {
+        diag.intent_invite_skipped = res.reason;
+        _intentDetected = null; // don't stamp cooldown if not appended
+      }
+    }
+  } catch (e: any) {
+    console.warn("[auto-reply] intent-links failed (non-fatal):", e?.message);
+  }
+
   // ── Dispatch via send-message ──
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
   const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
@@ -2172,6 +2207,16 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
       action_taken: actionTaken, reason: "inbound_message",
       menu_option: intent.intent, knowledge_query: intent.query?.slice(0, 200) || null, knowledge_found: knowledgeFound,
     });
+
+    // Stamp intent-invite cooldown only after confirmed dispatch
+    if (_intentDetected && contact_id) {
+      try {
+        const { markIntentInvited } = await import("../_shared/intent-links.ts");
+        await markIntentInvited(svc, contact_id, _intentDetected);
+      } catch (e: any) {
+        console.warn("[auto-reply] markIntentInvited failed (non-fatal):", e?.message);
+      }
+    }
 
     // Emergency-lane audit on successful auto-send
     if (emergencyLane && !emergencyUnsafeBlocked) {
