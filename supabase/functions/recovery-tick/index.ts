@@ -270,6 +270,9 @@ Deno.serve(async (req) => {
       if (sendResp.ok && groupInviteAppended) {
         await markGroupInvited(supabase, contact.id);
       }
+      if (sendResp.ok && sponsorCtaAppended) {
+        await markSponsorCtaSent(supabase, contact.id);
+      }
 
       if (sendResp.ok) sent++; else failed++;
     }
