@@ -1476,7 +1476,8 @@ Deno.serve(async (req) => {
       // Override the AI body — first-touch must be the trust-first script.
       replyContent = buildFirstTouch(isTwilio || !isMaytapi);
       diag.first_touch_template = isTwilio ? "twilio" : (isMaytapi ? "maytapi" : "default_twilio_style");
-      diag.proof_url_first_line = true;
+      diag.proof_url_first_line = false;
+      diag.identity_intro_first_line = true;
       actionTaken = "first_touch_trust_message";
     } else if (isJoinIntent) {
       replyContent =
