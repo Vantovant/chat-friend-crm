@@ -238,3 +238,84 @@ export async function markIntentInvited(
     console.warn("[intent-links] markIntentInvited failed:", e);
   }
 }
+
+// ── Outbound sponsor CTA (for phase3-tick / recovery-tick follow-ups) ──
+// Rotates with the WhatsApp group invite: if the group invite was already
+// appended to this outbound message, skip the sponsor CTA (and vice versa).
+// Cooldown defaults to 14 days per contact, separately from the reactive
+// intent-invite cooldown (which is per-intent and shorter).
+export interface SponsorCtaCtx {
+  contactId: string;
+  phoneNormalized: string | null;
+  leadType: string | null;
+  followupStep: number;
+  lastSponsorInviteAt: string | null;
+  groupInviteAlreadyAppended: boolean;
+}
+
+export interface SponsorCtaResult {
+  appended: boolean;
+  message: string;
+  reason?: string;
+}
+
+export async function maybeAppendSponsorCta(
+  svc: any,
+  message: string,
+  ctx: SponsorCtaCtx,
+): Promise<SponsorCtaResult> {
+  try {
+    if (ctx.groupInviteAlreadyAppended) {
+      return { appended: false, message, reason: "group_invite_in_same_message" };
+    }
+    const s = await loadSettings(svc);
+    const enabled = (s["sponsor_cta_enabled"] || "true").toLowerCase() === "true";
+    if (!enabled) return { appended: false, message, reason: "disabled" };
+
+    const sponsor = (s["sponsor_register_url"] || "").trim();
+    if (!sponsor) return { appended: false, message, reason: "no_sponsor_url" };
+
+    const line = (s["sponsor_cta_line"] || "").trim();
+    if (!line) return { appended: false, message, reason: "no_line" };
+
+    const minStep = parseInt(s["sponsor_cta_min_followup_step"] || "2", 10);
+    if (ctx.followupStep < minStep) return { appended: false, message, reason: `step<${minStep}` };
+
+    if ((ctx.leadType || "").toLowerCase() === "expired") {
+      return { appended: false, message, reason: "lead_expired" };
+    }
+    if (await isOptedOut(svc, ctx.phoneNormalized)) {
+      return { appended: false, message, reason: "optout" };
+    }
+
+    const cooldownDays = parseInt(s["sponsor_cta_cooldown_days"] || "14", 10);
+    if (ctx.lastSponsorInviteAt) {
+      const age = Date.now() - new Date(ctx.lastSponsorInviteAt).getTime();
+      if (age < cooldownDays * 86400000) {
+        return { appended: false, message, reason: "cooldown" };
+      }
+    }
+
+    if (message.includes(sponsor)) {
+      return { appended: false, message, reason: "sponsor_url_already_in_body" };
+    }
+
+    const composed = `${message.trimEnd()}\n\n${line}\n👉 ${sponsor}`;
+    return { appended: true, message: composed };
+  } catch (e) {
+    console.warn("[intent-links] maybeAppendSponsorCta failed:", e);
+    return { appended: false, message, reason: "error" };
+  }
+}
+
+export async function markSponsorCtaSent(svc: any, contactId: string): Promise<void> {
+  try {
+    await svc
+      .from("contacts")
+      .update({ last_sponsor_invite_at: new Date().toISOString() })
+      .eq("id", contactId);
+  } catch (e) {
+    console.warn("[intent-links] markSponsorCtaSent failed:", e);
+  }
+}
+
