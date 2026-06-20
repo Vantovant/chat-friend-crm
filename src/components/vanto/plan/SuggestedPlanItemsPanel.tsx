@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Sparkles, Loader2, X } from 'lucide-react';
+import { DateTimePicker } from './DateTimePicker';
 
 type Priority = 'low' | 'medium' | 'high' | 'urgent';
 
