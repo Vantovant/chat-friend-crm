@@ -219,8 +219,7 @@ export function SuggestedPlanItemsPanel({
                   <div className="flex-1 space-y-1">
                     <Input value={r.title} onChange={e => setMeetings(rs => rs.map((x, idx) => idx === i ? { ...x, title: e.target.value } : x))} className="text-xs h-8" />
                     <div className="grid grid-cols-2 gap-1.5">
-                      <input type="datetime-local" value={r.when} onChange={e => setMeetings(rs => rs.map((x, idx) => idx === i ? { ...x, when: e.target.value } : x))}
-                        className="bg-background/60 border border-border rounded-md px-2 py-1 text-[11px] text-foreground outline-none focus:border-primary/50" />
+                      <DateTimePicker value={r.when} onChange={v => setMeetings(rs => rs.map((x, idx) => idx === i ? { ...x, when: v } : x))} placeholder="Pick start time" />
                       <Input value={r.location} onChange={e => setMeetings(rs => rs.map((x, idx) => idx === i ? { ...x, location: e.target.value } : x))}
                         placeholder="Location / link" className="text-[11px] h-7" />
                     </div>
