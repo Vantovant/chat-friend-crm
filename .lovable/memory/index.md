@@ -14,6 +14,7 @@ Group Campaigns: Maytapi REST API (NOT Chrome Extension autoposter). Twilio stay
 - [Project Overview](mem://project/overview) — High-level purpose, modules, and scope of Vanto CRM
 - [Branding](mem://style/branding) — Visual branding details, interaction greetings
 - [Proof Card Image (LOCKED)](mem://style/proof-card-image) — APLGO Wellness OG preview image; never regenerate
+- [Proof URL Suspended](mem://technical/proof-url-suspended) — distributor_proof_url no longer prepended to messages; identity intro line used instead
 - [Permissions](mem://auth/permissions) — Role-based access control, RLS OR logic details
 - [Zazi CRM Integration](mem://integrations/zazi-crm) — Bidirectional sync details, retries
 - [Database Schema](mem://database/schema) — Core tables, enums, RAG tables setup
