@@ -203,8 +203,7 @@ export function SuggestedPlanItemsPanel({
                   <Checkbox className="mt-2" checked={r.selected} onCheckedChange={v => setReminders(rs => rs.map((x, idx) => idx === i ? { ...x, selected: Boolean(v) } : x))} />
                   <div className="flex-1 space-y-1">
                     <Input value={r.title} onChange={e => setReminders(rs => rs.map((x, idx) => idx === i ? { ...x, title: e.target.value } : x))} className="text-xs h-8" />
-                    <input type="datetime-local" value={r.when} onChange={e => setReminders(rs => rs.map((x, idx) => idx === i ? { ...x, when: e.target.value } : x))}
-                      className="w-full bg-background/60 border border-border rounded-md px-2 py-1 text-[11px] text-foreground outline-none focus:border-primary/50" />
+                    <DateTimePicker value={r.when} onChange={v => setReminders(rs => rs.map((x, idx) => idx === i ? { ...x, when: v } : x))} placeholder="Pick reminder date & time" />
                     {!r.when && <p className="text-[10px] text-amber-500">Pick a date/time or this reminder will be skipped.</p>}
                   </div>
                 </div>
