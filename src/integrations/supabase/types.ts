@@ -1569,6 +1569,41 @@ export type Database = {
         }
         Relationships: []
       }
+      message_limits: {
+        Row: {
+          contact_id: string
+          count_24h: number
+          count_5min: number
+          updated_at: string
+          window_24h_start: string
+          window_5min_start: string
+        }
+        Insert: {
+          contact_id: string
+          count_24h?: number
+          count_5min?: number
+          updated_at?: string
+          window_24h_start?: string
+          window_5min_start?: string
+        }
+        Update: {
+          contact_id?: string
+          count_24h?: number
+          count_5min?: number
+          updated_at?: string
+          window_24h_start?: string
+          window_5min_start?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_limits_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: true
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       message_variants: {
         Row: {
           content: string
@@ -3068,7 +3103,12 @@ export type Database = {
       }
       is_admin_or_super_admin: { Args: never; Returns: boolean }
       release_cadence_send_slot: { Args: never; Returns: undefined }
+      release_message_slot: {
+        Args: { p_contact_id: string }
+        Returns: undefined
+      }
       reserve_cadence_send_slot: { Args: { p_limit: number }; Returns: number }
+      reserve_message_slot: { Args: { p_contact_id: string }; Returns: Json }
       search_knowledge: {
         Args: {
           collection_filter?: string
