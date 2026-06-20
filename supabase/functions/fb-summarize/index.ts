@@ -220,11 +220,37 @@ Rules:
       return json({ ok: false, error: insErr.message }, 200);
     }
 
-    // Safety update: do NOT auto-inject Facebook posts into WhatsApp groups.
-    // Approved variants stay available for manual scheduled dispatch only.
+    // Auto-inject the approved group variant into the 11 allowlisted WhatsApp groups.
+    // Gated by integration_settings.fb_instant_enabled (emergency stop) inside fb-inject-to-queue.
+    // Scheduled +11 minutes (above the 10-min MIN_LEAD_TIME safety guard) so it can be cancelled.
     const groupRow = (ins ?? []).find((r: any) => r.variant === 'group' && r.status === 'approved');
     if (groupRow) {
-      console.log('[fb-summarize] group variant approved; manual scheduling required', { fb_generated_post_id: groupRow.id });
+      try {
+        const { data: enabledRow } = await supabase
+          .from('integration_settings').select('value').eq('key', 'fb_instant_enabled').maybeSingle();
+        const enabled = enabledRow ? (enabledRow.value === 'true' || enabledRow.value === '1') : false;
+        if (!enabled) {
+          console.log('[fb-summarize] fb_instant_enabled=false; skipping auto-inject', { fb_generated_post_id: groupRow.id });
+        } else {
+          const scheduledAt = new Date(Date.now() + 11 * 60 * 1000).toISOString();
+          const resp = await fetch(`${SUPABASE_URL}/functions/v1/fb-inject-to-queue`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${SERVICE_ROLE}`,
+              'apikey': SERVICE_ROLE,
+            },
+            body: JSON.stringify({
+              fb_generated_post_id: groupRow.id,
+              scheduled_at: scheduledAt,
+            }),
+          });
+          const body = await resp.json().catch(() => ({}));
+          console.log('[fb-summarize] auto-inject result', { fb_generated_post_id: groupRow.id, status: resp.status, body });
+        }
+      } catch (e) {
+        console.error('[fb-summarize] auto-inject exception', e);
+      }
     } else {
       console.warn('[fb-summarize] group variant not approved', {
         statuses: (ins ?? []).map((r: any) => ({ v: r.variant, s: r.status })),
