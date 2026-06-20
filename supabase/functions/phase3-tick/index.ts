@@ -5,6 +5,7 @@
 // Does NOT touch legacy 5-step rows.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { maybeAppendGroupInvite, markGroupInvited } from "../_shared/group-invite.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
