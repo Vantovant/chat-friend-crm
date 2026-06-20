@@ -1,6 +1,7 @@
 // Cron-driven: process due missed_inquiries, draft via Lovable AI, send via Maytapi, advance step.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { maybeAppendGroupInvite, markGroupInvited } from "../_shared/group-invite.ts";
+import { maybeAppendSponsorCta, markSponsorCtaSent } from "../_shared/intent-links.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -124,7 +125,7 @@ Deno.serve(async (req) => {
       // Fetch contact
       const { data: contact } = await supabase
         .from("contacts")
-        .select("id, name, phone, phone_normalized, do_not_contact, auto_reply_enabled, lead_type, last_group_invite_at")
+        .select("id, name, phone, phone_normalized, do_not_contact, auto_reply_enabled, lead_type, last_group_invite_at, last_sponsor_invite_at")
         .eq("id", row.contact_id)
         .maybeSingle();
 
@@ -179,6 +180,19 @@ Deno.serve(async (req) => {
       });
       message = inviteResult.message;
       const groupInviteAppended = inviteResult.appended;
+
+      // ── Sponsor "secure your seat / free quote" CTA (rotates with group invite) ──
+      const sponsorResult = await maybeAppendSponsorCta(supabase, message, {
+        contactId: contact.id,
+        phoneNormalized: contact.phone_normalized || null,
+        leadType: contact.lead_type || null,
+        followupStep: stepIdx + 1,
+        lastSponsorInviteAt: (contact as any).last_sponsor_invite_at || null,
+        groupInviteAlreadyAppended: groupInviteAppended,
+      });
+      message = sponsorResult.message;
+      const sponsorCtaAppended = sponsorResult.appended;
+
 
       // Send via Maytapi direct
       const sendResp = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
@@ -255,6 +269,9 @@ Deno.serve(async (req) => {
 
       if (sendResp.ok && groupInviteAppended) {
         await markGroupInvited(supabase, contact.id);
+      }
+      if (sendResp.ok && sponsorCtaAppended) {
+        await markSponsorCtaSent(supabase, contact.id);
       }
 
       if (sendResp.ok) sent++; else failed++;
