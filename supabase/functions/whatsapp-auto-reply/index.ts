@@ -1427,14 +1427,16 @@ Deno.serve(async (req) => {
     diag.first_touch = isFirstReply;
 
     // Build trust-first first-touch script (channel-aware).
-    // No "Hi I'm Vanto..." intro line — the proof-page preview card carries identity,
-    // and repeating it on every turn reads as robotic.
+    // PROOF-URL PREVIEW SUSPENDED 2026-06-20 — link card was not rendering reliably.
+    // Identity is now carried by an explicit intro line that also flags the Twilio number.
+    const IDENTITY_INTRO =
+      `Hi, this is *Vanto from K12 Africa* — an accredited APLGO distributor.\n`;
     const TRUST_BRIDGE_TWILIO =
-      `This WhatsApp may appear from our campaign/system number, but I'll guide you personally from my local South African number as well.\n\n`;
+      `You may receive a WhatsApp or call from our Twilio campaign number, but I'll guide you personally from my local South African number as well.\n\n`;
     const buildFirstTouch = (twilioStyle: boolean) => {
-      const bridge = twilioStyle ? TRUST_BRIDGE_TWILIO : "";
+      const bridge = twilioStyle ? TRUST_BRIDGE_TWILIO : "\n";
       return (
-        `${PROOF_URL}\n\n` +
+        `${IDENTITY_INTRO}` +
         `${bridge}` +
         `What would you like support with most — ${SUPPORT_MENU}?\n\n` +
         `Shop: ${SHOP_URL}\n` +
