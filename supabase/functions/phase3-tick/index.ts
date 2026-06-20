@@ -128,6 +128,32 @@ Deno.serve(async (req) => {
         failed++; continue;
       }
 
+      // ── Per-phone cooldown guard (duplicate-blast prevention) ──
+      // If ANY follow-up to this phone was sent in the last 20h (from any
+      // missed_inquiry row, regardless of topic/state), reschedule this one
+      // for 22h out and skip. Prevents two topics for the same contact firing
+      // identical step-1 messages back-to-back.
+      const COOLDOWN_HOURS = 20;
+      const cooldownAgoIso = new Date(Date.now() - COOLDOWN_HOURS * 3600000).toISOString();
+      const { data: recentSent } = await supabase
+        .from("followup_logs")
+        .select("id, created_at")
+        .eq("phone", phone)
+        .eq("delivery", "sent")
+        .gte("created_at", cooldownAgoIso)
+        .limit(1);
+      if (recentSent && recentSent.length > 0) {
+        const reschedAt = new Date(Date.now() + 22 * 3600000).toISOString();
+        await supabase
+          .from("missed_inquiries")
+          .update({ next_send_at: reschedAt, last_error: "cooldown_per_phone_20h" })
+          .eq("id", row.id);
+        skipped++;
+        continue;
+      }
+
+
+
       // Reply detection — auto-stop if user replied since last attempt
       const attemptsArr: any[] = Array.isArray(row.attempts) ? row.attempts : [];
       const lastAttemptAt = attemptsArr.length > 0 ? attemptsArr[attemptsArr.length - 1].sent_at : null;
