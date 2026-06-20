@@ -408,12 +408,16 @@ Deno.serve(async (req) => {
             previewStatus = "no_url";
           } else {
             const preview = await checkLinkPreview(post.message_content);
-            if (preview.ok) {
-              // Rich preview will render
+            if (preview.ok && preview.imageUrl) {
+              // Attach the page's og:image directly as media. This always renders
+              // the visual card at the top — no reliance on Maytapi/WhatsApp's
+              // phone-side scraper (which silently fails on Cloudflare-protected
+              // or slow pages, causing the URL to be appended as plain text,
+              // making the same URL appear TWICE in the group).
               body = {
                 to_number: targetJid,
-                type: "link",
-                message: preview.url!,
+                type: "media",
+                message: preview.imageUrl,
                 text: post.message_content,
               };
               previewStatus = "ok";
@@ -426,8 +430,9 @@ Deno.serve(async (req) => {
               messageToSend = fallback;
               body = { to_number: targetJid, type: "text", message: fallback };
               previewStatus = "fallback_used";
-              console.log(`[preview] post=${post.id} url=${preview.url} reason=${preview.reason} → fallback`);
+              console.log(`[preview] post=${post.id} url=${preview.url} reason=${preview.reason || "no_og_image"} → fallback`);
             }
+
           }
         }
 
