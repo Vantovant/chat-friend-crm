@@ -1427,14 +1427,16 @@ Deno.serve(async (req) => {
     diag.first_touch = isFirstReply;
 
     // Build trust-first first-touch script (channel-aware).
-    // No "Hi I'm Vanto..." intro line — the proof-page preview card carries identity,
-    // and repeating it on every turn reads as robotic.
+    // PROOF-URL PREVIEW SUSPENDED 2026-06-20 — link card was not rendering reliably.
+    // Identity is now carried by an explicit intro line that also flags the Twilio number.
+    const IDENTITY_INTRO =
+      `Hi, this is *Vanto from K12 Africa* — an accredited APLGO distributor.\n`;
     const TRUST_BRIDGE_TWILIO =
-      `This WhatsApp may appear from our campaign/system number, but I'll guide you personally from my local South African number as well.\n\n`;
+      `You may receive a WhatsApp or call from our Twilio campaign number, but I'll guide you personally from my local South African number as well.\n\n`;
     const buildFirstTouch = (twilioStyle: boolean) => {
-      const bridge = twilioStyle ? TRUST_BRIDGE_TWILIO : "";
+      const bridge = twilioStyle ? TRUST_BRIDGE_TWILIO : "\n";
       return (
-        `${PROOF_URL}\n\n` +
+        `${IDENTITY_INTRO}` +
         `${bridge}` +
         `What would you like support with most — ${SUPPORT_MENU}?\n\n` +
         `Shop: ${SHOP_URL}\n` +
@@ -1474,7 +1476,8 @@ Deno.serve(async (req) => {
       // Override the AI body — first-touch must be the trust-first script.
       replyContent = buildFirstTouch(isTwilio || !isMaytapi);
       diag.first_touch_template = isTwilio ? "twilio" : (isMaytapi ? "maytapi" : "default_twilio_style");
-      diag.proof_url_first_line = true;
+      diag.proof_url_first_line = false;
+      diag.identity_intro_first_line = true;
       actionTaken = "first_touch_trust_message";
     } else if (isJoinIntent) {
       replyContent =
@@ -1494,7 +1497,7 @@ Deno.serve(async (req) => {
       actionTaken = "buy_intent_trust_reply";
     } else if (isProductInfoReq) {
       replyContent =
-        `${PROOF_URL}\n\n` +
+        `${IDENTITY_INTRO}\n` +
         `Of course. Tell me what you want support with most — ${SUPPORT_MENU} — and I'll point you to the right product.\n\n` +
         `Shop: ${SHOP_URL}\n` +
         `Local support: ${LOCAL_NUMBER}`;
@@ -1502,7 +1505,7 @@ Deno.serve(async (req) => {
       actionTaken = "product_info_trust_reply";
     } else if (isPriceNoContext) {
       replyContent =
-        `${PROOF_URL}\n\n` +
+        `${IDENTITY_INTRO}\n` +
         `I can help with price. Which product are you asking about?\n\n` +
         `Shop: ${SHOP_URL}\n` +
         `Local support: ${LOCAL_NUMBER}`;

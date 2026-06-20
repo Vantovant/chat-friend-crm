@@ -54,21 +54,23 @@ async function assertMaytapiReady(productId: string, phoneId: string, token: str
   }
 }
 
-// Lean wrapper: proof URL on top, message in middle, Shop + Local support at bottom.
-// We intentionally do NOT prepend "Hi, I'm Vanto from Get Well Africa — an accredited
-// APLGO distributor" on every message — the proof-page preview card already establishes
-// identity, and repeating the intro on every turn reads as robotic / spammy.
+// Lean wrapper: identity intro on top, message in middle, Shop + Local support at bottom.
+// NOTE (2026-06-20): Proof-URL preview card has been SUSPENDED — the link preview was
+// not rendering reliably. Identity is now carried by an explicit intro line so the
+// recipient still knows who is messaging them (and that a Twilio number may call).
 function buildTrustWrap(
   message: string,
-  proofUrl: string,
+  _proofUrl: string,
   _tocUrl: string,
   localNumber: string,
 ): string {
-  const top = `${proofUrl}\n\n`;
+  const intro =
+    `Hi, this is *Vanto from K12 Africa* — an accredited APLGO distributor.\n` +
+    `You may also receive a call or WhatsApp from our Twilio number on our behalf.\n\n`;
   const footerParts: string[] = [`Shop: ${SHOP_URL}`];
   if (localNumber) footerParts.push(`Local support: ${localNumber}`);
   const footer = `\n\n${footerParts.join("\n")}`;
-  return `${top}${message}${footer}`;
+  return `${intro}${message}${footer}`;
 }
 
 Deno.serve(async (req) => {
@@ -204,13 +206,14 @@ Deno.serve(async (req) => {
           const TOC_URL = s.table_of_contents_url || SHOP_URL;
           const LOCAL_NUMBER = s.local_support_number || "+27 79 083 1530";
 
-          // If the message already contains the proof URL AND the shop URL, it has
+          // If the message already contains the identity intro AND the shop URL, it has
           // been wrapped upstream — don't double-stamp.
-          if (finalMessage.includes(PROOF_URL) && finalMessage.includes(SHOP_URL)) {
-            trust_skip_reason = "message_already_contains_trust_links";
+          const INTRO_SIG = "Vanto from K12 Africa";
+          if (finalMessage.includes(INTRO_SIG) && finalMessage.includes(SHOP_URL)) {
+            trust_skip_reason = "message_already_contains_trust_intro";
           } else {
-            // Lean wrap on every send (proof URL on top, Shop + Local support at bottom).
-            // No "Hi I'm Vanto..." intro — proof preview card carries identity.
+            // Lean wrap on every send (identity intro on top, Shop + Local support at bottom).
+            // Proof-URL preview SUSPENDED 2026-06-20 — identity carried by intro line.
             finalMessage = buildTrustWrap(finalMessage, PROOF_URL, TOC_URL, LOCAL_NUMBER);
             trust_header_applied = true;
           }
