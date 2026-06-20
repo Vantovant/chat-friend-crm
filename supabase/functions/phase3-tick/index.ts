@@ -262,11 +262,24 @@ Deno.serve(async (req) => {
         : new Date(Date.now() + (STEP_DELAYS_HOURS[nextStep] - STEP_DELAYS_HOURS[stepIdx]) * 3600000).toISOString();
 
       if (isAuto) {
-        // Auto-send via Maytapi
+        // ── Atomic rate-limit reserve (per-contact 30/5min + 100/24h) ──
+        const { reserveMessageSlot, logRateLimited } = await import("../_shared/rate-limit.ts");
+        const rl = await reserveMessageSlot(supabase, contact.id);
+        if (!rl.ok) {
+          await logRateLimited(supabase, contact.id, rl.reason || "unknown", rl.retry_after, { caller: "phase3-tick", step: stepIdx + 1 });
+          const reschedAt = rl.retry_after || new Date(Date.now() + 5 * 60 * 1000).toISOString();
+          await supabase.from("missed_inquiries").update({
+            next_send_at: reschedAt,
+            last_error: `rate_limited:${rl.reason}`,
+          }).eq("id", row.id);
+          skipped++; continue;
+        }
+
+        // Auto-send via Maytapi (skip_rate_limit: already reserved above)
         const sendResp = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
-          body: JSON.stringify({ to_number: phone, message }),
+          body: JSON.stringify({ to_number: phone, message, contact_id: contact.id, skip_rate_limit: true }),
         });
         const sendData = await sendResp.json().catch(() => ({}));
 
