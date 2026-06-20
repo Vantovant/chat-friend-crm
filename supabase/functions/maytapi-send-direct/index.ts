@@ -75,12 +75,13 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const { to_number, message, skip_trust_header } = await req.json();
+    const { to_number, message, skip_trust_header, attach_image_url } = await req.json();
     if (!to_number || !message) {
       return new Response(JSON.stringify({ error: "to_number and message required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
 
     if (isExpiredOneDaySaleMessage(String(message))) {
       return new Response(JSON.stringify({
@@ -164,14 +165,20 @@ Deno.serve(async (req) => {
 
     const url = `https://api.maytapi.com/api/${PRODUCT_ID}/${PHONE_ID}/sendMessage`;
 
-    // Detect a leading URL → send as a link preview so WhatsApp renders the OG card
-    // for the distributor-proof page (vanto-zazi-bloom.lovable.app, etc.).
-    // Maytapi link payload: { type: "link", message: "<url>", text: "<full body>" }
+    // Send modes (priority order):
+    //   1) attach_image_url present → type:media (image attached, text as caption).
+    //      Most reliable preview because no scraping is required.
+    //   2) leading URL detected     → type:link (WhatsApp/Maytapi try to fetch OG card).
+    //   3) otherwise                → type:text.
     const leadingUrlMatch = finalMessage.trim().match(/^(https?:\/\/[^\s]+)/i);
-    const usePreview = !!leadingUrlMatch;
-    const payload: Record<string, unknown> = usePreview
-      ? { to_number: cleanNumber, type: "link", message: leadingUrlMatch![1], text: finalMessage }
-      : { to_number: cleanNumber, type: "text", message: finalMessage };
+    const useMedia = typeof attach_image_url === "string" && /^https?:\/\//i.test(attach_image_url);
+    const usePreview = !useMedia && !!leadingUrlMatch;
+    const payload: Record<string, unknown> = useMedia
+      ? { to_number: cleanNumber, type: "media", message: attach_image_url, text: finalMessage }
+      : usePreview
+        ? { to_number: cleanNumber, type: "link", message: leadingUrlMatch![1], text: finalMessage }
+        : { to_number: cleanNumber, type: "text", message: finalMessage };
+
 
     const resp = await fetch(url, {
       method: "POST",
@@ -195,10 +202,12 @@ Deno.serve(async (req) => {
         trust_skip_reason,
         sent_length: finalMessage.length,
         link_preview: usePreview,
+        media_attached: useMedia,
         raw: data,
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
+
   } catch (err) {
     console.error("maytapi-send-direct error:", err);
     return new Response(JSON.stringify({ error: err instanceof Error ? err.message : "Unknown" }), {
