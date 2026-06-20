@@ -207,6 +207,19 @@ Deno.serve(async (req) => {
       message = inviteResult.message;
       const groupInviteAppended = inviteResult.appended;
 
+      // ── Sponsor "secure your seat / free quote" CTA (rotates with group invite) ──
+      const sponsorResult = await maybeAppendSponsorCta(supabase, message, {
+        contactId: contact.id,
+        phoneNormalized: contact.phone_normalized || null,
+        leadType: contact.lead_type || null,
+        followupStep: stepIdx + 1,
+        lastSponsorInviteAt: (contact as any).last_sponsor_invite_at || null,
+        groupInviteAlreadyAppended: groupInviteAppended,
+      });
+      message = sponsorResult.message;
+      const sponsorCtaAppended = sponsorResult.appended;
+
+
       let isAuto = tpl.send_mode === "auto";
 
       // Governance downgrade — Phase 3 cannot auto-send unless flag explicitly = 'auto'
