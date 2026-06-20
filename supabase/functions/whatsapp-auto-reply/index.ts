@@ -2182,6 +2182,28 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     return jsonRes({ ok: false, message: "Missing backend env vars" }, 500);
   }
 
+  // ── Atomic rate-limit reserve (per-contact 30/5min + 100/24h) ──
+  if (contact_id) {
+    try {
+      const { reserveMessageSlot, logRateLimited } = await import("../_shared/rate-limit.ts");
+      const rl = await reserveMessageSlot(svc, contact_id);
+      if (!rl.ok) {
+        await logRateLimited(svc, contact_id, rl.reason || "unknown", rl.retry_after, { caller: "whatsapp-auto-reply" });
+        diag.result = "rate_limited";
+        diag.rate_limit_reason = rl.reason;
+        console.log("[auto-reply] DIAG:", JSON.stringify(diag));
+        await svc.from("auto_reply_events").insert({
+          conversation_id, inbound_message_id: inbound_message_id || null,
+          action_taken: "rate_limited",
+          reason: `${rl.reason || "rate_limited"} retry_after=${rl.retry_after || "n/a"}`,
+        });
+        return jsonRes({ ok: true, auto_reply: false, rate_limited: true, reason: rl.reason, retry_after: rl.retry_after }, 200);
+      }
+    } catch (e: any) {
+      console.warn("[auto-reply] rate-limit failed open:", e?.message);
+    }
+  }
+
   try {
     const sendRes = await fetch(`${SUPABASE_URL}/functions/v1/send-message`, {
       method: "POST",
