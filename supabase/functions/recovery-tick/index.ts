@@ -92,6 +92,15 @@ Deno.serve(async (req) => {
     const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
+    // ── Master kill switch (emergency_all_auto_paused) ──
+    const { isEmergencyPaused } = await import("../_shared/emergency-guard.ts");
+    if (await isEmergencyPaused(supabase)) {
+      console.log("[recovery-tick] emergency_all_auto_paused=true — skipping all sends");
+      return new Response(JSON.stringify({ success: true, processed: 0, sent: 0, failed: 0, completed: 0, paused: true, reason: "emergency_all_auto_paused" }), {
+        status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const nowIso = new Date().toISOString();
 
     // ── Option B emergency pause gate ──

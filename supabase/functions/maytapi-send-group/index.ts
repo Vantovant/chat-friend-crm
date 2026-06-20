@@ -189,6 +189,19 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
+    // ── Master kill switch (emergency_all_auto_paused) ──
+    try {
+      const { isEmergencyPaused } = await import("../_shared/emergency-guard.ts");
+      if (await isEmergencyPaused(supabase)) {
+        console.log("[maytapi-send-group] emergency_all_auto_paused=true — refusing send");
+        return new Response(JSON.stringify({ success: false, processed: 0, paused: true, reason: "emergency_all_auto_paused" }), {
+          status: 423, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    } catch (err) {
+      console.warn("[maytapi-send-group] emergency guard failed open:", (err as Error).message);
+    }
+
     // Direct Group Administrator lane: used by pilot-group auto-reply.
     // This must send immediately to Maytapi, not fall through to the scheduled queue.
     if (directBody?.group_jid && directBody?.message) {

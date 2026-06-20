@@ -82,6 +82,24 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── Master kill switch (emergency_all_auto_paused) ──
+    try {
+      const SUPABASE_URL_GUARD = Deno.env.get("SUPABASE_URL");
+      const SERVICE_ROLE_GUARD = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+      if (SUPABASE_URL_GUARD && SERVICE_ROLE_GUARD) {
+        const svcGuard = createClient(SUPABASE_URL_GUARD, SERVICE_ROLE_GUARD);
+        const { isEmergencyPaused } = await import("../_shared/emergency-guard.ts");
+        if (await isEmergencyPaused(svcGuard)) {
+          console.log("[maytapi-send-direct] emergency_all_auto_paused=true — refusing send");
+          return new Response(JSON.stringify({ success: false, paused: true, reason: "emergency_all_auto_paused" }), {
+            status: 423, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+    } catch (err) {
+      console.warn("[maytapi-send-direct] emergency guard failed open:", (err as Error).message);
+    }
+
 
     if (isExpiredOneDaySaleMessage(String(message))) {
       return new Response(JSON.stringify({
