@@ -863,12 +863,16 @@ export function LeadCallReport() {
                       onClick={() => {
                         const cid = editor.row.id;
                         const phone = editor.row.phone || editor.row.phone_normalized || '';
+                        try {
+                          sessionStorage.setItem('vanto:pending-open-contact', JSON.stringify({ contactId: cid, phone, ts: Date.now() }));
+                        } catch {}
+                        setEditor(null);
                         window.dispatchEvent(new CustomEvent('vanto:navigate', { detail: { module: 'contacts' } }));
                         setTimeout(() => {
                           window.dispatchEvent(new CustomEvent('vanto:open-contact', {
                             detail: { contactId: cid, phone },
                           }));
-                        }, 80);
+                        }, 250);
                       }}
                     >
                       <UserCog className="h-3.5 w-3.5 mr-1" /> Open in Contacts
@@ -881,17 +885,22 @@ export function LeadCallReport() {
                       title="Add this person to Contacts"
                       onClick={() => {
                         const phone = editor.row.phone || editor.row.phone_normalized || '';
+                        try {
+                          sessionStorage.setItem('vanto:pending-open-contact', JSON.stringify({ phone, addIfMissing: true, ts: Date.now() }));
+                        } catch {}
+                        setEditor(null);
                         window.dispatchEvent(new CustomEvent('vanto:navigate', { detail: { module: 'contacts' } }));
                         setTimeout(() => {
                           window.dispatchEvent(new CustomEvent('vanto:open-contact', {
                             detail: { phone, addIfMissing: true },
                           }));
-                        }, 80);
+                        }, 250);
                       }}
                     >
                       <UserPlus className="h-3.5 w-3.5 mr-1" /> Add to Contacts
                     </Button>
                   )}
+
                 </div>
               </div>
 
