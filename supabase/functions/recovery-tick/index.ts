@@ -84,8 +84,22 @@ Never assume they remember you. Never start with just "Hi {name}, just checking 
   }
 }
 
+function isQuietHoursSAST(d: Date = new Date()): boolean {
+  // SAST = UTC+2, no DST. Quiet hours 20:00–06:00 SAST.
+  const h = (d.getUTCHours() + 2) % 24;
+  return h >= 20 || h < 6;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  // ── Quiet hours guard (20:00–06:00 SAST) ──
+  if (isQuietHoursSAST()) {
+    return new Response(JSON.stringify({ success: true, processed: 0, sent: 0, failed: 0, completed: 0, paused: true, reason: "quiet_hours_sast", window: "20:00–06:00 SAST" }), {
+      status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
 
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
