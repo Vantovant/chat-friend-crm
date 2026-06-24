@@ -47,6 +47,15 @@ function buildAskReintro(firstName: string, missing: string[]): string {
   );
 }
 
+// ── Quiet hours: 22:00–06:00 SAST (UTC+2, no DST) ──
+// Mirrors cadence-tick / phase3-tick / fast-closer-tick.
+function inQuietHoursSAST(now: Date = new Date()): boolean {
+  const sastHour = (now.getUTCHours() + 2) % 24;
+  return sastHour >= 22 || sastHour < 6;
+}
+
+
+
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -69,6 +78,16 @@ Deno.serve(async (req) => {
     if (((pauseRow?.value || "false") + "").toLowerCase() === "true") {
       return jsonRes({ success: true, processed: 0, paused: true, reason: "demographics_recovery_paused" });
     }
+
+    // ── Quiet hours guard (22:00–06:00 SAST) ──
+    if (inQuietHoursSAST()) {
+      return jsonRes({
+        success: true, processed: 0, sent: 0, paused: true,
+        reason: "quiet_hours_sast", window: "22:00–06:00 SAST",
+      });
+    }
+
+
 
     // ── HARD daily cap: count today's recovery sends from the audit log ──
     const dayStart = new Date();
