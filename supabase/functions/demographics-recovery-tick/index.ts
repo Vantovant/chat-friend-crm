@@ -108,6 +108,7 @@ Deno.serve(async (req) => {
     const { reserveMessageSlot, releaseMessageSlot, logRateLimited } = await import("../_shared/rate-limit.ts");
 
     for (const c of eligible) {
+      if (remainingToday <= 0) { skipped_daily_cap++; break; }
       const phone = c.phone_normalized || c.phone;
       if (!phone) { failed++; continue; }
 
