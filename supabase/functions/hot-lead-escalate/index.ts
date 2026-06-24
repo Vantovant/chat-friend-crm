@@ -21,7 +21,7 @@ function json(body: unknown, status = 200) {
 function inQuietHours(): boolean {
   // SAST = UTC+2
   const sastHour = (new Date().getUTCHours() + 2) % 24;
-  return sastHour >= 22 || sastHour < 6;
+  return sastHour >= 20 || sastHour < 6;
 }
 
 Deno.serve(async (req) => {

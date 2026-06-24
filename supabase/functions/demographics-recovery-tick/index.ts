@@ -47,11 +47,11 @@ function buildAskReintro(firstName: string, missing: string[]): string {
   );
 }
 
-// ── Quiet hours: 22:00–06:00 SAST (UTC+2, no DST) ──
+// ── Quiet hours: 20:00–06:00 SAST (UTC+2, no DST) ──
 // Mirrors cadence-tick / phase3-tick / fast-closer-tick.
 function inQuietHoursSAST(now: Date = new Date()): boolean {
   const sastHour = (now.getUTCHours() + 2) % 24;
-  return sastHour >= 22 || sastHour < 6;
+  return sastHour >= 20 || sastHour < 6;
 }
 
 
@@ -79,11 +79,11 @@ Deno.serve(async (req) => {
       return jsonRes({ success: true, processed: 0, paused: true, reason: "demographics_recovery_paused" });
     }
 
-    // ── Quiet hours guard (22:00–06:00 SAST) ──
+    // ── Quiet hours guard (20:00–06:00 SAST) ──
     if (inQuietHoursSAST()) {
       return jsonRes({
         success: true, processed: 0, sent: 0, paused: true,
-        reason: "quiet_hours_sast", window: "22:00–06:00 SAST",
+        reason: "quiet_hours_sast", window: "20:00–06:00 SAST",
       });
     }
 

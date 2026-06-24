@@ -1,5 +1,5 @@
 // Week 2 — Cadence Engine tick (7-touch nurture sequence).
-// Cron-friendly: invoke every 15 minutes. Honors quiet hours (22:00-06:00 SAST),
+// Cron-friendly: invoke every 15 minutes. Honors quiet hours (20:00-06:00 SAST),
 // opt-outs, kill switch, and idempotency. Sends via maytapi-send-direct.
 //
 // Kill switch: integration_settings.cadence_engine_enabled = "false"
@@ -42,7 +42,7 @@ const MAX_BATCH = 25;
 function isQuietHoursSAST(d: Date): boolean {
   // SAST = UTC+2, no DST.
   const h = (d.getUTCHours() + 2) % 24;
-  return h >= 22 || h < 6;
+  return h >= 20 || h < 6;
 }
 
 function renderTemplate(content: string, vars: Record<string, string>): string {
