@@ -148,8 +148,31 @@ export function LeadCallReport() {
   const [stages, setStages] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [dictating, setDictating] = useState(false);
   const [search, setSearch] = useState('');
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? window.localStorage.getItem('lead_call_report_hidden_ids') : null;
+      return new Set<string>(raw ? JSON.parse(raw) : []);
+    } catch { return new Set<string>(); }
+  });
   const recRef = useRef<any>(null);
   const dictateBaseRef = useRef<string>('');
+
+  function persistHidden(next: Set<string>) {
+    try { window.localStorage.setItem('lead_call_report_hidden_ids', JSON.stringify([...next])); } catch {}
+  }
+  function hideRow(row: Row) {
+    if (!window.confirm(`Remove "${displayName(row)}" from this report?\n\nThe contact is NOT deleted — this only hides the row from the Lead Call Report (and its PDF). You can restore it via "Restore hidden".`)) return;
+    setHiddenIds((prev) => {
+      const next = new Set(prev); next.add(row.id); persistHidden(next); return next;
+    });
+    toast.success('Row hidden from this report.');
+  }
+  function restoreHidden() {
+    if (hiddenIds.size === 0) return;
+    if (!window.confirm(`Restore ${hiddenIds.size} hidden row(s) to this report?`)) return;
+    setHiddenIds(() => { persistHidden(new Set()); return new Set(); });
+    toast.success('Hidden rows restored.');
+  }
 
   function getSpeechRecognition(): any {
     if (typeof window === 'undefined') return null;
