@@ -2130,6 +2130,9 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     diag.l2_dnc = dnc;
     diag.l2_quiet_hours = inQuietHours;
     diag.l2_quiet_hours_bypassed_for_paid_lead = bypassQuietHoursForPaidLead;
+    diag.l2_quiet_replies_used = quietRepliesUsed;
+    diag.l2_quiet_courtesy_used = quietCourtesyUsed;
+    diag.l2_quiet_allowance = QUIET_REPLY_ALLOWANCE;
     diag.l2_hourly_exceeded = hourlyExceeded;
     diag.l2_auto_allowed = autoAllowed;
     diag.l2_legacy_kv_path = (isTwilioChannel || isMaytapiChannel) && !isFirstTouch && !dnc && !quietHoursBlocked;
