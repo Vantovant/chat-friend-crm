@@ -79,6 +79,16 @@ Deno.serve(async (req) => {
       return jsonRes({ success: true, processed: 0, paused: true, reason: "demographics_recovery_paused" });
     }
 
+    // ── Quiet hours guard (22:00–06:00 SAST) ──
+    if (inQuietHoursSAST()) {
+      return jsonRes({
+        success: true, processed: 0, sent: 0, paused: true,
+        reason: "quiet_hours_sast", window: "22:00–06:00 SAST",
+      });
+    }
+
+
+
     // ── HARD daily cap: count today's recovery sends from the audit log ──
     const dayStart = new Date();
     dayStart.setUTCHours(0, 0, 0, 0);
