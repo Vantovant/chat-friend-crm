@@ -42,7 +42,7 @@ const MAX_BATCH = 25;
 function isQuietHoursSAST(d: Date): boolean {
   // SAST = UTC+2, no DST.
   const h = (d.getUTCHours() + 2) % 24;
-  return h >= 22 || h < 6;
+  return h >= 20 || h < 6;
 }
 
 function renderTemplate(content: string, vars: Record<string, string>): string {

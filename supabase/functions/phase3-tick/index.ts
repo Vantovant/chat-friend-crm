@@ -23,7 +23,7 @@ function renderTemplate(text: string, vars: Record<string, string>): string {
 // Quiet hours: 20:00–06:00 SAST (UTC+2, no DST). Mirrors cadence-tick / fast-closer-tick.
 function isQuietHoursSAST(d: Date): boolean {
   const h = (d.getUTCHours() + 2) % 24;
-  return h >= 22 || h < 6;
+  return h >= 20 || h < 6;
 }
 
 // Returns the next 06:00 SAST as ISO.
