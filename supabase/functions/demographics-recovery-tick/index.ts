@@ -170,7 +170,9 @@ Deno.serve(async (req) => {
       }).eq("id", c.id);
 
       const firstName = (c.first_name || (c.name || "").split(" ")[0] || "").trim();
-      const message = buildAsk(firstName, missing);
+      const isWarm = cumulativeSent < RECENT_WARM_THRESHOLD;
+      const templateLabel = isWarm ? "demographics_recovery_warm_v1" : "demographics_recovery_reintro_v1";
+      const message = isWarm ? buildAskWarm(firstName, missing) : buildAskReintro(firstName, missing);
       const conv = convByContact.get(c.id)!;
 
       // ── Send via Maytapi (skip_rate_limit: already reserved above) ──
