@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { ArrowDown, ArrowUp, ArrowUpDown, Download, Printer, RefreshCw, Star, Phone, Sparkles, Pencil, ClipboardPaste, Mic, Square, UserCog, UserPlus, Search, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, Printer, RefreshCw, Star, Phone, Sparkles, Pencil, ClipboardPaste, Mic, Square, UserCog, UserPlus, Search, X, Trash2, RotateCcw } from 'lucide-react';
 // jspdf + jspdf-autotable are dynamically imported inside generatePDF()
 // to keep them out of the initial bundle (heavy on Android first paint).
 import { toast } from 'sonner';
