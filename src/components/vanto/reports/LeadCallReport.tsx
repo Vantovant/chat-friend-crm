@@ -777,6 +777,7 @@ export function LeadCallReport() {
                 <SortButton label="Msgs" active={sortKey === 'msgs'} dir={sortDir} onClick={() => toggleSort('msgs')} align="right" />
               </TableHead>
               <TableHead className="w-20 text-right">Edit</TableHead>
+              <TableHead className="w-20 text-right">Remove</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
