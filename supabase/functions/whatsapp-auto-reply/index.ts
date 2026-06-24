@@ -2190,6 +2190,29 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     console.warn("[auto-reply] intent-links failed (non-fatal):", e?.message);
   }
 
+  // ── Append demographic ask (once) when prospect has signaled interest ──
+  try {
+    const interestSignaled =
+      _intentDetected !== null ||
+      intent.intent === "yes_interest" ||
+      intent.intent === "menu_1" ||
+      intent.intent === "menu_2" ||
+      intent.intent === "menu_3";
+    if (interestSignaled && contact_id) {
+      const { maybeAppendDemographicAsk } = await import("../_shared/demographics.ts");
+      const demoRes = await maybeAppendDemographicAsk(svc, contact_id, replyContent);
+      if (demoRes.appended) {
+        replyContent = demoRes.message;
+        diag.demographics_ask_appended = true;
+      } else {
+        diag.demographics_ask_skipped = demoRes.reason;
+      }
+    }
+  } catch (e: any) {
+    console.warn("[auto-reply] demographics ask failed (non-fatal):", e?.message);
+  }
+
+
   // ── Dispatch via send-message ──
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
   const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
