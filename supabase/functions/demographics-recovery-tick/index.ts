@@ -50,6 +50,23 @@ Deno.serve(async (req) => {
       return jsonRes({ success: true, processed: 0, paused: true, reason: "demographics_recovery_paused" });
     }
 
+    // ── HARD daily cap: count today's recovery sends from the audit log ──
+    const dayStart = new Date();
+    dayStart.setUTCHours(0, 0, 0, 0);
+    const { count: sentToday } = await supabase
+      .from("option_b_audit_log")
+      .select("id", { count: "exact", head: true })
+      .eq("trigger_type", "demographics_recovery")
+      .gte("created_at", dayStart.toISOString());
+    let remainingToday = Math.max(0, DAILY_RECOVERY_CAP - (sentToday || 0));
+    if (remainingToday === 0) {
+      return jsonRes({
+        success: true, processed: 0, sent: 0, paused: true,
+        reason: "daily_recovery_cap_reached", daily_cap: DAILY_RECOVERY_CAP, sent_today: sentToday || 0,
+      });
+    }
+
+
     // ── Find eligible prospects ──
     // - Has phone
     // - Not deleted, not opted-out, not muted
