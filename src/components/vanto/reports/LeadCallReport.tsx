@@ -783,7 +783,7 @@ export function LeadCallReport() {
           <TableBody>
             {sortedFiltered.length === 0 && !loading && (
               <TableRow>
-                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
                   No contacts match the current filter.
                 </TableCell>
               </TableRow>
