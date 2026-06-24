@@ -735,6 +735,11 @@ export function LeadCallReport() {
         <Button variant="ghost" size="sm" onClick={() => { setFiFrom(''); setFiTo(''); setLmFrom(''); setLmTo(''); }}>
           Reset dates
         </Button>
+        {hiddenIds.size > 0 && (
+          <Button variant="ghost" size="sm" onClick={restoreHidden} title="Restore rows you removed from this report">
+            <RotateCcw className="h-3.5 w-3.5 mr-1" /> Restore hidden ({hiddenIds.size})
+          </Button>
+        )}
         <div className="relative ml-auto w-full sm:w-72">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           <input
