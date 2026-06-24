@@ -501,11 +501,14 @@ export type Database = {
           assigned_to: string | null
           auto_reply_enabled: boolean
           avatar_url: string | null
+          city: string | null
           contact_confidence: string
           contact_source: string
           created_at: string
           created_by: string | null
           deleted_at: string | null
+          demographics_asked_at: string | null
+          demographics_captured_at: string | null
           do_not_contact: boolean
           do_not_contact_at: string | null
           do_not_contact_reason: string | null
@@ -528,6 +531,7 @@ export type Database = {
           phone: string
           phone_normalized: string | null
           phone_raw: string | null
+          province: string | null
           stage_id: string | null
           tags: string[] | null
           temperature: Database["public"]["Enums"]["lead_temperature"]
@@ -539,11 +543,14 @@ export type Database = {
           assigned_to?: string | null
           auto_reply_enabled?: boolean
           avatar_url?: string | null
+          city?: string | null
           contact_confidence?: string
           contact_source?: string
           created_at?: string
           created_by?: string | null
           deleted_at?: string | null
+          demographics_asked_at?: string | null
+          demographics_captured_at?: string | null
           do_not_contact?: boolean
           do_not_contact_at?: string | null
           do_not_contact_reason?: string | null
@@ -566,6 +573,7 @@ export type Database = {
           phone: string
           phone_normalized?: string | null
           phone_raw?: string | null
+          province?: string | null
           stage_id?: string | null
           tags?: string[] | null
           temperature?: Database["public"]["Enums"]["lead_temperature"]
@@ -577,11 +585,14 @@ export type Database = {
           assigned_to?: string | null
           auto_reply_enabled?: boolean
           avatar_url?: string | null
+          city?: string | null
           contact_confidence?: string
           contact_source?: string
           created_at?: string
           created_by?: string | null
           deleted_at?: string | null
+          demographics_asked_at?: string | null
+          demographics_captured_at?: string | null
           do_not_contact?: boolean
           do_not_contact_at?: string | null
           do_not_contact_reason?: string | null
@@ -604,6 +615,7 @@ export type Database = {
           phone?: string
           phone_normalized?: string | null
           phone_raw?: string | null
+          province?: string | null
           stage_id?: string | null
           tags?: string[] | null
           temperature?: Database["public"]["Enums"]["lead_temperature"]

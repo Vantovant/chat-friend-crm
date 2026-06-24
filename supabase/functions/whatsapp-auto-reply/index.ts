@@ -1034,6 +1034,22 @@ Deno.serve(async (req) => {
     diag.classifier_wired_error = e?.message || "unknown";
   }
 
+  // ── Demographic capture (email / city / province) ──
+  // Runs BEFORE the auto-reply mode check so we still harvest data when auto-reply is off.
+  try {
+    if (contact_id && inbound_content) {
+      const { extractAndSaveDemographics } = await import("../_shared/demographics.ts");
+      const saved = await extractAndSaveDemographics(svc, contact_id, inbound_content);
+      if (saved.email || saved.city || saved.province) {
+        diag.demographics_captured = saved;
+      }
+    }
+  } catch (e: any) {
+    console.warn("[auto-reply] demographics extract failed (non-fatal):", e?.message);
+  }
+
+
+
 
   // ── Check auto-reply mode ──
   const { data: modeSetting } = await svc.from("integration_settings").select("value").eq("key", "auto_reply_mode").maybeSingle();
@@ -2173,6 +2189,29 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
   } catch (e: any) {
     console.warn("[auto-reply] intent-links failed (non-fatal):", e?.message);
   }
+
+  // ── Append demographic ask (once) when prospect has signaled interest ──
+  try {
+    const interestSignaled =
+      _intentDetected !== null ||
+      intent.intent === "yes_interest" ||
+      intent.intent === "menu_1" ||
+      intent.intent === "menu_2" ||
+      intent.intent === "menu_3";
+    if (interestSignaled && contact_id) {
+      const { maybeAppendDemographicAsk } = await import("../_shared/demographics.ts");
+      const demoRes = await maybeAppendDemographicAsk(svc, contact_id, replyContent);
+      if (demoRes.appended) {
+        replyContent = demoRes.message;
+        diag.demographics_ask_appended = true;
+      } else {
+        diag.demographics_ask_skipped = demoRes.reason;
+      }
+    }
+  } catch (e: any) {
+    console.warn("[auto-reply] demographics ask failed (non-fatal):", e?.message);
+  }
+
 
   // ── Dispatch via send-message ──
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
