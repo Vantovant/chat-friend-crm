@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { ArrowDown, ArrowUp, ArrowUpDown, Download, Printer, RefreshCw, Star, Phone, Sparkles, Pencil, ClipboardPaste, Mic, Square, UserCog, UserPlus, Search, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Download, Printer, RefreshCw, Star, Phone, Sparkles, Pencil, ClipboardPaste, Mic, Square, UserCog, UserPlus, Search, X, Trash2, RotateCcw } from 'lucide-react';
 // jspdf + jspdf-autotable are dynamically imported inside generatePDF()
 // to keep them out of the initial bundle (heavy on Android first paint).
 import { toast } from 'sonner';
@@ -148,8 +148,31 @@ export function LeadCallReport() {
   const [stages, setStages] = useState<{ id: string; name: string; color: string | null }[]>([]);
   const [dictating, setDictating] = useState(false);
   const [search, setSearch] = useState('');
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => {
+    try {
+      const raw = typeof window !== 'undefined' ? window.localStorage.getItem('lead_call_report_hidden_ids') : null;
+      return new Set<string>(raw ? JSON.parse(raw) : []);
+    } catch { return new Set<string>(); }
+  });
   const recRef = useRef<any>(null);
   const dictateBaseRef = useRef<string>('');
+
+  function persistHidden(next: Set<string>) {
+    try { window.localStorage.setItem('lead_call_report_hidden_ids', JSON.stringify([...next])); } catch {}
+  }
+  function hideRow(row: Row) {
+    if (!window.confirm(`Remove "${displayName(row)}" from this report?\n\nThe contact is NOT deleted — this only hides the row from the Lead Call Report (and its PDF). You can restore it via "Restore hidden".`)) return;
+    setHiddenIds((prev) => {
+      const next = new Set(prev); next.add(row.id); persistHidden(next); return next;
+    });
+    toast.success('Row hidden from this report.');
+  }
+  function restoreHidden() {
+    if (hiddenIds.size === 0) return;
+    if (!window.confirm(`Restore ${hiddenIds.size} hidden row(s) to this report?`)) return;
+    setHiddenIds(() => { persistHidden(new Set()); return new Set(); });
+    toast.success('Hidden rows restored.');
+  }
 
   function getSpeechRecognition(): any {
     if (typeof window === 'undefined') return null;
@@ -403,6 +426,7 @@ export function LeadCallReport() {
 
   const filtered = useMemo(() => {
     let out = onlyDistributors ? rows.filter((r) => r.isDistributor) : rows;
+    out = out.filter((r) => !hiddenIds.has(r.id));
     if (fiFrom) out = out.filter((r) => r.firstInquiry && r.firstInquiry.slice(0, 10) >= fiFrom);
     if (fiTo) out = out.filter((r) => r.firstInquiry && r.firstInquiry.slice(0, 10) <= fiTo);
     if (lmFrom) out = out.filter((r) => r.lastMessage && r.lastMessage.slice(0, 10) >= lmFrom);
@@ -419,7 +443,7 @@ export function LeadCallReport() {
       });
     }
     return out;
-  }, [rows, onlyDistributors, fiFrom, fiTo, lmFrom, lmTo, search]);
+  }, [rows, onlyDistributors, fiFrom, fiTo, lmFrom, lmTo, search, hiddenIds]);
 
   const sortedFiltered = useMemo(() => {
     if (sortDir === 'none') return filtered;
@@ -711,6 +735,11 @@ export function LeadCallReport() {
         <Button variant="ghost" size="sm" onClick={() => { setFiFrom(''); setFiTo(''); setLmFrom(''); setLmTo(''); }}>
           Reset dates
         </Button>
+        {hiddenIds.size > 0 && (
+          <Button variant="ghost" size="sm" onClick={restoreHidden} title="Restore rows you removed from this report">
+            <RotateCcw className="h-3.5 w-3.5 mr-1" /> Restore hidden ({hiddenIds.size})
+          </Button>
+        )}
         <div className="relative ml-auto w-full sm:w-72">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
           <input
@@ -753,12 +782,13 @@ export function LeadCallReport() {
                 <SortButton label="Msgs" active={sortKey === 'msgs'} dir={sortDir} onClick={() => toggleSort('msgs')} align="right" />
               </TableHead>
               <TableHead className="w-20 text-right">Edit</TableHead>
+              <TableHead className="w-20 text-right">Remove</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {sortedFiltered.length === 0 && !loading && (
               <TableRow>
-                <TableCell colSpan={10} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
                   No contacts match the current filter.
                 </TableCell>
               </TableRow>
@@ -791,6 +821,17 @@ export function LeadCallReport() {
                 <TableCell className="py-2 text-right align-top">
                   <Button variant="ghost" size="sm" onClick={() => openEditor(r)} title="Edit lead type & notes — syncs to Contacts and CRM Pipeline">
                     <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                </TableCell>
+                <TableCell className="py-2 text-right align-top">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => hideRow(r)}
+                    title="Remove this row from the Lead Call Report (does not delete the contact)"
+                    className="text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </TableCell>
               </TableRow>
