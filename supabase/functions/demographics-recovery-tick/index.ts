@@ -205,6 +205,7 @@ Deno.serve(async (req) => {
       });
 
       sent++;
+      remainingToday--;
     }
 
     return jsonRes({
