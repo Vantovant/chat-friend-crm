@@ -10,23 +10,43 @@ const corsHeaders = {
 
 const BATCH_SIZE = 10; // contacts per tick
 const DAILY_RECOVERY_CAP = 50; // HARD cap: max recovery asks sent per UTC day
+const RECENT_WARM_THRESHOLD = 100; // first N cumulative sends use the short "warm" ask
 
-function buildAsk(firstName: string, missing: string[]): string {
+function formatMissing(missing: string[]): string {
+  return missing.length === 1
+    ? missing[0]
+    : missing.length === 2
+    ? `${missing[0]} and ${missing[1]}`
+    : `${missing.slice(0, -1).join(", ")}, and ${missing[missing.length - 1]}`;
+}
+
+// Warm ask — for prospects who likely still remember the recent campaign.
+function buildAskWarm(firstName: string, missing: string[]): string {
   const lead = firstName ? `Hi ${firstName}, ` : "Hi 👋 ";
-  const list =
-    missing.length === 1
-      ? missing[0]
-      : missing.length === 2
-      ? `${missing[0]} and ${missing[1]}`
-      : `${missing.slice(0, -1).join(", ")}, and ${missing[missing.length - 1]}`;
   return (
     `${lead}it's Vanto from Get Well Africa (accredited APLGO distributor) 🌿\n\n` +
-    `To make sure I send you the right info and any local offers, could you share your ${list}?\n\n` +
+    `To make sure I send you the right info and any local offers, could you share your ${formatMissing(missing)}?\n\n` +
     `Just reply in this format:\n` +
     `Email: you@email.com\nCity: Pretoria\nProvince: Gauteng\n\n` +
     `Thank you 🙏\n— Vanto`
   );
 }
+
+// Cold-reintroduction ask — for older prospects who may not remember.
+function buildAskReintro(firstName: string, missing: string[]): string {
+  const lead = firstName ? `Hi ${firstName} 👋` : `Hi there 👋`;
+  return (
+    `${lead}\n\n` +
+    `It's Vanto from *Get Well Africa* — an accredited APLGO distributor focused on natural wellness 🌿.\n\n` +
+    `A while back you took part in our Get Well Africa WhatsApp wellness campaign (APLGO natural lozenges & healthy-lifestyle info). I'm reaching back out personally to make sure you stay on the right list and only receive info that's relevant to you.\n\n` +
+    `To do that, could you please share your ${formatMissing(missing)}?\n\n` +
+    `Just reply in this format:\n` +
+    `Email: you@email.com\nCity: Pretoria\nProvince: Gauteng\n\n` +
+    `If you'd rather not receive further messages, just reply STOP and I'll remove you immediately.\n\n` +
+    `Thank you 🙏\n— Vanto, Get Well Africa`
+  );
+}
+
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
