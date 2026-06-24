@@ -9,6 +9,7 @@ const corsHeaders = {
 };
 
 const BATCH_SIZE = 10; // contacts per tick
+const DAILY_RECOVERY_CAP = 50; // HARD cap: max recovery asks sent per UTC day
 
 function buildAsk(firstName: string, missing: string[]): string {
   const lead = firstName ? `Hi ${firstName}, ` : "Hi 👋 ";
