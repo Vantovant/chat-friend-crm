@@ -2014,7 +2014,93 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     const isTwilioChannel = channel === "twilio";
     const isMaytapiChannel = channel === "maytapi";
     const bypassQuietHoursForPaidLead = isTwilioChannel || emergencyLane;
-    const quietHoursBlocked = inQuietHours && !bypassQuietHoursForPaidLead;
+
+    // ── Quiet-hours exception (inbound-only): allow up to 3 auto-replies per
+    //    contact during the 22:00–06:00 SAST window, then ONE courtesy
+    //    "back at 06:00" reminder, then silent. Outbound automations
+    //    (cadence / phase3 / recovery / demographics) are NOT affected —
+    //    this only relaxes responses to people who message us first.
+    const QUIET_REPLY_ALLOWANCE = 3;
+    let quietRepliesUsed = 0;
+    let quietCourtesyUsed = 0;
+    let quietHoursCourtesyOnly = false;
+    if (inQuietHours && !bypassQuietHoursForPaidLead && conversation_id) {
+      // Compute current quiet-window start in UTC (22:00 SAST = 20:00 UTC).
+      const sastNow = new Date(nowUtc.getTime() + 2 * 3600 * 1000);
+      const windowStartSast = new Date(sastNow);
+      windowStartSast.setUTCHours(22, 0, 0, 0);
+      if (sastNow.getUTCHours() < 22) {
+        windowStartSast.setUTCDate(windowStartSast.getUTCDate() - 1);
+      }
+      const windowStartUtc = new Date(windowStartSast.getTime() - 2 * 3600 * 1000).toISOString();
+
+      const { count: rUsed } = await svc.from("auto_reply_events")
+        .select("id", { count: "exact", head: true })
+        .eq("conversation_id", conversation_id)
+        .gte("created_at", windowStartUtc)
+        .neq("action_taken", "quiet_hours_courtesy")
+        .neq("action_taken", "window_expired")
+        .in("action_taken", ["first_touch_trust_message", "kv_auto_reply", "auto_reply_sent", "trust_wrap_sent"]);
+      quietRepliesUsed = rUsed || 0;
+
+      const { count: cUsed } = await svc.from("auto_reply_events")
+        .select("id", { count: "exact", head: true })
+        .eq("conversation_id", conversation_id)
+        .gte("created_at", windowStartUtc)
+        .eq("action_taken", "quiet_hours_courtesy");
+      quietCourtesyUsed = cUsed || 0;
+
+      quietHoursCourtesyOnly = quietRepliesUsed >= QUIET_REPLY_ALLOWANCE;
+    }
+
+    // Standard quiet-hours block now relaxed: only blocks once the contact
+    // has used all 3 quiet-window auto-replies AND received the courtesy line.
+    const quietHoursBlocked =
+      inQuietHours && !bypassQuietHoursForPaidLead &&
+      quietHoursCourtesyOnly && quietCourtesyUsed > 0;
+
+    // If we're in the courtesy slot (3 used, 0 courtesy sent), send the
+    // one-time "back at 06:00 SAST" reminder via the same channel and exit.
+    if (
+      inQuietHours && !bypassQuietHoursForPaidLead && !dnc && contact_id &&
+      quietHoursCourtesyOnly && quietCourtesyUsed === 0 &&
+      (isMaytapiChannel || isTwilioChannel)
+    ) {
+      const courtesyText =
+        "Thanks for your message 🌙\n\n" +
+        "Our auto-replies pause between 22:00 and 06:00 SAST so we don't disturb anyone. " +
+        "I'll get back to you from 06:00 — please send your question again then.\n\n— Vanto, Get Well Africa";
+      try {
+        const fnUrl = isMaytapiChannel
+          ? `${Deno.env.get("SUPABASE_URL")}/functions/v1/maytapi-send-direct`
+          : `${Deno.env.get("SUPABASE_URL")}/functions/v1/send-message`;
+        const body = isMaytapiChannel
+          ? { to_number: phone_e164, message: courtesyText, contact_id, skip_trust_header: true }
+          : { conversation_id, content: courtesyText, channel: "twilio" };
+        await fetch(fnUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+          },
+          body: JSON.stringify(body),
+        });
+        await svc.from("auto_reply_events").insert({
+          conversation_id, inbound_message_id: inbound_message_id || null,
+          action_taken: "quiet_hours_courtesy",
+          reason: `quiet_hours_22_06_sast — sent after ${QUIET_REPLY_ALLOWANCE} replies used`,
+        });
+        diag.result = "quiet_hours_courtesy_sent";
+        diag.l2_quiet_hours = true;
+        diag.l2_quiet_replies_used = quietRepliesUsed;
+        return new Response(JSON.stringify({ ok: true, courtesy: true, diag }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      } catch (e: any) {
+        console.warn("[auto-reply] quiet-hours courtesy send failed:", e?.message);
+      }
+    }
+
 
     const autoAllowed =
       // Path A — Level 2A first-touch trust auto-send
@@ -2044,6 +2130,9 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     diag.l2_dnc = dnc;
     diag.l2_quiet_hours = inQuietHours;
     diag.l2_quiet_hours_bypassed_for_paid_lead = bypassQuietHoursForPaidLead;
+    diag.l2_quiet_replies_used = quietRepliesUsed;
+    diag.l2_quiet_courtesy_used = quietCourtesyUsed;
+    diag.l2_quiet_allowance = QUIET_REPLY_ALLOWANCE;
     diag.l2_hourly_exceeded = hourlyExceeded;
     diag.l2_auto_allowed = autoAllowed;
     diag.l2_legacy_kv_path = (isTwilioChannel || isMaytapiChannel) && !isFirstTouch && !dnc && !quietHoursBlocked;
