@@ -426,6 +426,7 @@ export function LeadCallReport() {
 
   const filtered = useMemo(() => {
     let out = onlyDistributors ? rows.filter((r) => r.isDistributor) : rows;
+    out = out.filter((r) => !hiddenIds.has(r.id));
     if (fiFrom) out = out.filter((r) => r.firstInquiry && r.firstInquiry.slice(0, 10) >= fiFrom);
     if (fiTo) out = out.filter((r) => r.firstInquiry && r.firstInquiry.slice(0, 10) <= fiTo);
     if (lmFrom) out = out.filter((r) => r.lastMessage && r.lastMessage.slice(0, 10) >= lmFrom);
@@ -442,7 +443,7 @@ export function LeadCallReport() {
       });
     }
     return out;
-  }, [rows, onlyDistributors, fiFrom, fiTo, lmFrom, lmTo, search]);
+  }, [rows, onlyDistributors, fiFrom, fiTo, lmFrom, lmTo, search, hiddenIds]);
 
   const sortedFiltered = useMemo(() => {
     if (sortDir === 'none') return filtered;
