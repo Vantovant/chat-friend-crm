@@ -215,7 +215,7 @@ Deno.serve(async (req) => {
         phone_normalized: phone,
         trigger_type: "demographics_recovery",
         channel: "maytapi",
-        template_label: "demographics_recovery_v1",
+        template_label: templateLabel,
         message_text: message,
         message_preview: message.slice(0, 200),
         provider_message_id: sendData?.message_id || null,
