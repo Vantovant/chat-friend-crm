@@ -10,23 +10,43 @@ const corsHeaders = {
 
 const BATCH_SIZE = 10; // contacts per tick
 const DAILY_RECOVERY_CAP = 50; // HARD cap: max recovery asks sent per UTC day
+const RECENT_WARM_THRESHOLD = 100; // first N cumulative sends use the short "warm" ask
 
-function buildAsk(firstName: string, missing: string[]): string {
+function formatMissing(missing: string[]): string {
+  return missing.length === 1
+    ? missing[0]
+    : missing.length === 2
+    ? `${missing[0]} and ${missing[1]}`
+    : `${missing.slice(0, -1).join(", ")}, and ${missing[missing.length - 1]}`;
+}
+
+// Warm ask — for prospects who likely still remember the recent campaign.
+function buildAskWarm(firstName: string, missing: string[]): string {
   const lead = firstName ? `Hi ${firstName}, ` : "Hi 👋 ";
-  const list =
-    missing.length === 1
-      ? missing[0]
-      : missing.length === 2
-      ? `${missing[0]} and ${missing[1]}`
-      : `${missing.slice(0, -1).join(", ")}, and ${missing[missing.length - 1]}`;
   return (
     `${lead}it's Vanto from Get Well Africa (accredited APLGO distributor) 🌿\n\n` +
-    `To make sure I send you the right info and any local offers, could you share your ${list}?\n\n` +
+    `To make sure I send you the right info and any local offers, could you share your ${formatMissing(missing)}?\n\n` +
     `Just reply in this format:\n` +
     `Email: you@email.com\nCity: Pretoria\nProvince: Gauteng\n\n` +
     `Thank you 🙏\n— Vanto`
   );
 }
+
+// Cold-reintroduction ask — for older prospects who may not remember.
+function buildAskReintro(firstName: string, missing: string[]): string {
+  const lead = firstName ? `Hi ${firstName} 👋` : `Hi there 👋`;
+  return (
+    `${lead}\n\n` +
+    `It's Vanto from *Get Well Africa* — an accredited APLGO distributor focused on natural wellness 🌿.\n\n` +
+    `A while back you took part in our Get Well Africa WhatsApp wellness campaign (APLGO natural lozenges & healthy-lifestyle info). I'm reaching back out personally to make sure you stay on the right list and only receive info that's relevant to you.\n\n` +
+    `To do that, could you please share your ${formatMissing(missing)}?\n\n` +
+    `Just reply in this format:\n` +
+    `Email: you@email.com\nCity: Pretoria\nProvince: Gauteng\n\n` +
+    `If you'd rather not receive further messages, just reply STOP and I'll remove you immediately.\n\n` +
+    `Thank you 🙏\n— Vanto, Get Well Africa`
+  );
+}
+
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -67,12 +87,15 @@ Deno.serve(async (req) => {
     }
 
 
+    // ── Cumulative recovery sends ever (drives warm vs. reintro template) ──
+    const { count: sentTotal } = await supabase
+      .from("option_b_audit_log")
+      .select("id", { count: "exact", head: true })
+      .eq("trigger_type", "demographics_recovery");
+    let cumulativeSent = sentTotal || 0;
+
     // ── Find eligible prospects ──
-    // - Has phone
-    // - Not deleted, not opted-out, not muted
-    // - Missing at least one demographic field
-    // - Never asked before
-    // - Has at least one existing conversation (so this is a follow-up, not cold spam)
+    // Newest first — the most recent 100 still remember the campaign.
     const { data: candidates, error: candErr } = await supabase
       .from("contacts")
       .select("id, name, first_name, phone, phone_normalized, email, city, province")
@@ -82,8 +105,9 @@ Deno.serve(async (req) => {
       .is("demographics_asked_at", null)
       .or("email.is.null,city.is.null,province.is.null")
       .not("phone_normalized", "is", null)
-      .order("created_at", { ascending: true })
+      .order("created_at", { ascending: false })
       .limit(BATCH_SIZE * 4); // overscan; filter by conversation existence below
+
 
     if (candErr) throw candErr;
     if (!candidates || candidates.length === 0) {
@@ -146,7 +170,9 @@ Deno.serve(async (req) => {
       }).eq("id", c.id);
 
       const firstName = (c.first_name || (c.name || "").split(" ")[0] || "").trim();
-      const message = buildAsk(firstName, missing);
+      const isWarm = cumulativeSent < RECENT_WARM_THRESHOLD;
+      const templateLabel = isWarm ? "demographics_recovery_warm_v1" : "demographics_recovery_reintro_v1";
+      const message = isWarm ? buildAskWarm(firstName, missing) : buildAskReintro(firstName, missing);
       const conv = convByContact.get(c.id)!;
 
       // ── Send via Maytapi (skip_rate_limit: already reserved above) ──
@@ -189,7 +215,7 @@ Deno.serve(async (req) => {
         phone_normalized: phone,
         trigger_type: "demographics_recovery",
         channel: "maytapi",
-        template_label: "demographics_recovery_v1",
+        template_label: templateLabel,
         message_text: message,
         message_preview: message.slice(0, 200),
         provider_message_id: sendData?.message_id || null,
@@ -206,6 +232,7 @@ Deno.serve(async (req) => {
 
       sent++;
       remainingToday--;
+      cumulativeSent++;
     }
 
     return jsonRes({
