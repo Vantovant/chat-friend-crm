@@ -984,6 +984,21 @@ export function ContactsModule() {
       }
     };
     window.addEventListener('vanto:open-contact', handler as EventListener);
+
+    // Check sessionStorage for a pending open (set by another module before navigating here)
+    try {
+      const raw = sessionStorage.getItem('vanto:pending-open-contact');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && (Date.now() - (parsed.ts || 0) < 10000)) {
+          sessionStorage.removeItem('vanto:pending-open-contact');
+          handler(new CustomEvent('vanto:open-contact', { detail: parsed }));
+        } else {
+          sessionStorage.removeItem('vanto:pending-open-contact');
+        }
+      }
+    } catch {}
+
     return () => window.removeEventListener('vanto:open-contact', handler as EventListener);
   }, [contacts, toast]);
 
