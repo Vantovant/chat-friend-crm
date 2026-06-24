@@ -1034,6 +1034,22 @@ Deno.serve(async (req) => {
     diag.classifier_wired_error = e?.message || "unknown";
   }
 
+  // ── Demographic capture (email / city / province) ──
+  // Runs BEFORE the auto-reply mode check so we still harvest data when auto-reply is off.
+  try {
+    if (contact_id && inbound_content) {
+      const { extractAndSaveDemographics } = await import("../_shared/demographics.ts");
+      const saved = await extractAndSaveDemographics(svc, contact_id, inbound_content);
+      if (saved.email || saved.city || saved.province) {
+        diag.demographics_captured = saved;
+      }
+    }
+  } catch (e: any) {
+    console.warn("[auto-reply] demographics extract failed (non-fatal):", e?.message);
+  }
+
+
+
 
   // ── Check auto-reply mode ──
   const { data: modeSetting } = await svc.from("integration_settings").select("value").eq("key", "auto_reply_mode").maybeSingle();
