@@ -53,6 +53,7 @@ Group Campaigns: Maytapi REST API (NOT Chrome Extension autoposter). Twilio stay
 - [Group Campaigns](mem://features/group-campaigns) — Automated WA group messaging via Chrome Extension
 - [Group Campaigns Maytapi](mem://features/group-campaigns-maytapi) — Maytapi REST API migration for group campaigns
 - [Missed Inquiry Recovery](mem://features/missed-inquiry-recovery) — 5-step Maytapi auto-follow-up for stalled inbox convos
+- [Demographic Capture](mem://features/demographic-capture) — Auto-captures email/city/province from inbound WA replies (Maytapi + Twilio); appends one polite ask after interest signal
 - [Technical Debt](mem://technical/debt) — Modules needing refactor, future backlog
 - [Conversion Uplift Weeks 1-3](mem://features/conversion-uplift-week1-3) — Classifier wired into auto-reply (live), cadence engine + A/B + weekly PDF (off by default, kill switches in integration_settings)
 - [Daily Product Commerce Blueprint](mem://features/daily-product-commerce-blueprint) — Version B blueprint (R862/R431, R99 shipping, 3–7 days, 14-day returns) for GRW/GTS/SLD/STP/PWR Lemon/PWR Apricot — ON HOLD, awaiting named approval
