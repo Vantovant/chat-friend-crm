@@ -47,6 +47,15 @@ function buildAskReintro(firstName: string, missing: string[]): string {
   );
 }
 
+// ── Quiet hours: 22:00–06:00 SAST (UTC+2, no DST) ──
+// Mirrors cadence-tick / phase3-tick / fast-closer-tick.
+function inQuietHoursSAST(now: Date = new Date()): boolean {
+  const sastHour = (now.getUTCHours() + 2) % 24;
+  return sastHour >= 22 || sastHour < 6;
+}
+
+
+
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
