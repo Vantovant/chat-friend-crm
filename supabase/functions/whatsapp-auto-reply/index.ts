@@ -1865,7 +1865,7 @@ Deno.serve(async (req) => {
     const allowedTemplateIntents = new Set(["where_to_buy","how_to_join","membership_R375","product_range"]);
 
     const sastHourTpl = (new Date().getUTCHours() + 2) % 24;
-    const inQuietTpl = sastHourTpl >= 22 || sastHourTpl < 6;
+    const inQuietTpl = sastHourTpl >= 20 || sastHourTpl < 6;
     let dncTpl = false;
     if (contact_id) {
       const { data: cDnc } = await svc.from("contacts").select("do_not_contact,name,first_name").eq("id", contact_id).maybeSingle();
@@ -1975,12 +1975,12 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     const channel = (diag.channel_detected || "").toLowerCase();
     const isFirstTouch = actionTaken === "first_touch_trust_message";
 
-    // Quiet-hours check (22:00–06:00 SAST = UTC+2)
+    // Quiet-hours check (20:00–06:00 SAST = UTC+2)
     // Paid Twilio/Facebook ad leads must still receive the first trust reply immediately;
     // otherwise overnight ad spend creates silent inboxes and lost prospects.
     const nowUtc = new Date();
     const sastHour = (nowUtc.getUTCHours() + 2) % 24;
-    const inQuietHours = sastHour >= 22 || sastHour < 6;
+    const inQuietHours = sastHour >= 20 || sastHour < 6;
 
     // DNC check
     let dnc = false;
@@ -2016,7 +2016,7 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     const bypassQuietHoursForPaidLead = isTwilioChannel || emergencyLane;
 
     // ── Quiet-hours exception (inbound-only): allow up to 3 auto-replies per
-    //    contact during the 22:00–06:00 SAST window, then ONE courtesy
+    //    contact during the 20:00–06:00 SAST window, then ONE courtesy
     //    "back at 06:00" reminder, then silent. Outbound automations
     //    (cadence / phase3 / recovery / demographics) are NOT affected —
     //    this only relaxes responses to people who message us first.
@@ -2068,7 +2068,7 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     ) {
       const courtesyText =
         "Thanks for your message 🌙\n\n" +
-        "Our auto-replies pause between 22:00 and 06:00 SAST so we don't disturb anyone. " +
+        "Our auto-replies pause between 20:00 and 06:00 SAST so we don't disturb anyone. " +
         "I'll get back to you from 06:00 — please send your question again then.\n\n— Vanto, Get Well Africa";
       try {
         const fnUrl = isMaytapiChannel
@@ -2088,7 +2088,7 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
         await svc.from("auto_reply_events").insert({
           conversation_id, inbound_message_id: inbound_message_id || null,
           action_taken: "quiet_hours_courtesy",
-          reason: `quiet_hours_22_06_sast — sent after ${QUIET_REPLY_ALLOWANCE} replies used`,
+          reason: `quiet_hours_20_06_sast — sent after ${QUIET_REPLY_ALLOWANCE} replies used`,
         });
         diag.result = "quiet_hours_courtesy_sent";
         diag.l2_quiet_hours = true;
@@ -2146,7 +2146,7 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
         : mode !== "auto_first_touch" ? "mode_not_auto_first_touch"
         : !autoChannels.includes(channel) ? `channel_not_in_allowlist:${channel || "unknown"}`
         : dnc ? "dnc_blocked"
-        : quietHoursBlocked ? "quiet_hours_22_06_sast"
+        : quietHoursBlocked ? "quiet_hours_20_06_sast"
         : hourlyExceeded ? `hourly_cap_${hourlyCap}_exceeded`
         : "policy_block";
 

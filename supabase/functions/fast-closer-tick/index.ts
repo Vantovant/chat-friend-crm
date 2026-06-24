@@ -8,7 +8,7 @@
  * STOP conditions:
  *  - Lead replied (any inbound after first-touch)
  *  - Contact do_not_contact = true
- *  - Quiet hours (22:00–06:00 SAST)
+ *  - Quiet hours (20:00–06:00 SAST)
  *  - Step gate flag is false in integration_settings
  *
  * Tracked via `option_b_audit_log` rows with trigger_type `fast_closer_step_N`.
@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
 
     // Quiet hours 22-06 SAST
     const sastHour = (new Date().getUTCHours() + 2) % 24;
-    if (sastHour >= 22 || sastHour < 6) {
+    if (sastHour >= 20 || sastHour < 6) {
       return new Response(JSON.stringify({ ok: true, quiet_hours: true }), {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

@@ -240,9 +240,9 @@ async function enrichOne(svc: any, suggestionId: string): Promise<any> {
     dnc = !!c?.do_not_contact;
   }
 
-  // Quiet hours check (22:00–06:00 SAST = UTC+2)
+  // Quiet hours check (20:00–06:00 SAST = UTC+2)
   const sastHour = (new Date().getUTCHours() + 2) % 24;
-  const inQuiet = sastHour >= 22 || sastHour < 6;
+  const inQuiet = sastHour >= 20 || sastHour < 6;
 
   // Recommended action
   let recommendedAction = "ready_for_human_review";

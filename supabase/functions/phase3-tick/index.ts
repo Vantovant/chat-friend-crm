@@ -20,7 +20,7 @@ function renderTemplate(text: string, vars: Record<string, string>): string {
   return text.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k) => vars[k] ?? "");
 }
 
-// Quiet hours: 22:00–06:00 SAST (UTC+2, no DST). Mirrors cadence-tick / fast-closer-tick.
+// Quiet hours: 20:00–06:00 SAST (UTC+2, no DST). Mirrors cadence-tick / fast-closer-tick.
 function isQuietHoursSAST(d: Date): boolean {
   const h = (d.getUTCHours() + 2) % 24;
   return h >= 22 || h < 6;
@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
     const now = new Date();
     const nowIso = now.toISOString();
 
-    // ── Quiet hours guard (22:00–06:00 SAST) ──
+    // ── Quiet hours guard (20:00–06:00 SAST) ──
     // Skip during quiet hours and reschedule any already-due rows to 06:00 SAST
     // so we don't flood the moment we exit quiet hours.
     if (isQuietHoursSAST(now)) {
