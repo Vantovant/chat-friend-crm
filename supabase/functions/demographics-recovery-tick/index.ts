@@ -87,12 +87,15 @@ Deno.serve(async (req) => {
     }
 
 
+    // ── Cumulative recovery sends ever (drives warm vs. reintro template) ──
+    const { count: sentTotal } = await supabase
+      .from("option_b_audit_log")
+      .select("id", { count: "exact", head: true })
+      .eq("trigger_type", "demographics_recovery");
+    let cumulativeSent = sentTotal || 0;
+
     // ── Find eligible prospects ──
-    // - Has phone
-    // - Not deleted, not opted-out, not muted
-    // - Missing at least one demographic field
-    // - Never asked before
-    // - Has at least one existing conversation (so this is a follow-up, not cold spam)
+    // Newest first — the most recent 100 still remember the campaign.
     const { data: candidates, error: candErr } = await supabase
       .from("contacts")
       .select("id, name, first_name, phone, phone_normalized, email, city, province")
@@ -102,8 +105,9 @@ Deno.serve(async (req) => {
       .is("demographics_asked_at", null)
       .or("email.is.null,city.is.null,province.is.null")
       .not("phone_normalized", "is", null)
-      .order("created_at", { ascending: true })
+      .order("created_at", { ascending: false })
       .limit(BATCH_SIZE * 4); // overscan; filter by conversation existence below
+
 
     if (candErr) throw candErr;
     if (!candidates || candidates.length === 0) {
