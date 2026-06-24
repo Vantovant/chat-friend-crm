@@ -9,6 +9,7 @@ const corsHeaders = {
 };
 
 const BATCH_SIZE = 10; // contacts per tick
+const DAILY_RECOVERY_CAP = 50; // HARD cap: max recovery asks sent per UTC day
 
 function buildAsk(firstName: string, missing: string[]): string {
   const lead = firstName ? `Hi ${firstName}, ` : "Hi 👋 ";
@@ -48,6 +49,23 @@ Deno.serve(async (req) => {
     if (((pauseRow?.value || "false") + "").toLowerCase() === "true") {
       return jsonRes({ success: true, processed: 0, paused: true, reason: "demographics_recovery_paused" });
     }
+
+    // ── HARD daily cap: count today's recovery sends from the audit log ──
+    const dayStart = new Date();
+    dayStart.setUTCHours(0, 0, 0, 0);
+    const { count: sentToday } = await supabase
+      .from("option_b_audit_log")
+      .select("id", { count: "exact", head: true })
+      .eq("trigger_type", "demographics_recovery")
+      .gte("created_at", dayStart.toISOString());
+    let remainingToday = Math.max(0, DAILY_RECOVERY_CAP - (sentToday || 0));
+    if (remainingToday === 0) {
+      return jsonRes({
+        success: true, processed: 0, sent: 0, paused: true,
+        reason: "daily_recovery_cap_reached", daily_cap: DAILY_RECOVERY_CAP, sent_today: sentToday || 0,
+      });
+    }
+
 
     // ── Find eligible prospects ──
     // - Has phone
@@ -90,6 +108,7 @@ Deno.serve(async (req) => {
     const { reserveMessageSlot, releaseMessageSlot, logRateLimited } = await import("../_shared/rate-limit.ts");
 
     for (const c of eligible) {
+      if (remainingToday <= 0) { skipped_daily_cap++; break; }
       const phone = c.phone_normalized || c.phone;
       if (!phone) { failed++; continue; }
 
@@ -186,6 +205,7 @@ Deno.serve(async (req) => {
       });
 
       sent++;
+      remainingToday--;
     }
 
     return jsonRes({
