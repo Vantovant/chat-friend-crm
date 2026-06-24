@@ -818,6 +818,17 @@ export function LeadCallReport() {
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
                 </TableCell>
+                <TableCell className="py-2 text-right align-top">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => hideRow(r)}
+                    title="Remove this row from the Lead Call Report (does not delete the contact)"
+                    className="text-destructive hover:text-destructive"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
