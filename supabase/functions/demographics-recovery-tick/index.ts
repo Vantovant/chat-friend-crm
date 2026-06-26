@@ -163,6 +163,16 @@ Deno.serve(async (req) => {
       }
       seenPhonesThisTick.add(phoneNormalized);
 
+      const { data: existingPhoneLock } = await supabase
+        .from("demographics_recovery_phone_locks")
+        .select("phone_normalized")
+        .eq("phone_normalized", phoneNormalized)
+        .maybeSingle();
+      if (existingPhoneLock) {
+        skipped_phone_locked++;
+        continue;
+      }
+
       const missing: string[] = [];
       if (!c.email) missing.push("email address");
       if (!c.city) missing.push("city");
@@ -201,6 +211,7 @@ Deno.serve(async (req) => {
         p_contact_id: c.id,
       });
       if (phoneLockErr || phoneLock?.ok !== true) {
+        await releaseMessageSlot(supabase, c.id);
         skipped_phone_locked++;
         continue;
       }
