@@ -57,7 +57,55 @@
     --cold: 217 91% 60%;
     --sidebar-width: 64px;
     --sidebar-width-expanded: 220px;
+
+    /* GetWell Hub brand tokens (from logo) */
+    --brand-teal: 184 55% 36%;
+    --brand-teal-deep: 188 70% 22%;
+    --brand-orange: 22 85% 54%;
+    --brand-amber: 38 92% 58%;
+    --brand-rose: 340 70% 70%;
+    --brand-green: 142 45% 50%;
+    --brand-ink: 222 47% 11%;
+    --brand-paper: 36 33% 97%;
   }
+}
+
+/* Marketing site palette — applied via .gw-marketing wrapper */
+.gw-marketing {
+  --background: 36 33% 98%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 184 55% 36%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 36 33% 94%;
+  --secondary-foreground: 222 47% 11%;
+  --muted: 36 20% 92%;
+  --muted-foreground: 222 20% 35%;
+  --accent: 22 85% 54%;
+  --accent-foreground: 0 0% 100%;
+  --border: 220 13% 88%;
+  --input: 220 13% 88%;
+  --ring: 184 55% 36%;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+}
+.gw-hero-grad {
+  background:
+    radial-gradient(1200px 600px at 85% -10%, hsl(var(--brand-orange) / 0.18), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, hsl(var(--brand-teal) / 0.18), transparent 60%),
+    linear-gradient(180deg, hsl(36 33% 99%), hsl(36 33% 96%));
+}
+.gw-brand-grad-text {
+  background: linear-gradient(120deg, hsl(var(--brand-teal-deep)), hsl(var(--brand-teal)) 45%, hsl(var(--brand-orange)));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.gw-brand-grad-bg {
+  background: linear-gradient(120deg, hsl(var(--brand-teal-deep)), hsl(var(--brand-teal)) 50%, hsl(var(--brand-orange)));
 }
 
 @layer base {
