@@ -19,11 +19,12 @@ Backfill campaign to recover demographics from existing prospects (~471 at launc
 **Safety stack:**
 1. `emergency_all_auto_paused` master kill switch
 2. `demographics_recovery_paused` module kill switch (set in `integration_settings`)
-3. `reserve_cadence_send_slot(400)` project-wide daily cap — tick BREAKS when hit
-4. `reserveMessageSlot()` per-contact 30/5min + 100/24h
-5. Stamps `demographics_asked_at` BEFORE send (idempotency — never re-asks even on failure)
-6. On send failure: releases the rate-limit slot but keeps `demographics_asked_at` stamped (operator must manually clear to retry)
-7. Audit row in `option_b_audit_log` per send (`trigger_type='demographics_recovery'`, `template_label='demographics_recovery_v1'`)
+3. Phone-number atomic lock in `demographics_recovery_phone_locks` before any send — one WhatsApp number can receive the demographics recovery ask only once, even if duplicate contact rows exist or cron overlaps.
+4. `reserve_cadence_send_slot(400)` project-wide daily cap — tick BREAKS when hit
+5. `reserveMessageSlot()` per-contact 30/5min + 100/24h
+6. Stamps `demographics_asked_at` BEFORE send (idempotency — never re-asks even on failure)
+7. On send failure: releases the rate-limit slot but keeps `demographics_asked_at` and the phone lock stamped (operator must manually clear to retry)
+8. Audit row in `option_b_audit_log` per send (`trigger_type='demographics_recovery'`, `template_label='demographics_recovery_v1`)
 
 **Operator controls:**
 - Pause: `UPDATE integration_settings SET value='true' WHERE key='demographics_recovery_paused';`

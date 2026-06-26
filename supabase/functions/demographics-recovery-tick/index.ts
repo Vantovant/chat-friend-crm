@@ -146,7 +146,7 @@ Deno.serve(async (req) => {
 
     const eligible = candidates.filter((c) => convByContact.has(c.id)).slice(0, BATCH_SIZE);
 
-    let sent = 0, failed = 0, skipped_rate_limited = 0, skipped_daily_cap = 0;
+    let sent = 0, failed = 0, skipped_rate_limited = 0, skipped_daily_cap = 0, skipped_phone_locked = 0;
 
     const { reserveMessageSlot, releaseMessageSlot, logRateLimited } = await import("../_shared/rate-limit.ts");
 
@@ -154,6 +154,7 @@ Deno.serve(async (req) => {
       if (remainingToday <= 0) { skipped_daily_cap++; break; }
       const phone = c.phone_normalized || c.phone;
       if (!phone) { failed++; continue; }
+      const phoneNormalized = c.phone_normalized || `+${String(phone).replace(/[^\d]/g, "")}`;
 
       const missing: string[] = [];
       if (!c.email) missing.push("email address");
@@ -163,6 +164,21 @@ Deno.serve(async (req) => {
         await supabase.from("contacts")
           .update({ demographics_captured_at: new Date().toISOString(), updated_at: new Date().toISOString() })
           .eq("id", c.id);
+        continue;
+      }
+
+      // ── HARD phone-level duplicate guard ───────────────────────────────────
+      // Duplicate contact rows can share the same WhatsApp number. The old guard
+      // only protected contact_id, so the same number could be asked repeatedly
+      // through different duplicate records. This DB-backed reservation is atomic
+      // and keyed by phone number, so one number can receive this recovery ask
+      // only once, even across overlapping cron runs or duplicate contacts.
+      const { data: phoneLock, error: phoneLockErr } = await supabase.rpc("reserve_demographics_recovery_phone", {
+        p_phone_normalized: phoneNormalized,
+        p_contact_id: c.id,
+      });
+      if (phoneLockErr || phoneLock?.ok !== true) {
+        skipped_phone_locked++;
         continue;
       }
 
@@ -198,18 +214,24 @@ Deno.serve(async (req) => {
       const sendResp = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
-        body: JSON.stringify({ to_number: phone, message, contact_id: c.id, skip_rate_limit: true }),
+        body: JSON.stringify({ to_number: phoneNormalized, message, contact_id: c.id, skip_rate_limit: true }),
       });
       const sendData = await sendResp.json().catch(() => ({}));
 
       if (!sendResp.ok) {
-        // Roll back the rate-limit reservation but KEEP demographics_asked_at stamped
-        // to avoid re-spamming the contact on failure loops. Operator can clear manually.
+        // Roll back the rate-limit reservation but KEEP demographics_asked_at and
+        // phone lock stamped to avoid re-spamming the same number on failure loops.
+        // Operator can clear manually if a safe retry is needed.
         await releaseMessageSlot(supabase, c.id);
         failed++;
         console.warn(`[demographics-recovery] send failed for ${c.id}:`, sendData?.error || sendResp.status);
         continue;
       }
+
+      await supabase.rpc("mark_demographics_recovery_phone_sent", {
+        p_phone_normalized: phoneNormalized,
+        p_provider_message_id: sendData?.message_id || null,
+      });
 
       // ── Mirror into conversation timeline ──
       await supabase.from("messages").insert({
@@ -231,7 +253,7 @@ Deno.serve(async (req) => {
       await supabase.from("option_b_audit_log").insert({
         contact_id: c.id,
         conversation_id: conv.id,
-        phone_normalized: phone,
+        phone_normalized: phoneNormalized,
         trigger_type: "demographics_recovery",
         channel: "maytapi",
         template_label: templateLabel,
@@ -261,6 +283,7 @@ Deno.serve(async (req) => {
       failed,
       skipped_rate_limited,
       skipped_daily_cap,
+      skipped_phone_locked,
       batch_size: BATCH_SIZE,
     });
   } catch (err) {
