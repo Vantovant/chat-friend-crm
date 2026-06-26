@@ -123,7 +123,7 @@ export function MarketingLayout({ children }: { children: ReactNode }) {
           <div>
             <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">Contact</div>
             <p className="text-sm text-muted-foreground">
-              GetWellAfrica · APLGO accredited distributor network<br />
+              GetWellAfrica · Accredited distributor network<br />
               hello@getwellhub.dev
             </p>
           </div>

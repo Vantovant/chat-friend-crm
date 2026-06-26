@@ -34,7 +34,7 @@ export default function Home() {
               become <span className="gw-brand-grad-text">partners.</span>
             </h1>
             <p className="mt-6 text-lg text-muted-foreground max-w-xl leading-relaxed">
-              GetWell Hub is the WhatsApp-first CRM and autonomous Prospector for APLGO distributors, wellness coaches and direct sellers across Africa. From the moment a lead taps your Facebook ad to the day they become a partner — every message, follow-up and decision happens in one place.
+              GetWell Hub is the WhatsApp-first CRM and autonomous Prospector for any MLM or direct-selling team. It is demoed here with a wellness distributor network, and can be tailor-made to match the products, scripts and structures of any company on request.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <Link to="/login" className="inline-flex items-center gap-2 px-6 py-3 rounded-lg text-white font-semibold gw-brand-grad-bg shadow-md hover:opacity-90">
@@ -107,7 +107,7 @@ export default function Home() {
               <div className="space-y-3 text-sm">
                 <div className="flex gap-2"><div className="px-3 py-2 rounded-2xl rounded-tl-sm bg-secondary max-w-[80%]">Hi good day, I saw your ad on Facebook 🙂</div></div>
                 <div className="flex justify-end"><div className="px-3 py-2 rounded-2xl rounded-tr-sm gw-brand-grad-bg text-white max-w-[80%]">
-                  Hi, this is *Vanto from GetWellAfrica* — an accredited APLGO distributor. Quick question: are you looking for help with sleep, energy, joints, hormones, immune support — or the business opportunity?
+                  Hi, this is *Vanto from GetWellAfrica* — an accredited distributor. Quick question: are you looking for help with sleep, energy, joints, hormones, immune support — or the business opportunity?
                 </div></div>
                 <div className="flex gap-2"><div className="px-3 py-2 rounded-2xl rounded-tl-sm bg-secondary max-w-[80%]">Business opportunity please</div></div>
                 <div className="flex justify-end"><div className="px-3 py-2 rounded-2xl rounded-tr-sm gw-brand-grad-bg text-white max-w-[80%]">
@@ -128,7 +128,7 @@ export default function Home() {
               <div className="text-xs font-bold uppercase tracking-widest opacity-80 mb-3">For investors</div>
               <h3 className="text-3xl font-black mb-3">A defensible operating system for the African direct-sales economy.</h3>
               <p className="text-white/90 leading-relaxed">
-                WhatsApp is how Africa sells. GetWell Hub turns it into a measurable, compliant, AI-driven revenue engine — already running real Twilio, Maytapi and Facebook traffic for an accredited APLGO distributor network.
+                WhatsApp is how Africa sells. GetWell Hub turns it into a measurable, compliant, AI-driven revenue engine — already running real Twilio, Maytapi and Facebook traffic for an accredited distributor network. Configurable for any MLM company.
               </p>
             </div>
             <div className="flex lg:justify-end">
