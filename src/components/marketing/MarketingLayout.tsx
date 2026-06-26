@@ -135,6 +135,8 @@ export function MarketingLayout({ children }: { children: ReactNode }) {
           </div>
         </div>
       </footer>
+
+      <MarketingChat />
     </div>
   );
 }
