@@ -6,7 +6,7 @@ const STEPS = [
   { n: '1', title: 'Sign in', body: 'Open getwellhub.dev/login with your invited email. Your role (Agent, Admin, Super Admin) determines what you see and what you can change.' },
   { n: '2', title: 'Connect channels', body: 'In Integrations, plug in Twilio (paid WhatsApp Business number) and Maytapi (personal/business number). Both run side-by-side — Twilio for ads, Maytapi for community.' },
   { n: '3', title: 'Configure the Prospector', body: 'Settings → Prospector Controls. Choose your level (Drafts only / Auto first-touch / Full). Set quiet hours, daily caps, master kill switch.' },
-  { n: '4', title: 'Load the Knowledge Vault', body: 'Drop your APLGO scripts, pricing, BOP slides, training notes. The Prospector and AI Agent answer only from this — never the open internet.' },
+  { n: '4', title: 'Load the Knowledge Vault', body: 'Drop your company scripts, pricing, BOP slides, training notes. The Prospector and AI Agent answer only from this — never the open internet.' },
   { n: '5', title: 'Launch your Facebook ad', body: 'Your click-to-chat ad lands on Twilio. The Prospector responds in under 30 seconds with a trust-first intro and a qualifying question.' },
   { n: '6', title: 'Watch the Pipeline move', body: 'Every reply auto-classifies intent, promotes the lead in the CRM Kanban, and queues the right CTA (sponsor link, BOP invite, group invite, training).' },
   { n: '7', title: 'Approve drafts (or let it run)', body: 'In supervised mode, drafts wait for one-click approval. In auto mode, the Prospector sends within all safety rails — you review the audit log later.' },
