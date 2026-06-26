@@ -97,11 +97,11 @@ export function AuthPage({ onSuccess }: Props) {
           {/* LEFT PANEL — visible on lg+ */}
           <div className="hidden lg:block lg:col-span-3 space-y-6">
             <div>
-              <h2 className="text-xl font-black tracking-tight leading-tight">
-                WhatsApp-first CRM for APLGO
+            <h2 className="text-xl font-black tracking-tight leading-tight">
+                WhatsApp-first CRM for MLM
               </h2>
               <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
-                Autonomous prospecting, unified inbox and intelligent follow-ups — built for accredited distributors across Africa.
+                Autonomous prospecting, inbox and follow-ups for network-marketing teams. Built for APLGO — configurable for any company on request.
               </p>
             </div>
 
