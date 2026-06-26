@@ -1,17 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { Bot, Eye, EyeOff, Loader2, ArrowLeft } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Bot, Eye, EyeOff, Loader2, ArrowLeft, Lock } from 'lucide-react';
 
 interface Props {
   onSuccess: () => void;
 }
 
 export function AuthPage({ onSuccess }: Props) {
-  const [mode, setMode] = useState<'login' | 'signup' | 'forgot'>('login');
+  // Public signup is disabled. Access is invite-only via /accept-invite.
+  const [mode, setMode] = useState<'login' | 'forgot'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -28,24 +27,12 @@ export function AuthPage({ onSuccess }: Props) {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         onSuccess();
-      } else if (mode === 'signup') {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { full_name: fullName },
-            emailRedirectTo: window.location.origin,
-          },
-        });
-        if (error) throw error;
-        setMessage('Check your email to confirm your account, then sign in.');
-        setMode('login');
       } else if (mode === 'forgot') {
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: `${window.location.origin}/reset-password`,
         });
         if (error) throw error;
-        setMessage('Password reset link sent! Check your email inbox.');
+        setMessage('If that email is registered, a reset link has been sent.');
         setMode('login');
       }
     } catch (err: any) {
@@ -55,7 +42,7 @@ export function AuthPage({ onSuccess }: Props) {
     }
   };
 
-  const switchMode = (newMode: 'login' | 'signup' | 'forgot') => {
+  const switchMode = (newMode: 'login' | 'forgot') => {
     setMode(newMode);
     setError('');
     setMessage('');
@@ -72,19 +59,17 @@ export function AuthPage({ onSuccess }: Props) {
           <div className="w-14 h-14 rounded-2xl vanto-gradient flex items-center justify-center mx-auto mb-4 shadow-lg shadow-primary/20">
             <Bot size={28} className="text-primary-foreground" />
           </div>
-          <h1 className="text-2xl font-black text-foreground tracking-tight">Vanto</h1>
-          <p className="text-muted-foreground text-sm">Command Hub 2.0</p>
+          <h1 className="text-2xl font-black text-foreground tracking-tight">GetWell Hub</h1>
+          <p className="text-muted-foreground text-sm">Private workspace · Invite only</p>
         </div>
 
         <div className="vanto-card p-6">
           <h2 className="text-lg font-bold text-foreground mb-1">
-            {mode === 'login' ? 'Welcome back' : mode === 'signup' ? 'Create account' : 'Reset password'}
+            {mode === 'login' ? 'Welcome back' : 'Reset password'}
           </h2>
           <p className="text-sm text-muted-foreground mb-5">
             {mode === 'login'
               ? 'Sign in to your workspace'
-              : mode === 'signup'
-              ? 'Join your team on Vanto'
               : 'Enter your email to receive a reset link'}
           </p>
 
@@ -100,19 +85,6 @@ export function AuthPage({ onSuccess }: Props) {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-3">
-            {mode === 'signup' && (
-              <div>
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Full Name</label>
-                <input
-                  type="text"
-                  value={fullName}
-                  onChange={e => setFullName(e.target.value)}
-                  required
-                  placeholder="Alex Thompson"
-                  className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/60 transition-colors"
-                />
-              </div>
-            )}
             <div>
               <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Email</label>
               <input
@@ -120,7 +92,7 @@ export function AuthPage({ onSuccess }: Props) {
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 required
-                placeholder="you@vanto.io"
+                placeholder="you@getwellhub.dev"
                 className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/60 transition-colors"
               />
             </div>
@@ -165,7 +137,7 @@ export function AuthPage({ onSuccess }: Props) {
               className="w-full py-2.5 rounded-lg vanto-gradient text-primary-foreground font-semibold text-sm hover:opacity-90 transition-opacity disabled:opacity-60 flex items-center justify-center gap-2 mt-2"
             >
               {loading && <Loader2 size={15} className="animate-spin" />}
-              {mode === 'login' ? 'Sign In' : mode === 'signup' ? 'Create Account' : 'Send Reset Link'}
+              {mode === 'login' ? 'Sign In' : 'Send Reset Link'}
             </button>
           </form>
 
@@ -179,20 +151,15 @@ export function AuthPage({ onSuccess }: Props) {
               </button>
             </p>
           ) : (
-            <p className="text-center text-sm text-muted-foreground mt-4">
-              {mode === 'login' ? "Don't have an account? " : 'Already have an account? '}
-              <button
-                onClick={() => switchMode(mode === 'login' ? 'signup' : 'login')}
-                className="text-primary font-medium hover:underline"
-              >
-                {mode === 'login' ? 'Sign up' : 'Sign in'}
-              </button>
+            <p className="text-center text-xs text-muted-foreground mt-5 flex items-center justify-center gap-1.5">
+              <Lock size={11} />
+              Access is invite-only. Contact your admin for access.
             </p>
           )}
         </div>
 
         <p className="text-center text-xs text-muted-foreground mt-4">
-          WhatsApp AI CRM · Powered by Vanto
+          GetWell Hub · Private CRM
         </p>
       </div>
     </div>
