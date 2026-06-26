@@ -42,6 +42,10 @@ const ModuleFallback = () => (
 );
 
 const pathToModule: Record<string, Module> = {
+  '/app/maytapi-inbox': 'maytapi-inbox',
+  '/app/plan': 'plan',
+  '/app/voice-diary': 'voice-diary',
+  // legacy paths (kept for compatibility)
   '/maytapi-inbox': 'maytapi-inbox',
   '/plan': 'plan',
   '/voice-diary': 'voice-diary',
@@ -120,7 +124,10 @@ const Index = () => {
   }
 
   if (!session) {
-    return <AuthPage onSuccess={() => setLoading(true)} />;
+    if (typeof window !== 'undefined') {
+      window.location.replace('/login');
+    }
+    return null;
   }
 
   if (isMobile) {
