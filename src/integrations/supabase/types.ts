@@ -789,6 +789,44 @@ export type Database = {
         }
         Relationships: []
       }
+      demographics_recovery_phone_locks: {
+        Row: {
+          contact_id: string | null
+          phone_normalized: string
+          provider_message_id: string | null
+          reason: string | null
+          reserved_at: string
+          sent_at: string | null
+          status: string
+        }
+        Insert: {
+          contact_id?: string | null
+          phone_normalized: string
+          provider_message_id?: string | null
+          reason?: string | null
+          reserved_at?: string
+          sent_at?: string | null
+          status?: string
+        }
+        Update: {
+          contact_id?: string | null
+          phone_normalized?: string
+          provider_message_id?: string | null
+          reason?: string | null
+          reserved_at?: string
+          sent_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "demographics_recovery_phone_locks_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       fb_dispatch_log: {
         Row: {
           created_at: string
@@ -3114,12 +3152,20 @@ export type Database = {
         Returns: boolean
       }
       is_admin_or_super_admin: { Args: never; Returns: boolean }
+      mark_demographics_recovery_phone_sent: {
+        Args: { p_phone_normalized: string; p_provider_message_id?: string }
+        Returns: undefined
+      }
       release_cadence_send_slot: { Args: never; Returns: undefined }
       release_message_slot: {
         Args: { p_contact_id: string }
         Returns: undefined
       }
       reserve_cadence_send_slot: { Args: { p_limit: number }; Returns: number }
+      reserve_demographics_recovery_phone: {
+        Args: { p_contact_id?: string; p_phone_normalized: string }
+        Returns: Json
+      }
       reserve_message_slot: { Args: { p_contact_id: string }; Returns: Json }
       search_knowledge: {
         Args: {
