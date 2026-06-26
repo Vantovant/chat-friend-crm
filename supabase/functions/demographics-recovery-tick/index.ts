@@ -150,11 +150,18 @@ Deno.serve(async (req) => {
 
     const { reserveMessageSlot, releaseMessageSlot, logRateLimited } = await import("../_shared/rate-limit.ts");
 
+    const seenPhonesThisTick = new Set<string>();
+
     for (const c of eligible) {
       if (remainingToday <= 0) { skipped_daily_cap++; break; }
       const phone = c.phone_normalized || c.phone;
       if (!phone) { failed++; continue; }
       const phoneNormalized = c.phone_normalized || `+${String(phone).replace(/[^\d]/g, "")}`;
+      if (seenPhonesThisTick.has(phoneNormalized)) {
+        skipped_phone_locked++;
+        continue;
+      }
+      seenPhonesThisTick.add(phoneNormalized);
 
       const missing: string[] = [];
       if (!c.email) missing.push("email address");
@@ -164,21 +171,6 @@ Deno.serve(async (req) => {
         await supabase.from("contacts")
           .update({ demographics_captured_at: new Date().toISOString(), updated_at: new Date().toISOString() })
           .eq("id", c.id);
-        continue;
-      }
-
-      // ── HARD phone-level duplicate guard ───────────────────────────────────
-      // Duplicate contact rows can share the same WhatsApp number. The old guard
-      // only protected contact_id, so the same number could be asked repeatedly
-      // through different duplicate records. This DB-backed reservation is atomic
-      // and keyed by phone number, so one number can receive this recovery ask
-      // only once, even across overlapping cron runs or duplicate contacts.
-      const { data: phoneLock, error: phoneLockErr } = await supabase.rpc("reserve_demographics_recovery_phone", {
-        p_phone_normalized: phoneNormalized,
-        p_contact_id: c.id,
-      });
-      if (phoneLockErr || phoneLock?.ok !== true) {
-        skipped_phone_locked++;
         continue;
       }
 
@@ -195,6 +187,21 @@ Deno.serve(async (req) => {
       if (!rl.ok) {
         await logRateLimited(supabase, c.id, rl.reason || "unknown", rl.retry_after, { caller: "demographics-recovery-tick" });
         skipped_rate_limited++;
+        continue;
+      }
+
+      // ── HARD phone-level duplicate guard ───────────────────────────────────
+      // Duplicate contact rows can share the same WhatsApp number. The old guard
+      // only protected contact_id, so the same number could be asked repeatedly
+      // through different duplicate records. This DB-backed reservation is atomic
+      // and keyed by phone number, so one number can receive this recovery ask
+      // only once, even across overlapping cron runs or duplicate contacts.
+      const { data: phoneLock, error: phoneLockErr } = await supabase.rpc("reserve_demographics_recovery_phone", {
+        p_phone_normalized: phoneNormalized,
+        p_contact_id: c.id,
+      });
+      if (phoneLockErr || phoneLock?.ok !== true) {
+        skipped_phone_locked++;
         continue;
       }
 
@@ -264,7 +271,7 @@ Deno.serve(async (req) => {
         safety_checks_passed: [
           "contact_present", "phone_present", "not_opted_out", "auto_reply_not_muted",
           "has_prior_conversation", "demographics_missing", "never_asked_before",
-          "per_contact_rate_limit_ok", "daily_cap_ok", "emergency_not_paused",
+          "phone_duplicate_lock_ok", "per_contact_rate_limit_ok", "daily_cap_ok", "emergency_not_paused",
         ],
         reason_allowed: `Backfilling missing demographics (${missing.join(", ")}) for existing prospect.`,
         operating_mode: "demographics_recovery",
