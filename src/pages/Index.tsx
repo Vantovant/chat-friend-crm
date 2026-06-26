@@ -31,7 +31,7 @@ const ProspectorDraftsModule = lazy(() => import('@/components/vanto/ProspectorD
 const PlanModule = lazy(() => import('@/components/vanto/PlanModule').then(m => ({ default: m.PlanModule })));
 const VoiceDiaryModule = lazy(() => import('@/components/vanto/VoiceDiaryModule').then(m => ({ default: m.VoiceDiaryModule })));
 
-import { Bot } from 'lucide-react';
+import { Bot, Home } from 'lucide-react';
 
 const ModuleFallback = () => (
   <div className="h-full w-full flex items-center justify-center">
@@ -136,7 +136,15 @@ const Index = () => {
         <AppSidebar activeModule={activeModule} onModuleChange={setActiveModule} />
         {/* Main content with padding for top bar and bottom nav */}
         <main className="flex-1 overflow-hidden pt-12 pb-16 relative">
-          <div className="absolute top-14 right-2 z-30">
+          <div className="absolute top-14 right-2 z-30 flex items-center gap-2">
+            <a
+              href="/"
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-card border border-border text-foreground hover:bg-secondary/60 transition-colors"
+              title="Back to homepage"
+            >
+              <Home size={14} />
+              <span>Home</span>
+            </a>
             <PageHelpButton page={activeModule} />
           </div>
           <Suspense fallback={<ModuleFallback />}>{renderModule()}</Suspense>
@@ -149,7 +157,15 @@ const Index = () => {
     <div className="flex h-screen overflow-hidden bg-background">
       <AppSidebar activeModule={activeModule} onModuleChange={setActiveModule} />
       <main className="flex-1 overflow-hidden relative">
-        <div className="absolute top-3 right-3 z-30">
+        <div className="absolute top-3 right-3 z-30 flex items-center gap-2">
+          <a
+            href="/"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-card border border-border text-foreground hover:bg-secondary/60 transition-colors"
+            title="Back to homepage"
+          >
+            <Home size={14} />
+            <span>Homepage</span>
+          </a>
           <PageHelpButton page={activeModule} />
         </div>
         <Suspense fallback={<ModuleFallback />}>{renderModule()}</Suspense>

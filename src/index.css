@@ -15,8 +15,8 @@
     --popover: 222 47% 10%;
     --popover-foreground: 210 40% 98%;
 
-    --primary: 172 66% 50%;
-    --primary-foreground: 222 47% 6%;
+    --primary: 184 55% 42%;
+    --primary-foreground: 0 0% 100%;
 
     --secondary: 217 33% 17%;
     --secondary-foreground: 210 40% 98%;
@@ -24,26 +24,26 @@
     --muted: 217 33% 14%;
     --muted-foreground: 215 20% 55%;
 
-    --accent: 172 66% 50%;
-    --accent-foreground: 222 47% 6%;
+    --accent: 22 85% 54%;
+    --accent-foreground: 0 0% 100%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 210 40% 98%;
 
     --border: 217 33% 17%;
     --input: 217 33% 17%;
-    --ring: 172 66% 50%;
+    --ring: 184 55% 42%;
 
     --radius: 0.75rem;
 
     --sidebar-background: 222 47% 7%;
     --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 172 66% 50%;
-    --sidebar-primary-foreground: 222 47% 6%;
+    --sidebar-primary: 184 55% 42%;
+    --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 217 33% 17%;
     --sidebar-accent-foreground: 210 40% 98%;
     --sidebar-border: 217 33% 17%;
-    --sidebar-ring: 172 66% 50%;
+    --sidebar-ring: 184 55% 42%;
 
     --chart-1: 172 66% 50%;
     --chart-2: 160 60% 45%;
@@ -125,7 +125,7 @@
 ::-webkit-scrollbar-thumb { background: hsl(var(--muted-foreground) / 0.3); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: hsl(var(--primary) / 0.5); }
 
-.vanto-gradient { background: linear-gradient(135deg, hsl(var(--primary)), hsl(172 80% 35%)); }
+.vanto-gradient { background: linear-gradient(135deg, hsl(var(--brand-teal)), hsl(var(--brand-orange))); }
 .vanto-card { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); }
 .message-bubble-in { background: hsl(var(--secondary)); border-radius: 0 12px 12px 12px; }
 .message-bubble-out { background: hsl(var(--primary) / 0.15); border-radius: 12px 0 12px 12px; border: 1px solid hsl(var(--primary) / 0.3); }
