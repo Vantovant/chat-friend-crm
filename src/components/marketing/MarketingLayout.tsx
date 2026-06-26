@@ -2,6 +2,7 @@ import { ReactNode, useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router-dom';
 import { Menu, X, ArrowRight } from 'lucide-react';
 import logo from '@/assets/getwellhub-logo.png.asset.json';
+import { MarketingChat } from './MarketingChat';
 
 const NAV = [
   { to: '/', label: 'Home' },
