@@ -8,6 +8,12 @@ import NotFound from "./pages/NotFound";
 import AcceptInvite from "./pages/AcceptInvite";
 import ResetPassword from "./pages/ResetPassword";
 import Privacy from "./pages/Privacy";
+import Login from "./pages/Login";
+import Home from "./pages/marketing/Home";
+import Prospector from "./pages/marketing/Prospector";
+import Features from "./pages/marketing/Features";
+import HowItWorks from "./pages/marketing/HowItWorks";
+import Investors from "./pages/marketing/Investors";
 
 const queryClient = new QueryClient();
 
@@ -18,13 +24,26 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Index />} />
+          {/* Marketing site */}
+          <Route path="/" element={<Home />} />
+          <Route path="/prospector" element={<Prospector />} />
+          <Route path="/features" element={<Features />} />
+          <Route path="/how-it-works" element={<HowItWorks />} />
+          <Route path="/investors" element={<Investors />} />
+
+          {/* Auth */}
+          <Route path="/login" element={<Login />} />
           <Route path="/accept-invite" element={<AcceptInvite />} />
           <Route path="/reset-password" element={<ResetPassword />} />
-          <Route path="/maytapi-inbox" element={<Index />} />
-          <Route path="/plan" element={<Index />} />
           <Route path="/privacy" element={<Privacy />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+
+          {/* App (authenticated) */}
+          <Route path="/app" element={<Index />} />
+          <Route path="/app/maytapi-inbox" element={<Index />} />
+          <Route path="/app/plan" element={<Index />} />
+          <Route path="/app/voice-diary" element={<Index />} />
+
+          {/* Catch-all */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
