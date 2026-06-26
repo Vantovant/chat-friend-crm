@@ -31,7 +31,7 @@ const ProspectorDraftsModule = lazy(() => import('@/components/vanto/ProspectorD
 const PlanModule = lazy(() => import('@/components/vanto/PlanModule').then(m => ({ default: m.PlanModule })));
 const VoiceDiaryModule = lazy(() => import('@/components/vanto/VoiceDiaryModule').then(m => ({ default: m.VoiceDiaryModule })));
 
-import { Bot } from 'lucide-react';
+import { Bot, Home } from 'lucide-react';
 
 const ModuleFallback = () => (
   <div className="h-full w-full flex items-center justify-center">
