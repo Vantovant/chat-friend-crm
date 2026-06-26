@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type { Module } from '@/lib/vanto-data';
-import logo from '@/assets/logo.jpg';
+import logo from '@/assets/getwellhub-logo.png.asset.json';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import {
   LayoutDashboard, MessageSquare, Users, BarChart3, Zap, Bot, GitBranch,
@@ -109,7 +109,7 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
             <button onClick={() => setMobileOpen(true)} className="p-2 rounded-lg text-foreground hover:bg-secondary/60">
               <Menu size={20} />
             </button>
-            <img src={logo} alt="Vanto CRM" className="h-8 w-auto" />
+            <img src={logo.url} alt="GetWell Hub" className="h-8 w-auto" />
           </div>
           <div className="flex items-center gap-2">
             <InstallAppButton variant="compact" />
@@ -160,7 +160,7 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
           <div className="fixed inset-0 z-50 bg-background flex flex-col">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <div className="flex items-center gap-2">
-                <img src={logo} alt="Vanto CRM" className="h-10 w-auto" />
+                <img src={logo.url} alt="GetWell Hub" className="h-10 w-auto" />
               </div>
               <button onClick={() => setMobileOpen(false)} className="p-2 rounded-lg text-muted-foreground hover:text-foreground">
                 <X size={20} />
@@ -228,8 +228,8 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
       {/* Logo */}
       <div className={cn('flex items-center gap-2 p-3 border-b border-border', collapsed && 'justify-center')}>
         <img
-          src={logo}
-          alt="Online Course For MLM"
+          src={logo.url}
+          alt="GetWell Hub"
           className={cn('object-contain shrink-0', collapsed ? 'w-10 h-10 rounded-lg' : 'h-12 w-auto max-w-[160px]')}
         />
       </div>
