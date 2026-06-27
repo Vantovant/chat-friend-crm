@@ -119,45 +119,52 @@ Deno.serve(async (req) => {
       : [DEFAULT_TARGET];
     const rows: any[] = [];
 
-    for (const group of groups) {
+    // STAGGER: offset each group by 2 minutes within the same slot so
+    // 11 groups don't fire in a 3-second burst (which got us restricted).
+    const STAGGER_MIN = 2;
+
+    for (let g = 0; g < groups.length; g++) {
+      const group = groups[g];
       const groupName = group.name || DEFAULT_TARGET.name;
       const groupJid = group.jid || DEFAULT_TARGET.jid;
+      const offsetMin = g * STAGGER_MIN;
+      const mm = String(offsetMin % 60).padStart(2, "0");
+      const baseHourMorning = 5 + Math.floor(offsetMin / 60); // 07:00 SAST = 05:00 UTC
+      const baseHourMidday = 10 + Math.floor(offsetMin / 60); // 12:00 SAST = 10:00 UTC
+      const baseHourEvening = 15 + Math.floor(offsetMin / 60); // 17:00 SAST = 15:00 UTC
+      const morningHH = String(baseHourMorning).padStart(2, "0");
+      const middayHH = String(baseHourMidday).padStart(2, "0");
+      const eveningHH = String(baseHourEvening).padStart(2, "0");
 
       for (let i = 0; i < days; i++) {
-        // Build SAST calendar date (timezone-safe — never use Date.getDay() on a UTC server)
         const [sy, sm, sd] = start_date.split("-").map(Number);
         const baseUTC = new Date(Date.UTC(sy, sm - 1, sd));
         baseUTC.setUTCDate(baseUTC.getUTCDate() + i);
         const dateStr = baseUTC.toISOString().split("T")[0];
-        const dayOfWeek = baseUTC.getUTCDay(); // 0=Sun, matches the SAST calendar date
+        const dayOfWeek = baseUTC.getUTCDay();
 
-        // Morning + Midday: Mon–Sat only (skip Sundays per user rule 2026-06-19;
-        // Sundays are rest days for product/biz content — Sunday evening Zoom still runs).
         if (dayOfWeek !== 0) {
-          // Morning post at 07:00 SAST (05:00 UTC)
           const morningIdx = (morningStart + i) % 30;
           rows.push({
             user_id,
             target_group_name: groupName,
             target_group_jid: groupJid,
             message_content: MORNING_MESSAGES[morningIdx],
-            scheduled_at: `${dateStr}T05:00:00+00:00`,
+            scheduled_at: `${dateStr}T${morningHH}:${mm}:00+00:00`,
             status: "pending",
           });
 
-          // Midday post at 12:00 SAST (10:00 UTC)
           const middayIdx = (morningStart + i) % 30;
           rows.push({
             user_id,
             target_group_name: groupName,
             target_group_jid: groupJid,
             message_content: MIDDAY_MESSAGES[middayIdx],
-            scheduled_at: `${dateStr}T10:00:00+00:00`,
+            scheduled_at: `${dateStr}T${middayHH}:${mm}:00+00:00`,
             status: "pending",
           });
         }
 
-        // Evening post at 17:00 SAST (15:00 UTC)
         const eveningMsg = EVENING_MESSAGES[dayOfWeek];
         if (eveningMsg) {
           rows.push({
@@ -165,12 +172,13 @@ Deno.serve(async (req) => {
             target_group_name: groupName,
             target_group_jid: groupJid,
             message_content: eveningMsg,
-            scheduled_at: `${dateStr}T15:00:00+00:00`,
+            scheduled_at: `${dateStr}T${eveningHH}:${mm}:00+00:00`,
             status: "pending",
           });
         }
       }
     }
+
 
     // Insert in batches of 50
     let inserted = 0;
