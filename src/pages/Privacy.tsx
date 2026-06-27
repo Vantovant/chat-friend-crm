@@ -9,7 +9,7 @@ export default function Privacy() {
 
         <section className="space-y-6 text-sm leading-relaxed">
           <p>
-            Vanto CRM ("we", "us", "the platform") is operated by Online Course For MLM (Get Well Africa).
+            GetWell Hub ("we", "us", "the platform") is operated by Get Well Africa.
             This Privacy Policy explains how we collect, use, and protect personal data when you use the
             Vanto CRM web application, Chrome Extension, and connected WhatsApp / Facebook integrations.
           </p>
@@ -100,9 +100,9 @@ export default function Privacy() {
           <div>
             <h2 className="text-lg font-semibold mb-2">9. Contact</h2>
             <p className="text-muted-foreground">
-              Online Course For MLM / Get Well Africa<br />
-              Email: <a className="text-primary underline" href="mailto:support@onlinecourseformlm.com">support@onlinecourseformlm.com</a><br />
-              Web: <a className="text-primary underline" href="https://onlinecourseformlm.com">onlinecourseformlm.com</a>
+              GetWell Hub / Get Well Africa<br />
+              Email: <a className="text-primary underline" href="mailto:support@getwellhub.dev">support@getwellhub.dev</a><br />
+              Web: <a className="text-primary underline" href="https://getwellhub.dev">getwellhub.dev</a>
             </p>
           </div>
 
