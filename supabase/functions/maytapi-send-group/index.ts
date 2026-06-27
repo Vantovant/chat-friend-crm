@@ -514,7 +514,13 @@ Deno.serve(async (req) => {
             ...(previewStatus === "fallback_used" ? { message_content: messageToSend } : {}),
           }).eq("id", post.id);
           results.push({ id: post.id, status: "sent", preview: previewStatus });
+
+          // Stamp last_group_send_at to enforce 90s inter-send floor
+          await supabase
+            .from("integration_settings")
+            .upsert({ key: "last_group_send_at", value: new Date().toISOString() }, { onConflict: "key" });
         } else {
+
           const reason = sendData.message || sendData.error || JSON.stringify(sendData);
           const newAttemptCount = (post.attempt_count || 0) + 1;
           await supabase.from("scheduled_group_posts").update({
