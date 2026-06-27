@@ -266,13 +266,54 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── Permanent guardrails (2026-06-27): prevent burst-spam restrictions ──
+    // 1) Inter-send floor: at least 90 seconds between any two group sends
+    // 2) Hourly cap: at most 12 group sends per rolling hour
+    const MIN_INTER_SEND_SEC = 90;
+    const HOURLY_CAP = 12;
+
+    {
+      const { data: lastRow } = await supabase
+        .from("integration_settings")
+        .select("value")
+        .eq("key", "last_group_send_at")
+        .maybeSingle();
+      const lastIso = lastRow?.value || null;
+      if (lastIso) {
+        const ageSec = (Date.now() - new Date(lastIso).getTime()) / 1000;
+        if (Number.isFinite(ageSec) && ageSec < MIN_INTER_SEND_SEC) {
+          return new Response(JSON.stringify({
+            processed: 0,
+            status: "throttled_inter_send_floor",
+            wait_seconds: Math.ceil(MIN_INTER_SEND_SEC - ageSec),
+          }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+      }
+
+      const { count: hourCount } = await supabase
+        .from("scheduled_group_posts")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "sent")
+        .gte("last_attempt_at", new Date(Date.now() - 60 * 60 * 1000).toISOString());
+      if ((hourCount || 0) >= HOURLY_CAP) {
+        return new Response(JSON.stringify({
+          processed: 0,
+          status: "throttled_hourly_cap",
+          hourly_count: hourCount,
+          cap: HOURLY_CAP,
+        }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
+    // Hard cap: process AT MOST ONE post per invocation. Burst-sending 11 groups
+    // in ~3 seconds is what triggered the 24h WhatsApp restriction on 2026-06-27.
     const { data: duePosts, error: fetchErr } = await supabase
       .from("scheduled_group_posts")
       .select("*")
       .eq("status", "pending")
       .lte("scheduled_at", new Date().toISOString())
       .order("scheduled_at", { ascending: true })
-      .limit(20);
+      .limit(1);
 
     if (fetchErr) {
       return new Response(JSON.stringify({ error: fetchErr.message }), {
@@ -285,6 +326,7 @@ Deno.serve(async (req) => {
         status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
 
     const results: { id: string; status: string; error?: string; preview?: string }[] = [];
 
@@ -472,7 +514,13 @@ Deno.serve(async (req) => {
             ...(previewStatus === "fallback_used" ? { message_content: messageToSend } : {}),
           }).eq("id", post.id);
           results.push({ id: post.id, status: "sent", preview: previewStatus });
+
+          // Stamp last_group_send_at to enforce 90s inter-send floor
+          await supabase
+            .from("integration_settings")
+            .upsert({ key: "last_group_send_at", value: new Date().toISOString() }, { onConflict: "key" });
         } else {
+
           const reason = sendData.message || sendData.error || JSON.stringify(sendData);
           const newAttemptCount = (post.attempt_count || 0) + 1;
           await supabase.from("scheduled_group_posts").update({
