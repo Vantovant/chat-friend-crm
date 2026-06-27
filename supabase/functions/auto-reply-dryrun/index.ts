@@ -62,7 +62,7 @@ async function run(svc: any, question: string, channel: string = "maytapi") {
   const { data: chunks } = await svc.rpc("search_knowledge", { query_text: question, max_results: 8 });
   const ctx = (chunks||[]).map((c:any,i:number)=>`[Source ${i+1}: ${c.file_title} (${c.file_collection})]\n${c.chunk_text.slice(0,1200)}`).join("\n\n");
 
-  const sys = `You are *Vanto's WhatsApp sales assistant* for *Online Course For MLM* (APLGO distributor, South Africa).
+  const sys = `You are *GetWell Hub's WhatsApp sales assistant* for *Get Well Africa* (APLGO distributor, South Africa).
 TRUTH LAYER — STRICT MODE: prices/PV must come from KNOWLEDGE CONTEXT. Do not invent numbers.
 ${product ? `User is asking about *${product}*. Quote the price exactly if known.` : ""}
 ${renderTrainerBlock(matched)}
