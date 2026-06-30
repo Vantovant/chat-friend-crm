@@ -124,6 +124,7 @@ export function MarketingLayout({ children }: { children: ReactNode }) {
               <li><a href="https://vantoos.com" target="_blank" rel="noopener" className="hover:text-primary">VantoOS.com ↗</a></li>
               <li><a href="https://vantoos.com/command-center" target="_blank" rel="noopener" className="hover:text-primary">Executive AI Command Center ↗</a></li>
               <li><a href="https://getwellgrow.app" target="_blank" rel="noopener" className="hover:text-primary">GetWell Grow ↗</a></li>
+              <li><a href="https://getwellafrica.com" target="_blank" rel="noopener" className="hover:text-primary">Get Well Africa ↗</a></li>
             </ul>
           </div>
           <div>
