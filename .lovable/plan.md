@@ -1,106 +1,117 @@
-Context loaded. Here's the plan.
 
-## Guarantees (locked at the database level)
+# Plan — Add VantoOS Parent Attribution & Suite Hub to GetWell Hub
 
-1. **Only the 11 approved groups will be posted to.** The `scheduled_group_posts` table has a trigger (`enforce_scheduled_group_safety`) that rejects any insert whose `target_group_name` is not in the `fb_auto_target_groups` allowlist. The current allowlist is exactly:
+Goal: Comply with the VantoOS Parent Company Attribution Instruction (v1.0) by surfacing VantoOS as the parent company across the public marketing site, and give every visitor a clear path to the sister apps (Executive AI Command Center, GetWell Grow, and future apps).
 
-   1. 90 day Challenge and FB Campaign
-   2. APLGO
-   3. APLGO | Health and Biz
-   4. APLGO | Health and Biz E&W Cape
-   5. APLGO | Health and Biz Global Distributors
-   6. APLGO | Health and Biz KZN
-   7. APLGO 4 SHO
-   8. APLGO| Health and Biz North West
-   9. Ascension Bloemfontein
-   10. Botswana APLGO Presentations
-   11. New Day New Life
+Scope: **Marketing/UI only.** No backend, no auth, no edge-function changes. All in-app modules (behind login) untouched.
 
-2. **No duplicate posts.** Each scheduled row carries a unique `(target_group_name, scheduled_at, campaign_tag)`. I'll tag every row `bafana_flash_2026_06_26` and check for existing rows with that tag before inserting — if any exist, the queue is aborted (no second run possible).
+---
 
-3. **Sale-end safety.** A one-shot expiry rule (mirroring the APLGO WITH LOVE pattern already in `enforce_scheduled_group_safety`) will block any `bafana_flash` content from dispatching after **2026-06-26 23:59 SAST**, even if a row somehow leaks through.
+## 1. New page — `/suite` (VantoOS Suite hub)
 
-## Quiet-hours conflict (needs your decision)
+Route added in `src/App.tsx` and new file `src/pages/marketing/Suite.tsx`.
 
-You confirmed quiet hours = **20:00–06:00 SAST, no sends**. The sale ends midnight tonight. That leaves a usable window of roughly **now → 19:55 SAST**. I will **not** schedule anything after 20:00, even for a sale reminder, unless you explicitly override.
+Sections, top → bottom:
 
-Proposed schedule (4 messages, evenly paced inside the legal window):
+1. **Hero** — "Part of the VantoOS Suite" + the exact Section 2 paragraph from the directive (verbatim, no edits).
+2. **Suite grid** — three product cards (live + coming):
+   - **Executive AI Command Center** → https://vantoos.com/command-center  *(Flagship)*
+   - **GetWell Hub** → / (current site — "You're here" badge)
+   - **GetWell Grow** → https://getwellgrow.app
+   - Placeholder card "More apps shipping in 2026" → https://vantoos.com/suite
+3. **About VantoOS** — short bio + CTA buttons: Visit VantoOS, Company, Investors, Pricing, Contact (all to vantoos.com/...).
+4. **Sitemap-style link list** of every VantoOS parent page (Home, Command Center, Features, How it Works, The Suite, Company, Clientele, Investors, Pricing, Contact, Sign In) — fulfils Section 4 of the directive.
 
-| # | Time (SAST) | Purpose |
-|---|---|---|
-| 1 | +5 min from approval | Launch announcement |
-| 2 | 15:30 | Midday push — "~8 hours left" |
-| 3 | 18:00 | Evening push — "Final hours, quiet-hours about to start" |
-| 4 | 19:50 | Last call before quiet hours — "Order before midnight, we'll process in the morning" |
+Add nav link "The Suite" to `MarketingLayout.tsx` top nav.
 
-Total sends: **4 messages × 11 groups = 44 queued posts**, all tagged `bafana_flash_2026_06_26`.
+---
 
-## Message previews
+## 2. Global footer attribution (every page)
 
-**Message 1 — Launch (immediate)**
+Update `src/components/marketing/MarketingLayout.tsx` footer:
+
+- Add a fourth/fifth row: **"GetWell Hub is a product of the VantoOS Suite — designed and developed by VantoOS."**
+- Add small **VantoOS wordmark** linking to https://vantoos.com (text wordmark — no logo image needed since we don't have the asset).
+- Change copyright line to: `© {year} VantoOS (Pty) Ltd. All rights reserved.`
+- Add link "The Suite" → `/suite` and "VantoOS.com ↗" → https://vantoos.com in the Company column.
+
+This satisfies Placement #1 (global footer) on every public page.
+
+---
+
+## 3. Home page — "Part of the VantoOS Suite" card
+
+In `src/pages/marketing/Home.tsx`, insert a compact band just above the footer:
+
+- Left: "Part of the **VantoOS Suite**" + one-liner.
+- Right: 3 chips → Executive AI Command Center · GetWell Grow · See the full suite (→ `/suite`).
+
+Satisfies Placement #3.
+
+---
+
+## 4. Top-nav "More from VantoOS" (optional but recommended)
+
+Add a small dropdown in `MarketingLayout.tsx` desktop nav (and a section in the mobile drawer):
+
+- Executive AI Command Center → vantoos.com/command-center
+- GetWell Grow → getwellgrow.app
+- VantoOS Home → vantoos.com
+- See all → `/suite`
+
+Satisfies Placement #4.
+
+---
+
+## 5. Investors page — parent paragraph
+
+In `src/pages/marketing/Investors.tsx`, add a "Parent Company" block at the top with the verbatim Section 2 paragraph + link to vantoos.com/investors. Satisfies Placement #5.
+
+---
+
+## 6. Sitemap doc update
+
+Update `/mnt/documents/getwellhub-sitemap.md`:
+- Add `/suite` to public pages table.
+- Add "Part of the VantoOS Suite · vantoos.com" line to the link-tree block (Placement #6).
+- Add a short "Sister apps" section listing GetWell Grow + Executive AI Command Center URLs so you can paste them into your master Link Tree.
+
+Also update `scripts/generate-sitemap.ts` (or `public/robots.txt` sitemap mechanism if present) to include `/suite`.
+
+---
+
+## 7. Brand-name consistency check
+
+Sweep marketing pages to ensure **"VantoOS"** is spelled exactly that way (no "Vanto OS", "VantOS", "Vanto-OS") wherever introduced. Section 8 checklist requirement.
+
+---
+
+## Files to change / create
+
+```text
+NEW   src/pages/marketing/Suite.tsx
+EDIT  src/App.tsx                                 (add /suite route)
+EDIT  src/components/marketing/MarketingLayout.tsx (footer + nav dropdown)
+EDIT  src/pages/marketing/Home.tsx                 (suite band)
+EDIT  src/pages/marketing/Investors.tsx            (parent paragraph)
+EDIT  /mnt/documents/getwellhub-sitemap.md         (suite + sister links)
+EDIT  scripts/generate-sitemap.ts (if exists)      (add /suite)
 ```
-⚡ Bafana Bafana Win: 1-Day Flash Sale! 🇿🇦⚽
 
-TODAY ONLY (26 June 2026) — celebration deals straight from home:
+## Out of scope (not touching)
 
-🌿 Daily Collection ➡️ 30% OFF (GTS excluded)
-💎 Premium Collection ➡️ 40% OFF
-❌ Elite Collection excluded
+- No changes to `/app/*` authenticated routes.
+- No changes to Edge Functions, Supabase, prospector pipeline, WhatsApp senders, or any backend.
+- No logo image upload (using text wordmark "VantoOS" styled to match brand). If you later provide an official VantoOS logo PNG, I'll swap it in.
 
-Final whistle blows at midnight! ⏳
+## Compliance checklist after build (mirrors Section 8 of the PDF)
 
-👉 https://bit.ly/3SqwUxO
-```
+- [x] Global footer: © {year} VantoOS (Pty) Ltd
+- [x] Global footer: "[Product] is a product of the VantoOS Suite — developed by VantoOS"
+- [x] VantoOS wordmark links to https://vantoos.com
+- [x] About/Company page (Investors) contains Section 2 paragraph verbatim
+- [x] "Part of the VantoOS Suite" block on Home
+- [x] Link-tree pack updated with VantoOS attribution + sister apps
+- [x] "VantoOS" spelled consistently everywhere
 
-**Message 2 — Midday (15:30 SAST)**
-```
-⏰ About 8 hours left on the Bafana Flash Sale 🇿🇦
-
-🌿 Daily 30% OFF (excl. GTS)
-💎 Premium 40% OFF
-❌ Elite excluded
-
-Don't miss it — ends midnight tonight.
-👉 https://bit.ly/3SqwUxO
-```
-
-**Message 3 — Evening (18:00 SAST)**
-```
-🚨 Final hours — Bafana Flash Sale closes midnight!
-
-🌿 Daily 30% OFF (excl. GTS)
-💎 Premium 40% OFF
-
-Place your order now while stock lasts.
-👉 https://bit.ly/3SqwUxO
-```
-
-**Message 4 — Last call (19:50 SAST)**
-```
-🌙 Last call before we go quiet for the night.
-
-Bafana Flash Sale ends at midnight:
-🌿 Daily 30% OFF (excl. GTS) | 💎 Premium 40% OFF
-
-Place your order tonight via the link — we process first thing in the morning.
-👉 https://bit.ly/3SqwUxO
-```
-
-## Technical implementation (one step)
-
-- Insert 44 rows into `scheduled_group_posts` with:
-  - `source = 'scheduled'`
-  - `target_group_name` = one of the 11 allowlisted names
-  - `campaign_tag = 'bafana_flash_2026_06_26'`
-  - `scheduled_at` per the table above
-  - `status = 'pending'`
-- Pre-flight check: `SELECT count(*) FROM scheduled_group_posts WHERE campaign_tag = 'bafana_flash_2026_06_26'`. If `> 0`, abort.
-- The existing dispatcher (`maytapi-dispatcher`) picks them up at their scheduled time and posts via Maytapi to those groups only.
-
-## Please confirm before I queue
-
-1. **Approve the 4 messages and times above?** (Or do you want 5 messages, or different copy?)
-2. **Confirm: no override of quiet hours** — last send at 19:50, then silence until 06:00 even though sale runs to midnight. ✅ / ❌
-3. **Approve the campaign tag `bafana_flash_2026_06_26`** as the duplicate-prevention key.
-
-Once you reply "approved", I'll queue all 44 rows in a single transaction and send you back the inserted row IDs as proof.
+Approve and I'll build it in one pass.
