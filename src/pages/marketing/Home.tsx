@@ -139,7 +139,7 @@ export default function Home() {
           </div>
         </div>
       </section>
-      </section>
+
 
       {/* Part of the VantoOS Suite */}
       <section className="py-16 border-t border-border">
