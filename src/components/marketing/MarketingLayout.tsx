@@ -10,6 +10,7 @@ const NAV = [
   { to: '/features', label: 'Inside the App' },
   { to: '/how-it-works', label: 'How it Works' },
   { to: '/investors', label: 'Investors' },
+  { to: '/suite', label: 'The Suite' },
 ];
 
 export function MarketingLayout({ children }: { children: ReactNode }) {
@@ -103,6 +104,9 @@ export function MarketingLayout({ children }: { children: ReactNode }) {
             <p className="text-sm text-muted-foreground max-w-xs">
               The WhatsApp-first CRM and AI Prospector built for Africa's direct sellers and wellness distributors.
             </p>
+            <p className="text-xs text-muted-foreground mt-4">
+              A <a href="https://vantoos.com" target="_blank" rel="noopener" className="font-semibold text-primary hover:underline">VantoOS</a> product · vantoos.com
+            </p>
           </div>
           <div>
             <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">Product</div>
@@ -114,24 +118,30 @@ export function MarketingLayout({ children }: { children: ReactNode }) {
             </ul>
           </div>
           <div>
+            <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">VantoOS Suite</div>
+            <ul className="space-y-2 text-sm">
+              <li><Link to="/suite" className="hover:text-primary">The Suite</Link></li>
+              <li><a href="https://vantoos.com" target="_blank" rel="noopener" className="hover:text-primary">VantoOS.com ↗</a></li>
+              <li><a href="https://vantoos.com/command-center" target="_blank" rel="noopener" className="hover:text-primary">Executive AI Command Center ↗</a></li>
+              <li><a href="https://getwellgrow.app" target="_blank" rel="noopener" className="hover:text-primary">GetWell Grow ↗</a></li>
+            </ul>
+          </div>
+          <div>
             <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">Company</div>
             <ul className="space-y-2 text-sm">
               <li><Link to="/investors" className="hover:text-primary">Investors</Link></li>
               <li><Link to="/privacy" className="hover:text-primary">Privacy</Link></li>
+              <li><a href="mailto:hello@getwellhub.dev" className="hover:text-primary">hello@getwellhub.dev</a></li>
             </ul>
-          </div>
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-3">Contact</div>
-            <p className="text-sm text-muted-foreground">
-              GetWellAfrica · Accredited distributor network<br />
-              hello@getwellhub.dev
-            </p>
           </div>
         </div>
         <div className="border-t border-border">
           <div className="max-w-7xl mx-auto px-4 lg:px-8 py-4 text-xs text-muted-foreground flex flex-col sm:flex-row justify-between gap-2">
-            <div>© {new Date().getFullYear()} GetWell Hub. All rights reserved.</div>
-            <div>Built for distributors. Designed for partners.</div>
+            <div>© {new Date().getFullYear()} VantoOS (Pty) Ltd. All rights reserved.</div>
+            <div>
+              GetWell Hub is a product of the VantoOS Suite — designed and developed by{' '}
+              <a href="https://vantoos.com" target="_blank" rel="noopener" className="font-semibold text-primary hover:underline">VantoOS</a>.
+            </div>
           </div>
         </div>
       </footer>
