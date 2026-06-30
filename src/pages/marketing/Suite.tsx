@@ -28,6 +28,13 @@ const PRODUCTS = [
     badge: 'Live',
   },
   {
+    name: 'Get Well Africa',
+    tag: 'Live · APLGO distributor hub',
+    desc: 'Plant-based wellness, powered by APLGO Acumullit SA drop lozenges. Shop the full range, read the wellness blog, listen to podcasts, and explore the APLGO income opportunity for Africa.',
+    url: 'https://getwellafrica.com',
+    badge: 'Live',
+  },
+  {
     name: 'More apps shipping in 2026',
     tag: 'Coming soon',
     desc: 'Additional executive and operator tools in the VantoOS Suite. See the full roadmap and upcoming releases.',
