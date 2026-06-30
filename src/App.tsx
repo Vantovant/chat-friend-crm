@@ -14,6 +14,7 @@ import Prospector from "./pages/marketing/Prospector";
 import Features from "./pages/marketing/Features";
 import HowItWorks from "./pages/marketing/HowItWorks";
 import Investors from "./pages/marketing/Investors";
+import Suite from "./pages/marketing/Suite";
 
 const queryClient = new QueryClient();
 
@@ -30,6 +31,7 @@ const App = () => (
           <Route path="/features" element={<Features />} />
           <Route path="/how-it-works" element={<HowItWorks />} />
           <Route path="/investors" element={<Investors />} />
+          <Route path="/suite" element={<Suite />} />
 
           {/* Auth */}
           <Route path="/login" element={<Login />} />
