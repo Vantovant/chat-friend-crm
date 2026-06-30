@@ -139,6 +139,35 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+
+      {/* Part of the VantoOS Suite */}
+      <section className="py-16 border-t border-border">
+        <div className="max-w-7xl mx-auto px-4 lg:px-8">
+          <div className="rounded-3xl border border-border bg-card p-8 lg:p-10 grid lg:grid-cols-2 gap-8 items-center">
+            <div>
+              <div className="text-xs font-bold uppercase tracking-widest text-accent mb-3">Part of the VantoOS Suite</div>
+              <h3 className="text-2xl sm:text-3xl font-black mb-3">
+                GetWell Hub is built by <a href="https://vantoos.com" target="_blank" rel="noopener" className="gw-brand-grad-text hover:underline">VantoOS</a>.
+              </h3>
+              <p className="text-muted-foreground leading-relaxed">
+                One company. One design language. One AI gateway. VantoOS is the parent company behind the Executive AI Command Center, GetWell Hub, GetWell Grow, and a growing suite of products for executives and operators.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3 lg:justify-end">
+              <a href="https://vantoos.com/command-center" target="_blank" rel="noopener" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border border-border bg-white hover:bg-secondary">
+                Executive AI Command Center
+              </a>
+              <a href="https://getwellgrow.app" target="_blank" rel="noopener" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border border-border bg-white hover:bg-secondary">
+                GetWell Grow
+              </a>
+              <Link to="/suite" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white gw-brand-grad-bg hover:opacity-90">
+                See the full suite <ArrowRight size={14} />
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
     </MarketingLayout>
   );
 }

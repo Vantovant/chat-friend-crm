@@ -33,6 +33,28 @@ export default function Investors() {
         </div>
       </section>
 
+      {/* Parent company */}
+      <section className="py-12 border-b border-border">
+        <div className="max-w-5xl mx-auto px-4 lg:px-8">
+          <div className="rounded-2xl border border-border bg-card p-8">
+            <div className="text-xs font-bold uppercase tracking-widest text-accent mb-3">Parent company</div>
+            <h2 className="text-2xl font-black mb-4">A product of the VantoOS Suite.</h2>
+            <p className="text-muted-foreground leading-relaxed mb-4">
+              VantoOS is an African-built software house designing AI-powered operating systems for executives, founders, and growing teams. VantoOS is the parent company behind the Executive AI Command Center, GetWell Hub, GetWell Grow, and a growing suite of products that share one governance core, one AI gateway, and one design language. Learn more at{' '}
+              <a href="https://vantoos.com" target="_blank" rel="noopener" className="font-semibold text-primary hover:underline">https://vantoos.com</a>.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <a href="https://vantoos.com/investors" target="_blank" rel="noopener" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border border-border bg-white hover:bg-secondary">
+                VantoOS investor brief <ArrowRight size={14} />
+              </a>
+              <Link to="/suite" className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white gw-brand-grad-bg hover:opacity-90">
+                See the full suite
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section className="py-12">
         <div className="max-w-5xl mx-auto px-4 lg:px-8 grid grid-cols-2 md:grid-cols-4 gap-4">
           {METRICS.map((m) => (
