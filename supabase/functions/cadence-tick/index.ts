@@ -265,7 +265,7 @@ Deno.serve(async (req) => {
         console.error(`[cadence-tick] ${errMsg} contact=${contact.id}`);
         await sb.from("cadence_log").insert({
           contact_id: contact.id,
-          sequence_key: SEQUENCE_KEY,
+          sequence_key: row.sequence_key,
           step: nextStepNum,
           template_key: stepDef.templateKey,
           variant_id: variant.id,
