@@ -24,6 +24,8 @@ const corsHeaders = {
 };
 
 const SEQUENCE_KEY = "prospect_7touch_v1";
+const REGISTERED_SEQUENCE_KEY = "registered_9step_v1";
+const ACTIVE_SEQUENCE_KEYS = [SEQUENCE_KEY, REGISTERED_SEQUENCE_KEY];
 
 // step → { offsetHoursFromStart, defaultContent, templateKey }
 const STEPS = [
@@ -35,6 +37,17 @@ const STEPS = [
   { step: 6, offsetH: 264,  templateKey: "cadence_v1_step6_objection",  content: "Hi {name} — totally fair if you're hesitating. APLGO has a 14-day money-back. You literally cannot lose. Want me to send the link?" },
   { step: 7, offsetH: 336,  templateKey: "cadence_v1_step7_close",      content: "Hi {name} 🌟 Last note from me on this — two routes:\n1) Customer: best for you (no admin)\n2) Member: 25% off forever + earn\nReply 1 or 2 and I'll take it from there." },
 ];
+
+// One-shot outreach for newly-registered (no purchase) APLGO associates.
+// See followup_templates.intent_state='REGISTERED_9STEP_GUIDE' for the source of truth.
+const REGISTERED_STEPS = [
+  { step: 1, offsetH: 0, templateKey: "registered_9step_v1_step1_guide",
+    content: "🇿🇦 Hi {name}! Congrats on registering with APLGO. 🚀\n\nNot sure how to place your first order under our Get Well Africa team? I've written a simple 9-Step Guide showing you exactly how to sign up, pick products, and check out safely.\n\n👇 Full guide:\nhttps://getwellafrica.com/blog/how-to-register-and-order-aplgo-in-9-steps\n\n— Vanto" },
+];
+
+function stepsFor(sequenceKey: string) {
+  return sequenceKey === REGISTERED_SEQUENCE_KEY ? REGISTERED_STEPS : STEPS;
+}
 
 const TOTAL_STEPS = STEPS.length;
 const MAX_BATCH = 25;
@@ -131,12 +144,12 @@ Deno.serve(async (req) => {
     }
 
 
-    // Pick due rows
+    // Pick due rows (both prospect nurture + registered 9-step one-shot).
     const { data: due, error } = await sb
       .from("prospect_cadence_state")
       .select("id, contact_id, sequence_key, current_step, next_send_at, status")
       .eq("status", "active")
-      .eq("sequence_key", SEQUENCE_KEY)
+      .in("sequence_key", ACTIVE_SEQUENCE_KEYS)
       .lte("next_send_at", now.toISOString())
       .order("next_send_at", { ascending: true })
       .limit(MAX_BATCH);
@@ -169,7 +182,8 @@ Deno.serve(async (req) => {
       }
       diag.processed++;
       const nextStepNum = (row.current_step || 0) + 1;
-      const stepDef = STEPS.find((s) => s.step === nextStepNum);
+      const rowSteps = stepsFor(row.sequence_key);
+      const stepDef = rowSteps.find((s) => s.step === nextStepNum);
       if (!stepDef) {
         // No more steps → mark completed
         await sb.from("prospect_cadence_state").update({
@@ -251,7 +265,7 @@ Deno.serve(async (req) => {
         console.error(`[cadence-tick] ${errMsg} contact=${contact.id}`);
         await sb.from("cadence_log").insert({
           contact_id: contact.id,
-          sequence_key: SEQUENCE_KEY,
+          sequence_key: row.sequence_key,
           step: nextStepNum,
           template_key: stepDef.templateKey,
           variant_id: variant.id,
@@ -315,7 +329,7 @@ Deno.serve(async (req) => {
             to_number: recipient,
             message: messageBody,
             skip_trust_header: true,
-            source: `cadence_${SEQUENCE_KEY}_step${nextStepNum}`,
+            source: `cadence_${row.sequence_key}_step${nextStepNum}`,
             contact_id: contact.id,
           }),
         });
@@ -336,7 +350,7 @@ Deno.serve(async (req) => {
       // Log
       await sb.from("cadence_log").insert({
         contact_id: contact.id,
-        sequence_key: SEQUENCE_KEY,
+        sequence_key: row.sequence_key,
         step: nextStepNum,
         template_key: stepDef.templateKey,
         variant_id: variant.id,
@@ -361,7 +375,7 @@ Deno.serve(async (req) => {
         remainingDaily--;
         sentInWindow++;
         // Schedule next step
-        const nextDef = STEPS.find((s) => s.step === nextStepNum + 1);
+        const nextDef = rowSteps.find((s) => s.step === nextStepNum + 1);
         const nextAt = nextDef
           ? new Date(now.getTime() + (nextDef.offsetH - stepDef.offsetH) * 3600 * 1000).toISOString()
           : null;
