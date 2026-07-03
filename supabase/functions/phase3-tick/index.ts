@@ -116,7 +116,7 @@ Deno.serve(async (req) => {
 
       const { data: contact } = await supabase
         .from("contacts")
-        .select("id, name, phone, phone_normalized, do_not_contact, auto_reply_enabled, lead_type, last_group_invite_at, last_sponsor_invite_at")
+        .select("id, name, phone, phone_normalized, do_not_contact, is_deleted, auto_reply_enabled, lead_type, last_group_invite_at, last_sponsor_invite_at, last_outbound_at, last_inbound_at")
         .eq("id", row.contact_id)
         .maybeSingle();
 
@@ -124,13 +124,24 @@ Deno.serve(async (req) => {
         await supabase.from("missed_inquiries").update({ status: "exhausted", last_error: "contact missing" }).eq("id", row.id);
         failed++; continue;
       }
-      if (contact.do_not_contact) {
-        await supabase.from("missed_inquiries").update({ status: "stopped", last_error: "do_not_contact" }).eq("id", row.id);
-        skipped++; continue;
-      }
-      if (contact.auto_reply_enabled === false) {
-        await supabase.from("missed_inquiries").update({ status: "stopped", last_error: "auto_reply_muted" }).eq("id", row.id);
-        skipped++; continue;
+
+      // ── Universal pre-send guard (Fix 1+2: cross-provider cooldown + soft-refusal) ──
+      const { shouldSendFollowup } = await import("../_shared/should-send-followup.ts");
+      const guard = await shouldSendFollowup(supabase, contact as any, {
+        conversationId: row.conversation_id,
+        caller: "phase3-tick",
+      });
+      if (!guard.ok) {
+        const reschedAt = guard.retry_after || new Date(Date.now() + 6 * 3600000).toISOString();
+        const status = guard.reason?.startsWith("promoted_lead_type") || guard.reason === "do_not_contact" || guard.reason === "auto_reply_muted"
+          ? "stopped" : "active";
+        await supabase.from("missed_inquiries").update({
+          status,
+          next_send_at: status === "active" ? reschedAt : null,
+          last_error: `guard:${guard.reason}`,
+        }).eq("id", row.id);
+        skipped++;
+        continue;
       }
 
       const phone = contact.phone_normalized || contact.phone;
@@ -261,6 +272,43 @@ Deno.serve(async (req) => {
         ? null
         : new Date(Date.now() + (STEP_DELAYS_HOURS[nextStep] - STEP_DELAYS_HOURS[stepIdx]) * 3600000).toISOString();
 
+      if (isAuto) {
+        // ── AI guard (Fix 5) — behind flag `followup_ai_guard_enabled` ──
+        {
+          const { data: aiFlagRow } = await supabase
+            .from("integration_settings").select("value").eq("key", "followup_ai_guard_enabled").maybeSingle();
+          const aiGuardOn = (aiFlagRow?.value || "false").toLowerCase() === "true";
+          if (aiGuardOn) {
+            try {
+              const aiResp = await fetch(`${SUPABASE_URL}/functions/v1/followup-guard-ai`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
+                body: JSON.stringify({
+                  contact_id: contact.id,
+                  conversation_id: row.conversation_id,
+                  draft_text: message,
+                  template_key: `${row.intent_state}_step_${stepIdx + 1}`,
+                  step: stepIdx + 1,
+                }),
+              });
+              const aiJson = await aiResp.json().catch(() => ({ send: true }));
+              if (aiJson && aiJson.send === false) {
+                // Downgrade to suggest — record decision, don't auto-send.
+                isAuto = false;
+                await supabase.from("followup_logs").insert({
+                  missed_inquiry_id: row.id, contact_id: row.contact_id, conversation_id: row.conversation_id,
+                  phone, intent_state: row.intent_state, topic: row.topic,
+                  step_number: stepIdx + 1, template_id: tpl.id,
+                  message_text: message, send_mode: "suggest", delivery: "ai_blocked",
+                  error: `ai_guard:${aiJson.reason || "blocked"}`,
+                });
+              }
+            } catch (_e) {
+              // Fail-open — never let the AI guard break the send loop.
+            }
+          }
+        }
+      }
       if (isAuto) {
         // ── Atomic rate-limit reserve (per-contact 30/5min + 100/24h) ──
         const { reserveMessageSlot, logRateLimited } = await import("../_shared/rate-limit.ts");

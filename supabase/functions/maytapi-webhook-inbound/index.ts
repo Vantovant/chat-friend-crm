@@ -634,6 +634,19 @@ Deno.serve(async (req) => {
         .select("id")
         .single();
 
+      // Fix 3: fire-and-forget lead stage promotion + stamp inbound timestamp.
+      if (contact?.id) {
+        supabase.from("contacts").update({
+          last_inbound_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }).eq("id", contact.id).then(() => {}).catch(() => {});
+        fetch(`${SUPABASE_URL}/functions/v1/lead-stage-detect`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
+          body: JSON.stringify({ contact_id: contact.id, text, conversation_id: conversation!.id }),
+        }).catch(() => {});
+      }
+
       // Keep the Maytapi Inbox Conversations tab in sync with the main CRM inbox.
       // Fall back to the first profile so Maytapi visibility is not skipped for
       // newly-created/unassigned contacts that have no owner yet.

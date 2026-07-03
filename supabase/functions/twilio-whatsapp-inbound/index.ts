@@ -244,6 +244,20 @@ Deno.serve(async (req) => {
 
   const inboundMessageId = inboundMsg?.id || null;
 
+  // Fix 3: fire-and-forget lead stage promotion + stamp inbound timestamp.
+  if (contactId) {
+    svc.from('contacts').update({
+      last_inbound_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }).eq('id', contactId).then(() => {}).catch(() => {});
+    fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/lead-stage-detect`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}` },
+      body: JSON.stringify({ contact_id: contactId, text: body, conversation_id: convId }),
+    }).catch(() => {});
+  }
+
+
   // 4) Update conversation metadata
   const preview = body.length > 200 ? body.slice(0, 200) + '…' : body;
   await svc.from('conversations').update({

@@ -517,10 +517,15 @@ export type Database = {
           id: string
           interest: Database["public"]["Enums"]["interest_level"]
           is_deleted: boolean
+          last_conversation_summary: string | null
+          last_conversation_summary_at: string | null
           last_distributor_invite_at: string | null
           last_group_invite_at: string | null
+          last_inbound_at: string | null
           last_name: string | null
           last_opportunity_invite_at: string | null
+          last_outbound_at: string | null
+          last_outbound_provider: string | null
           last_sponsor_invite_at: string | null
           last_synced_at: string | null
           last_training_invite_at: string | null
@@ -559,10 +564,15 @@ export type Database = {
           id?: string
           interest?: Database["public"]["Enums"]["interest_level"]
           is_deleted?: boolean
+          last_conversation_summary?: string | null
+          last_conversation_summary_at?: string | null
           last_distributor_invite_at?: string | null
           last_group_invite_at?: string | null
+          last_inbound_at?: string | null
           last_name?: string | null
           last_opportunity_invite_at?: string | null
+          last_outbound_at?: string | null
+          last_outbound_provider?: string | null
           last_sponsor_invite_at?: string | null
           last_synced_at?: string | null
           last_training_invite_at?: string | null
@@ -601,10 +611,15 @@ export type Database = {
           id?: string
           interest?: Database["public"]["Enums"]["interest_level"]
           is_deleted?: boolean
+          last_conversation_summary?: string | null
+          last_conversation_summary_at?: string | null
           last_distributor_invite_at?: string | null
           last_group_invite_at?: string | null
+          last_inbound_at?: string | null
           last_name?: string | null
           last_opportunity_invite_at?: string | null
+          last_outbound_at?: string | null
+          last_outbound_provider?: string | null
           last_sponsor_invite_at?: string | null
           last_synced_at?: string | null
           last_training_invite_at?: string | null
