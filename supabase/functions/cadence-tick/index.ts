@@ -375,7 +375,7 @@ Deno.serve(async (req) => {
         remainingDaily--;
         sentInWindow++;
         // Schedule next step
-        const nextDef = STEPS.find((s) => s.step === nextStepNum + 1);
+        const nextDef = rowSteps.find((s) => s.step === nextStepNum + 1);
         const nextAt = nextDef
           ? new Date(now.getTime() + (nextDef.offsetH - stepDef.offsetH) * 3600 * 1000).toISOString()
           : null;
