@@ -7,7 +7,7 @@
 //   <proof_url>
 //   🌿 *APLGO Official Wellness Info*
 //   Hi, I'm *Vanto from Get Well Africa* — an accredited APLGO distributor.
-//   Shop: https://onlinecourseformlm.com/shop
+//   Shop: https://getwellafrica.com/shop
 //   Learning guide: <toc_url>
 //
 // This catches recovery-tick, phase3-tick, and any future caller — no matter what
@@ -22,7 +22,7 @@ const corsHeaders = {
 };
 
 const DEFAULT_PROOF_URL = "https://vanto-zazi-bloom.lovable.app";
-const SHOP_URL = "https://onlinecourseformlm.com/shop";
+const SHOP_URL = "https://getwellafrica.com/shop";
 const ONE_DAY_SALE_CUTOFF_SAST = Date.UTC(2026, 4, 26, 22, 0, 0); // 2026-05-27 00:00 Africa/Johannesburg
 const ONE_DAY_SALE_MARKERS = [
   "APLGO WITH LOVE SALE",

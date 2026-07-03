@@ -4,7 +4,7 @@
  * Vanto reviews and copies manually.
  */
 
-const SHOP = 'https://onlinecourseformlm.com/shop';
+const SHOP = 'https://getwellafrica.com/shop';
 const LOCAL_NUMBER = '+27 79 083 1530';
 
 function safeName(name?: string | null) {

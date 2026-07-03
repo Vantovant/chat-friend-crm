@@ -444,7 +444,7 @@ Deno.serve(async (req) => {
             else if (/help/i.test(lower)) intent = "how_to_join";
             else intent = "where_to_buy";
 
-            const SHOP = "https://onlinecourseformlm.com/shop";
+            const SHOP = "https://getwellafrica.com/shop";
             // Per-group registration link override (e.g. APLGO 4 SHO uses sp=804776)
             let REG = "https://backoffice.aplgo.com/register/?sp=787262";
             let REG_SPONSOR = "787262";

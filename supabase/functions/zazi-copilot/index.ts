@@ -109,8 +109,8 @@ Deno.serve(async (req) => {
   const prospectorLevel = settings.zazi_prospector_level || '1';
   const prospectorMode  = settings.zazi_prospector_mode  || 'draft_only';
   const proofUrl   = settings.distributor_proof_url   || 'https://vanto-zazi-bloom.lovable.app';
-  const tocUrl     = settings.table_of_contents_url   || 'https://onlinecourseformlm.com/shop';
-  const shopUrl    = 'https://onlinecourseformlm.com/shop';
+  const tocUrl     = settings.table_of_contents_url   || 'https://getwellafrica.com/shop';
+  const shopUrl    = 'https://getwellafrica.com/shop';
   const localSupport = settings.local_support_number || '+27 79 083 1530';
   const isFirstTouch = (recentMsgs || []).filter((m: any) => m.is_outbound).length === 0;
 

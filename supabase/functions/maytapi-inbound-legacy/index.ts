@@ -191,7 +191,7 @@ async function handlePilotGroupAutoReply(admin: any, groupJid: string, inboundTe
   else intent = "where_to_buy";
 
   const localSupport = cfg.local_support_number || "+27 79 083 1530";
-  const SHOP = "https://onlinecourseformlm.com/shop";
+  const SHOP = "https://getwellafrica.com/shop";
   const REG = "https://backoffice.aplgo.com/register/?sp=787262";
   const senderName = String(body?.user?.name || message?.notifyName || "").split(/\s+/)[0] || "";
   const greet = senderName ? ` ${senderName}` : "";

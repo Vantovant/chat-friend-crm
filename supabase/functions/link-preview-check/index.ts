@@ -33,7 +33,7 @@ export async function checkLinkPreview(input: string): Promise<PreviewResult> {
       redirect: "follow",
       headers: {
         // Pretend to be a generic crawler so sites return OG meta
-        "User-Agent": "Mozilla/5.0 (compatible; VantoCRM-LinkPreview/1.0; +https://chat.onlinecourseformlm.com)",
+        "User-Agent": "Mozilla/5.0 (compatible; VantoCRM-LinkPreview/1.0; +https://getwellafrica.com)",
         "Accept": "text/html,application/xhtml+xml",
       },
       signal: ctrl.signal,
