@@ -144,12 +144,12 @@ Deno.serve(async (req) => {
     }
 
 
-    // Pick due rows
+    // Pick due rows (both prospect nurture + registered 9-step one-shot).
     const { data: due, error } = await sb
       .from("prospect_cadence_state")
       .select("id, contact_id, sequence_key, current_step, next_send_at, status")
       .eq("status", "active")
-      .eq("sequence_key", SEQUENCE_KEY)
+      .in("sequence_key", ACTIVE_SEQUENCE_KEYS)
       .lte("next_send_at", now.toISOString())
       .order("next_send_at", { ascending: true })
       .limit(MAX_BATCH);
