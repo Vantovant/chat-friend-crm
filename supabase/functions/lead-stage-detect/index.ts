@@ -14,16 +14,16 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 
-// Ordered — first match wins.
+// Ordered — first match wins. `type` values must match public.lead_type enum.
 const RULES: Array<{ label: string; type: string; re: RegExp }> = [
-  // Purchased with STATUS package.
-  { label: "purchase_status", type: "Purchase_Status",
+  // Purchased with STATUS package → buyer + vip note (we only have one buyer tier in enum).
+  { label: "purchase_status", type: "vip",
     re: /\b(status\s*(package|pack|kit)|bought\s+status|paid\s+for\s+status|status\s+order\s+placed)\b/i },
-  // Purchased any product (no status specifically).
-  { label: "purchase_nostatus", type: "Purchase_Nostatus",
+  // Purchased any product.
+  { label: "purchase_nostatus", type: "buyer",
     re: /\b(order\s+placed|i\s+ordered|i\s+bought|paid\s+for\s+(the\s+)?(sticks|starter|product|nrm|grw|rlx)|check\s?out\s+complete|payment\s+went\s+through|order\s+confirmation)\b/i },
   // Registered on APLGO backoffice (no purchase yet).
-  { label: "registered_nopurchase", type: "Registered_Nopurchase",
+  { label: "registered_nopurchase", type: "registered",
     re: /\b(i(['’ ]|\s)?ve\s+registered|i\s+registered|signed\s+up|sign(ed)?\s+up|associate\s+id|welcome\s+to\s+apl|apl(go)?\s+account\s+created|back\s?office\s+set\s+up|got\s+my\s+aplgo\s+id)\b/i },
 ];
 
@@ -64,12 +64,13 @@ Deno.serve(async (req) => {
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Only upgrade — never downgrade.
+    // Only upgrade — never downgrade. Values must match public.lead_type enum.
     const RANK: Record<string, number> = {
-      "prospect": 0, "Prospect": 0,
-      "Registered_Nopurchase": 1, "registered": 1,
-      "Purchase_Nostatus": 2,
-      "Purchase_Status": 3,
+      "prospect": 0,
+      "expired": 0,
+      "registered": 1,
+      "buyer": 2,
+      "vip": 3,
     };
     const currentRank = RANK[contact.lead_type || ""] ?? 0;
     const newRank = RANK[promotedType] ?? 0;

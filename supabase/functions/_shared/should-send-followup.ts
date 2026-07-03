@@ -11,9 +11,10 @@
 const SOFT_REFUSAL_RE = /\b(not\s+(now|interested|today)|i(['’ ]|\s)?ll\s+(let\s+u|let\s+you|get\s+back)|stop\b|later\b|another\s+time|leave\s+me|please\s+don['’ ]?t|not\s+ready|let\s+me\s+think|maybe\s+later)\b/i;
 
 const PROMOTED_TYPES = new Set([
-  "Purchase_Status", "Purchase_Nostatus", "Registered_Nopurchase",
-  // lowercase safety-net
-  "purchase_status", "purchase_nostatus", "registered_nopurchase", "registered",
+  // DB enum values
+  "registered", "buyer", "vip",
+  // CRM label variants (safety-net if a caller passes the label form)
+  "Registered_Nopurchase", "Purchase_Status", "Purchase_Nostatus",
 ]);
 
 export interface GuardContact {
