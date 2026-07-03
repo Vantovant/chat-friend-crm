@@ -9,7 +9,7 @@ const corsHeaders = {
 };
 
 const PROOF_URL = 'https://vanto-zazi-bloom.lovable.app';
-const SHOP_URL = 'https://onlinecourseformlm.com/shop';
+const SHOP_URL = 'https://getwellafrica.com/shop';
 const LOCAL_NUMBER = '+27 79 083 1530';
 
 interface Msg {
@@ -46,7 +46,7 @@ function scoreConversation(conv: { id: string; contact: any }, msgs: Msg[]) {
   const ft = firstAsc?.content || '';
   const had_proof_url = ft.includes('vanto-zazi-bloom') || ft.includes(PROOF_URL);
   const had_aplgo_header = /APLGO|Get Well Africa/i.test(ft);
-  const had_shop_link = ft.includes('onlinecourseformlm.com/shop') || ft.includes(SHOP_URL);
+  const had_shop_link = ft.includes('getwellafrica.com/shop') || ft.includes('onlinecourseformlm.com/shop') || ft.includes(SHOP_URL);
   const had_local_number = ft.includes('+27 79 083 1530') || ft.includes('+27 79');
 
   // Price leak detection: any outbound mentioning R<100 for a product

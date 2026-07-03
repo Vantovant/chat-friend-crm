@@ -1412,7 +1412,7 @@ Deno.serve(async (req) => {
     const settingsMap: Record<string, string> = {};
     for (const r of (settingRows || []) as any[]) settingsMap[r.key] = (r.value || "").trim();
     const PROOF_URL = settingsMap.distributor_proof_url || "https://vanto-zazi-bloom.lovable.app";
-    const SHOP_URL = "https://onlinecourseformlm.com/shop";
+    const SHOP_URL = "https://getwellafrica.com/shop";
     const TOC_URL = settingsMap.table_of_contents_url || SHOP_URL;
     const LOCAL_NUMBER = settingsMap.local_support_number || "+27 79 083 1530";
     const CUSTOMER_STORE = "https://aplshop.com/j/787262";
@@ -1859,7 +1859,7 @@ Deno.serve(async (req) => {
     for (const r of (tplRows || []) as any[]) tplCfg[r.key] = (r.value || "").trim();
     const tplEnabled = (tplCfg.zazi_emergency_template_autoreply_enabled || "true").toLowerCase() === "true";
     const localSupport = tplCfg.local_support_number || "+27 79 083 1530";
-    const SHOP = "https://onlinecourseformlm.com/shop";
+    const SHOP = "https://getwellafrica.com/shop";
     const REG = "https://backoffice.aplgo.com/register/?sp=787262";
 
     const allowedTemplateIntents = new Set(["where_to_buy","how_to_join","membership_R375","product_range"]);
