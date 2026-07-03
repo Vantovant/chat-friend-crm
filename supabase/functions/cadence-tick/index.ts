@@ -24,6 +24,8 @@ const corsHeaders = {
 };
 
 const SEQUENCE_KEY = "prospect_7touch_v1";
+const REGISTERED_SEQUENCE_KEY = "registered_9step_v1";
+const ACTIVE_SEQUENCE_KEYS = [SEQUENCE_KEY, REGISTERED_SEQUENCE_KEY];
 
 // step → { offsetHoursFromStart, defaultContent, templateKey }
 const STEPS = [
@@ -35,6 +37,17 @@ const STEPS = [
   { step: 6, offsetH: 264,  templateKey: "cadence_v1_step6_objection",  content: "Hi {name} — totally fair if you're hesitating. APLGO has a 14-day money-back. You literally cannot lose. Want me to send the link?" },
   { step: 7, offsetH: 336,  templateKey: "cadence_v1_step7_close",      content: "Hi {name} 🌟 Last note from me on this — two routes:\n1) Customer: best for you (no admin)\n2) Member: 25% off forever + earn\nReply 1 or 2 and I'll take it from there." },
 ];
+
+// One-shot outreach for newly-registered (no purchase) APLGO associates.
+// See followup_templates.intent_state='REGISTERED_9STEP_GUIDE' for the source of truth.
+const REGISTERED_STEPS = [
+  { step: 1, offsetH: 0, templateKey: "registered_9step_v1_step1_guide",
+    content: "🇿🇦 Hi {name}! Congrats on registering with APLGO. 🚀\n\nNot sure how to place your first order under our Get Well Africa team? I've written a simple 9-Step Guide showing you exactly how to sign up, pick products, and check out safely.\n\n👇 Full guide:\nhttps://getwellafrica.com/blog/how-to-register-and-order-aplgo-in-9-steps\n\n— Vanto" },
+];
+
+function stepsFor(sequenceKey: string) {
+  return sequenceKey === REGISTERED_SEQUENCE_KEY ? REGISTERED_STEPS : STEPS;
+}
 
 const TOTAL_STEPS = STEPS.length;
 const MAX_BATCH = 25;
