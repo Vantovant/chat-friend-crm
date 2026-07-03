@@ -1,117 +1,69 @@
+Context loaded. Here's the plan.
 
-# Plan — Add VantoOS Parent Attribution & Suite Hub to GetWell Hub
+# Plan — Migrate to getwellafrica.com + Pipeline-Aware AI Follow-ups
 
-Goal: Comply with the VantoOS Parent Company Attribution Instruction (v1.0) by surfacing VantoOS as the parent company across the public marketing site, and give every visitor a clear path to the sister apps (Executive AI Command Center, GetWell Grow, and future apps).
+## Part A — Domain migration (onlinecourseformlm.com → getwellafrica.com)
 
-Scope: **Marketing/UI only.** No backend, no auth, no edge-function changes. All in-app modules (behind login) untouched.
+**1. DB settings (one migration, data update)**
+Update every `integration_settings` row where value contains `onlinecourseformlm.com`, replacing the host with `getwellafrica.com`. Affected keys:
+`sister_site_shop_url`, `sister_site_blog_url`, `sister_site_brand_domain`, `sister_site_grw_url`, `sister_site_gts_url`, `sister_site_nrm_url`, `sister_site_rlx_url`, `sister_site_sld_url`, `sister_site_stp_url`, `sister_site_pwr_apricot_url`, `sister_site_pwr_lemon_url`, `table_of_contents_url`, `distributor_proof_url` (→ `https://getwellafrica.com/proof`), and the admin email `zazi_emergency_admin_email` (leave — it's a mailbox, not a link).
+Also update any `ai_trainer_rules.instruction`/`notes` and `fb_source_posts.raw_message`/`permalink_url` that contain the old host.
 
----
+**2. Code constants**
+Replace hardcoded strings in these files (all use `getwellafrica.com`):
+- `src/lib/recovery-drafts.ts`
+- `supabase/functions/cadence-tick/index.ts`
+- `supabase/functions/maytapi-inbound-legacy/index.ts`
+- `supabase/functions/maytapi-send-direct/index.ts`
+- `supabase/functions/maytapi-webhook-inbound/index.ts`
+- `supabase/functions/prospector-damage-audit/index.ts` (keep old string in the `had_shop_link` detector so historical audits still match — add new one as OR)
+- `supabase/functions/whatsapp-auto-reply/index.ts` (2 sites)
+- `supabase/functions/zazi-copilot/index.ts`
+- `supabase/functions/link-preview-check/index.ts` (User-Agent)
 
-## 1. New page — `/suite` (VantoOS Suite hub)
+**3. Deploy** all 8 edge functions after edits.
 
-Route added in `src/App.tsx` and new file `src/pages/marketing/Suite.tsx`.
+## Part B — Pipeline-aware follow-up engine
 
-Sections, top → bottom:
+Today `phase3-tick` / `recovery-tick` / `cadence-tick` pick a template purely by time + last-touch. We'll add pipeline stage + demographic completeness as first-class inputs.
 
-1. **Hero** — "Part of the VantoOS Suite" + the exact Section 2 paragraph from the directive (verbatim, no edits).
-2. **Suite grid** — three product cards (live + coming):
-   - **Executive AI Command Center** → https://vantoos.com/command-center  *(Flagship)*
-   - **GetWell Hub** → / (current site — "You're here" badge)
-   - **GetWell Grow** → https://getwellgrow.app
-   - Placeholder card "More apps shipping in 2026" → https://vantoos.com/suite
-3. **About VantoOS** — short bio + CTA buttons: Visit VantoOS, Company, Investors, Pricing, Contact (all to vantoos.com/...).
-4. **Sitemap-style link list** of every VantoOS parent page (Home, Command Center, Features, How it Works, The Suite, Company, Clientele, Investors, Pricing, Contact, Sign In) — fulfils Section 4 of the directive.
+**1. New helper `supabase/functions/_shared/followup-router.ts`**
+Pure router: given `{ contact, conversation, lastInboundText, demographics, pipelineStage }` returns `{ templateKey, body, appendedLink }`. Rules:
 
-Add nav link "The Suite" to `MarketingLayout.tsx` top nav.
+| Pipeline stage | Demographics | Message intent |
+|---|---|---|
+| Lead (new) | missing | Warm intro + ask for city/province/email |
+| Lead | complete | Regional greeting ("Hi X in {city}!"), one product invite |
+| Contacted | any | Ask what area (sleep/energy/joints/business); mention WhatsApp group |
+| Proposal | complete | Product-fit message from APLGO 30-status catalogue (GRW/RLX/NRM etc.) with `getwellafrica.com/shop/<sku>` |
+| Negotiation | complete | Sponsor CTA (`sponsor_register_url`) + BOP/Zoom invite |
+| Won | any | Onboarding, upsell peer product, ask for referral |
+| Lost | any | 30-day cool-down; then value-only content, no CTA |
 
----
+Rotation: at most ONE URL per outbound (existing constraint preserved).
 
-## 2. Global footer attribution (every page)
+**2. AI intent → product mapping**
+Extend `whatsapp-auto-reply`'s existing intent map with the full 30-status catalogue from the uploaded PDF, so inbound keywords route to the right `getwellafrica.com/shop/<slug>` link (grw, sld, nrm, gts, stp, rlx, pwr-apricot, pwr-lemon, lft, alt, ice, hpr, hrt, mls, terra-pendant, pft, etc.).
 
-Update `src/components/marketing/MarketingLayout.tsx` footer:
+**3. Wire router into the three tick functions**
+`phase3-tick`, `recovery-tick`, `cadence-tick` all call `followupRouter(contact)` instead of picking from a static array. Keeps existing guardrails: 20:00–06:00 SAST quiet hours, per-phone 20h cooldown, `reserve_message_slot`, emergency pause.
 
-- Add a fourth/fifth row: **"GetWell Hub is a product of the VantoOS Suite — designed and developed by VantoOS."**
-- Add small **VantoOS wordmark** linking to https://vantoos.com (text wordmark — no logo image needed since we don't have the asset).
-- Change copyright line to: `© {year} VantoOS (Pty) Ltd. All rights reserved.`
-- Add link "The Suite" → `/suite` and "VantoOS.com ↗" → https://vantoos.com in the Company column.
+**4. Personalisation from captured demographics**
+If `contacts.city` and/or `contacts.first_name` are set, prepend `"Hi {first_name} in {city}, "`. If `email` is present, never re-ask.
 
-This satisfies Placement #1 (global footer) on every public page.
+**5. Pipeline change → trigger relevant nudge**
+New DB trigger on `contacts.pipeline_stage_id` UPDATE: enqueue a single "stage-entry" follow-up (respecting quiet hours + cooldown) via `phase3-tick`'s existing queue. Prevents dead leads sitting silent after stage moves.
 
----
+## Part C — Verification
 
-## 3. Home page — "Part of the VantoOS Suite" card
+- Run migration; assert `SELECT count(*) FROM integration_settings WHERE value ILIKE '%onlinecourseformlm%'` = 0.
+- `curl` `getwellafrica.com/shop/grw` etc. returns 200 (spot-check 3 SKUs).
+- Trigger `phase3-tick` in test mode for one Lead-stage contact with city set → confirm message uses new domain + regional greeting.
+- Grep repo post-edit for `onlinecourseformlm` → should return only historical migration files + `prospector-damage-audit` OR-clause.
 
-In `src/pages/marketing/Home.tsx`, insert a compact band just above the footer:
+## Out of scope (ask before doing)
 
-- Left: "Part of the **VantoOS Suite**" + one-liner.
-- Right: 3 chips → Executive AI Command Center · GetWell Grow · See the full suite (→ `/suite`).
+- Rewriting historical `messages.content` rows (would touch prospect audit trail).
+- Sending a "we've moved to getwellafrica.com" broadcast — would burn WhatsApp trust with duplicate touches.
 
-Satisfies Placement #3.
-
----
-
-## 4. Top-nav "More from VantoOS" (optional but recommended)
-
-Add a small dropdown in `MarketingLayout.tsx` desktop nav (and a section in the mobile drawer):
-
-- Executive AI Command Center → vantoos.com/command-center
-- GetWell Grow → getwellgrow.app
-- VantoOS Home → vantoos.com
-- See all → `/suite`
-
-Satisfies Placement #4.
-
----
-
-## 5. Investors page — parent paragraph
-
-In `src/pages/marketing/Investors.tsx`, add a "Parent Company" block at the top with the verbatim Section 2 paragraph + link to vantoos.com/investors. Satisfies Placement #5.
-
----
-
-## 6. Sitemap doc update
-
-Update `/mnt/documents/getwellhub-sitemap.md`:
-- Add `/suite` to public pages table.
-- Add "Part of the VantoOS Suite · vantoos.com" line to the link-tree block (Placement #6).
-- Add a short "Sister apps" section listing GetWell Grow + Executive AI Command Center URLs so you can paste them into your master Link Tree.
-
-Also update `scripts/generate-sitemap.ts` (or `public/robots.txt` sitemap mechanism if present) to include `/suite`.
-
----
-
-## 7. Brand-name consistency check
-
-Sweep marketing pages to ensure **"VantoOS"** is spelled exactly that way (no "Vanto OS", "VantOS", "Vanto-OS") wherever introduced. Section 8 checklist requirement.
-
----
-
-## Files to change / create
-
-```text
-NEW   src/pages/marketing/Suite.tsx
-EDIT  src/App.tsx                                 (add /suite route)
-EDIT  src/components/marketing/MarketingLayout.tsx (footer + nav dropdown)
-EDIT  src/pages/marketing/Home.tsx                 (suite band)
-EDIT  src/pages/marketing/Investors.tsx            (parent paragraph)
-EDIT  /mnt/documents/getwellhub-sitemap.md         (suite + sister links)
-EDIT  scripts/generate-sitemap.ts (if exists)      (add /suite)
-```
-
-## Out of scope (not touching)
-
-- No changes to `/app/*` authenticated routes.
-- No changes to Edge Functions, Supabase, prospector pipeline, WhatsApp senders, or any backend.
-- No logo image upload (using text wordmark "VantoOS" styled to match brand). If you later provide an official VantoOS logo PNG, I'll swap it in.
-
-## Compliance checklist after build (mirrors Section 8 of the PDF)
-
-- [x] Global footer: © {year} VantoOS (Pty) Ltd
-- [x] Global footer: "[Product] is a product of the VantoOS Suite — developed by VantoOS"
-- [x] VantoOS wordmark links to https://vantoos.com
-- [x] About/Company page (Investors) contains Section 2 paragraph verbatim
-- [x] "Part of the VantoOS Suite" block on Home
-- [x] Link-tree pack updated with VantoOS attribution + sister apps
-- [x] "VantoOS" spelled consistently everywhere
-
-Approve and I'll build it in one pass.
+Approve and I'll ship Part A + B in one pass.
