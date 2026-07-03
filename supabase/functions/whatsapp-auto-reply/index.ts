@@ -42,7 +42,7 @@ const MAX_AUTO_REPLIES_PER_DAY = 40;
 const HUMAN_CONTACT_FOOTER = `\n\n_Prefer to talk to Vanto directly?_ 📲 https://wa.me/27790831530`;
 
 // v6.0 — short warm greeting, no menu dump. AI handles the rest in conversation.
-const GREETING_REPLY = `Hey 👋 Vanto here from *Online Course For MLM*.\n\nWhat can I help you with today — a product, a price, or the business opportunity?`;
+const GREETING_REPLY = `Hey 👋 Vanto here from *Get Well Africa*.\n\nWhat can I help you with today — a product, a price, or the business opportunity?`;
 
 const HUMAN_HANDOVER = `On it ✅ Vanto Vanto will reach out to you personally.\n\n📲 WhatsApp: https://wa.me/27790831530\n📞 Call: +27 79 083 1530`;
 
@@ -740,7 +740,7 @@ async function generateAIAnswer(
     ? `User is asking about *${detectedProduct}*. Quote the price exactly as it appears (e.g. "R433.13"). If ${detectedProduct} price is not in context, give what IS known about it (benefits, use) and offer to fetch the price.`
     : "";
 
-  const systemPrompt = `You are *Vanto's WhatsApp sales assistant* for *Online Course For MLM* (APLGO distributor, South Africa). You speak on behalf of Vanto Vanto.
+  const systemPrompt = `You are *Vanto's WhatsApp sales assistant* for *Get Well Africa* (APLGO distributor, South Africa). You speak on behalf of Vanto Vanto.
 
 You are an elite, warm, sharp sales consultant inside WhatsApp. African market aware. Confident. Decisive. Never robotic, never an FAQ bot, never asks permission ("should I check…?").
 
