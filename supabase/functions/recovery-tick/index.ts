@@ -148,7 +148,7 @@ Deno.serve(async (req) => {
       // Fetch contact
       const { data: contact } = await supabase
         .from("contacts")
-        .select("id, name, phone, phone_normalized, do_not_contact, auto_reply_enabled, lead_type, last_group_invite_at, last_sponsor_invite_at")
+        .select("id, name, phone, phone_normalized, do_not_contact, is_deleted, auto_reply_enabled, lead_type, last_group_invite_at, last_sponsor_invite_at, last_outbound_at, last_inbound_at")
         .eq("id", row.contact_id)
         .maybeSingle();
 
@@ -156,9 +156,25 @@ Deno.serve(async (req) => {
         await supabase.from("missed_inquiries").update({ status: "exhausted", last_error: "contact missing" }).eq("id", row.id);
         failed++; continue;
       }
-      if (contact.do_not_contact || contact.auto_reply_enabled === false) {
-        await supabase.from("missed_inquiries").update({ status: "stopped", last_error: contact.auto_reply_enabled === false ? "auto_reply_muted" : "do_not_contact" }).eq("id", row.id);
-        failed++; continue;
+
+      // ── Universal pre-send guard (Fix 1+2) ──
+      {
+        const { shouldSendFollowup } = await import("../_shared/should-send-followup.ts");
+        const guard = await shouldSendFollowup(supabase, contact as any, {
+          conversationId: row.conversation_id,
+          caller: "recovery-tick",
+        });
+        if (!guard.ok) {
+          const isHardStop = ["do_not_contact", "auto_reply_muted", "contact_deleted"].includes(guard.reason || "")
+            || (guard.reason || "").startsWith("promoted_lead_type");
+          const reschedAt = guard.retry_after || new Date(Date.now() + 6 * 3600000).toISOString();
+          await supabase.from("missed_inquiries").update({
+            status: isHardStop ? "stopped" : "active",
+            next_send_at: isHardStop ? null : reschedAt,
+            last_error: `guard:${guard.reason}`,
+          }).eq("id", row.id);
+          failed++; continue;
+        }
       }
 
       const phone = contact.phone_normalized || contact.phone;

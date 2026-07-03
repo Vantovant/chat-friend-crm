@@ -199,7 +199,7 @@ Deno.serve(async (req) => {
       // Load contact + verify still eligible
       const { data: contact } = await sb
         .from("contacts")
-        .select("id, name, phone, phone_normalized, lead_type, do_not_contact, is_deleted, auto_reply_enabled")
+        .select("id, name, phone, phone_normalized, lead_type, do_not_contact, is_deleted, auto_reply_enabled, last_outbound_at, last_inbound_at")
         .eq("id", row.contact_id)
         .maybeSingle();
 
@@ -227,7 +227,7 @@ Deno.serve(async (req) => {
       }
 
       // Skip if contact has registered/purchased (lead_type promotion)
-      if (contact.lead_type && ["Purchase_Status", "Purchase_Nostatus", "Registered_Nopurchase"].includes(contact.lead_type)) {
+      if (contact.lead_type && ["registered", "buyer", "vip"].includes(contact.lead_type)) {
         await sb.from("prospect_cadence_state").update({
           status: "completed",
           pause_reason: "converted",
@@ -237,6 +237,31 @@ Deno.serve(async (req) => {
         }).eq("id", row.id);
         diag.completed++;
         continue;
+      }
+
+      // ── Universal pre-send guard (Fix 1+2: cross-provider cooldown + soft-refusal) ──
+      {
+        const { shouldSendFollowup } = await import("../_shared/should-send-followup.ts");
+        // Find the most recent conversation for this contact to get inbound context
+        const { data: conv } = await sb.from("conversations")
+          .select("id").eq("contact_id", contact.id)
+          .order("last_message_at", { ascending: false, nullsFirst: false })
+          .limit(1).maybeSingle();
+        const guard = await shouldSendFollowup(sb, contact as any, {
+          conversationId: conv?.id || null,
+          caller: "cadence-tick",
+        });
+        if (!guard.ok) {
+          const reschedAt = guard.retry_after || new Date(Date.now() + 6 * 3600000).toISOString();
+          await sb.from("prospect_cadence_state").update({
+            status: "active",
+            next_send_at: reschedAt,
+            pause_reason: `guard:${guard.reason}`.slice(0, 200),
+            updated_at: now.toISOString(),
+          }).eq("id", row.id);
+          diag.skipped++;
+          continue;
+        }
       }
 
       // Pick variant
