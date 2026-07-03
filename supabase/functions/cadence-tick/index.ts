@@ -329,7 +329,7 @@ Deno.serve(async (req) => {
             to_number: recipient,
             message: messageBody,
             skip_trust_header: true,
-            source: `cadence_${SEQUENCE_KEY}_step${nextStepNum}`,
+            source: `cadence_${row.sequence_key}_step${nextStepNum}`,
             contact_id: contact.id,
           }),
         });
