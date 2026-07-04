@@ -412,6 +412,7 @@ Deno.serve(async (req) => {
         diag.sent++;
         remainingDaily--;
         sentInWindow++;
+        if (welcomeBundleMark) { try { await welcomeBundleMark(); } catch (_e) {} }
         // Schedule next step
         const nextDef = rowSteps.find((s) => s.step === nextStepNum + 1);
         const nextAt = nextDef
