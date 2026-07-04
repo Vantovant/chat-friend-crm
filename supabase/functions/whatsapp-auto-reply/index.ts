@@ -2435,6 +2435,13 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
       });
     }
 
+    // Mark welcome bundle audit row (if applied on this turn and send succeeded)
+    try {
+      if (sentMessage?.id && (globalThis as any).__welcomeBundleMark) {
+        await (globalThis as any).__welcomeBundleMark();
+      }
+    } catch (_e) { /* non-fatal */ }
+
     console.log("[auto-reply] DIAG:", JSON.stringify(diag));
 
     return jsonRes({
