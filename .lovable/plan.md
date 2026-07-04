@@ -1,69 +1,52 @@
 Context loaded. Here's the plan.
 
-# Plan — Migrate to getwellafrica.com + Pipeline-Aware AI Follow-ups
+# Plan — Add two blog links to first-touch prospector messages
 
-## Part A — Domain migration (onlinecourseformlm.com → getwellafrica.com)
+Category: backend (edge functions + settings), no UI, no cadence/guard changes.
 
-**1. DB settings (one migration, data update)**
-Update every `integration_settings` row where value contains `onlinecourseformlm.com`, replacing the host with `getwellafrica.com`. Affected keys:
-`sister_site_shop_url`, `sister_site_blog_url`, `sister_site_brand_domain`, `sister_site_grw_url`, `sister_site_gts_url`, `sister_site_nrm_url`, `sister_site_rlx_url`, `sister_site_sld_url`, `sister_site_stp_url`, `sister_site_pwr_apricot_url`, `sister_site_pwr_lemon_url`, `table_of_contents_url`, `distributor_proof_url` (→ `https://getwellafrica.com/proof`), and the admin email `zazi_emergency_admin_email` (leave — it's a mailbox, not a link).
-Also update any `ai_trainer_rules.instruction`/`notes` and `fb_source_posts.raw_message`/`permalink_url` that contain the old host.
+## Goal
+On the FIRST outbound message to a new prospect (Twilio or Maytapi, 1-on-1 only), append two links so people can self-educate before we push:
+- Intro: `https://getwellafrica.com/blog/welcome-to-wellness-aplgo-2-minute-intro`
+- Register: `https://getwellafrica.com/blog/how-to-register-and-order-aplgo-in-9-steps`
 
-**2. Code constants**
-Replace hardcoded strings in these files (all use `getwellafrica.com`):
-- `src/lib/recovery-drafts.ts`
-- `supabase/functions/cadence-tick/index.ts`
-- `supabase/functions/maytapi-inbound-legacy/index.ts`
-- `supabase/functions/maytapi-send-direct/index.ts`
-- `supabase/functions/maytapi-webhook-inbound/index.ts`
-- `supabase/functions/prospector-damage-audit/index.ts` (keep old string in the `had_shop_link` detector so historical audits still match — add new one as OR)
-- `supabase/functions/whatsapp-auto-reply/index.ts` (2 sites)
-- `supabase/functions/zazi-copilot/index.ts`
-- `supabase/functions/link-preview-check/index.ts` (User-Agent)
+Existing single-URL-per-outbound rule is broken by design here (two links) — so we treat these two blog links as ONE "welcome bundle" that only ever fires once per contact, on first touch. All subsequent messages remain single-link as today.
 
-**3. Deploy** all 8 edge functions after edits.
+## Where the change lands
+1. **`integration_settings`** — add three keys (source of truth, editable without redeploy):
+   - `welcome_intro_blog_url` = intro link
+   - `welcome_register_blog_url` = 9-step link
+   - `welcome_bundle_enabled` = `true`
 
-## Part B — Pipeline-aware follow-up engine
+2. **`supabase/functions/whatsapp-auto-reply/index.ts`** — Unified Trust Entry Protocol block (EMERGENCY FIRST-TOUCH TRUST PATCH). Insert the two blog lines AFTER the shop link and BEFORE the learning-guide/TOC line, formatted as:
+   ```
+   📖 New here? Start with our 2-minute intro: <intro_url>
+   📝 Ready to register? Follow our 9-step guide: <register_url>
+   ```
+   Only fires when `actionTaken === "first_touch_trust_message"` (already the first-touch gate). No change to the auto-send safety locks, price validator, DNC, quiet hours, or Prospector Level 2A logic.
 
-Today `phase3-tick` / `recovery-tick` / `cadence-tick` pick a template purely by time + last-touch. We'll add pipeline stage + demographic completeness as first-class inputs.
+3. **`supabase/functions/maytapi-send-direct/index.ts`** — same insertion inside its own first-touch trust template (mirrors the auto-reply block). Preserves the existing per-channel trust check.
 
-**1. New helper `supabase/functions/_shared/followup-router.ts`**
-Pure router: given `{ contact, conversation, lastInboundText, demographics, pipelineStage }` returns `{ templateKey, body, appendedLink }`. Rules:
+4. **`supabase/functions/cadence-tick/index.ts`** — for the prospect nurture sequence's FIRST step only (step index 0), if `welcome_bundle_enabled` and contact has zero prior outbound, prepend the two links. Registered 9-step sequence is untouched (it already sends the register link).
 
-| Pipeline stage | Demographics | Message intent |
-|---|---|---|
-| Lead (new) | missing | Warm intro + ask for city/province/email |
-| Lead | complete | Regional greeting ("Hi X in {city}!"), one product invite |
-| Contacted | any | Ask what area (sleep/energy/joints/business); mention WhatsApp group |
-| Proposal | complete | Product-fit message from APLGO 30-status catalogue (GRW/RLX/NRM etc.) with `getwellafrica.com/shop/<sku>` |
-| Negotiation | complete | Sponsor CTA (`sponsor_register_url`) + BOP/Zoom invite |
-| Won | any | Onboarding, upsell peer product, ask for referral |
-| Lost | any | 30-day cool-down; then value-only content, no CTA |
+5. **Idempotency** — new `contact_activity` row `type=welcome_bundle_sent` written on success. Guard reads this row before appending; guarantees the bundle is sent at most once per contact even if first-touch fires across both channels.
 
-Rotation: at most ONE URL per outbound (existing constraint preserved).
+## What stays exactly as-is (assurance)
+- 40/day cadence cap, 3/min throttle, 20:00–06:00 SAST quiet hours.
+- 6h cross-provider cooldown + 12h inbound quiet window (should-send-followup guard).
+- Lead-stage detect promotion (registered → cadence stops).
+- 11-group allowlist and group dispatcher — untouched.
+- Price-safety validator, sponsor 787262, DNC honour, duplicate guard.
+- Prospector Level 2A auto/draft split, ai_suggestions flow.
+- All other outbound messages remain single-URL.
 
-**2. AI intent → product mapping**
-Extend `whatsapp-auto-reply`'s existing intent map with the full 30-status catalogue from the uploaded PDF, so inbound keywords route to the right `getwellafrica.com/shop/<slug>` link (grw, sld, nrm, gts, stp, rlx, pwr-apricot, pwr-lemon, lft, alt, ice, hpr, hrt, mls, terra-pendant, pft, etc.).
-
-**3. Wire router into the three tick functions**
-`phase3-tick`, `recovery-tick`, `cadence-tick` all call `followupRouter(contact)` instead of picking from a static array. Keeps existing guardrails: 20:00–06:00 SAST quiet hours, per-phone 20h cooldown, `reserve_message_slot`, emergency pause.
-
-**4. Personalisation from captured demographics**
-If `contacts.city` and/or `contacts.first_name` are set, prepend `"Hi {first_name} in {city}, "`. If `email` is present, never re-ask.
-
-**5. Pipeline change → trigger relevant nudge**
-New DB trigger on `contacts.pipeline_stage_id` UPDATE: enqueue a single "stage-entry" follow-up (respecting quiet hours + cooldown) via `phase3-tick`'s existing queue. Prevents dead leads sitting silent after stage moves.
-
-## Part C — Verification
-
-- Run migration; assert `SELECT count(*) FROM integration_settings WHERE value ILIKE '%onlinecourseformlm%'` = 0.
-- `curl` `getwellafrica.com/shop/grw` etc. returns 200 (spot-check 3 SKUs).
-- Trigger `phase3-tick` in test mode for one Lead-stage contact with city set → confirm message uses new domain + regional greeting.
-- Grep repo post-edit for `onlinecourseformlm` → should return only historical migration files + `prospector-damage-audit` OR-clause.
+## Verification
+- Trigger `auto-reply-dryrun` for a fresh test number → confirm both links present, `welcome_bundle_sent` activity row created.
+- Re-run for same number → confirm bundle NOT re-added (idempotency holds).
+- Trigger `phase3-tick` on a contact who already got the bundle → confirm normal single-link message, no duplication.
+- Grep `messages` table for count of outbound with both URLs → should equal count of `welcome_bundle_sent` rows.
 
 ## Out of scope (ask before doing)
+- Backfilling the bundle to existing prospects who already received first-touch (would double-touch, risky for WhatsApp trust).
+- Adding the links to group messages or bulk campaigns.
 
-- Rewriting historical `messages.content` rows (would touch prospect audit trail).
-- Sending a "we've moved to getwellafrica.com" broadcast — would burn WhatsApp trust with duplicate touches.
-
-Approve and I'll ship Part A + B in one pass.
+Approve and I'll implement in one pass.
