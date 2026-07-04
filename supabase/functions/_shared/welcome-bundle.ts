@@ -79,7 +79,7 @@ export async function maybeWelcomeBundle(
         await svc.from("contact_activity").insert({
           contact_id: contactId,
           type: "welcome_bundle_sent",
-          content: opts?.source || "welcome_bundle",
+          performed_by: "00000000-0000-0000-0000-000000000000",
           metadata: { intro: cfg.intro, register: cfg.register, source: opts?.source || null },
         }).then(() => {}).catch(() => {});
       },
