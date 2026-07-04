@@ -1488,9 +1488,15 @@ Deno.serve(async (req) => {
     // Join / business intent
     const isJoinIntent = /\b(i want to join|want to join|how do i register|i want to become a member|become a member|business opportunity|i want member price|want member price|how to register|register me|sign up as (a )?member|how do i join|associate registration)\b/i.test(lastIn);
 
+    // Welcome bundle: intro + register blog links, appended ONCE per contact.
+    const { maybeWelcomeBundle } = await import("../_shared/welcome-bundle.ts");
+    const welcomeBundle = await maybeWelcomeBundle(svc, contact_id, { source: "auto_reply_first_touch" });
+    (globalThis as any).__welcomeBundleMark = welcomeBundle.mark;
+    diag.welcome_bundle_applied = welcomeBundle.applied;
+
     if (isFirstReply) {
       // Override the AI body — first-touch must be the trust-first script.
-      replyContent = buildFirstTouch(isTwilio || !isMaytapi);
+      replyContent = buildFirstTouch(isTwilio || !isMaytapi) + (welcomeBundle.append || "");
       diag.first_touch_template = isTwilio ? "twilio" : (isMaytapi ? "maytapi" : "default_twilio_style");
       diag.proof_url_first_line = false;
       diag.identity_intro_first_line = true;
