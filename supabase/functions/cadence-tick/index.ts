@@ -267,7 +267,20 @@ Deno.serve(async (req) => {
       // Pick variant
       const variant = await pickVariant(sb, abEnabled, stepDef.templateKey, stepDef.content);
       const firstName = (contact.name || "").split(/\s+/)[0] || "there";
-      const messageBody = renderTemplate(variant.content, { name: firstName });
+      let messageBody = renderTemplate(variant.content, { name: firstName });
+
+      // Welcome bundle: on prospect step 1, append two blog links once per contact.
+      let welcomeBundleMark: (() => Promise<void>) | null = null;
+      if (row.sequence_key === SEQUENCE_KEY && nextStepNum === 1) {
+        try {
+          const { maybeWelcomeBundle } = await import("../_shared/welcome-bundle.ts");
+          const wb = await maybeWelcomeBundle(sb, contact.id, { source: "cadence_step1" });
+          if (wb.applied) {
+            messageBody = messageBody + wb.append;
+            welcomeBundleMark = wb.mark;
+          }
+        } catch (_e) { /* non-fatal */ }
+      }
 
       // Resolve recipient: prefer phone_normalized (already E.164). Fallback to phone,
       // forcing a leading "+" so Maytapi accepts it. SA-specific reformatting if needed.
@@ -399,6 +412,7 @@ Deno.serve(async (req) => {
         diag.sent++;
         remainingDaily--;
         sentInWindow++;
+        if (welcomeBundleMark) { try { await welcomeBundleMark(); } catch (_e) {} }
         // Schedule next step
         const nextDef = rowSteps.find((s) => s.step === nextStepNum + 1);
         const nextAt = nextDef
