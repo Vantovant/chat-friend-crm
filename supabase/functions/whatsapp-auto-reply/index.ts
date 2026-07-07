@@ -1496,8 +1496,11 @@ Deno.serve(async (req) => {
 
     if (isFirstReply) {
       // Override the AI body — first-touch must be the trust-first script.
-      replyContent = buildFirstTouch(isTwilio || !isMaytapi) + (welcomeBundle.append || "");
-      diag.first_touch_template = isTwilio ? "twilio" : (isMaytapi ? "maytapi" : "default_twilio_style");
+      // 2026-07-06: Maytapi first-touch now uses the identical Twilio-style body
+      // (identity intro + Twilio bridge line + support menu + Shop + Local support)
+      // so both channels deliver the same welcome message on first contact.
+      replyContent = buildFirstTouch(true) + (welcomeBundle.append || "");
+      diag.first_touch_template = "unified_twilio_style";
       diag.proof_url_first_line = false;
       diag.identity_intro_first_line = true;
       actionTaken = "first_touch_trust_message";
