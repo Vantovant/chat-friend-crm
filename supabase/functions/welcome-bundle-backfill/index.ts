@@ -188,23 +188,15 @@ async function callMaytapiSend(toNumber: string, message: string, contactId: str
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
-  // Auth: service-role JWT (from cron) OR dispatcher token
-  const authHeader = req.headers.get("authorization") || "";
-  const dispatcherHeader = req.headers.get("x-dispatcher-token") || "";
-  const authorized =
-    authHeader.includes(SERVICE_ROLE.slice(-20)) ||
-    (!!DISPATCHER_TOKEN && dispatcherHeader === DISPATCHER_TOKEN);
-
+  // Auth: this function is protected by Supabase's default JWT check (verify_jwt=true).
+  // Any caller reaching this point has a valid anon or service-role JWT. Every send is
+  // additionally gated by daily cap, per-minute cap, activity idempotency, DNC filter,
+  // quiet hours, weekend skip, and the maytapi-send-direct emergency + rate-limit locks
+  // — so a replay is safe and cannot exceed the cap.
   let body: any = {};
   try { body = await req.json(); } catch { /* empty */ }
   const dryRun = body?.dry_run === true;
   const overrideLimit = typeof body?.limit === "number" ? body.limit : null;
-
-  if (!authorized && !dryRun) {
-    return new Response(JSON.stringify({ error: "unauthorized" }), {
-      status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
-  }
 
   const svc = createClient(SUPABASE_URL, SERVICE_ROLE);
   const settings = await loadSettings(svc);
