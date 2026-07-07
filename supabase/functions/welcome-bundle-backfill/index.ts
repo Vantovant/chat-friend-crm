@@ -110,7 +110,7 @@ async function pickCandidates(svc: any, limit: number): Promise<any[]> {
     .from("contacts")
     .select("id, name, phone, phone_normalized, lead_type, do_not_contact, is_deleted, created_at")
     .eq("is_deleted", false)
-    .eq("lead_type", "Prospect")
+    .eq("lead_type", "prospect")
     .not("phone_normalized", "is", null)
     .neq("do_not_contact", true)
     .order("created_at", { ascending: false })
