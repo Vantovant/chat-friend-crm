@@ -108,12 +108,11 @@ async function pickCandidates(svc: any, limit: number): Promise<any[]> {
   // Pull a larger pool then filter in-memory (Supabase JS lacks EXISTS/NOT EXISTS).
   const { data: pool, error } = await svc
     .from("contacts")
-    .select("id, name, phone, phone_normalized, lead_type, do_not_contact, opted_out, is_deleted, created_at")
+    .select("id, name, phone, phone_normalized, lead_type, do_not_contact, is_deleted, created_at")
     .eq("is_deleted", false)
     .eq("lead_type", "Prospect")
     .not("phone_normalized", "is", null)
     .neq("do_not_contact", true)
-    .neq("opted_out", true)
     .order("created_at", { ascending: false })
     .limit(limit * 10);
   if (error) throw error;
