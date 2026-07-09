@@ -263,8 +263,9 @@ Deno.serve(async (req) => {
     try {
       const r = await callMaytapiSend(c.phone_normalized, message, c.id);
       if (r.ok) {
-        await svc.from("contact_activity").insert({
-          contact_id: c.id,
+        const siblingIds: string[] = (c.sibling_ids && c.sibling_ids.length) ? c.sibling_ids : [c.id];
+        const rows = siblingIds.map((sid) => ({
+          contact_id: sid,
           type: "welcome_bundle_sent",
           performed_by: SYSTEM_USER,
           metadata: {
@@ -273,8 +274,11 @@ Deno.serve(async (req) => {
             intro: settings.intro,
             register: settings.register,
             maytapi_message_id: r.data?.message_id || null,
+            phone_normalized: c.phone_normalized,
+            sent_via_contact_id: c.id,
           },
-        });
+        }));
+        await svc.from("contact_activity").insert(rows);
         diag.sent++;
       } else {
         diag.errors++;
