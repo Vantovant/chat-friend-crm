@@ -1,8 +1,41 @@
-# Welcome to your Lovable project
+# Vanto CRM (Get Well Hub)
+
+Production WhatsApp CRM for APLGO / Get Well Africa. Hybrid multi-user
+workspace: shared inbox + private notes, per-user Twilio routing, and
+super-admin-only Maytapi (see change log below).
+
+## Recent changes (2026-07-09) — Multi-user & Maytapi suspension
+
+- **Team invitations (super-admin only).** Invited users join as `agent`
+  role. Existing invitation flow untouched.
+- **Hybrid data model.** Shared: contacts, Twilio + Maytapi inboxes,
+  CRM pipeline, knowledge, playbooks. Private per-user: plan/tasks,
+  voice diary, AI settings, prospector drafts.
+- **Twilio hybrid routing.**
+  - `profiles.twilio_routing_mode` = `shared` | `own_number`.
+  - `profiles.twilio_phone_number` (E.164) — used as `From` for own-number users.
+  - Inbound `twilio-whatsapp-inbound` stamps `messages.routed_to_user_id`
+    when destination matches a user's number; otherwise NULL = shared.
+- **Maytapi hybrid routing (inbound stamping).** Same pattern in
+  `maytapi-webhook-inbound` via `profiles.maytapi_phone_id`.
+- **Contact ownership.** `contacts.owner_user_id` (nullable, NULL = shared).
+- **Inbox default view.** Non-admins default to "My inbox"; admins default
+  to "All".
+- **Maytapi suspended for invited users** (this change):
+  - Sidebar: `Maytapi Inbox` and `Group Campaigns` marked `adminOnly`.
+  - Edge functions `maytapi-send-direct` and `maytapi-send-group` now call
+    `_shared/require-admin-or-system.ts`. Service-role / anon / no-auth
+    callers (cron + edge-to-edge) pass through unchanged. Agent-role JWTs
+    are blocked with `403 { reason: "maytapi_shared_number_disabled_for_invited_users" }`.
+  - Rationale: the workspace Maytapi is the super-admin's personal
+    WhatsApp; per-number rate limits, trust-header identity, and ban risk
+    make sharing unsafe. Invited users will connect their own Maytapi
+    credentials in a future "Settings → Team → Connect your Maytapi" flow.
 
 ## Project info
 
 **URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+
 
 ## How can I edit this code?
 
