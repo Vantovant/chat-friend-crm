@@ -230,6 +230,7 @@ export function SettingsModule() {
       toast({ title: 'Save failed', description: error.message, variant: 'destructive' });
       return;
     }
+    toast({ title: 'Saved', description: 'Team member settings updated.' });
     await loadTeamMembers();
   };
 
