@@ -250,6 +250,7 @@ Deno.serve(async (req) => {
     status: 'delivered',
     provider: 'twilio',
     provider_message_id: messageSid,
+    routed_to_user_id: routedToUserId,
   }).select('id').single();
 
   if (msgErr) {
