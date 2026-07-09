@@ -533,6 +533,7 @@ export type Database = {
           name: string
           name_needs_confirmation: boolean
           notes: string | null
+          owner_user_id: string | null
           phone: string
           phone_normalized: string | null
           phone_raw: string | null
@@ -580,6 +581,7 @@ export type Database = {
           name: string
           name_needs_confirmation?: boolean
           notes?: string | null
+          owner_user_id?: string | null
           phone: string
           phone_normalized?: string | null
           phone_raw?: string | null
@@ -627,6 +629,7 @@ export type Database = {
           name?: string
           name_needs_confirmation?: boolean
           notes?: string | null
+          owner_user_id?: string | null
           phone?: string
           phone_normalized?: string | null
           phone_raw?: string | null
@@ -1588,6 +1591,7 @@ export type Database = {
           phone_last4: string | null
           raw: Json | null
           received_at: string | null
+          routed_to_user_id: string | null
           status: string | null
           user_id: string
           zazi_action_id: string | null
@@ -1608,6 +1612,7 @@ export type Database = {
           phone_last4?: string | null
           raw?: Json | null
           received_at?: string | null
+          routed_to_user_id?: string | null
           status?: string | null
           user_id: string
           zazi_action_id?: string | null
@@ -1628,6 +1633,7 @@ export type Database = {
           phone_last4?: string | null
           raw?: Json | null
           received_at?: string | null
+          routed_to_user_id?: string | null
           status?: string | null
           user_id?: string
           zazi_action_id?: string | null
@@ -1719,6 +1725,7 @@ export type Database = {
           provider: string | null
           provider_message_id: string | null
           read_at: string | null
+          routed_to_user_id: string | null
           sent_by: string | null
           status: Database["public"]["Enums"]["message_status"] | null
           status_raw: string | null
@@ -1736,6 +1743,7 @@ export type Database = {
           provider?: string | null
           provider_message_id?: string | null
           read_at?: string | null
+          routed_to_user_id?: string | null
           sent_by?: string | null
           status?: Database["public"]["Enums"]["message_status"] | null
           status_raw?: string | null
@@ -1753,6 +1761,7 @@ export type Database = {
           provider?: string | null
           provider_message_id?: string | null
           read_at?: string | null
+          routed_to_user_id?: string | null
           sent_by?: string | null
           status?: Database["public"]["Enums"]["message_status"] | null
           status_raw?: string | null
@@ -2165,8 +2174,14 @@ export type Database = {
           email: string | null
           full_name: string | null
           id: string
+          inbox_default_view: string
+          is_active: boolean
           last_synced_at: string | null
+          maytapi_phone_number: string | null
+          maytapi_routing_mode: string
           phone: string | null
+          twilio_phone_number: string | null
+          twilio_routing_mode: string
           updated_at: string
         }
         Insert: {
@@ -2175,8 +2190,14 @@ export type Database = {
           email?: string | null
           full_name?: string | null
           id: string
+          inbox_default_view?: string
+          is_active?: boolean
           last_synced_at?: string | null
+          maytapi_phone_number?: string | null
+          maytapi_routing_mode?: string
           phone?: string | null
+          twilio_phone_number?: string | null
+          twilio_routing_mode?: string
           updated_at?: string
         }
         Update: {
@@ -2185,8 +2206,14 @@ export type Database = {
           email?: string | null
           full_name?: string | null
           id?: string
+          inbox_default_view?: string
+          is_active?: boolean
           last_synced_at?: string | null
+          maytapi_phone_number?: string | null
+          maytapi_routing_mode?: string
           phone?: string | null
+          twilio_phone_number?: string | null
+          twilio_routing_mode?: string
           updated_at?: string
         }
         Relationships: []

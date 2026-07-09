@@ -81,6 +81,19 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
+    // Routing lookup: which team member owns this Maytapi phone_id?
+    let routedToUserId: string | null = null;
+    if (payload.phone_id) {
+      const { data: routedProfile } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("maytapi_routing_mode", "own_number")
+        .eq("maytapi_phone_number", String(payload.phone_id))
+        .maybeSingle();
+      routedToUserId = routedProfile?.id ?? null;
+      if (routedToUserId) console.log("[maytapi-inbound] Routed to user:", routedToUserId);
+    }
+
     // Always log webhook event for audit
     await supabase.from("webhook_events").insert({
       source: "maytapi",
@@ -630,6 +643,7 @@ Deno.serve(async (req) => {
           provider: "maytapi",
           provider_message_id: providerMessageId,
           status: "delivered",
+          routed_to_user_id: routedToUserId,
         })
         .select("id")
         .single();
@@ -678,6 +692,7 @@ Deno.serve(async (req) => {
           status: "received",
           received_at: new Date().toISOString(),
           raw: payload,
+          routed_to_user_id: routedToUserId,
         }).then(() => {}, (e: any) => console.warn("[maytapi-inbound] maytapi_messages warn:", e?.message));
 
         await supabase.from("contact_activity").insert({
