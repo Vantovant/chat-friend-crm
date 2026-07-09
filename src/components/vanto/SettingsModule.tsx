@@ -44,6 +44,11 @@ interface TeamMember {
   role: string;
   full_name: string | null;
   email: string | null;
+  is_active: boolean;
+  twilio_routing_mode: 'shared' | 'own_number';
+  twilio_phone_number: string | null;
+  maytapi_routing_mode: 'shared' | 'own_number';
+  maytapi_phone_number: string | null;
 }
 
 function InviteModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
