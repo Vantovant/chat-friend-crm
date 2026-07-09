@@ -455,46 +455,120 @@ export function SettingsModule() {
                 <h3 className="text-base font-bold text-foreground mt-6 mb-4">Team Members</h3>
                 <div className="vanto-card overflow-hidden">
                   {teamMembers.map((member, i) => (
-                    <div key={member.user_id} className={cn('flex items-center justify-between px-4 py-3', i < teamMembers.length - 1 && 'border-b border-border/50')}>
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center text-sm font-bold text-muted-foreground">
-                          {(member.full_name?.[0] ?? member.email?.[0] ?? '?').toUpperCase()}
+                    <div key={member.user_id} className={cn('px-4 py-3', i < teamMembers.length - 1 && 'border-b border-border/50')}>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-9 h-9 rounded-full bg-secondary flex items-center justify-center text-sm font-bold text-muted-foreground">
+                            {(member.full_name?.[0] ?? member.email?.[0] ?? '?').toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-foreground">
+                              {member.full_name ?? member.email}
+                              {!member.is_active && <span className="ml-2 text-xs text-muted-foreground">(paused)</span>}
+                            </p>
+                            <p className="text-xs text-muted-foreground">{member.email}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-sm font-medium text-foreground">{member.full_name ?? member.email}</p>
-                          <p className="text-xs text-muted-foreground">{member.email}</p>
+                        <div className="flex items-center gap-2">
+                          {editingRole === member.user_id ? (
+                            <div className="flex items-center gap-2">
+                              <select
+                                defaultValue={member.role}
+                                onChange={e => updateMemberRole(member.user_id, e.target.value)}
+                                disabled={savingRole}
+                                className="bg-secondary/60 border border-border rounded px-2 py-1 text-xs text-foreground outline-none focus:border-primary/60"
+                              >
+                                <option value="agent">Agent</option>
+                                <option value="admin">Admin</option>
+                                <option value="super_admin">Super Admin</option>
+                              </select>
+                              <button onClick={() => setEditingRole(null)} className="text-xs text-muted-foreground hover:text-foreground">
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <span className="text-xs font-medium px-2 py-0.5 rounded border bg-primary/10 text-primary border-primary/30 capitalize">
+                                {member.role.replace('_', ' ')}
+                              </span>
+                              <button
+                                onClick={() => setEditingRole(member.user_id)}
+                                className="text-muted-foreground hover:text-foreground transition-colors"
+                              >
+                                <Edit2 size={13} />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        {editingRole === member.user_id ? (
-                          <div className="flex items-center gap-2">
+
+                      {/* Routing controls */}
+                      <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="p-3 rounded-lg bg-secondary/40 border border-border/40">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs font-semibold text-foreground">Twilio inbox</p>
                             <select
-                              defaultValue={member.role}
-                              onChange={e => updateMemberRole(member.user_id, e.target.value)}
-                              disabled={savingRole}
-                              className="bg-secondary/60 border border-border rounded px-2 py-1 text-xs text-foreground outline-none focus:border-primary/60"
+                              defaultValue={member.twilio_routing_mode}
+                              onChange={e => updateMemberProfile(member.user_id, { twilio_routing_mode: e.target.value as any })}
+                              className="bg-background border border-border rounded px-2 py-1 text-xs text-foreground outline-none focus:border-primary/60"
                             >
-                              <option value="agent">Agent</option>
-                              <option value="admin">Admin</option>
-                              <option value="super_admin">Super Admin</option>
+                              <option value="shared">Shared inbox</option>
+                              <option value="own_number">Own number</option>
                             </select>
-                            <button onClick={() => setEditingRole(null)} className="text-xs text-muted-foreground hover:text-foreground">
-                              Cancel
-                            </button>
                           </div>
-                        ) : (
-                          <>
-                            <span className="text-xs font-medium px-2 py-0.5 rounded border bg-primary/10 text-primary border-primary/30 capitalize">
-                              {member.role.replace('_', ' ')}
-                            </span>
-                            <button
-                              onClick={() => setEditingRole(member.user_id)}
-                              className="text-muted-foreground hover:text-foreground transition-colors"
+                          {member.twilio_routing_mode === 'own_number' && (
+                            <input
+                              type="text"
+                              defaultValue={member.twilio_phone_number ?? ''}
+                              onBlur={e => {
+                                const v = e.target.value.trim();
+                                if (v !== (member.twilio_phone_number ?? '')) {
+                                  updateMemberProfile(member.user_id, { twilio_phone_number: v });
+                                }
+                              }}
+                              placeholder="+27790831530 (E.164)"
+                              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/60"
+                            />
+                          )}
+                        </div>
+                        <div className="p-3 rounded-lg bg-secondary/40 border border-border/40">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-xs font-semibold text-foreground">Maytapi inbox</p>
+                            <select
+                              defaultValue={member.maytapi_routing_mode}
+                              onChange={e => updateMemberProfile(member.user_id, { maytapi_routing_mode: e.target.value as any })}
+                              className="bg-background border border-border rounded px-2 py-1 text-xs text-foreground outline-none focus:border-primary/60"
                             >
-                              <Edit2 size={13} />
-                            </button>
-                          </>
-                        )}
+                              <option value="shared">Shared inbox</option>
+                              <option value="own_number">Own number</option>
+                            </select>
+                          </div>
+                          {member.maytapi_routing_mode === 'own_number' && (
+                            <input
+                              type="text"
+                              defaultValue={member.maytapi_phone_number ?? ''}
+                              onBlur={e => {
+                                const v = e.target.value.trim();
+                                if (v !== (member.maytapi_phone_number ?? '')) {
+                                  updateMemberProfile(member.user_id, { maytapi_phone_number: v });
+                                }
+                              }}
+                              placeholder="Maytapi phone_id"
+                              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/60"
+                            />
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-2 flex items-center gap-2">
+                        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={member.is_active}
+                            onChange={e => updateMemberProfile(member.user_id, { is_active: e.target.checked })}
+                            className="accent-primary"
+                          />
+                          Active
+                        </label>
                       </div>
                     </div>
                   ))}
