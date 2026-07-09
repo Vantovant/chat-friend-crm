@@ -392,7 +392,7 @@ export function SettingsModule() {
                 Invitation sent successfully!
               </div>
             )}
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4 pr-2 md:pr-56 mt-10 md:mt-0">
               <h3 className="text-base font-bold text-foreground">Team Invitations</h3>
               {isSuperAdmin && (
                 <button
