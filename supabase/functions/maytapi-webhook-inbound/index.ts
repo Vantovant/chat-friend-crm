@@ -643,6 +643,7 @@ Deno.serve(async (req) => {
           provider: "maytapi",
           provider_message_id: providerMessageId,
           status: "delivered",
+          routed_to_user_id: routedToUserId,
         })
         .select("id")
         .single();
