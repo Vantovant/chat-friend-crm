@@ -558,7 +558,8 @@ export function SettingsModule() {
                               className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/60"
                             />
                           )}
-                        </div>
+                      </div>
+                      <p className="mt-2 text-[10px] text-muted-foreground italic">Changes save automatically. Non-admin members must use their own Maytapi number — the admin's private number is never shared.</p>
                       </div>
                       <div className="mt-2 flex items-center gap-2">
                         <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
