@@ -230,6 +230,7 @@ export function SettingsModule() {
       toast({ title: 'Save failed', description: error.message, variant: 'destructive' });
       return;
     }
+    toast({ title: 'Saved', description: 'Team member settings updated.' });
     await loadTeamMembers();
   };
 
@@ -508,7 +509,7 @@ export function SettingsModule() {
                           <div className="flex items-center justify-between mb-2">
                             <p className="text-xs font-semibold text-foreground">Twilio inbox</p>
                             <select
-                              defaultValue={member.twilio_routing_mode}
+                              value={member.twilio_routing_mode}
                               onChange={e => updateMemberProfile(member.user_id, { twilio_routing_mode: e.target.value as any })}
                               className="bg-background border border-border rounded px-2 py-1 text-xs text-foreground outline-none focus:border-primary/60"
                             >
@@ -535,7 +536,7 @@ export function SettingsModule() {
                           <div className="flex items-center justify-between mb-2">
                             <p className="text-xs font-semibold text-foreground">Maytapi inbox</p>
                             <select
-                              defaultValue={member.maytapi_routing_mode}
+                              value={member.maytapi_routing_mode}
                               onChange={e => updateMemberProfile(member.user_id, { maytapi_routing_mode: e.target.value as any })}
                               className="bg-background border border-border rounded px-2 py-1 text-xs text-foreground outline-none focus:border-primary/60"
                             >
@@ -557,7 +558,8 @@ export function SettingsModule() {
                               className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/60"
                             />
                           )}
-                        </div>
+                      </div>
+                      <p className="mt-2 text-[10px] text-muted-foreground italic">Changes save automatically. Non-admin members must use their own Maytapi number — the admin's private number is never shared.</p>
                       </div>
                       <div className="mt-2 flex items-center gap-2">
                         <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
