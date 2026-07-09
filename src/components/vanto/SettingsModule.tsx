@@ -536,7 +536,7 @@ export function SettingsModule() {
                           <div className="flex items-center justify-between mb-2">
                             <p className="text-xs font-semibold text-foreground">Maytapi inbox</p>
                             <select
-                              defaultValue={member.maytapi_routing_mode}
+                              value={member.maytapi_routing_mode}
                               onChange={e => updateMemberProfile(member.user_id, { maytapi_routing_mode: e.target.value as any })}
                               className="bg-background border border-border rounded px-2 py-1 text-xs text-foreground outline-none focus:border-primary/60"
                             >
