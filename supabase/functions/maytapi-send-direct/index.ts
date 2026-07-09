@@ -90,6 +90,19 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
+    // 🔒 Invited-user gate: the workspace Maytapi number is the super-admin's personal
+    // WhatsApp. Invited (agent) users must NOT be able to send through it.
+    // System callers (cron / other edge functions using the service role) are unaffected.
+    const { requireAdminOrSystem } = await import("../_shared/require-admin-or-system.ts");
+    const guard = await requireAdminOrSystem(req);
+    if (!guard.ok) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: "Shared Maytapi sending is disabled for invited users. Please connect your own Maytapi account (coming soon in Settings → Team).",
+        reason: guard.reason,
+      }), { status: guard.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     const { to_number, message, skip_trust_header, attach_image_url, contact_id: bodyContactId, skip_rate_limit, source } = await req.json();
     if (!to_number || !message) {
       return new Response(JSON.stringify({ error: "to_number and message required" }), {

@@ -22,7 +22,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'inbox', label: 'Inbox', icon: MessageSquare },
-  { id: 'maytapi-inbox', label: 'Maytapi Inbox', icon: MessageSquare },
+  { id: 'maytapi-inbox', label: 'Maytapi Inbox', icon: MessageSquare, adminOnly: true },
   { id: 'plan', label: 'PLAN', icon: CalendarCheck },
   { id: 'voice-diary', label: 'Voice Diary', icon: BookHeart },
   { id: 'contacts', label: 'Contacts', icon: Users },
@@ -32,7 +32,7 @@ const navItems: NavItem[] = [
   { id: 'knowledge', label: 'Knowledge', icon: BookOpen },
   { id: 'playbooks', label: 'Playbooks', icon: FileText },
   { id: 'workflows', label: 'Workflows', icon: GitBranch },
-  { id: 'group-campaigns', label: 'Group Campaigns', icon: Megaphone },
+  { id: 'group-campaigns', label: 'Group Campaigns', icon: Megaphone, adminOnly: true },
   { id: 'group-administrator', label: 'Group Administrator', icon: ShieldCheck, adminOnly: true },
   { id: 'integrations', label: 'Integrations', icon: Puzzle },
   { id: 'api-console', label: 'API Console', icon: Terminal },

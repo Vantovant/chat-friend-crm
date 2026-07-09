@@ -162,6 +162,19 @@ Deno.serve(async (req) => {
   }
 
   try {
+    // 🔒 Invited-user gate: block agent-role users from posting through the shared Maytapi number.
+    const { requireAdminOrSystem } = await import("../_shared/require-admin-or-system.ts");
+    const guard = await requireAdminOrSystem(req);
+    if (!guard.ok) {
+      return new Response(JSON.stringify({
+        success: false,
+        processed: 0,
+        error: "Shared Maytapi group sending is disabled for invited users. Connect your own Maytapi account (coming soon in Settings → Team).",
+        reason: guard.reason,
+      }), { status: guard.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+
     const directBody = await req.json().catch(() => null);
     const PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID")?.trim();
     const PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID")?.trim();
