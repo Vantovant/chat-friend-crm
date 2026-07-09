@@ -189,11 +189,23 @@ export function SettingsModule() {
   const loadTeamMembers = async () => {
     const { data: roles } = await supabase.from('user_roles').select('user_id, role');
     if (!roles) return;
-    const { data: profiles } = await supabase.from('profiles').select('id, full_name, email');
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, full_name, email, is_active, twilio_routing_mode, twilio_phone_number, maytapi_routing_mode, maytapi_phone_number');
     if (!profiles) return;
     const members: TeamMember[] = roles.map(r => {
-      const p = profiles.find(p => p.id === r.user_id);
-      return { user_id: r.user_id, role: r.role, full_name: p?.full_name ?? null, email: p?.email ?? null };
+      const p: any = profiles.find((p: any) => p.id === r.user_id);
+      return {
+        user_id: r.user_id,
+        role: r.role,
+        full_name: p?.full_name ?? null,
+        email: p?.email ?? null,
+        is_active: p?.is_active ?? true,
+        twilio_routing_mode: (p?.twilio_routing_mode as any) ?? 'shared',
+        twilio_phone_number: p?.twilio_phone_number ?? null,
+        maytapi_routing_mode: (p?.maytapi_routing_mode as any) ?? 'shared',
+        maytapi_phone_number: p?.maytapi_phone_number ?? null,
+      };
     });
     setTeamMembers(members);
   };
@@ -204,6 +216,21 @@ export function SettingsModule() {
     await loadTeamMembers();
     setSavingRole(false);
     setEditingRole(null);
+  };
+
+  const updateMemberProfile = async (userId: string, patch: Partial<TeamMember>) => {
+    const dbPatch: any = {};
+    if ('is_active' in patch) dbPatch.is_active = patch.is_active;
+    if ('twilio_routing_mode' in patch) dbPatch.twilio_routing_mode = patch.twilio_routing_mode;
+    if ('twilio_phone_number' in patch) dbPatch.twilio_phone_number = patch.twilio_phone_number || null;
+    if ('maytapi_routing_mode' in patch) dbPatch.maytapi_routing_mode = patch.maytapi_routing_mode;
+    if ('maytapi_phone_number' in patch) dbPatch.maytapi_phone_number = patch.maytapi_phone_number || null;
+    const { error } = await supabase.from('profiles').update(dbPatch).eq('id', userId);
+    if (error) {
+      toast({ title: 'Save failed', description: error.message, variant: 'destructive' });
+      return;
+    }
+    await loadTeamMembers();
   };
 
   const handleInviteSuccess = () => {
