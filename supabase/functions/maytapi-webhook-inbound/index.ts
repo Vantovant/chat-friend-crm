@@ -692,6 +692,7 @@ Deno.serve(async (req) => {
           status: "received",
           received_at: new Date().toISOString(),
           raw: payload,
+          routed_to_user_id: routedToUserId,
         }).then(() => {}, (e: any) => console.warn("[maytapi-inbound] maytapi_messages warn:", e?.message));
 
         await supabase.from("contact_activity").insert({
