@@ -118,48 +118,53 @@ async function pickCandidates(svc: any, limit: number): Promise<any[]> {
   if (error) throw error;
 
   const picks: any[] = [];
+  const seenPhones = new Set<string>();
   for (const c of (pool || [])) {
     if (picks.length >= limit) break;
+    if (!c.phone_normalized) continue;
+    if (seenPhones.has(c.phone_normalized)) continue; // dedupe duplicate contact rows within this run
 
-    // Already welcomed?
+    // All contact rows sharing this phone (duplicate-contact safety)
+    const { data: siblings } = await svc
+      .from("contacts")
+      .select("id")
+      .eq("phone_normalized", c.phone_normalized)
+      .eq("is_deleted", false);
+    const siblingIds = (siblings || []).map((s: any) => s.id);
+
+    // Already welcomed on ANY contact row for this phone?
     const { data: wb } = await svc
       .from("contact_activity")
       .select("id")
-      .eq("contact_id", c.id)
+      .in("contact_id", siblingIds)
       .eq("type", "welcome_bundle_sent")
       .limit(1)
       .maybeSingle();
-    if (wb) continue;
+    if (wb) { seenPhones.add(c.phone_normalized); continue; }
 
-    // Recent outbound? (avoid stacking)
-    const { data: recentOut } = await svc
-      .from("messages")
+    // Conversations across all sibling contact rows
+    const { data: convs } = await svc
+      .from("conversations")
       .select("id")
-      .eq("is_outbound", true)
-      .gte("created_at", since24h)
-      .in(
-        "conversation_id",
-        (await svc.from("conversations").select("id").eq("contact_id", c.id)).data?.map((x: any) => x.id) || [],
-      )
-      .limit(1)
-      .maybeSingle();
-    if (recentOut) continue;
+      .in("contact_id", siblingIds);
+    const convIds = (convs || []).map((x: any) => x.id);
 
-    // Recent inbound? (respect quiet window)
-    const { data: recentIn } = await svc
-      .from("messages")
-      .select("id")
-      .eq("is_outbound", false)
-      .gte("created_at", since12h)
-      .in(
-        "conversation_id",
-        (await svc.from("conversations").select("id").eq("contact_id", c.id)).data?.map((x: any) => x.id) || [],
-      )
-      .limit(1)
-      .maybeSingle();
-    if (recentIn) continue;
+    if (convIds.length) {
+      const { data: recentOut } = await svc
+        .from("messages").select("id")
+        .eq("is_outbound", true).gte("created_at", since24h)
+        .in("conversation_id", convIds).limit(1).maybeSingle();
+      if (recentOut) { seenPhones.add(c.phone_normalized); continue; }
 
-    picks.push(c);
+      const { data: recentIn } = await svc
+        .from("messages").select("id")
+        .eq("is_outbound", false).gte("created_at", since12h)
+        .in("conversation_id", convIds).limit(1).maybeSingle();
+      if (recentIn) { seenPhones.add(c.phone_normalized); continue; }
+    }
+
+    seenPhones.add(c.phone_normalized);
+    picks.push({ ...c, sibling_ids: siblingIds });
   }
   return picks;
 }
