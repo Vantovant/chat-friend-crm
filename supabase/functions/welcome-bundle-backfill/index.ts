@@ -14,6 +14,10 @@
 //   • per-minute cap (3/min)
 // Idempotent: writes contact_activity type=welcome_bundle_sent on success. Any future
 // first-touch or cadence step 1 will skip this contact.
+//
+// SAFETY UPDATE 2026-07-09: This is no longer allowed to send from cron by default.
+// It is a manual-only recovery tool and requires an explicit confirmation token in
+// the request body for any real send. Dry-runs remain available.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 
@@ -77,7 +81,8 @@ async function loadSettings(svc: any) {
   const m: Record<string, string> = {};
   for (const r of (data || []) as any[]) m[r.key] = (r.value || "").trim();
   return {
-    enabled: (m.welcome_backfill_enabled ?? "true").toLowerCase() === "true",
+    // Default OFF. A missing setting must never silently enable bulk follow-up sends.
+    enabled: (m.welcome_backfill_enabled ?? "false").toLowerCase() === "true",
     dailyCap: parseInt(m.welcome_backfill_daily_cap || "20", 10),
     perMinute: parseInt(m.welcome_backfill_per_minute || "3", 10),
     skipWeekends: (m.welcome_backfill_skip_weekends ?? "true").toLowerCase() === "true",
@@ -200,6 +205,7 @@ Deno.serve(async (req) => {
   let body: any = {};
   try { body = await req.json(); } catch { /* empty */ }
   const dryRun = body?.dry_run === true;
+  const manualConfirm = body?.manual_confirm === "SEND_WELCOME_BACKFILL";
   const overrideLimit = typeof body?.limit === "number" ? body.limit : null;
 
   const svc = createClient(SUPABASE_URL, SERVICE_ROLE);
@@ -219,6 +225,11 @@ Deno.serve(async (req) => {
 
   if (!settings.enabled) {
     diag.reason = "disabled";
+    return new Response(JSON.stringify(diag), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
+  if (!dryRun && !manualConfirm) {
+    diag.reason = "manual_confirmation_required";
+    diag.message = "Real sends are blocked unless manual_confirm=SEND_WELCOME_BACKFILL is provided.";
     return new Response(JSON.stringify(diag), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
   if (!dryRun && isQuietHoursSAST()) {

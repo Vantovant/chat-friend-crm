@@ -39,6 +39,19 @@ function isExpiredOneDaySaleMessage(message: string): boolean {
   return isSaleMessage && Date.now() >= ONE_DAY_SALE_CUTOFF_SAST;
 }
 
+function normalizePhoneToE164(raw: string): string {
+  const digits = String(raw || "").replace(/\D/g, "");
+  return digits ? `+${digits}` : "";
+}
+
+function isWelcomeBundleText(message: string): boolean {
+  const text = String(message || "");
+  return text.includes("Vanto from GetWellAfrica")
+    && text.includes("What would you like support with most")
+    && text.includes("2-minute intro")
+    && text.includes("9-step guide");
+}
+
 async function assertMaytapiReady(productId: string, phoneId: string, token: string): Promise<{ ok: boolean; reason?: string }> {
   try {
     const res = await fetch(`https://api.maytapi.com/api/${productId}/${phoneId}/status`, {
@@ -77,7 +90,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const { to_number, message, skip_trust_header, attach_image_url, contact_id: bodyContactId, skip_rate_limit } = await req.json();
+    const { to_number, message, skip_trust_header, attach_image_url, contact_id: bodyContactId, skip_rate_limit, source } = await req.json();
     if (!to_number || !message) {
       return new Response(JSON.stringify({ error: "to_number and message required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -178,6 +191,64 @@ Deno.serve(async (req) => {
 
     // Normalize to E164 digits only (Maytapi expects "27821234567" without +)
     const cleanNumber = String(to_number).replace(/[^\d]/g, "");
+    const normalizedTo = normalizePhoneToE164(cleanNumber);
+
+    // ── Phone-level welcome-bundle duplicate guard ────────────────────────────
+    // Maytapi delivers to a phone number, not to a CRM contact row. If duplicate
+    // contact rows exist for the same phone, any caller trying to resend the same
+    // welcome bundle must be blocked here before the provider call.
+    if (isWelcomeBundleText(String(message))) {
+      try {
+        const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+        const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+        if (SUPABASE_URL && SERVICE_ROLE && normalizedTo) {
+          const svc = createClient(SUPABASE_URL, SERVICE_ROLE);
+          let duplicateFound = false;
+
+          const { data: byPhone } = await svc
+            .from("contact_activity")
+            .select("id, created_at")
+            .eq("type", "welcome_bundle_sent")
+            .filter("metadata->>phone_normalized", "eq", normalizedTo)
+            .limit(1)
+            .maybeSingle();
+          duplicateFound = !!byPhone;
+
+          if (!duplicateFound) {
+            const { data: siblings } = await svc
+              .from("contacts")
+              .select("id")
+              .eq("phone_normalized", normalizedTo)
+              .eq("is_deleted", false);
+            const siblingIds = (siblings || []).map((s: any) => s.id).filter(Boolean);
+            if (siblingIds.length) {
+              const { data: bySibling } = await svc
+                .from("contact_activity")
+                .select("id, created_at")
+                .eq("type", "welcome_bundle_sent")
+                .in("contact_id", siblingIds)
+                .limit(1)
+                .maybeSingle();
+              duplicateFound = !!bySibling;
+            }
+          }
+
+          if (duplicateFound) {
+            console.warn("[maytapi-send-direct] duplicate welcome bundle blocked", { normalizedTo, source: source || null, contact_id: bodyContactId || null });
+            return new Response(JSON.stringify({
+              success: false,
+              duplicate_guard: true,
+              reason: "welcome_bundle_already_sent_to_phone",
+            }), {
+              status: 409,
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+        }
+      } catch (err) {
+        console.warn("[maytapi-send-direct] welcome duplicate guard failed open:", (err as Error).message);
+      }
+    }
 
     // ── Trust-header enforcement ──────────────────────────────────────────────
     // Skip only if caller explicitly opts out (e.g., the trust header is already
