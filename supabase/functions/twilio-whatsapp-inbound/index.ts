@@ -100,22 +100,37 @@ Deno.serve(async (req) => {
   }
 
   const from = params['From'] || '';
+  const to = params['To'] || '';
   const body = params['Body'] || '';
   const messageSid = params['MessageSid'] || '';
   const profileName = params['ProfileName'] || '';
 
   const phoneE164 = normalizePhoneToE164(from);
   const phoneDigits = digitsOnly(phoneE164);
+  const toE164 = normalizePhoneToE164(to);
 
   if (!phoneE164) {
     console.error('[twilio-inbound] No phone in From:', from);
     return jsonRes({ error: 'No phone number' }, 400);
   }
 
-  console.log('[twilio-inbound] Inbound from', phoneE164, '| SID:', messageSid, '| Body length:', body.length);
+  console.log('[twilio-inbound] Inbound from', phoneE164, '→', toE164, '| SID:', messageSid, '| Body length:', body.length);
 
   const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
   const svc = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+
+  // Routing lookup: which team member owns this Twilio destination number?
+  let routedToUserId: string | null = null;
+  if (toE164) {
+    const { data: routedProfile } = await svc
+      .from('profiles')
+      .select('id')
+      .eq('twilio_routing_mode', 'own_number')
+      .eq('twilio_phone_number', toE164)
+      .maybeSingle();
+    routedToUserId = routedProfile?.id ?? null;
+    if (routedToUserId) console.log('[twilio-inbound] Routed to user:', routedToUserId);
+  }
 
   // Helper: detect placeholder names that should be replaced with a real WA push-name
   const isPlaceholderName = (n: string | null | undefined): boolean => {
