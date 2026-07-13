@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { FileText, Phone, BarChart3, Users, ArrowLeft } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { FileText, Phone, BarChart3, Users, ArrowLeft, Link2 } from 'lucide-react';
 import { LeadCallReport } from './reports/LeadCallReport';
 import { Button } from '@/components/ui/button';
+import { supabase } from '@/integrations/supabase/client';
 
 type ReportKey = 'lead-call' | null;
 
