@@ -34,6 +34,7 @@ const navItems: NavItem[] = [
   { id: 'workflows', label: 'Workflows', icon: GitBranch },
   { id: 'group-campaigns', label: 'Group Campaigns', icon: Megaphone, adminOnly: true },
   { id: 'group-administrator', label: 'Group Administrator', icon: ShieldCheck, adminOnly: true },
+  { id: 'backlink-outreach', label: 'Backlink Outreach', icon: Link2, adminOnly: true },
   { id: 'integrations', label: 'Integrations', icon: Puzzle },
   { id: 'api-console', label: 'API Console', icon: Terminal },
   { id: 'reports', label: 'Reports', icon: FileText, adminOnly: true },
