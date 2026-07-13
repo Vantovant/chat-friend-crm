@@ -83,22 +83,23 @@ export function BacklinkOutreachModule() {
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="px-6 py-4 border-b border-border shrink-0">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl vanto-gradient flex items-center justify-center">
+        <div className="flex items-start justify-between gap-3 mb-3 flex-wrap pr-32">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl vanto-gradient flex items-center justify-center shrink-0">
               <Link2 size={18} className="text-primary-foreground" />
             </div>
-            <div>
-              <h2 className="text-lg font-bold text-foreground">Backlink Outreach</h2>
-              <p className="text-xs text-muted-foreground">Growth · SA backlink pipeline · 5/day/user cap · 14d/domain cooldown</p>
+            <div className="min-w-0">
+              <h2 className="text-lg font-bold text-foreground truncate">Backlink Outreach</h2>
+              <p className="text-xs text-muted-foreground truncate">Growth · SA backlink pipeline · 5/day/user cap · 14d/domain cooldown</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button onClick={() => load()} className="p-2 rounded-lg border border-border text-muted-foreground hover:text-foreground" title="Refresh"><RefreshCcw size={14} /></button>
             <button onClick={() => setShowImport(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm text-foreground hover:bg-secondary/60"><Upload size={14} /> Import CSV</button>
             <button onClick={() => setShowNew(true)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg vanto-gradient text-primary-foreground text-sm font-medium hover:opacity-90"><Plus size={14} /> New target</button>
           </div>
         </div>
+
 
         {/* Tabs + search */}
         <div className="flex items-center justify-between gap-2 flex-wrap">
