@@ -5,7 +5,7 @@ import { toast } from '@/hooks/use-toast';
 import {
   Link2, Plus, X, Loader2, Upload, Search, Mail, ExternalLink,
   FileText as FileIcon, Settings as Cog, Kanban, Table as TableIcon,
-  Send, GripVertical, RefreshCcw,
+  Send, GripVertical, RefreshCcw, Sparkles,
 } from 'lucide-react';
 
 // ─── Types ─────────────────────────────────────────────────────────
