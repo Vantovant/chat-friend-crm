@@ -31,6 +31,7 @@ const ProspectorDraftsModule = lazy(() => import('@/components/vanto/ProspectorD
 const PlanModule = lazy(() => import('@/components/vanto/PlanModule').then(m => ({ default: m.PlanModule })));
 const VoiceDiaryModule = lazy(() => import('@/components/vanto/VoiceDiaryModule').then(m => ({ default: m.VoiceDiaryModule })));
 const BacklinkOutreachModule = lazy(() => import('@/components/vanto/BacklinkOutreachModule').then(m => ({ default: m.BacklinkOutreachModule })));
+const ClientNurtureModule = lazy(() => import('@/components/vanto/ClientNurtureModule').then(m => ({ default: m.ClientNurtureModule })));
 
 import { Bot, Home } from 'lucide-react';
 
