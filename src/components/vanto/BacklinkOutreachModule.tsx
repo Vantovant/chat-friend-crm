@@ -490,11 +490,14 @@ function TargetDrawer({ target, templates, onClose, reload }: {
                 <textarea readOnly value={preview.body} rows={10} className="fld text-xs font-mono" />
               </>
             )}
-            <div className="flex items-center justify-between">
-              <p className="text-[10px] text-muted-foreground">Send opens your mail client. Every send is logged and counts against caps (5/24h, 1/domain/14d).</p>
-              <button onClick={send} disabled={sending || !preview} className="px-4 py-2 rounded-lg vanto-gradient text-primary-foreground text-sm font-medium disabled:opacity-40 flex items-center gap-2">
-                {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Log & send
-              </button>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <p className="text-[10px] text-muted-foreground flex-1 min-w-[200px]">Send opens your mail client. Every send is logged and counts against caps (5/24h, 1/domain/14d).</p>
+              <div className="flex items-center gap-2">
+                <DraftGuestPostButton targetId={t.id} onDrafted={reload} />
+                <button onClick={send} disabled={sending || !preview} className="px-4 py-2 rounded-lg vanto-gradient text-primary-foreground text-sm font-medium disabled:opacity-40 flex items-center gap-2">
+                  {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Log & send
+                </button>
+              </div>
             </div>
           </div>
 
