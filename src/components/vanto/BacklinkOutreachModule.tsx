@@ -493,6 +493,7 @@ function TargetDrawer({ target, templates, onClose, reload }: {
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <p className="text-[10px] text-muted-foreground flex-1 min-w-[200px]">Send opens your mail client. Every send is logged and counts against caps (5/24h, 1/domain/14d).</p>
               <div className="flex items-center gap-2">
+                <SemrushEnrichButton targetId={t.id} onDone={reload} />
                 <DraftGuestPostButton targetId={t.id} onDrafted={reload} />
                 <button onClick={send} disabled={sending || !preview} className="px-4 py-2 rounded-lg vanto-gradient text-primary-foreground text-sm font-medium disabled:opacity-40 flex items-center gap-2">
                   {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Log & send
@@ -549,6 +550,25 @@ function DraftGuestPostButton({ targetId, onDrafted }: { targetId: string; onDra
   return (
     <button onClick={run} disabled={busy} className="px-3 py-2 rounded-lg border border-primary/40 text-primary text-sm font-medium disabled:opacity-40 flex items-center gap-1.5 hover:bg-primary/10">
       {busy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Draft guest post (AI)
+    </button>
+  );
+}
+
+function SemrushEnrichButton({ targetId, onDone }: { targetId: string; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    const { data, error } = await supabase.functions.invoke('backlink-enrich-semrush', { body: { target_id: targetId } });
+    setBusy(false);
+    if (error) return toast({ title: 'Enrichment failed', description: error.message, variant: 'destructive' });
+    const r = data as { ascore?: number | null; totalBacklinks?: number | null; refDomains?: number | null; error?: string; detail?: string };
+    if (r.error) return toast({ title: r.error, description: r.detail || 'Check Semrush connection in Integrations', variant: 'destructive' });
+    toast({ title: 'Enriched', description: `AS ${r.ascore ?? '—'} · backlinks ${r.totalBacklinks ?? '—'} · ref domains ${r.refDomains ?? '—'}` });
+    onDone();
+  };
+  return (
+    <button onClick={run} disabled={busy} className="px-3 py-2 rounded-lg border border-border text-foreground text-sm font-medium disabled:opacity-40 flex items-center gap-1.5 hover:bg-secondary/60">
+      {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCcw size={14} />} Enrich (Semrush)
     </button>
   );
 }

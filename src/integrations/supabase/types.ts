@@ -620,6 +620,95 @@ export type Database = {
         }
         Relationships: []
       }
+      client_nurture_campaigns: {
+        Row: {
+          active: boolean
+          audience: string | null
+          body_tpl: string
+          cooldown_days: number
+          created_at: string
+          created_by: string | null
+          id: string
+          name: string
+          subject_tpl: string
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          audience?: string | null
+          body_tpl: string
+          cooldown_days?: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name: string
+          subject_tpl: string
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          audience?: string | null
+          body_tpl?: string
+          cooldown_days?: number
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          name?: string
+          subject_tpl?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      client_nurture_sends: {
+        Row: {
+          body: string
+          campaign_id: string
+          contact_email: string
+          contact_id: string | null
+          contact_name: string | null
+          created_at: string
+          error: string | null
+          id: string
+          performed_by: string | null
+          status: string
+          subject: string
+        }
+        Insert: {
+          body: string
+          campaign_id: string
+          contact_email: string
+          contact_id?: string | null
+          contact_name?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          performed_by?: string | null
+          status?: string
+          subject: string
+        }
+        Update: {
+          body?: string
+          campaign_id?: string
+          contact_email?: string
+          contact_id?: string | null
+          contact_name?: string | null
+          created_at?: string
+          error?: string | null
+          id?: string
+          performed_by?: string | null
+          status?: string
+          subject?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "client_nurture_sends_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "client_nurture_campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contact_activity: {
         Row: {
           contact_id: string
