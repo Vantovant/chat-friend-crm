@@ -493,6 +493,7 @@ function TargetDrawer({ target, templates, onClose, reload }: {
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <p className="text-[10px] text-muted-foreground flex-1 min-w-[200px]">Send opens your mail client. Every send is logged and counts against caps (5/24h, 1/domain/14d).</p>
               <div className="flex items-center gap-2">
+                <SemrushEnrichButton targetId={t.id} onDone={reload} />
                 <DraftGuestPostButton targetId={t.id} onDrafted={reload} />
                 <button onClick={send} disabled={sending || !preview} className="px-4 py-2 rounded-lg vanto-gradient text-primary-foreground text-sm font-medium disabled:opacity-40 flex items-center gap-2">
                   {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Log & send
