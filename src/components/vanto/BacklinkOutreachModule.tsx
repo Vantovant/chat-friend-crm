@@ -554,6 +554,25 @@ function DraftGuestPostButton({ targetId, onDrafted }: { targetId: string; onDra
   );
 }
 
+function SemrushEnrichButton({ targetId, onDone }: { targetId: string; onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    const { data, error } = await supabase.functions.invoke('backlink-enrich-semrush', { body: { target_id: targetId } });
+    setBusy(false);
+    if (error) return toast({ title: 'Enrichment failed', description: error.message, variant: 'destructive' });
+    const r = data as { ascore?: number | null; totalBacklinks?: number | null; refDomains?: number | null; error?: string; detail?: string };
+    if (r.error) return toast({ title: r.error, description: r.detail || 'Check Semrush connection in Integrations', variant: 'destructive' });
+    toast({ title: 'Enriched', description: `AS ${r.ascore ?? '—'} · backlinks ${r.totalBacklinks ?? '—'} · ref domains ${r.refDomains ?? '—'}` });
+    onDone();
+  };
+  return (
+    <button onClick={run} disabled={busy} className="px-3 py-2 rounded-lg border border-border text-foreground text-sm font-medium disabled:opacity-40 flex items-center gap-1.5 hover:bg-secondary/60">
+      {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCcw size={14} />} Enrich (Semrush)
+    </button>
+  );
+}
+
 // ─── New target ────────────────────────────────────────────────────
 function NewTargetDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState(''); const [url, setUrl] = useState(''); const [category, setCategory] = useState('');
