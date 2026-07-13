@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { FileText, Phone, BarChart3, Users, ArrowLeft } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { FileText, Phone, BarChart3, Users, ArrowLeft, Link2 } from 'lucide-react';
 import { LeadCallReport } from './reports/LeadCallReport';
 import { Button } from '@/components/ui/button';
+import { supabase } from '@/integrations/supabase/client';
 
 type ReportKey = 'lead-call' | null;
 
@@ -85,6 +86,64 @@ export function ReportsModule() {
           );
         })}
       </div>
+
+      <BacklinkOutreachWidget />
+    </div>
+  );
+}
+
+function BacklinkOutreachWidget() {
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<{ queued: number; contacted: number; reply: number; published: number; dead: number; sent7: number; replies7: number } | null>(null);
+
+  useEffect(() => {
+    const load = async () => {
+      const since = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
+      const [tRes, sentRes, replyRes] = await Promise.all([
+        supabase.from('backlink_targets' as never).select('status').eq('is_deleted', false),
+        supabase.from('backlink_outreach_log' as never).select('id', { count: 'exact', head: true }).eq('event_type', 'sent').gte('created_at', since),
+        supabase.from('backlink_outreach_log' as never).select('id', { count: 'exact', head: true }).eq('event_type', 'reply').gte('created_at', since),
+      ]);
+      const rows = (tRes.data as unknown as { status: string }[]) || [];
+      const by = (s: string) => rows.filter(r => r.status === s).length;
+      setStats({
+        queued: by('queued'), contacted: by('contacted'), reply: by('reply'),
+        published: by('published'), dead: by('dead'),
+        sent7: sentRes.count ?? 0, replies7: replyRes.count ?? 0,
+      });
+      setLoading(false);
+    };
+    load();
+  }, []);
+
+  return (
+    <div className="mt-8">
+      <div className="flex items-center gap-2 mb-3">
+        <Link2 className="h-4 w-4 text-primary" />
+        <h2 className="text-sm font-semibold text-foreground">Backlink Outreach — last 7 days</h2>
+      </div>
+      {loading || !stats ? (
+        <div className="text-xs text-muted-foreground">Loading…</div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
+          <KPI label="Sent (7d)" value={stats.sent7} />
+          <KPI label="Replies (7d)" value={stats.replies7} />
+          <KPI label="Queued" value={stats.queued} />
+          <KPI label="Contacted" value={stats.contacted} />
+          <KPI label="In reply" value={stats.reply} />
+          <KPI label="Published" value={stats.published} />
+          <KPI label="Dead" value={stats.dead} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KPI({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="p-3 rounded-lg border border-border bg-card">
+      <div className="text-xl font-semibold text-foreground">{value}</div>
+      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
     </div>
   );
 }
