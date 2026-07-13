@@ -7,7 +7,7 @@ import logo from '@/assets/getwellhub-logo.png.asset.json';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import {
   LayoutDashboard, MessageSquare, Users, BarChart3, Zap, Bot, GitBranch,
-  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X, Megaphone, ShieldCheck, ShieldAlert, Brain, AlertCircle, CalendarCheck, BookHeart,
+  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X, Megaphone, ShieldCheck, ShieldAlert, Brain, AlertCircle, CalendarCheck, BookHeart, Link2,
 } from 'lucide-react';
 import { InstallAppButton } from './InstallAppButton';
 
@@ -34,6 +34,7 @@ const navItems: NavItem[] = [
   { id: 'workflows', label: 'Workflows', icon: GitBranch },
   { id: 'group-campaigns', label: 'Group Campaigns', icon: Megaphone, adminOnly: true },
   { id: 'group-administrator', label: 'Group Administrator', icon: ShieldCheck, adminOnly: true },
+  { id: 'backlink-outreach', label: 'Backlink Outreach', icon: Link2, adminOnly: true },
   { id: 'integrations', label: 'Integrations', icon: Puzzle },
   { id: 'api-console', label: 'API Console', icon: Terminal },
   { id: 'reports', label: 'Reports', icon: FileText, adminOnly: true },

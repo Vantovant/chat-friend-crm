@@ -419,6 +419,165 @@ export type Database = {
           },
         ]
       }
+      backlink_outreach_log: {
+        Row: {
+          body: string | null
+          created_at: string
+          direction: string | null
+          event_type: string
+          id: string
+          metadata: Json
+          performed_by: string | null
+          subject: string | null
+          target_id: string
+          template_id: string | null
+        }
+        Insert: {
+          body?: string | null
+          created_at?: string
+          direction?: string | null
+          event_type: string
+          id?: string
+          metadata?: Json
+          performed_by?: string | null
+          subject?: string | null
+          target_id: string
+          template_id?: string | null
+        }
+        Update: {
+          body?: string | null
+          created_at?: string
+          direction?: string | null
+          event_type?: string
+          id?: string
+          metadata?: Json
+          performed_by?: string | null
+          subject?: string | null
+          target_id?: string
+          template_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "backlink_outreach_log_target_id_fkey"
+            columns: ["target_id"]
+            isOneToOne: false
+            referencedRelation: "backlink_targets"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "backlink_outreach_log_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "backlink_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      backlink_targets: {
+        Row: {
+          approach: string | null
+          assigned_to: string | null
+          category: string | null
+          contact_url: string | null
+          created_at: string
+          created_by: string | null
+          domain: string | null
+          domain_rating: number | null
+          first_line_hook: string | null
+          id: string
+          is_deleted: boolean
+          last_send_at: string | null
+          name: string
+          next_action_at: string | null
+          notes: string | null
+          published_url: string | null
+          status: string
+          updated_at: string
+          url: string
+        }
+        Insert: {
+          approach?: string | null
+          assigned_to?: string | null
+          category?: string | null
+          contact_url?: string | null
+          created_at?: string
+          created_by?: string | null
+          domain?: string | null
+          domain_rating?: number | null
+          first_line_hook?: string | null
+          id?: string
+          is_deleted?: boolean
+          last_send_at?: string | null
+          name: string
+          next_action_at?: string | null
+          notes?: string | null
+          published_url?: string | null
+          status?: string
+          updated_at?: string
+          url: string
+        }
+        Update: {
+          approach?: string | null
+          assigned_to?: string | null
+          category?: string | null
+          contact_url?: string | null
+          created_at?: string
+          created_by?: string | null
+          domain?: string | null
+          domain_rating?: number | null
+          first_line_hook?: string | null
+          id?: string
+          is_deleted?: boolean
+          last_send_at?: string | null
+          name?: string
+          next_action_at?: string | null
+          notes?: string | null
+          published_url?: string | null
+          status?: string
+          updated_at?: string
+          url?: string
+        }
+        Relationships: []
+      }
+      backlink_templates: {
+        Row: {
+          active: boolean
+          body_tpl: string
+          code: string
+          created_at: string
+          id: string
+          name: string
+          subject_tpl: string
+          updated_at: string
+          updated_by: string | null
+          version: number
+        }
+        Insert: {
+          active?: boolean
+          body_tpl: string
+          code: string
+          created_at?: string
+          id?: string
+          name: string
+          subject_tpl: string
+          updated_at?: string
+          updated_by?: string | null
+          version?: number
+        }
+        Update: {
+          active?: boolean
+          body_tpl?: string
+          code?: string
+          created_at?: string
+          id?: string
+          name?: string
+          subject_tpl?: string
+          updated_at?: string
+          updated_by?: string | null
+          version?: number
+        }
+        Relationships: []
+      }
       cadence_log: {
         Row: {
           contact_id: string
