@@ -288,9 +288,9 @@ function TemplateCard({ tpl, onSaved }: { tpl: Template; onSaved: () => void }) 
 
   const save = async () => {
     setSaving(true);
-    const { error } = await supabase.from('backlink_templates' as never).update(
+    const { error } = await supabase.from('backlink_templates' as never).update({
       subject_tpl: subject, body_tpl: body, version: tpl.version + 1,
-    }).eq('id', tpl.id);
+    } as never).eq('id', tpl.id);
     setSaving(false);
     if (error) return toast({ title: 'Save failed', description: error.message, variant: 'destructive' });
     toast({ title: 'Template saved', description: `${tpl.name} → v${tpl.version + 1}` });
@@ -415,10 +415,10 @@ function TargetDrawer({ target, templates, onClose, reload }: {
       return toast({ title: 'Blocked', description: msg, variant: 'destructive' });
     }
     // Bump target
-    await supabase.from('backlink_targets' as never).update(
+    await supabase.from('backlink_targets' as never).update({
       status: t.status === 'queued' ? 'contacted' : t.status,
       last_send_at: new Date().toISOString(),
-    }).eq('id', t.id);
+    } as never).eq('id', t.id);
     // Open mailto
     const mailto = `mailto:?subject=${encodeURIComponent(preview.subject)}&body=${encodeURIComponent(preview.body)}`;
     window.open(mailto, '_blank');
