@@ -535,6 +535,24 @@ function Field({ label, children, span2 }: { label: string; children: React.Reac
   );
 }
 
+function DraftGuestPostButton({ targetId, onDrafted }: { targetId: string; onDrafted: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    setBusy(true);
+    const { data, error } = await supabase.functions.invoke('backlink-draft-guest-post', { body: { target_id: targetId } });
+    setBusy(false);
+    if (error) return toast({ title: 'Draft failed', description: error.message, variant: 'destructive' });
+    const d = (data as { draft?: { title?: string } } | null)?.draft;
+    toast({ title: 'Draft ready', description: `Saved as note: ${d?.title || 'guest post draft'}` });
+    onDrafted();
+  };
+  return (
+    <button onClick={run} disabled={busy} className="px-3 py-2 rounded-lg border border-primary/40 text-primary text-sm font-medium disabled:opacity-40 flex items-center gap-1.5 hover:bg-primary/10">
+      {busy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Draft guest post (AI)
+    </button>
+  );
+}
+
 // ─── New target ────────────────────────────────────────────────────
 function NewTargetDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState(''); const [url, setUrl] = useState(''); const [category, setCategory] = useState('');
