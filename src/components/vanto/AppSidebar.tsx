@@ -7,7 +7,7 @@ import logo from '@/assets/getwellhub-logo.png.asset.json';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import {
   LayoutDashboard, MessageSquare, Users, BarChart3, Zap, Bot, GitBranch,
-  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X, Megaphone, ShieldCheck, ShieldAlert, Brain, AlertCircle, CalendarCheck, BookHeart, Link2,
+  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X, Megaphone, ShieldCheck, ShieldAlert, Brain, AlertCircle, CalendarCheck, BookHeart, Link2, Mail,
 } from 'lucide-react';
 import { InstallAppButton } from './InstallAppButton';
 
