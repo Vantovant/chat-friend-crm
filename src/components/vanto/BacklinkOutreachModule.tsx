@@ -158,7 +158,7 @@ export function BacklinkOutreachModule() {
 
 // ─── Helpers ───────────────────────────────────────────────────────
 async function changeStatus(id: string, newStatus: Status) {
-  const { error } = await supabase.from('backlink_targets' as never).update({ status: newStatus }).eq('id', id);
+  const { error } = await supabase.from('backlink_targets' as never).update({ status: newStatus } as never).eq('id', id);
   if (error) { toast({ title: 'Update failed', description: error.message, variant: 'destructive' }); return; }
   const { data: { user } } = await supabase.auth.getUser();
   await supabase.from('backlink_outreach_log' as never).insert({
@@ -288,7 +288,7 @@ function TemplateCard({ tpl, onSaved }: { tpl: Template; onSaved: () => void }) 
 
   const save = async () => {
     setSaving(true);
-    const { error } = await supabase.from('backlink_templates' as never).update({
+    const { error } = await supabase.from('backlink_templates' as never).update(
       subject_tpl: subject, body_tpl: body, version: tpl.version + 1,
     }).eq('id', tpl.id);
     setSaving(false);
@@ -415,7 +415,7 @@ function TargetDrawer({ target, templates, onClose, reload }: {
       return toast({ title: 'Blocked', description: msg, variant: 'destructive' });
     }
     // Bump target
-    await supabase.from('backlink_targets' as never).update({
+    await supabase.from('backlink_targets' as never).update(
       status: t.status === 'queued' ? 'contacted' : t.status,
       last_send_at: new Date().toISOString(),
     }).eq('id', t.id);
