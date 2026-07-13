@@ -106,6 +106,7 @@ const Index = () => {
       case 'prospector-drafts': return <ProspectorDraftsModule />;
       case 'plan': return <PlanModule />;
       case 'voice-diary': return <VoiceDiaryModule />;
+      case 'backlink-outreach': return <BacklinkOutreachModule />;
       case 'settings': return <SettingsModule />;
       default: return <InboxModule />;
     }
