@@ -97,20 +97,12 @@ Deno.serve(async (req) => {
     return jsonRes({ error: 'messages array required' }, 400);
   }
 
-  // Build providers list
+  // Build providers list — BYO key takes precedence when configured
   const providers: AIProvider[] = [];
+  const byoProviders: AIProvider[] = [];
 
   const lovableKey = Deno.env.get('LOVABLE_API_KEY') || '';
-  if (lovableKey) {
-    providers.push({
-      url: AI_GATEWAY_URL,
-      key: lovableKey,
-      model: 'google/gemini-3-flash-preview',
-      name: 'lovable',
-    });
-  }
 
-  // BYO key fallback
   const authHeader = req.headers.get('Authorization') || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
 
@@ -137,15 +129,26 @@ Deno.serve(async (req) => {
         if (settings?.is_enabled && settings.api_key_encrypted) {
           const decodedKey = atob(settings.api_key_encrypted);
           if (settings.provider === 'openai') {
-            providers.push({ url: OPENAI_URL, key: decodedKey, model: settings.model || 'gpt-4o-mini', name: 'openai' });
+            byoProviders.push({ url: OPENAI_URL, key: decodedKey, model: settings.model || 'gpt-4o-mini', name: 'openai' });
           } else if (settings.provider === 'gemini') {
-            providers.push({ url: GEMINI_URL, key: decodedKey, model: settings.model || 'gemini-2.0-flash', name: 'gemini' });
+            byoProviders.push({ url: GEMINI_URL, key: decodedKey, model: settings.model || 'gemini-2.0-flash', name: 'gemini' });
           }
         }
       }
     } catch (e) {
       console.error('[ai-chat] Failed to load user AI settings:', e);
     }
+  }
+
+  // BYO first (so user's own key is used), Lovable only as fallback
+  providers.push(...byoProviders);
+  if (lovableKey) {
+    providers.push({
+      url: AI_GATEWAY_URL,
+      key: lovableKey,
+      model: 'google/gemini-3-flash-preview',
+      name: 'lovable',
+    });
   }
 
   if (providers.length === 0) {
