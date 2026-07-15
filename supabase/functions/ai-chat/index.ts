@@ -207,10 +207,9 @@ Deno.serve(async (req) => {
         if (!response.ok) {
           const errText = await response.text();
           console.warn(`[ai-chat] ${provider.name} stream error:`, response.status, errText);
-          if (response.status === 429) return jsonRes({ error: 'Rate limit exceeded. Please try again later.' }, 429);
-          if (response.status === 402) return jsonRes({ error: 'Payment required. Please add funds.' }, 402);
           continue;
         }
+
 
         // Proxy the SSE stream
         return new Response(response.body, {
