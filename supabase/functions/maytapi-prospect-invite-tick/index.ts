@@ -15,12 +15,14 @@ const corsHeaders = {
 const DAILY_CAP = 15;
 const MAX_TOUCHES = 5;
 // Touch → (min days since previous touch, template)
+const GROUP_INVITE_URL = "https://chat.whatsapp.com/Efmbxxh5Wrz7ulfzRWVHPL";
+
 const LADDER: Record<number, { minDays: number; body: (name: string) => string }> = {
-  1: { minDays: 0, body: (n) => `Hi ${n} 👋 This is Vanto from Get Well Africa. You reached out about APLGO wellness a while back — I wanted to personally share our simple 9-step register-and-order guide with you:\n\nhttps://getwellafrica.com/blog/how-to-register-and-order-aplgo-in-9-steps\n\nAny questions, just reply here. Reply STOP anytime to opt out.` },
-  2: { minDays: 3, body: (n) => `Hi ${n}, just checking in 🙂 Did you get a chance to look at the 9-step guide? Here's a quick 2-minute intro on what makes APLGO Accumullit drops different:\n\nhttps://getwellafrica.com/blog/welcome-to-wellness-aplgo-2-minute-intro\n\nHappy to answer anything. Reply STOP to opt out.` },
-  3: { minDays: 7, body: (n) => `Hi ${n}, quick nudge — thousands across SA are now on the APLGO cellular-defense drops. If cost is what's holding you back, ask me about the distributor route (30–40% off retail). Reply STOP to opt out.` },
-  4: { minDays: 14, body: (n) => `Hey ${n}, I don't want to keep pinging you. Two options if you're still curious:\n\n• Read: https://getwellafrica.com/blog/welcome-to-wellness-aplgo-2-minute-intro\n• Or just reply "CALL" and I'll book a 10-min chat.\n\nReply STOP to opt out.` },
-  5: { minDays: 21, body: (n) => `Hi ${n}, this will be my last follow-up 🙏 If wellness or a home-based APLGO business is on your radar again, you know where to find me:\n\nhttps://getwellafrica.com/blog/how-to-register-and-order-aplgo-in-9-steps\n\nWishing you great health either way. Reply STOP if you'd prefer no future messages.` },
+  1: { minDays: 0, body: (n) => `Hi ${n} 👋 This is Vanto from Get Well Africa. You reached out about APLGO wellness a while back — I'd like to personally invite you into our free WhatsApp community where we share daily tips, member results and Q&A on the Accumullit cellular-defense drops:\n\n${GROUP_INVITE_URL}\n\nJust tap the link to join. Reply STOP anytime to opt out of my messages.` },
+  2: { minDays: 3, body: (n) => `Hi ${n}, just checking in 🙂 Did you get a chance to join our APLGO wellness community? It's the easiest way to see real member stories and ask questions in your own time:\n\n${GROUP_INVITE_URL}\n\nHappy to answer anything here too. Reply STOP to opt out.` },
+  3: { minDays: 7, body: (n) => `Hi ${n}, quick nudge — hundreds across SA are now inside our APLGO WhatsApp community learning about the cellular-defense drops. Come join us, no pressure to buy:\n\n${GROUP_INVITE_URL}\n\nReply STOP to opt out.` },
+  4: { minDays: 14, body: (n) => `Hey ${n}, I don't want to keep pinging you privately. Two easy options if you're still curious:\n\n• Join the community: ${GROUP_INVITE_URL}\n• Or reply "CALL" and I'll book a 10-min chat.\n\nReply STOP to opt out.` },
+  5: { minDays: 21, body: (n) => `Hi ${n}, this will be my last personal follow-up 🙏 If wellness is ever on your radar again, our free APLGO community is always open:\n\n${GROUP_INVITE_URL}\n\nWishing you great health either way. Reply STOP if you'd prefer no future messages.` },
 };
 
 function isBusinessWindowSAST(now: Date): boolean {
