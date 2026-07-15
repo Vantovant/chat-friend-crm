@@ -2514,6 +2514,53 @@ export type Database = {
         }
         Relationships: []
       }
+      prospect_invite_touches: {
+        Row: {
+          contact_id: string
+          created_at: string
+          error_reason: string | null
+          id: string
+          message_body: string
+          phone_normalized: string
+          provider_message_id: string | null
+          stage_days: number
+          status: string
+          touch_number: number
+        }
+        Insert: {
+          contact_id: string
+          created_at?: string
+          error_reason?: string | null
+          id?: string
+          message_body: string
+          phone_normalized: string
+          provider_message_id?: string | null
+          stage_days: number
+          status?: string
+          touch_number: number
+        }
+        Update: {
+          contact_id?: string
+          created_at?: string
+          error_reason?: string | null
+          id?: string
+          message_body?: string
+          phone_normalized?: string
+          provider_message_id?: string | null
+          stage_days?: number
+          status?: string
+          touch_number?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prospect_invite_touches_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       prospector_approval_audit: {
         Row: {
           admin_user: string | null
