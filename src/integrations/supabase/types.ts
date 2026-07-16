@@ -2756,6 +2756,7 @@ export type Database = {
       reactivation_campaign_recipients: {
         Row: {
           attempts: number
+          batch_label: string | null
           contact_id: string | null
           created_at: string
           delivered_at: string | null
@@ -2763,10 +2764,12 @@ export type Database = {
           error: string | null
           expired_on: string | null
           first_name: string | null
+          graduated_at: string | null
           id: string
           last_attempt_at: string | null
           member_id: string | null
           name: string
+          notes: string | null
           phone_normalized: string
           provider_message_id: string | null
           rank: string | null
@@ -2779,6 +2782,7 @@ export type Database = {
         }
         Insert: {
           attempts?: number
+          batch_label?: string | null
           contact_id?: string | null
           created_at?: string
           delivered_at?: string | null
@@ -2786,10 +2790,12 @@ export type Database = {
           error?: string | null
           expired_on?: string | null
           first_name?: string | null
+          graduated_at?: string | null
           id?: string
           last_attempt_at?: string | null
           member_id?: string | null
           name: string
+          notes?: string | null
           phone_normalized: string
           provider_message_id?: string | null
           rank?: string | null
@@ -2802,6 +2808,7 @@ export type Database = {
         }
         Update: {
           attempts?: number
+          batch_label?: string | null
           contact_id?: string | null
           created_at?: string
           delivered_at?: string | null
@@ -2809,10 +2816,12 @@ export type Database = {
           error?: string | null
           expired_on?: string | null
           first_name?: string | null
+          graduated_at?: string | null
           id?: string
           last_attempt_at?: string | null
           member_id?: string | null
           name?: string
+          notes?: string | null
           phone_normalized?: string
           provider_message_id?: string | null
           rank?: string | null
@@ -2824,6 +2833,44 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      reactivation_campaign_replies: {
+        Row: {
+          body: string
+          created_at: string
+          id: string
+          phone_normalized: string
+          provider_message_id: string | null
+          received_at: string
+          recipient_id: string
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          id?: string
+          phone_normalized: string
+          provider_message_id?: string | null
+          received_at?: string
+          recipient_id: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          id?: string
+          phone_normalized?: string
+          provider_message_id?: string | null
+          received_at?: string
+          recipient_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reactivation_campaign_replies_recipient_id_fkey"
+            columns: ["recipient_id"]
+            isOneToOne: false
+            referencedRelation: "reactivation_campaign_recipients"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       scheduled_group_posts: {
         Row: {
