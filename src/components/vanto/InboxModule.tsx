@@ -434,6 +434,11 @@ export function InboxModule() {
     if (fixtureFilter === 'test' && !isFixture) return false;
     if (inboxFilter === 'mine') return c.contact?.assigned_to === currentUser?.id;
     if (inboxFilter === 'unassigned') return !c.contact?.assigned_to;
+    if (inboxFilter === 'unanswered') {
+      const lastIn = c.last_inbound_at ? new Date(c.last_inbound_at).getTime() : 0;
+      const lastOut = c.last_outbound_at ? new Date(c.last_outbound_at).getTime() : 0;
+      return lastIn > 0 && lastIn > lastOut;
+    }
     return true;
   });
 
