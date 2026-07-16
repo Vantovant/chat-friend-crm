@@ -78,7 +78,7 @@ type Message = {
   sent_by: string | null;
 };
 
-type InboxFilter = 'accessible' | 'mine' | 'unassigned';
+type InboxFilter = 'accessible' | 'mine' | 'unassigned' | 'unanswered';
 
 /* ── Main Component ── */
 export function InboxModule() {
