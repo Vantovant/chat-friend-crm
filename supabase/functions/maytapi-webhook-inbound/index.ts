@@ -126,6 +126,15 @@ Deno.serve(async (req) => {
         await supabase.from("messages")
           .update({ status: newStatus, status_raw: String(ackStatus) })
           .eq("provider_message_id", msgId);
+
+        // Reactivation campaign tracking
+        const patch: Record<string, unknown> = { status: newStatus };
+        if (newStatus === "delivered") patch.delivered_at = new Date().toISOString();
+        if (ackStatus === 3 || ackStatus === "read") { patch.status = "read"; patch.read_at = new Date().toISOString(); }
+        if (newStatus === "sent") patch.sent_at = new Date().toISOString();
+        await supabase.from("reactivation_campaign_recipients")
+          .update(patch)
+          .eq("provider_message_id", msgId);
       }
     }
 
