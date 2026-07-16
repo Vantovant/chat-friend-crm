@@ -51,6 +51,7 @@ type Conversation = {
   last_message: string | null;
   last_message_at: string | null;
   last_inbound_at: string | null;
+  last_outbound_at: string | null;
   contact: Contact;
 };
 
