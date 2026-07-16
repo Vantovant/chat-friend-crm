@@ -32,6 +32,7 @@ const PlanModule = lazy(() => import('@/components/vanto/PlanModule').then(m => 
 const VoiceDiaryModule = lazy(() => import('@/components/vanto/VoiceDiaryModule').then(m => ({ default: m.VoiceDiaryModule })));
 const BacklinkOutreachModule = lazy(() => import('@/components/vanto/BacklinkOutreachModule').then(m => ({ default: m.BacklinkOutreachModule })));
 const ClientNurtureModule = lazy(() => import('@/components/vanto/ClientNurtureModule').then(m => ({ default: m.ClientNurtureModule })));
+const ReactivationCampaignModule = lazy(() => import('@/components/vanto/ReactivationCampaignModule').then(m => ({ default: m.ReactivationCampaignModule })));
 
 import { Bot, Home } from 'lucide-react';
 
@@ -109,6 +110,7 @@ const Index = () => {
       case 'voice-diary': return <VoiceDiaryModule />;
       case 'backlink-outreach': return <BacklinkOutreachModule />;
       case 'client-nurture': return <ClientNurtureModule />;
+      case 'reactivation-campaign': return <ReactivationCampaignModule />;
       case 'settings': return <SettingsModule />;
       default: return <InboxModule />;
     }

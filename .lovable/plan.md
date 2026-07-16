@@ -1,117 +1,79 @@
-# Backlink Outreach — Vanto CRM Module (Plan C)
+Context loaded. Here's the plan.
 
-Ship a live module that turns the Backlink Outreach Kit v2 into an operational workflow inside Vanto CRM. Everything is agent/admin-only, guarded by the same role model already in the project.
+## 1. The WhatsApp message (sample — approve or edit)
 
-## Deliverables
+Personalised, warm, half-length of the blog copy, ends with the article link so WhatsApp shows a link preview card. First name pulled from column B.
 
-Two artifacts already shipped (Parts A + B):
+```
+Hi {FirstName} 👋
 
-- `SEO_Growth_Strategy_v2.pdf` / `.docx`
-- `GetWellAfrica_Backlink_Outreach_Kit_v2.pdf` / `.docx`
-- `backlink_tracker_v2.csv` (seed data for this module)
+It's Vanto from Get Well Africa (APLGO).
+It's been a while — I hope you and the family are well. 🙏
 
-This plan is Part C — the CRM module.
+I'm reaching out personally because July is your chance to
+*restart your APLGO journey — with the reactivation fee waived*.
 
-## User-facing scope
+✅ Place a 40 PV order any time between 01–31 July 2026
+✅ Reactivation fee = R0 (normally charged)
+✅ Your ID, rank history and team stay intact
 
-- New sidebar entry **Backlink Outreach** under a **Growth** section (peer of Group Campaigns).
-- Views: **Kanban** (Queued → Contacted → Reply → Negotiating → Published → Dead) and **Table** (sortable, filterable, exportable).
-- Per-target drawer: contact info, per-site first-line hook, template picker (A / B / C / D), preview, send, notes, activity feed, backlink URL when published.
-- Template library page: edit the 4 canonical templates (A/B/C/D), version-tracked.
-- Bulk actions: assign, set status, tag, export CSV.
-- CSV import: seed from `backlink_tracker_v2.csv`.
-- Dashboard widget on the main Reports page: targets by status, outreach velocity, replies, published backlinks, referring-domain growth.
-- Weekly digest email (Monday 08:00 SAST) to admins: last-week activity + this-week queue.
+Full details here 👇
+https://getwellafrica.com/blog/restart-your-journey-aplgo-july-2026-reactivation-promo
 
-## Guardrails (hard-coded, admin-tunable via `integration_settings`)
+If you'd like, I can help you pick the right 40 PV combo
+(NRM, PWR, BRN, SLD…) for your goal — just reply *1* and I'll
+send options. Reply *2* if you'd rather I call you.
 
-- **≤ 5 outreach sends / day / user**
-- **≤ 1 send / domain / 14 days**
-- **DNC list**: any target flagged DNC is permanently blocked
-- **Kill switch**: `integration_settings.key = 'backlink_outreach_enabled'` (default `true`)
-- No exact-match anchors in the send form (front-end warning + server-side reject on list of banned anchors)
-- Every send writes a full audit row (who, when, template used, hook line, target, result)
-
-## Optional (deferred): Guest Post Draft Assistant
-
-Not built in this plan — proposed as Plan D after C ships and is proven. It would generate 900-word drafts from Knowledge Vault + AI Trainer rules in site-specific tone.
-
----
-
-## Technical section
-
-### 1. Database (one migration)
-
-New tables in `public`:
-
-- `backlink_targets` — one row per site
-  - `id uuid pk`, `name text not null`, `url text not null unique`, `status text not null default 'queued'` (queued / contacted / reply / negotiating / published / dead / dnc), `category text`, `approach text` (A/B/C/D), `contact_url text`, `first_line_hook text`, `assigned_to uuid references auth.users`, `domain_rating int`, `last_send_at timestamptz`, `next_action_at timestamptz`, `published_url text`, `notes text`, `created_by uuid`, `created_at timestamptz default now()`, `updated_at timestamptz default now()`, `is_deleted boolean default false`
-- `backlink_templates` — 4 seeded rows (A/B/C/D) + user-added
-  - `id uuid pk`, `code text` (A/B/C/D or custom), `name text`, `subject_tpl text`, `body_tpl text`, `active bool default true`, `version int default 1`, `updated_by uuid`, `updated_at timestamptz default now()`
-- `backlink_outreach_log` — every send + reply + status change
-  - `id uuid pk`, `target_id uuid references backlink_targets on delete cascade`, `template_id uuid references backlink_templates`, `event_type text` (sent / reply / status_change / note), `direction text` (outbound/inbound), `subject text`, `body text`, `metadata jsonb`, `performed_by uuid`, `created_at timestamptz default now()`
-- `backlink_settings` — thin table for the kill switch + caps (or reuse `integration_settings`)
-
-**Grants + RLS** in the same migration, following the project pattern:
-
-```sql
-grant select, insert, update, delete on public.backlink_targets to authenticated;
-grant all on public.backlink_targets to service_role;
--- (repeat for other tables; no anon grants)
-alter table public.backlink_targets enable row level security;
-create policy "agents+admins can read"  on public.backlink_targets for select to authenticated
-  using (public.has_role(auth.uid(),'agent') or public.is_admin_or_super_admin());
-create policy "agents+admins can write" on public.backlink_targets for all to authenticated
-  using  (public.has_role(auth.uid(),'agent') or public.is_admin_or_super_admin())
-  with check (public.has_role(auth.uid(),'agent') or public.is_admin_or_super_admin());
--- similar for backlink_templates, backlink_outreach_log
+— Vanto | Get Well Africa
 ```
 
-Trigger `enforce_backlink_send_caps()` on `backlink_outreach_log` insert where `event_type='sent'`:
-- Reject if today's `sent` rows for `performed_by` ≥ 5
-- Reject if any `sent` row exists for `target.url`'s domain in last 14 days
-- Reject if `backlink_outreach_enabled` = false in `integration_settings`
+Trust wrapper (identity + Shop + local support) is auto-appended by `maytapi-send-direct`, so the raw body stays short.
 
-Seed `backlink_templates` with A/B/C/D from the Outreach Kit v2.
+## 2. The list
 
-### 2. Edge functions
+Uploaded file `Vanto_Level1_2024_2025_Only.xlsx` contains **39 expired Level-1 members** (ID, Name, Rank, Expiry date, Enrollment date, Email, Phone in E164-ready format `27…`). All South Africa.
 
-- `backlink-send` — POST { target_id, template_id, hook_override? }. Renders subject + body using target + template + first-line hook, opens the user's default mail client via a `mailto:` response, and writes the `sent` log row. (No SMTP in v1 — we open mailto so we don't need email infra; v2 can add real send via existing email connector when the user asks.)
-- `backlink-cadence-tick` — runs daily 06:00 SAST via `pg_cron`. Emits reminders in `backlink_outreach_log` for day-4 nudge and day-10 kill.
-- `backlink-weekly-digest` — Monday 08:00 SAST. Summarises to admin emails.
+## 3. Sending plan (protects your daily WA limit)
 
-### 3. UI (React + Tailwind, matches existing `vanto-card` / `vanto-gradient` tokens)
+Existing daily hard cap: 100 msgs / 24h across the whole workspace (`rate_limit_24h`). Group campaigns + auto-replies already use part of it. To stay safe:
 
-- `src/components/vanto/BacklinkOutreachModule.tsx` — top-level page
-  - Header (title + filters + Import CSV + New Target)
-  - Tabs: **Kanban** / **Table** / **Templates** / **Settings**
-- `src/components/vanto/backlink/KanbanBoard.tsx` — drag-and-drop columns (reuse patterns from `CRMModule.tsx`)
-- `src/components/vanto/backlink/TargetsTable.tsx` — sortable/filterable
-- `src/components/vanto/backlink/TargetDrawer.tsx` — target detail + send flow
-- `src/components/vanto/backlink/TemplateEditor.tsx`
-- `src/components/vanto/backlink/SettingsPanel.tsx` — caps + kill switch
+- **Pace: 8 sends per day, 4-minute gap between each** → ~32 min of dispatch time.
+- **Window: 10:00–11:00 SAST** (peak read-rate for SA warm audience).
+- **Total run: 5 days** (39 ÷ 8 = 5 days). Finishes well inside July.
+- Uses `maytapi-send-direct` (same choke-point that enforces cooldown, kill switch, rate limit).
+- Skips anyone with `do_not_contact`, opt-out, or an outbound in the last 6h.
 
-Sidebar addition in `src/components/vanto/AppSidebar.tsx`: new group "Growth" with **Backlink Outreach** under it. Route added to `src/pages/Index.tsx` module switch.
+## 4. Dedicated dashboard — "Reactivation Campaign"
 
-Reports dashboard widget added to `ReportsModule.tsx` with per-week outbound / reply / published counts.
+New page under Group Campaigns → **"July Reactivation (Expired)"** showing:
 
-### 4. Seed & import
+| Column | Meaning |
+|---|---|
+| Name | From sheet |
+| Phone | E164 |
+| Status | queued / sent / delivered / read / failed / replied |
+| Sent at | Timestamp |
+| Delivery event | From Maytapi webhook |
+| Reply preview | First inbound after send, if any |
+| Action | Resend / Skip / Open conversation |
 
-- Seed script runs once from admin **Settings → Backlink Outreach → Import v2 kit** — parses `backlink_tracker_v2.csv` and inserts all 30 targets with correct status (skips DEAD as `dead`, marks BLOCKED / UNCHECKED normally).
-- Also allow arbitrary CSV upload with column mapping.
+Stat cards at top: Total 39 · Sent · Delivered · Read · Replied · Failed.
 
-### 5. Rollout
+## 5. Technical build
 
-- Phase 1 (this build): tables + Kanban/Table/Drawer + mailto send + caps trigger + CSV import + sidebar entry
-- Phase 2 (follow-up turn): cadence tick + weekly digest + Reports widget + template editor UI polish
-- Phase 3 (later, optional): Semrush enrichment (auto-fetch DR / traffic per target) using the existing Semrush connector
+- **Table** `reactivation_campaign_recipients` (id, member_id, name, phone_normalized, status, sent_at, provider_message_id, delivered_at, read_at, replied_at, error, contact_id). RLS admin-only. GRANTs included.
+- **Seed migration**: insert the 39 rows from the uploaded sheet.
+- **Edge function** `reactivation-campaign-tick` — cron `*/4 10-11 * * *` SAST; picks next `queued` row, calls `maytapi-send-direct` with the message + blog link, updates row.
+- **Webhook hook**: extend `maytapi-webhook-inbound` to stamp delivered/read/replied on the matching row by `provider_message_id` / `phone_normalized`.
+- **UI**: `ReactivationCampaignModule.tsx` (table + stats + manual "Send now" per row + master pause switch stored in `integration_settings.reactivation_campaign_enabled`).
+- **Kill switch**: single toggle disables the cron immediately.
+- **Duplicate guard**: a member is only sent once (unique on `phone_normalized`).
+- **No touching**: Twilio inbox, auto-reply, group cadence, recovery-tick — all left as-is.
 
-### 6. Non-goals
+## 6. What I need from you
 
-- Not building a full SMTP sender (mailto is sufficient v1; keeps replies in your own inbox)
-- Not touching Group Campaigns, Prospector, or Inbox
-- No AI generation of first-line hooks in v1 (hooks already exist in seed data; AI drafting is Plan D)
+1. Approve the message copy (or paste edits).
+2. Confirm 8/day × 5 days at 10:00–11:00 SAST works.
+3. Confirm the dashboard lives under **Group Campaigns** (or should I put it under **CRM → Campaigns**?).
 
----
-
-**Approve this plan and I will build Phase 1 next turn (single migration + module + sidebar + import). Phases 2–3 are opt-in follow-ups.**
+Reply **GO** and I'll build in one pass (migration + seed + function + cron + UI).
