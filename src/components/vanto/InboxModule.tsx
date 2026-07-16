@@ -51,6 +51,7 @@ type Conversation = {
   last_message: string | null;
   last_message_at: string | null;
   last_inbound_at: string | null;
+  last_outbound_at: string | null;
   contact: Contact;
 };
 
@@ -78,7 +79,7 @@ type Message = {
   sent_by: string | null;
 };
 
-type InboxFilter = 'accessible' | 'mine' | 'unassigned';
+type InboxFilter = 'accessible' | 'mine' | 'unassigned' | 'unanswered';
 
 /* ── Main Component ── */
 export function InboxModule() {
@@ -434,6 +435,11 @@ export function InboxModule() {
     if (fixtureFilter === 'test' && !isFixture) return false;
     if (inboxFilter === 'mine') return c.contact?.assigned_to === currentUser?.id;
     if (inboxFilter === 'unassigned') return !c.contact?.assigned_to;
+    if (inboxFilter === 'unanswered') {
+      const lastIn = c.last_inbound_at ? new Date(c.last_inbound_at).getTime() : 0;
+      const lastOut = c.last_outbound_at ? new Date(c.last_outbound_at).getTime() : 0;
+      return lastIn > 0 && lastIn > lastOut;
+    }
     return true;
   });
 
@@ -466,18 +472,20 @@ export function InboxModule() {
               />
             </div>
             <div className="flex gap-1 mt-2">
-              {(['accessible', 'mine', 'unassigned'] as const).map(f => (
+              {(['accessible', 'mine', 'unassigned', 'unanswered'] as const).map(f => (
                 <button
                   key={f}
                   onClick={() => setInboxFilter(f)}
                   className={cn(
                     'px-2.5 py-1 rounded-lg text-[10px] font-semibold border transition-colors capitalize',
                     inboxFilter === f
-                      ? 'bg-primary/15 text-primary border-primary/30'
+                      ? (f === 'unanswered'
+                          ? 'bg-amber-500/15 text-amber-500 border-amber-500/30'
+                          : 'bg-primary/15 text-primary border-primary/30')
                       : 'text-muted-foreground border-border hover:text-foreground hover:bg-secondary/60'
                   )}
                 >
-                  {f === 'accessible' ? 'All' : f === 'mine' ? 'My Leads' : 'Unassigned'}
+                  {f === 'accessible' ? 'All' : f === 'mine' ? 'My Leads' : f === 'unassigned' ? 'Unassigned' : 'Unanswered'}
                 </button>
               ))}
             </div>
