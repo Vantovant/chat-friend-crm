@@ -110,6 +110,7 @@ const Index = () => {
       case 'voice-diary': return <VoiceDiaryModule />;
       case 'backlink-outreach': return <BacklinkOutreachModule />;
       case 'client-nurture': return <ClientNurtureModule />;
+      case 'reactivation-campaign': return <ReactivationCampaignModule />;
       case 'settings': return <SettingsModule />;
       default: return <InboxModule />;
     }
