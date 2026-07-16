@@ -1461,26 +1461,48 @@ Deno.serve(async (req) => {
     };
 
     // ── Detect message-class fallbacks (apply at any turn, not only first) ──
-    const lastInTextRaw = (
-      await svc
-        .from("messages")
-        .select("content")
-        .eq("conversation_id", conversation_id)
-        .eq("is_outbound", false)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle()
-    ).data?.content || "";
+    // 2026-07-16: Multi-turn context awareness — a user often says
+    // "What is NRM" then "Price" as two separate messages. Reading only the
+    // last message caused us to dump a generic "which product?" link fallback
+    // instead of quoting the R433.13 NRM price we already have in knowledge.
+    // We now pull the last 3 inbounds (last ~15 min) and treat product tokens
+    // in any of them as valid context.
+    const { data: recentInRows } = await svc
+      .from("messages")
+      .select("content, created_at")
+      .eq("conversation_id", conversation_id)
+      .eq("is_outbound", false)
+      .order("created_at", { ascending: false })
+      .limit(3);
+    const recentIn = (recentInRows || []) as Array<{ content: string; created_at: string }>;
+    const lastInTextRaw = recentIn[0]?.content || "";
     const lastIn = lastInTextRaw.toLowerCase().trim();
+    // Combine last 3 inbounds within a 15-minute window as one context blob.
+    const WINDOW_MS = 15 * 60 * 1000;
+    const nowMs = Date.now();
+    const recentBlob = recentIn
+      .filter(r => nowMs - new Date(r.created_at).getTime() <= WINDOW_MS)
+      .map(r => (r.content || "").toLowerCase())
+      .join(" | ");
 
     const isProductInfoReq =
       /\b(product info( please)?|send (me )?info|i want to know more|tell me about (the )?products?|more info|info please|product information|what products do you have)\b/i.test(lastIn);
 
     // Price-asked-but-no-product-context: mentions price but no product token
+    // in the CURRENT message OR in the recent conversation window.
     const mentionsPrice = /\b(price|cost|how much|pricing|how much is)\b/i.test(lastIn);
-    const productTokens = /(ice|nrm|rlx|pwr|grw|sld|dox|gts|brn|chm|stp|hpr|mnd|skn|lemon|apricot|daily|premium|elite|pendant|pft|status|lft|alt|mls|hrt|air|hpy|bty)/i;
-    const hasProductContext = productTokens.test(lastIn);
+    const productTokens = /\b(ice|nrm|rlx|pwr|grw|sld|dox|gts|brn|chm|stp|hpr|mnd|skn|lemon|apricot|daily|premium|elite|pendant|pft|status|lft|alt|mls|hrt|air|hpy|bty)\b/i;
+    const hasProductContextNow = productTokens.test(lastIn);
+    const hasProductContextRecent = productTokens.test(recentBlob);
+    const hasProductContext = hasProductContextNow || hasProductContextRecent;
     const isPriceNoContext = mentionsPrice && !hasProductContext;
+    diag.multi_turn_product_context = hasProductContextRecent && !hasProductContextNow;
+
+    // Specific factual question — user is asking for a real answer, not a menu.
+    // "what is NRM", "how does RLX work", "does GTS help with...", "how much is PWR"
+    const isSpecificFactualQuestion =
+      hasProductContext &&
+      /\b(what\s+is|what\s+are|what\s+does|how\s+does|how\s+do|does\s+it|does\s+the|tell\s+me\s+about|explain|difference|benefit|ingredient|dosage|how\s+to\s+(use|take))\b/i.test(lastIn);
 
     // Buy intent (no price asked, just ready to order)
     const isBuyIntent = /\b(i want to buy|want to buy|send (me )?(the )?order link|order link|i'?m ready|i am ready|ready to order|how do i order|buy now|place (an )?order|how to buy)\b/i.test(lastIn);
@@ -1494,7 +1516,17 @@ Deno.serve(async (req) => {
     (globalThis as any).__welcomeBundleMark = welcomeBundle.mark;
     diag.welcome_bundle_applied = welcomeBundle.applied;
 
-    if (isFirstReply) {
+    // 2026-07-16: If the very first inbound is a SPECIFIC factual question
+    // (e.g. "What is NRM?" / "How much is RLX?"), do NOT override with the
+    // generic first-touch link dump. Let the AI's knowledge-grounded answer
+    // stand, prefixed with a single-line identity tag so trust is preserved.
+    if (isFirstReply && (isSpecificFactualQuestion || (mentionsPrice && hasProductContext))) {
+      replyContent =
+        `${IDENTITY_INTRO}\n${replyContent}`.trim() + (welcomeBundle.append || "");
+      diag.first_touch_template = "factual_answer_preserved";
+      diag.identity_intro_first_line = true;
+      actionTaken = "first_touch_factual_answer";
+    } else if (isFirstReply) {
       // Override the AI body — first-touch must be the trust-first script.
       // 2026-07-06: Maytapi first-touch now uses the identical Twilio-style body
       // (identity intro + Twilio bridge line + support menu + Shop + Local support)
