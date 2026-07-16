@@ -563,6 +563,37 @@ Deno.serve(async (req) => {
         });
       }
 
+      // ── REACTIVATION CAMPAIGN ISOLATION ──
+      // If this phone belongs to an expired-member campaign recipient AND has NOT
+      // been graduated to Contacts yet, keep the reply out of the main Contacts
+      // pipeline (no prospect creation, no auto-cadence). Store the reply against
+      // the reactivation table only and return early.
+      {
+        const { data: reactRow } = await supabase
+          .from("reactivation_campaign_recipients")
+          .select("id, contact_id")
+          .eq("phone_normalized", phoneE164)
+          .maybeSingle();
+        if (reactRow && !reactRow.contact_id) {
+          await supabase.from("reactivation_campaign_replies").insert({
+            recipient_id: reactRow.id,
+            phone_normalized: phoneE164,
+            body: text,
+            provider_message_id: providerMessageId,
+          });
+          await supabase.from("reactivation_campaign_recipients").update({
+            replied_at: new Date().toISOString(),
+            reply_preview: text.slice(0, 200),
+            status: "replied",
+            updated_at: new Date().toISOString(),
+          }).eq("id", reactRow.id);
+          console.log("[maytapi-inbound] Reactivation reply routed (isolated):", reactRow.id);
+          return new Response(JSON.stringify({ ok: true, routed: "reactivation_campaign" }), {
+            status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+
       // Find or create contact by phone_normalized
       let { data: contact } = await supabase
         .from("contacts")
