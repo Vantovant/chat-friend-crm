@@ -472,18 +472,20 @@ export function InboxModule() {
               />
             </div>
             <div className="flex gap-1 mt-2">
-              {(['accessible', 'mine', 'unassigned'] as const).map(f => (
+              {(['accessible', 'mine', 'unassigned', 'unanswered'] as const).map(f => (
                 <button
                   key={f}
                   onClick={() => setInboxFilter(f)}
                   className={cn(
                     'px-2.5 py-1 rounded-lg text-[10px] font-semibold border transition-colors capitalize',
                     inboxFilter === f
-                      ? 'bg-primary/15 text-primary border-primary/30'
+                      ? (f === 'unanswered'
+                          ? 'bg-amber-500/15 text-amber-500 border-amber-500/30'
+                          : 'bg-primary/15 text-primary border-primary/30')
                       : 'text-muted-foreground border-border hover:text-foreground hover:bg-secondary/60'
                   )}
                 >
-                  {f === 'accessible' ? 'All' : f === 'mine' ? 'My Leads' : 'Unassigned'}
+                  {f === 'accessible' ? 'All' : f === 'mine' ? 'My Leads' : f === 'unassigned' ? 'Unassigned' : 'Unanswered'}
                 </button>
               ))}
             </div>
