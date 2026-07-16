@@ -2753,6 +2753,78 @@ export type Database = {
         }
         Relationships: []
       }
+      reactivation_campaign_recipients: {
+        Row: {
+          attempts: number
+          contact_id: string | null
+          created_at: string
+          delivered_at: string | null
+          email: string | null
+          error: string | null
+          expired_on: string | null
+          first_name: string | null
+          id: string
+          last_attempt_at: string | null
+          member_id: string | null
+          name: string
+          phone_normalized: string
+          provider_message_id: string | null
+          rank: string | null
+          read_at: string | null
+          replied_at: string | null
+          reply_preview: string | null
+          sent_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          contact_id?: string | null
+          created_at?: string
+          delivered_at?: string | null
+          email?: string | null
+          error?: string | null
+          expired_on?: string | null
+          first_name?: string | null
+          id?: string
+          last_attempt_at?: string | null
+          member_id?: string | null
+          name: string
+          phone_normalized: string
+          provider_message_id?: string | null
+          rank?: string | null
+          read_at?: string | null
+          replied_at?: string | null
+          reply_preview?: string | null
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          contact_id?: string | null
+          created_at?: string
+          delivered_at?: string | null
+          email?: string | null
+          error?: string | null
+          expired_on?: string | null
+          first_name?: string | null
+          id?: string
+          last_attempt_at?: string | null
+          member_id?: string | null
+          name?: string
+          phone_normalized?: string
+          provider_message_id?: string | null
+          rank?: string | null
+          read_at?: string | null
+          replied_at?: string | null
+          reply_preview?: string | null
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       scheduled_group_posts: {
         Row: {
           attempt_count: number
