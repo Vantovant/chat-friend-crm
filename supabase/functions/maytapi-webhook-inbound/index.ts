@@ -663,6 +663,12 @@ Deno.serve(async (req) => {
           last_inbound_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         }).eq("id", contact.id).then(() => {}).catch(() => {});
+        // Reactivation campaign reply tracking
+        supabase.from("reactivation_campaign_recipients").update({
+          replied_at: new Date().toISOString(),
+          reply_preview: text.slice(0, 200),
+          status: "replied",
+        }).eq("phone_normalized", phoneE164).is("replied_at", null).then(() => {}).catch(() => {});
         fetch(`${SUPABASE_URL}/functions/v1/lead-stage-detect`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
