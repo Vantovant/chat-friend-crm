@@ -33,6 +33,7 @@ const navItems: NavItem[] = [
   { id: 'playbooks', label: 'Playbooks', icon: FileText },
   { id: 'workflows', label: 'Workflows', icon: GitBranch },
   { id: 'group-campaigns', label: 'Group Campaigns', icon: Megaphone, adminOnly: true },
+  { id: 'reactivation-campaign', label: 'Reactivation Campaign', icon: Megaphone, adminOnly: true },
   { id: 'group-administrator', label: 'Group Administrator', icon: ShieldCheck, adminOnly: true },
   { id: 'backlink-outreach', label: 'Backlink Outreach', icon: Link2, adminOnly: true },
   { id: 'client-nurture', label: 'Client Email Nurture', icon: Mail, adminOnly: true },
