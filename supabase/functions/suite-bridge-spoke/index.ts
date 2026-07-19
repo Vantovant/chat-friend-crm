@@ -38,7 +38,7 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
-  const secret = Deno.env.get("SUITE_BRIDGE_SECRET");
+  const secret = Deno.env.get("SUITE_BRIDGE_SECRET_GETWELL_HUB") ?? Deno.env.get("SUITE_BRIDGE_SECRET");
   if (!secret) return json({ error: "spoke_missing_secret" }, 500);
 
   const senderApp = req.headers.get("x-bridge-app") ?? "";
