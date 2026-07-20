@@ -107,7 +107,9 @@ Deno.serve(async (req) => {
   // ── Deletes (one per call) ──
   for (const row of pendingDelete ?? []) {
     const resp = await signedPost(secret, "contacts_delete", {
-      remote_id: row.payload?.remote_id,
+      source_app: "vanto_crm",
+      source_ref: row.payload?.source_ref ?? row.payload?.remote_id,
+      remote_id: row.payload?.source_ref ?? row.payload?.remote_id,
       reason: row.payload?.reason ?? "contact_deleted",
     });
     if (resp.ok && resp.data?.ok) {
