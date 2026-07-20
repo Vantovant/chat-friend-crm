@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { CloudCheck, CloudAlert } from 'lucide-react';
+import { CloudUpload, CloudOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -45,7 +45,7 @@ export function HubSyncBadge({ collapsed }: Props) {
   }, []);
 
   const healthy = pending < 10;
-  const Icon = healthy ? CloudCheck : CloudAlert;
+  const Icon = healthy ? CloudUpload : CloudOff;
 
   if (collapsed) {
     return (
