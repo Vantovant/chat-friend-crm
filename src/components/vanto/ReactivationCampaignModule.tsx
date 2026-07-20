@@ -246,7 +246,12 @@ export function ReactivationCampaignModule() {
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map((r) => (
+                    {[...rows].sort((a, b) => {
+                      const ar = a.status === 'replied' ? 0 : 1;
+                      const br = b.status === 'replied' ? 0 : 1;
+                      if (ar !== br) return ar - br;
+                      return 0;
+                    }).map((r) => (
                       <tr key={r.id} className="border-t border-border/40 hover:bg-muted/20">
                         <td className="p-2 font-medium">
                           {r.name}
