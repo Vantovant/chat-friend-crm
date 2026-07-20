@@ -10,6 +10,7 @@ import {
   Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X, Megaphone, ShieldCheck, ShieldAlert, Brain, AlertCircle, CalendarCheck, BookHeart, Link2, Mail,
 } from 'lucide-react';
 import { InstallAppButton } from './InstallAppButton';
+import { HubSyncBadge } from './HubSyncBadge';
 
 interface NavItem {
   id: Module;
@@ -273,6 +274,7 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
 
       {/* Footer */}
       <div className="p-2 border-t border-border space-y-1">
+        <HubSyncBadge collapsed={collapsed} />
         <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/60 transition-all text-sm">
           <Bell size={16} />
           {!collapsed && <span>Notifications</span>}
