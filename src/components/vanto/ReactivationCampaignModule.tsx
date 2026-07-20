@@ -186,7 +186,7 @@ export function ReactivationCampaignModule() {
   }, [replies]);
 
   return (
-    <div className="p-4 sm:p-6 space-y-4">
+    <div className="p-4 sm:p-6 space-y-4 h-full overflow-y-auto">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">July Reactivation (Expired Members)</h1>
