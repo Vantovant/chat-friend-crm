@@ -57,10 +57,13 @@ Deno.serve(async (req) => {
 
     if (resp.ok && resp.data?.ok) {
       const byRemote: Record<string, any> = {};
-      for (const r of (resp.data.results ?? [])) byRemote[r.remote_id] = r;
+      for (const r of (resp.data.results ?? [])) {
+        const key = r.source_ref ?? r.remote_id;
+        if (key) byRemote[key] = r;
+      }
 
       for (const row of pendingUpsert) {
-        const remoteId = row.payload?.remote_id;
+        const remoteId = row.payload?.source_ref ?? row.payload?.remote_id;
         const hubResult = byRemote[remoteId];
         if (hubResult && ["created", "updated"].includes(hubResult.action)) {
           await sb.from("hub_outbox").update({
@@ -104,7 +107,9 @@ Deno.serve(async (req) => {
   // ── Deletes (one per call) ──
   for (const row of pendingDelete ?? []) {
     const resp = await signedPost(secret, "contacts_delete", {
-      remote_id: row.payload?.remote_id,
+      source_app: "vanto_crm",
+      source_ref: row.payload?.source_ref ?? row.payload?.remote_id,
+      remote_id: row.payload?.source_ref ?? row.payload?.remote_id,
       reason: row.payload?.reason ?? "contact_deleted",
     });
     if (resp.ok && resp.data?.ok) {
