@@ -762,6 +762,9 @@ export type Database = {
           do_not_contact_reason: string | null
           email: string | null
           first_name: string | null
+          hub_contact_id: string | null
+          hub_last_synced_at: string | null
+          hub_version: number
           id: string
           interest: Database["public"]["Enums"]["interest_level"]
           is_deleted: boolean
@@ -810,6 +813,9 @@ export type Database = {
           do_not_contact_reason?: string | null
           email?: string | null
           first_name?: string | null
+          hub_contact_id?: string | null
+          hub_last_synced_at?: string | null
+          hub_version?: number
           id?: string
           interest?: Database["public"]["Enums"]["interest_level"]
           is_deleted?: boolean
@@ -858,6 +864,9 @@ export type Database = {
           do_not_contact_reason?: string | null
           email?: string | null
           first_name?: string | null
+          hub_contact_id?: string | null
+          hub_last_synced_at?: string | null
+          hub_version?: number
           id?: string
           interest?: Database["public"]["Enums"]["interest_level"]
           is_deleted?: boolean
@@ -1490,6 +1499,72 @@ export type Database = {
           primary_intent?: string
           signals?: Json
           temperature_score?: number
+        }
+        Relationships: []
+      }
+      hub_outbox: {
+        Row: {
+          attempts: number
+          contact_id: string
+          created_at: string
+          hub_contact_id: string | null
+          id: string
+          last_error: string | null
+          op: string
+          payload: Json
+          sent_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          contact_id: string
+          created_at?: string
+          hub_contact_id?: string | null
+          id?: string
+          last_error?: string | null
+          op: string
+          payload: Json
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          contact_id?: string
+          created_at?: string
+          hub_contact_id?: string | null
+          id?: string
+          last_error?: string | null
+          op?: string
+          payload?: Json
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      hub_sync_state: {
+        Row: {
+          id: string
+          last_pulled_at: string | null
+          last_since: string | null
+          meta: Json
+          updated_at: string
+        }
+        Insert: {
+          id: string
+          last_pulled_at?: string | null
+          last_since?: string | null
+          meta?: Json
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          last_pulled_at?: string | null
+          last_since?: string | null
+          meta?: Json
+          updated_at?: string
         }
         Relationships: []
       }
