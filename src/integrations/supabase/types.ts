@@ -3123,6 +3123,48 @@ export type Database = {
         }
         Relationships: []
       }
+      user_maytapi_accounts: {
+        Row: {
+          api_token: string
+          connected_at: string
+          created_at: string
+          display_phone_e164: string | null
+          is_active: boolean
+          last_verified_at: string | null
+          notes: string | null
+          phone_id: string
+          product_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          api_token: string
+          connected_at?: string
+          created_at?: string
+          display_phone_e164?: string | null
+          is_active?: boolean
+          last_verified_at?: string | null
+          notes?: string | null
+          phone_id: string
+          product_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          api_token?: string
+          connected_at?: string
+          created_at?: string
+          display_phone_e164?: string | null
+          is_active?: boolean
+          last_verified_at?: string | null
+          notes?: string | null
+          phone_id?: string
+          product_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
