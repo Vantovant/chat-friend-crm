@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { User, Bell, Shield, Users, ChevronRight, Mail, Loader2, CheckCircle, X, Clock, Edit2, Bot, Key, MessageSquare, Sparkles, ShieldAlert } from 'lucide-react';
+import { User, Bell, Shield, Users, ChevronRight, Mail, Loader2, CheckCircle, X, Clock, Edit2, Bot, Key, MessageSquare, Sparkles, ShieldAlert, Phone } from 'lucide-react';
+import { MyMaytapiAccount } from './MyMaytapiAccount';
 import ProspectorControls from './ProspectorControls';
 import AITrainerPanel from './AITrainerPanel';
 import { cn } from '@/lib/utils';
