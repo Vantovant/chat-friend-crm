@@ -1,0 +1,1 @@
+DROP POLICY IF EXISTS "Agents can view contacts linked to any conversation" ON public.contacts;
