@@ -13,6 +13,7 @@ const settingSections = [
   { id: 'team', icon: Users, label: 'Team', description: 'Manage team members' },
   { id: 'ai-provider', icon: Bot, label: 'AI Provider', description: 'BYO API keys' },
   { id: 'auto-reply', icon: MessageSquare, label: 'Auto-Reply', description: 'WhatsApp auto-reply settings' },
+  { id: 'my-maytapi', icon: Phone, label: 'My Maytapi Account', description: 'Connect your personal WhatsApp' },
   { id: 'ai-trainer', icon: Sparkles, label: 'AI Trainer', description: 'Teach & correct the AI' },
   { id: 'prospector', icon: ShieldAlert, label: 'Prospector Controls', description: 'Kill switches & emergency mode' },
   { id: 'notifications', icon: Bell, label: 'Notifications', description: 'Alert preferences' },
@@ -586,6 +587,8 @@ export function SettingsModule() {
 
         {/* Auto-Reply */}
         {activeSection === 'auto-reply' && <AutoReplySection />}
+
+        {activeSection === 'my-maytapi' && <MyMaytapiAccount />}
 
         {activeSection === 'ai-trainer' && <AITrainerPanel />}
 
