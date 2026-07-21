@@ -23,7 +23,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'inbox', label: 'Inbox', icon: MessageSquare },
-  { id: 'maytapi-inbox', label: 'Maytapi Inbox', icon: MessageSquare, adminOnly: true },
+  { id: 'maytapi-inbox', label: 'Maytapi Inbox', icon: MessageSquare },
   { id: 'plan', label: 'PLAN', icon: CalendarCheck },
   { id: 'voice-diary', label: 'Voice Diary', icon: BookHeart },
   { id: 'contacts', label: 'Contacts', icon: Users },
