@@ -3683,6 +3683,10 @@ export type Database = {
         Returns: boolean
       }
       is_admin_or_super_admin: { Args: never; Returns: boolean }
+      is_private_agent_contact: {
+        Args: { _assigned_to: string; _contact_id: string; _created_by: string }
+        Returns: boolean
+      }
       mark_demographics_recovery_phone_sent: {
         Args: { p_phone_normalized: string; p_provider_message_id?: string }
         Returns: undefined
