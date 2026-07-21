@@ -247,9 +247,15 @@ export function ReactivationCampaignModule() {
                   </thead>
                   <tbody>
                     {[...rows].sort((a, b) => {
-                      const ar = a.status === 'replied' ? 0 : 1;
-                      const br = b.status === 'replied' ? 0 : 1;
-                      if (ar !== br) return ar - br;
+                      const aHasReply = a.status === 'replied' || repliesByRecipient.has(a.id);
+                      const bHasReply = b.status === 'replied' || repliesByRecipient.has(b.id);
+                      if (aHasReply && !bHasReply) return -1;
+                      if (!aHasReply && bHasReply) return 1;
+                      if (aHasReply && bHasReply) {
+                        const at = a.replied_at ? new Date(a.replied_at).getTime() : 0;
+                        const bt = b.replied_at ? new Date(b.replied_at).getTime() : 0;
+                        return bt - at;
+                      }
                       return 0;
                     }).map((r) => (
                       <tr key={r.id} className="border-t border-border/40 hover:bg-muted/20">
