@@ -215,6 +215,31 @@ Deno.serve(async (req) => {
       console.warn("[maytapi-send-group] emergency guard failed open:", (err as Error).message);
     }
 
+    // ── Suite-wide freeze (VantoOS Maytapi restriction 2026-07-23) ──
+    try {
+      const { data: frozen } = await supabase
+        .from("integration_settings").select("value").eq("key", "maytapi_outbound_frozen").maybeSingle();
+      const isFrozen = String(frozen?.value ?? "").trim().toLowerCase() === "true";
+      if (isFrozen) {
+        const { data: until } = await supabase
+          .from("integration_settings").select("value").eq("key", "maytapi_freeze_until_at").maybeSingle();
+        const blockedUntil = until?.value ?? null;
+        if (!blockedUntil || new Date(blockedUntil).getTime() > Date.now()) {
+          console.log("[maytapi-send-group] suite_daily_cap freeze active — refusing send", { blockedUntil });
+          return new Response(JSON.stringify({
+            success: false, processed: 0, paused: true, allowed: false,
+            reason: "suite_daily_cap",
+            blocked_until: blockedUntil,
+            daily_limit: 20,
+            member_app_keys: ["getwell_hub"],
+          }), { status: 423, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+        }
+      }
+    } catch (err) {
+      console.warn("[maytapi-send-group] suite freeze check failed open:", (err as Error).message);
+    }
+
+
     // Direct Group Administrator lane: used by pilot-group auto-reply.
     // This must send immediately to Maytapi, not fall through to the scheduled queue.
     if (directBody?.group_jid && directBody?.message) {

@@ -128,6 +128,36 @@ Deno.serve(async (req) => {
       console.warn("[maytapi-send-direct] emergency guard failed open:", (err as Error).message);
     }
 
+    // ── Suite-wide freeze (VantoOS Maytapi restriction 2026-07-23) ──
+    try {
+      const SUPABASE_URL_F = Deno.env.get("SUPABASE_URL");
+      const SERVICE_ROLE_F = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+      if (SUPABASE_URL_F && SERVICE_ROLE_F) {
+        const svcF = createClient(SUPABASE_URL_F, SERVICE_ROLE_F);
+        const { data: frozen } = await svcF
+          .from("integration_settings").select("value").eq("key", "maytapi_outbound_frozen").maybeSingle();
+        const isFrozen = String(frozen?.value ?? "").trim().toLowerCase() === "true";
+        if (isFrozen) {
+          const { data: until } = await svcF
+            .from("integration_settings").select("value").eq("key", "maytapi_freeze_until_at").maybeSingle();
+          const blockedUntil = until?.value ?? null;
+          if (!blockedUntil || new Date(blockedUntil).getTime() > Date.now()) {
+            console.log("[maytapi-send-direct] suite_daily_cap freeze active — refusing send", { blockedUntil });
+            return new Response(JSON.stringify({
+              success: false, paused: true, allowed: false,
+              reason: "suite_daily_cap",
+              blocked_until: blockedUntil,
+              daily_limit: 20,
+              member_app_keys: ["getwell_hub"],
+            }), { status: 423, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[maytapi-send-direct] suite freeze check failed open:", (err as Error).message);
+    }
+
+
     // ── Atomic per-contact rate-limit reserve (30/5min + 100/24h, configurable) ──
     // Acts as the central choke point for all outbound sends.
     let _reservedContactId: string | null = null;
