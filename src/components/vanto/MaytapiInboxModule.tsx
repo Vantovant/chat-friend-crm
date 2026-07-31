@@ -272,24 +272,31 @@ export function MaytapiInboxModule() {
                           <p className="text-[10px] text-muted-foreground mt-1">{c.count} message{c.count !== 1 ? 's' : ''}</p>
                         </div>
                         {c.contact?.id && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="shrink-0"
-                            title="Edit this contact in Contacts"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              window.dispatchEvent(new CustomEvent('vanto:navigate', { detail: { module: 'contacts' } }));
-                              setTimeout(() => {
-                                window.dispatchEvent(new CustomEvent('vanto:open-contact', {
-                                  detail: { contactId: c.contact!.id, phone: c.contact!.phone },
-                                }));
-                              }, 80);
-                            }}
+                          <div
+                            className="flex items-center gap-1 shrink-0"
+                            onClick={(e) => e.stopPropagation()}
                           >
-                            <UserCog size={14} />
-                          </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="shrink-0 px-2"
+                              title="Edit this contact in Contacts"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                window.dispatchEvent(new CustomEvent('vanto:navigate', { detail: { module: 'contacts' } }));
+                                setTimeout(() => {
+                                  window.dispatchEvent(new CustomEvent('vanto:open-contact', {
+                                    detail: { contactId: c.contact!.id, phone: c.contact!.phone },
+                                  }));
+                                }, 80);
+                              }}
+                            >
+                              <UserCog size={14} />
+                            </Button>
+                            <AutoReplyToggle contactId={c.contact.id} contactName={c.contact.name} compact />
+                          </div>
                         )}
+
                       </li>
 
                     );
@@ -399,25 +406,28 @@ function ThreadView({
           <p className="text-xs text-muted-foreground truncate">{contact?.phone || ''}</p>
         </div>
         {contact?.id && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              window.dispatchEvent(new CustomEvent('vanto:navigate', { detail: { module: 'contacts' } }));
-              setTimeout(() => {
-                window.dispatchEvent(new CustomEvent('vanto:open-contact', {
-                  detail: { contactId: contact.id, phone: contact.phone },
-                }));
-              }, 80);
-            }}
-            title="Open this contact in Contacts (edit name, details, etc.)"
-          >
-            <UserCog size={14} className="mr-1" /> Edit contact
-          </Button>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0 px-2 sm:px-3"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('vanto:navigate', { detail: { module: 'contacts' } }));
+                setTimeout(() => {
+                  window.dispatchEvent(new CustomEvent('vanto:open-contact', {
+                    detail: { contactId: contact.id, phone: contact.phone },
+                  }));
+                }, 80);
+              }}
+              title="Open this contact in Contacts (edit name, details, etc.)"
+            >
+              <UserCog size={14} />
+              <span className="ml-1 hidden sm:inline">Edit contact</span>
+            </Button>
+            <AutoReplyToggle contactId={contact.id} contactName={contact.name} compact />
+          </div>
         )}
-        {contact?.id && (
-          <AutoReplyToggle contactId={contact.id} contactName={contact.name} compact />
-        )}
+
 
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-2">
