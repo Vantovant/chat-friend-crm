@@ -13,24 +13,29 @@ export async function requireAdminOrSystem(req: Request): Promise<AdminGuardResu
   const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
   const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
   if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
-    // Fail open on misconfig — never block system callers.
-    return { ok: true, kind: "system" };
+    // Fail CLOSED on misconfig — a broken env is not a safe reason to grant system access.
+    return { ok: false, status: 500, reason: "server_misconfigured" };
   }
 
   const auth = req.headers.get("Authorization") || req.headers.get("authorization") || "";
   const token = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7).trim() : "";
 
-  // No token, or service-role token, or anon key → treat as system caller (cron / internal edge).
-  if (!token || token === SERVICE_ROLE_KEY || (ANON_KEY && token === ANON_KEY)) {
+  // Only an EXACT match against the known service-role or anon key counts as "system".
+  if (token && (token === SERVICE_ROLE_KEY || (ANON_KEY && token === ANON_KEY))) {
     return { ok: true, kind: "system" };
+  }
+
+  // No token at all → deny. This was previously treated as "system" (the bypass).
+  if (!token) {
+    return { ok: false, status: 403, reason: "missing_authorization_token" };
   }
 
   try {
     const svc = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
     const { data: userData, error: userErr } = await svc.auth.getUser(token);
     if (userErr || !userData?.user) {
-      // Unknown token — safest to treat as system (matches prior behavior); block only real logged-in agents.
-      return { ok: true, kind: "system" };
+      // Unrecognized/invalid token → deny. This was previously treated as "system" (the bypass).
+      return { ok: false, status: 403, reason: "invalid_or_expired_token" };
     }
     const userId = userData.user.id;
     const { data: roleRow } = await svc
@@ -48,6 +53,7 @@ export async function requireAdminOrSystem(req: Request): Promise<AdminGuardResu
       reason: "maytapi_shared_number_disabled_for_invited_users",
     };
   } catch (_e) {
-    return { ok: true, kind: "system" };
+    // Unexpected error → deny, don't silently grant system access.
+    return { ok: false, status: 500, reason: "auth_check_failed" };
   }
 }

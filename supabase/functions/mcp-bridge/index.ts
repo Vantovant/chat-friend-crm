@@ -21,6 +21,21 @@ const json = (body: unknown, status = 200) =>
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
 
+function mapLeadType(val: string): 'prospect' | 'registered' | 'buyer' | 'vip' {
+  const v = (val || '').toLowerCase()
+  if (v === 'registered') return 'registered'
+  if (v === 'buyer') return 'buyer'
+  if (v === 'vip') return 'vip'
+  return 'prospect'
+}
+
+function mapTemperature(val: string): 'hot' | 'warm' | 'cold' {
+  const v = (val || '').toLowerCase()
+  if (v === 'hot') return 'hot'
+  if (v === 'warm') return 'warm'
+  return 'cold'
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -182,6 +197,111 @@ Deno.serve(async (req) => {
         if (error) throw error
 
         return json({ ok: true, touch: inserted })
+      }
+
+      case 'list_contacts': {
+        const leadType = body.lead_type ? String(body.lead_type) : null
+        const temperature = body.temperature ? String(body.temperature) : null
+        const tag = body.tag ? String(body.tag) : null
+        const search = body.search ? String(body.search) : null
+        const limit = Number.isInteger(Number(body.limit)) && Number(body.limit) > 0
+          ? Math.min(Number(body.limit), 100) : 25
+
+        let query = supabase.from('contacts')
+          .select('id, name, phone_normalized, email, lead_type, temperature, tags, notes, do_not_contact, updated_at')
+          .eq('is_deleted', false)
+          .order('updated_at', { ascending: false })
+          .limit(limit)
+        if (leadType) query = query.eq('lead_type', leadType)
+        if (temperature) query = query.eq('temperature', temperature)
+        if (tag) query = query.contains('tags', [tag])
+        if (search) query = query.or(`name.ilike.%${search}%,phone_normalized.ilike.%${search}%`)
+
+        const { data, error } = await query
+        if (error) throw error
+        return json({ ok: true, count: data?.length ?? 0, contacts: data ?? [] })
+      }
+
+      case 'get_contact': {
+        const contactId = body.contact_id ? String(body.contact_id) : null
+        const phone = body.phone_normalized ? String(body.phone_normalized) : null
+        if (!contactId && !phone) return json({ error: 'contact_id_or_phone_normalized_required' }, 400)
+
+        let query = supabase.from('contacts').select('*').eq('is_deleted', false).limit(1)
+        query = contactId ? query.eq('id', contactId) : query.eq('phone_normalized', phone)
+        const { data: contact, error } = await query.maybeSingle()
+        if (error) throw error
+        if (!contact) return json({ error: 'contact_not_found' }, 404)
+
+        const { data: recentActivity } = await supabase
+          .from('contact_activity')
+          .select('type, metadata, created_at')
+          .eq('contact_id', contact.id)
+          .order('created_at', { ascending: false })
+          .limit(10)
+
+        return json({ ok: true, contact, recent_activity: recentActivity ?? [] })
+      }
+
+      case 'update_contact': {
+        const contactId = String(body.contact_id ?? '')
+        if (!contactId) return json({ error: 'contact_id_required' }, 400)
+
+        const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
+        if (body.name !== undefined) updates.name = String(body.name).trim()
+        if (body.email !== undefined) updates.email = body.email ? String(body.email).trim() : null
+        if (body.lead_type !== undefined) updates.lead_type = mapLeadType(String(body.lead_type))
+        if (body.temperature !== undefined) updates.temperature = mapTemperature(String(body.temperature))
+        if (body.tags !== undefined) updates.tags = Array.isArray(body.tags) ? body.tags : []
+        if (body.do_not_contact !== undefined) updates.do_not_contact = Boolean(body.do_not_contact)
+        if (Object.keys(updates).length === 1) return json({ error: 'no_updatable_fields_provided' }, 400)
+
+        const { data, error } = await supabase
+          .from('contacts')
+          .update(updates)
+          .eq('id', contactId)
+          .eq('is_deleted', false)
+          .select('id, name, phone_normalized, email, lead_type, temperature, tags, do_not_contact, updated_at')
+          .single()
+        if (error) throw error
+        return json({ ok: true, contact: data })
+      }
+
+      case 'add_contact_note': {
+        const contactId = String(body.contact_id ?? '')
+        const noteText = String(body.note ?? '').trim()
+        if (!contactId) return json({ error: 'contact_id_required' }, 400)
+        if (!noteText) return json({ error: 'note_required' }, 400)
+
+        const { data: existing, error: fetchErr } = await supabase
+          .from('contacts')
+          .select('notes')
+          .eq('id', contactId)
+          .eq('is_deleted', false)
+          .maybeSingle()
+        if (fetchErr) throw fetchErr
+        if (!existing) return json({ error: 'contact_not_found' }, 404)
+
+        const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ')
+        const appended = existing.notes
+          ? `${existing.notes}\n\n[${stamp} · via MCP] ${noteText}`
+          : `[${stamp} · via MCP] ${noteText}`
+
+        const { data: updated, error: updateErr } = await supabase
+          .from('contacts')
+          .update({ notes: appended, updated_at: new Date().toISOString() })
+          .eq('id', contactId)
+          .select('id, notes')
+          .single()
+        if (updateErr) throw updateErr
+
+        await supabase.from('contact_activity').insert({
+          contact_id: contactId,
+          type: 'note_added',
+          performed_by: '00000000-0000-0000-0000-000000000000',
+          metadata: { source: 'mcp-bridge', note_preview: noteText.slice(0, 160) },
+        })
+        return json({ ok: true, contact_id: contactId, notes: updated.notes })
       }
 
       default:
