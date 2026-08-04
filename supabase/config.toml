@@ -35,3 +35,6 @@ verify_jwt = false
 
 [functions.marketing-chat]
 verify_jwt = false
+
+[functions.mcp-bridge]
+verify_jwt = false
