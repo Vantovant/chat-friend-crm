@@ -50,6 +50,7 @@ Group Campaigns: Maytapi REST API (NOT Chrome Extension autoposter). Twilio stay
 - [Sales Playbooks](mem://features/sales-playbooks) — Scripts, response templates
 - [AI Routing Logic](mem://technical/ai-routing-logic) — Deterministic AI fallback hierarchy
 - [Documentation](mem://project/documentation) — Location and contents of technical docs
+- [Group Wave Drift](mem://technical/group-wave-drift) — 11-group wave takes ~50 min; schedule 60 min before events, no minute-countdown wording
 - [Group Campaigns](mem://features/group-campaigns) — Automated WA group messaging via Chrome Extension
 - [Group Campaigns Maytapi](mem://features/group-campaigns-maytapi) — Maytapi REST API migration for group campaigns
 - [Missed Inquiry Recovery](mem://features/missed-inquiry-recovery) — 5-step Maytapi auto-follow-up for stalled inbox convos
