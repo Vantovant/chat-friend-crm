@@ -382,7 +382,8 @@ Deno.serve(async (req) => {
       }
 
       default:
-        return json({ error: 'unknown_action', action }, 400)
+        return json({ error: 'unknown_action', action, available_actions: ACTIONS }, 400)
+
     }
   } catch (e) {
     console.error('mcp-bridge error', action, e)
