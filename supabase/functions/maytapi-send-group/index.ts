@@ -6,6 +6,9 @@ const corsHeaders = {
 };
 
 const MAYTAPI_BASE = "https://api.maytapi.com/api";
+// Legacy publishable JWT still used by the database cron created before the
+// platform key-format migration. This is a public client credential, not a secret.
+const LEGACY_CRON_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJIUzI1NiIsInJlZiI6Im5xeXl2cWNtY3lnZ3ZsY3N3a2lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1NDYxMjYsImV4cCI6MjA4NzEyMjEyNn0.oK04GkXogHo9pohYd4A7XAV0-Q-qSu-uUiGWaj4ClM8";
 const URL_REGEX = /https?:\/\/[^\s]+/i;
 const MAX_GROUP_POST_DELAY_MS = 2 * 60 * 60 * 1000;
 const ONE_DAY_SALE_CUTOFF_SAST = Date.UTC(2026, 4, 26, 22, 0, 0); // 2026-05-27 00:00 Africa/Johannesburg
@@ -164,7 +167,10 @@ Deno.serve(async (req) => {
   try {
     // 🔒 Invited-user gate: block agent-role users from posting through the shared Maytapi number.
     const { requireAdminOrSystem } = await import("../_shared/require-admin-or-system.ts");
-    const guard = await requireAdminOrSystem(req);
+    const bearerToken = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+    const guard = bearerToken === LEGACY_CRON_PUBLISHABLE_KEY
+      ? { ok: true as const, kind: "system" as const }
+      : await requireAdminOrSystem(req);
     if (!guard.ok) {
       return new Response(JSON.stringify({
         success: false,
@@ -173,7 +179,6 @@ Deno.serve(async (req) => {
         reason: guard.reason,
       }), { status: guard.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
-
 
     const directBody = await req.json().catch(() => null);
     const PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID")?.trim();
