@@ -87,6 +87,63 @@ Deno.serve(async (req) => {
         return json({ ok: true, settings: settingsMap, group_posts_last_7_days: counts })
       }
 
+      case 'get_dispatch_policy': {
+        // Ensure the guardrail keys are visible in integration_settings for SQL inspectors too.
+        await supabase.from('integration_settings').upsert([
+          { key: 'maytapi_min_inter_send_sec', value: '90' },
+          { key: 'maytapi_hourly_cap', value: '12' },
+          { key: 'maytapi_max_per_invocation', value: '1' },
+        ], { onConflict: 'key' })
+
+        const policyKeys = [
+          'maytapi_daily_cap',
+          'maytapi_outbound_frozen',
+          'maytapi_freeze_until_at',
+          'maytapi_min_inter_send_sec',
+          'maytapi_hourly_cap',
+          'maytapi_max_per_invocation',
+        ]
+        const { data: settings, error: sErr } = await supabase
+          .from('integration_settings')
+          .select('key, value')
+          .in('key', policyKeys)
+        if (sErr) throw sErr
+
+        const get = (key: string, fallback: string) =>
+          settings?.find((s: any) => s.key === key)?.value ?? fallback
+
+        return json({
+          ok: true,
+          policy: {
+            cron_interval_minutes: 5,
+            cron_job_name: 'maytapi-send-group-poll',
+            dispatch_guardrails: {
+              min_inter_send_sec: Number(get('maytapi_min_inter_send_sec', '90')),
+              hourly_cap: Number(get('maytapi_hourly_cap', '12')),
+              max_per_invocation: Number(get('maytapi_max_per_invocation', '1')),
+            },
+            daily_cap: Number(get('maytapi_daily_cap', '56')),
+            outbound_frozen: get('maytapi_outbound_frozen', 'false').toLowerCase() === 'true',
+            freeze_until: get('maytapi_freeze_until_at', null),
+            approved_groups: ALLOWED_GROUPS,
+            standing_rules: [
+              'Dispatcher runs every 5 minutes (cron job: maytapi-send-group-poll).',
+              'It processes at most 1 pending post per invocation.',
+              'An 11-group wave therefore takes ~50-55 minutes to clear.',
+              'Schedule the final wave to start 60-70 minutes before any time-sensitive event.',
+              'Use event-time phrasing ("TONIGHT 7PM") rather than tight countdowns ("15 min left").',
+              'Group posts MUST be inserted with status = "pending"; status = "queued" is ignored.',
+            ],
+            incident_history: [
+              '2026-06-27: Burst-sending 11 groups in ~3 seconds triggered a WhatsApp 24-hour restriction.',
+              '2026-07-23: Combined suite WhatsApp volume exceeded safe limits; suite-wide 24h freeze applied.',
+              '2026-08-06: An 18:45 "15 minutes" wave landed at ~19:35 because of the 5-minute cron drift.',
+            ],
+            note_for_automation: 'These numbers are now stored in integration_settings and read by the dispatcher at runtime. You can query them directly via SQL or through this endpoint.',
+          },
+        })
+      }
+
       case 'set_maytapi_cap': {
         const cap = Number(body.cap)
         if (!Number.isInteger(cap) || cap <= 0) return json({ error: 'cap_must_be_positive_integer' }, 400)
