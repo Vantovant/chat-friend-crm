@@ -577,7 +577,7 @@ Deno.serve(async (req) => {
           }).eq("id", post.id);
           results.push({ id: post.id, status: "sent", preview: previewStatus });
 
-          // Stamp last_group_send_at to enforce 90s inter-send floor
+          // Stamp last_group_send_at to enforce the configured inter-send floor
           await supabase
             .from("integration_settings")
             .upsert({ key: "last_group_send_at", value: new Date().toISOString() }, { onConflict: "key" });
