@@ -97,6 +97,26 @@ function pickMeta(html: string, property: string): string | null {
 }
 // ----------------------------------------------------------
 
+// ── Configurable guardrails (defaults are the safe production values) ──
+type Guardrails = { minInterSendSec: number; hourlyCap: number; maxPerInvocation: number };
+async function getGuardrails(supabase: any): Promise<Guardrails> {
+  const { data: rows } = await supabase
+    .from("integration_settings")
+    .select("key,value")
+    .in("key", ["maytapi_min_inter_send_sec", "maytapi_hourly_cap", "maytapi_max_per_invocation"]);
+  const map = new Map((rows || []).map((r: any) => [r.key, r.value]));
+  const parsePositiveInt = (key: string, fallback: number) => {
+    const raw = map.get(key);
+    const n = raw ? Number(raw) : NaN;
+    return Number.isInteger(n) && n > 0 ? n : fallback;
+  };
+  return {
+    minInterSendSec: parsePositiveInt("maytapi_min_inter_send_sec", 90),
+    hourlyCap: parsePositiveInt("maytapi_hourly_cap", 12),
+    maxPerInvocation: parsePositiveInt("maytapi_max_per_invocation", 1),
+  };
+}
+
 // ---------- Conservative delivery-failure alert ----------
 // Only fires after a scheduled post has failed twice. Logs to maytapi_delivery_alerts
 // and best-effort pings admin phone via send-admin-alert. Does NOT retry the post,
@@ -310,10 +330,9 @@ Deno.serve(async (req) => {
     }
 
     // ── Permanent guardrails (2026-06-27): prevent burst-spam restrictions ──
-    // 1) Inter-send floor: at least 90 seconds between any two group sends
-    // 2) Hourly cap: at most 12 group sends per rolling hour
-    const MIN_INTER_SEND_SEC = 90;
-    const HOURLY_CAP = 12;
+    // Defaults: 90s inter-send floor, 12 group sends/hour, 1 post per invocation.
+    // These can be read from integration_settings but fall back to the safe defaults.
+    const guardrails = await getGuardrails(supabase);
 
     {
       const { data: lastRow } = await supabase
@@ -324,11 +343,11 @@ Deno.serve(async (req) => {
       const lastIso = lastRow?.value || null;
       if (lastIso) {
         const ageSec = (Date.now() - new Date(lastIso).getTime()) / 1000;
-        if (Number.isFinite(ageSec) && ageSec < MIN_INTER_SEND_SEC) {
+        if (Number.isFinite(ageSec) && ageSec < guardrails.minInterSendSec) {
           return new Response(JSON.stringify({
             processed: 0,
             status: "throttled_inter_send_floor",
-            wait_seconds: Math.ceil(MIN_INTER_SEND_SEC - ageSec),
+            wait_seconds: Math.ceil(guardrails.minInterSendSec - ageSec),
           }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
         }
       }
@@ -338,17 +357,17 @@ Deno.serve(async (req) => {
         .select("id", { count: "exact", head: true })
         .eq("status", "sent")
         .gte("last_attempt_at", new Date(Date.now() - 60 * 60 * 1000).toISOString());
-      if ((hourCount || 0) >= HOURLY_CAP) {
+      if ((hourCount || 0) >= guardrails.hourlyCap) {
         return new Response(JSON.stringify({
           processed: 0,
           status: "throttled_hourly_cap",
           hourly_count: hourCount,
-          cap: HOURLY_CAP,
+          cap: guardrails.hourlyCap,
         }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
     }
 
-    // Hard cap: process AT MOST ONE post per invocation. Burst-sending 11 groups
+    // Hard cap: process AT MOST maxPerInvocation posts per invocation. Burst-sending 11 groups
     // in ~3 seconds is what triggered the 24h WhatsApp restriction on 2026-06-27.
     const { data: duePosts, error: fetchErr } = await supabase
       .from("scheduled_group_posts")
@@ -356,7 +375,7 @@ Deno.serve(async (req) => {
       .eq("status", "pending")
       .lte("scheduled_at", new Date().toISOString())
       .order("scheduled_at", { ascending: true })
-      .limit(1);
+      .limit(guardrails.maxPerInvocation);
 
     if (fetchErr) {
       return new Response(JSON.stringify({ error: fetchErr.message }), {
@@ -558,7 +577,7 @@ Deno.serve(async (req) => {
           }).eq("id", post.id);
           results.push({ id: post.id, status: "sent", preview: previewStatus });
 
-          // Stamp last_group_send_at to enforce 90s inter-send floor
+          // Stamp last_group_send_at to enforce the configured inter-send floor
           await supabase
             .from("integration_settings")
             .upsert({ key: "last_group_send_at", value: new Date().toISOString() }, { onConflict: "key" });
