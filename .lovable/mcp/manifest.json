@@ -1,0 +1,329 @@
+{
+  "version": 1,
+  "sdk_version": "0.26.1",
+  "path": "/functions/v1/mcp",
+  "auth": {
+    "type": "oauth",
+    "issuer": "https://nqyyvqcmcyggvlcswkio.supabase.co/auth/v1",
+    "accepted_audiences": [
+      "authenticated"
+    ]
+  },
+  "mcp": {
+    "server": {
+      "name": "get-well-hub",
+      "version": "1.0.0",
+      "title": "Get Well Hub"
+    },
+    "tools": [
+      {
+        "name": "get_dispatch_policy",
+        "title": "Get WhatsApp dispatch policy",
+        "description": "Read the live WhatsApp group dispatch guardrails: cron interval, inter-send floor, hourly cap, daily cap, freeze state, the approved group list, standing rules and incident history.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_maytapi_status",
+        "title": "Get WhatsApp sending status",
+        "description": "Current WhatsApp sending settings (daily cap, outbound freeze, reactivation campaign toggle) plus a count of scheduled group posts by status over the last 7 days.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "set_maytapi_cap",
+        "title": "Set WhatsApp daily cap",
+        "description": "Set the maximum number of WhatsApp messages the dispatcher may send in a 24-hour period. Requires an admin account.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "cap": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 200,
+              "description": "New daily cap."
+            }
+          },
+          "required": [
+            "cap"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "set_maytapi_freeze",
+        "title": "Freeze or unfreeze WhatsApp outbound",
+        "description": "Freeze (true) or resume (false) all outbound WhatsApp sending. Freezing halts every group and 1-on-1 dispatch immediately. Requires an admin account.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "frozen": {
+              "type": "boolean",
+              "description": "true to freeze outbound sending, false to resume."
+            }
+          },
+          "required": [
+            "frozen"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "queue_group_post",
+        "title": "Queue a WhatsApp group post",
+        "description": "Schedule one message to one of the 11 approved WhatsApp groups. The post is inserted with status 'pending' so the dispatcher picks it up. Remember: 1 group per 5-minute tick, so an 11-group wave takes ~55 minutes to clear.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "group_name": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Exact name of an approved WhatsApp group."
+            },
+            "message_content": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Message body to post."
+            },
+            "scheduled_at": {
+              "type": "string",
+              "minLength": 1,
+              "description": "ISO 8601 timestamp for when the post should go out."
+            },
+            "image_url": {
+              "type": "string",
+              "format": "uri",
+              "description": "Optional image to attach."
+            }
+          },
+          "required": [
+            "group_name",
+            "message_content",
+            "scheduled_at"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_prospector_status",
+        "title": "Get prospector cadence status",
+        "description": "Counts of prospect cadence states by status, plus the next 20 upcoming scheduled sends.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_contacts",
+        "title": "List contacts",
+        "description": "List CRM contacts visible to the signed-in user, newest first. Optional filters by lead type, temperature, tag or free-text search on name/phone.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "lead_type": {
+              "type": "string",
+              "description": "Filter by lead type."
+            },
+            "temperature": {
+              "type": "string",
+              "description": "Filter by temperature (hot/warm/cold)."
+            },
+            "tag": {
+              "type": "string",
+              "description": "Filter by a single tag."
+            },
+            "search": {
+              "type": "string",
+              "description": "Free-text match on name or phone."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "description": "Max rows (default 25)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_contact",
+        "title": "Get a contact",
+        "description": "Fetch one contact by id or normalized phone number, together with its 10 most recent activity records.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "contact_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Contact UUID."
+            },
+            "phone_normalized": {
+              "type": "string",
+              "description": "Phone in +E164 format."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "update_contact",
+        "title": "Update a contact",
+        "description": "Update editable fields on a contact: name, email, lead type, temperature, tags, or the do-not-contact flag. Phone numbers are never changed here.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "contact_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Contact UUID."
+            },
+            "name": {
+              "type": "string"
+            },
+            "email": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "email"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lead_type": {
+              "type": "string",
+              "enum": [
+                "prospect",
+                "registered",
+                "buyer",
+                "vip"
+              ]
+            },
+            "temperature": {
+              "type": "string",
+              "enum": [
+                "hot",
+                "warm",
+                "cold"
+              ]
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "do_not_contact": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "contact_id"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "add_contact_note",
+        "title": "Add a note to a contact",
+        "description": "Append a timestamped note to a contact's notes field and record it on the contact activity trail.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "contact_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Contact UUID."
+            },
+            "note": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Note text to append."
+            }
+          },
+          "required": [
+            "contact_id",
+            "note"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      }
+    ]
+  }
+}

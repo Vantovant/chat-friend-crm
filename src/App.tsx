@@ -15,6 +15,7 @@ import Features from "./pages/marketing/Features";
 import HowItWorks from "./pages/marketing/HowItWorks";
 import Investors from "./pages/marketing/Investors";
 import Suite from "./pages/marketing/Suite";
+import OAuthConsent from "./pages/OAuthConsent";
 
 const queryClient = new QueryClient();
 
@@ -38,6 +39,9 @@ const App = () => (
           <Route path="/accept-invite" element={<AcceptInvite />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/privacy" element={<Privacy />} />
+
+          {/* MCP OAuth consent */}
+          <Route path="/.lovable/oauth/consent" element={<OAuthConsent />} />
 
           {/* App (authenticated) */}
           <Route path="/app" element={<Index />} />
