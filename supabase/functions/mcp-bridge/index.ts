@@ -61,8 +61,26 @@ Deno.serve(async (req) => {
 
   const action = String(body.action ?? '')
 
+  const ACTIONS = [
+    'list_actions',
+    'get_maytapi_status',
+    'get_dispatch_policy',
+    'set_maytapi_cap',
+    'set_maytapi_freeze',
+    'queue_group_post',
+    'get_prospector_status',
+    'queue_prospector_touch',
+    'list_contacts',
+    'get_contact',
+    'update_contact',
+    'add_contact_note',
+  ]
+
   try {
     switch (action) {
+      case 'list_actions':
+        return json({ ok: true, actions: ACTIONS, bridge_version: '2026-08-07' })
+
       case 'get_maytapi_status': {
         const keys = ['maytapi_daily_cap', 'maytapi_outbound_frozen', 'reactivation_campaign_enabled']
         const { data: settings, error: sErr } = await supabase
