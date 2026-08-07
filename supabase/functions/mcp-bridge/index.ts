@@ -139,7 +139,9 @@ Deno.serve(async (req) => {
             message_content: messageContent,
             image_url: imageUrl,
             scheduled_at: new Date(scheduledAt).toISOString(),
-            status: 'queued',
+            // MUST be 'pending' — the maytapi-send-group dispatcher only picks up
+            // rows with status = 'pending'. 'queued' rows are never sent.
+            status: 'pending',
             source: 'mcp-bridge',
           })
           .select('id, target_group_name, scheduled_at, status')
