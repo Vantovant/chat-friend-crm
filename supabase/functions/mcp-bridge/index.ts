@@ -74,7 +74,33 @@ Deno.serve(async (req) => {
     'get_contact',
     'update_contact',
     'add_contact_note',
+    'create_task',
+    'create_reminder',
+    'create_meeting',
+    'create_diary_entry',
   ]
+
+  // Resolves the single super_admin profile row. This bridge authenticates via a
+  // shared service-role token, not a per-user login, so any action that writes to
+  // per-user-scoped tables (plan_tasks, plan_reminders, plan_meetings,
+  // voice_diary_entries) needs to know which profile owns the new row. This is a
+  // single-operator system with exactly one super_admin, so we resolve it dynamically
+  // instead of hardcoding a UUID. Fails loudly (rather than guessing) if that
+  // assumption ever stops holding.
+  async function resolveOwnerId(): Promise<{ ownerId: string } | { errorResponse: Response }> {
+    const { data: owners, error } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('role', 'super_admin')
+    if (error) throw error
+    if (!owners || owners.length === 0) {
+      return { errorResponse: json({ error: 'no_super_admin_found' }, 500) }
+    }
+    if (owners.length > 1) {
+      return { errorResponse: json({ error: 'multiple_super_admins_found', count: owners.length }, 500) }
+    }
+    return { ownerId: owners[0].id }
+  }
 
   try {
     switch (action) {
@@ -106,7 +132,6 @@ Deno.serve(async (req) => {
       }
 
       case 'get_dispatch_policy': {
-        // Ensure the guardrail keys are visible in integration_settings for SQL inspectors too.
         await supabase.from('integration_settings').upsert([
           { key: 'maytapi_min_inter_send_sec', value: '90' },
           { key: 'maytapi_hourly_cap', value: '12' },
@@ -214,8 +239,6 @@ Deno.serve(async (req) => {
             message_content: messageContent,
             image_url: imageUrl,
             scheduled_at: new Date(scheduledAt).toISOString(),
-            // MUST be 'pending' — the maytapi-send-group dispatcher only picks up
-            // rows with status = 'pending'. 'queued' rows are never sent.
             status: 'pending',
             source: 'mcp-bridge',
           })
@@ -379,6 +402,116 @@ Deno.serve(async (req) => {
           metadata: { source: 'mcp-bridge', note_preview: noteText.slice(0, 160) },
         })
         return json({ ok: true, contact_id: contactId, notes: updated.notes })
+      }
+
+      case 'create_task': {
+        const title = String(body.title ?? '').trim()
+        if (!title) return json({ error: 'title_required' }, 400)
+        const priority = ['low', 'medium', 'high', 'urgent'].includes(String(body.priority))
+          ? String(body.priority) : 'medium'
+        const dueDate = body.due_date ? String(body.due_date) : null
+        if (dueDate && Number.isNaN(Date.parse(dueDate))) {
+          return json({ error: 'due_date_must_be_iso_timestamp' }, 400)
+        }
+
+        const resolved = await resolveOwnerId()
+        if ('errorResponse' in resolved) return resolved.errorResponse
+
+        const payload: Record<string, unknown> = {
+          user_id: resolved.ownerId,
+          title,
+          priority,
+          source: 'mcp',
+        }
+        if (dueDate) payload.due_date = new Date(dueDate).toISOString()
+
+        const { data: inserted, error } = await supabase
+          .from('plan_tasks')
+          .insert(payload)
+          .select('id, title, priority, due_date, created_at')
+          .single()
+        if (error) throw error
+        return json({ ok: true, task: inserted })
+      }
+
+      case 'create_reminder': {
+        const title = String(body.title ?? '').trim()
+        const reminderTime = String(body.reminder_time ?? '')
+        if (!title) return json({ error: 'title_required' }, 400)
+        if (!reminderTime || Number.isNaN(Date.parse(reminderTime))) {
+          return json({ error: 'reminder_time_must_be_iso_timestamp' }, 400)
+        }
+        const description = body.description ? String(body.description) : null
+
+        const resolved = await resolveOwnerId()
+        if ('errorResponse' in resolved) return resolved.errorResponse
+
+        const { data: inserted, error } = await supabase
+          .from('plan_reminders')
+          .insert({
+            user_id: resolved.ownerId,
+            title,
+            reminder_time: new Date(reminderTime).toISOString(),
+            description,
+          })
+          .select('id, title, reminder_time, created_at')
+          .single()
+        if (error) throw error
+        return json({ ok: true, reminder: inserted })
+      }
+
+      case 'create_meeting': {
+        const title = String(body.title ?? '').trim()
+        const startTime = String(body.start_time ?? '')
+        if (!title) return json({ error: 'title_required' }, 400)
+        if (!startTime || Number.isNaN(Date.parse(startTime))) {
+          return json({ error: 'start_time_must_be_iso_timestamp' }, 400)
+        }
+        const location = body.location ? String(body.location) : null
+        const description = body.description ? String(body.description) : null
+
+        const resolved = await resolveOwnerId()
+        if ('errorResponse' in resolved) return resolved.errorResponse
+
+        const { data: inserted, error } = await supabase
+          .from('plan_meetings')
+          .insert({
+            user_id: resolved.ownerId,
+            title,
+            start_time: new Date(startTime).toISOString(),
+            location,
+            description,
+          })
+          .select('id, title, start_time, location, created_at')
+          .single()
+        if (error) throw error
+        return json({
+          ok: true,
+          meeting: inserted,
+          note: 'Lightweight add only — no Google Calendar event or WhatsApp/email invite was sent.',
+        })
+      }
+
+      case 'create_diary_entry': {
+        const content = String(body.content ?? '').trim()
+        if (!content) return json({ error: 'content_required' }, 400)
+        const title = body.title ? String(body.title).trim() : null
+
+        const resolved = await resolveOwnerId()
+        if ('errorResponse' in resolved) return resolved.errorResponse
+
+        const { data: inserted, error } = await supabase
+          .from('voice_diary_entries')
+          .insert({
+            user_id: resolved.ownerId,
+            title,
+            content,
+            source_type: 'typed',
+          })
+          .select('id, title, created_at')
+          .single()
+        if (error) throw error
+        return json({ ok: true, entry: inserted })
       }
 
       default:
