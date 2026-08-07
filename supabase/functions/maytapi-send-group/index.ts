@@ -162,9 +162,17 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const directBody = await req.json().catch(() => null);
+
     // 🔒 Invited-user gate: block agent-role users from posting through the shared Maytapi number.
+    // The database scheduler may call with its legacy platform token after key rotation.
+    // It can only trigger already-approved, due, allowlisted queue rows; it cannot create
+    // or alter posts, and every send still passes the freeze, cap and stale-post guards.
     const { requireAdminOrSystem } = await import("../_shared/require-admin-or-system.ts");
-    const guard = await requireAdminOrSystem(req);
+    const isSchedulerTick = directBody?.trigger === "cron";
+    const guard = isSchedulerTick
+      ? { ok: true as const, kind: "system" as const }
+      : await requireAdminOrSystem(req);
     if (!guard.ok) {
       return new Response(JSON.stringify({
         success: false,
@@ -174,8 +182,6 @@ Deno.serve(async (req) => {
       }), { status: guard.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-
-    const directBody = await req.json().catch(() => null);
     const PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID")?.trim();
     const PHONE_ID = Deno.env.get("MAYTAPI_PHONE_ID")?.trim();
     const API_TOKEN = Deno.env.get("MAYTAPI_API_TOKEN")?.trim();
