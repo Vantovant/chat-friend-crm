@@ -3004,11 +3004,15 @@ export type Database = {
           preview_image_url: string | null
           preview_status: string | null
           provider_message_id: string | null
+          revived_at: string | null
+          revived_from: string | null
           scheduled_at: string
           source: string
           status: string
           target_group_jid: string | null
           target_group_name: string
+          updated_at: string
+          updated_by: string | null
           user_id: string
         }
         Insert: {
@@ -3025,11 +3029,15 @@ export type Database = {
           preview_image_url?: string | null
           preview_status?: string | null
           provider_message_id?: string | null
+          revived_at?: string | null
+          revived_from?: string | null
           scheduled_at: string
           source?: string
           status?: string
           target_group_jid?: string | null
           target_group_name: string
+          updated_at?: string
+          updated_by?: string | null
           user_id: string
         }
         Update: {
@@ -3046,11 +3054,15 @@ export type Database = {
           preview_image_url?: string | null
           preview_status?: string | null
           provider_message_id?: string | null
+          revived_at?: string | null
+          revived_from?: string | null
           scheduled_at?: string
           source?: string
           status?: string
           target_group_jid?: string | null
           target_group_name?: string
+          updated_at?: string
+          updated_by?: string | null
           user_id?: string
         }
         Relationships: [
