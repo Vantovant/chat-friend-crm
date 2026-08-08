@@ -33,6 +33,22 @@
         "outputSchema": null
       },
       {
+        "name": "get_dispatcher_health",
+        "title": "Get WhatsApp dispatcher health",
+        "description": "Self-diagnose the WhatsApp group dispatcher: last successful send, last failure and its reason, queue depth by status, sends in the last hour and last 24 hours against the caps, and whether outbound is frozen. Call this first when posts appear stuck.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null
+      },
+      {
         "name": "get_maytapi_status",
         "title": "Get WhatsApp sending status",
         "description": "Current WhatsApp sending settings (daily cap, outbound freeze, reactivation campaign toggle) plus a count of scheduled group posts by status over the last 7 days.",

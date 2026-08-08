@@ -77,6 +77,8 @@ export default defineTool({
           note: "Superseded by this OAuth MCP server. Prefer the tools above; the bridge remains only for legacy write actions (create_task, create_reminder, create_meeting, create_diary_entry).",
         },
       },
+    };
+
 
 
     return {

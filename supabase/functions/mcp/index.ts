@@ -118,8 +118,30 @@ var get_dispatch_policy_default = defineTool({
       incident_history: [
         "2026-06-27: Burst-sending 11 groups in ~3 seconds triggered a WhatsApp 24-hour restriction.",
         "2026-07-23: Combined suite WhatsApp volume exceeded safe limits; suite-wide 24h freeze applied.",
-        '2026-08-06: An 18:45 "15 minutes" wave landed at ~19:35 because of the 5-minute cron drift.'
-      ]
+        '2026-08-06: An 18:45 "15 minutes" wave landed at ~19:35 because of the 5-minute cron drift.',
+        "2026-08-07: The pg_cron job hit HTTP 403 (stale key after rotation); only 1 group received the wave."
+      ],
+      self_discovery: {
+        mcp_server: "This MCP server exposes every capability as a discoverable tool - no manual action names needed. Call get_dispatcher_health to diagnose stuck posts.",
+        tools: [
+          "get_dispatch_policy",
+          "get_dispatcher_health",
+          "get_maytapi_status",
+          "set_maytapi_cap",
+          "set_maytapi_freeze",
+          "queue_group_post",
+          "get_prospector_status",
+          "list_contacts",
+          "get_contact",
+          "update_contact",
+          "add_contact_note"
+        ],
+        legacy_bridge: {
+          endpoint: "POST /functions/v1/mcp-bridge (shared-token, being retired)",
+          discovery_action: '{"action":"list_actions"} returns the canonical action list',
+          note: "Superseded by this OAuth MCP server. Prefer the tools above; the bridge remains only for legacy write actions (create_task, create_reminder, create_meeting, create_diary_entry)."
+        }
+      }
     };
     return {
       content: [{ type: "text", text: JSON.stringify(policy, null, 2) }],
@@ -128,10 +150,94 @@ var get_dispatch_policy_default = defineTool({
   }
 });
 
-// src/lib/mcp/tools/get-maytapi-status.ts
+// src/lib/mcp/tools/get-dispatcher-health.ts
 import { defineTool as defineTool2 } from "npm:@lovable.dev/mcp-js@0.26.1";
+var HEALTH_KEYS = [
+  "maytapi_outbound_frozen",
+  "maytapi_freeze_until_at",
+  "maytapi_freeze_reason",
+  "maytapi_daily_cap"
+];
+var get_dispatcher_health_default = defineTool2({
+  name: "get_dispatcher_health",
+  title: "Get WhatsApp dispatcher health",
+  description: "Self-diagnose the WhatsApp group dispatcher: last successful send, last failure and its reason, queue depth by status, sends in the last hour and last 24 hours against the caps, and whether outbound is frozen. Call this first when posts appear stuck.",
+  inputSchema: {},
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async (_input, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const nowMs = Date.now();
+    const hourAgo = new Date(nowMs - 60 * 60 * 1e3).toISOString();
+    const dayAgo = new Date(nowMs - 24 * 60 * 60 * 1e3).toISOString();
+    const { data: settings, error: sErr } = await supabase.from("integration_settings").select("key, value").in("key", HEALTH_KEYS);
+    if (sErr) return { content: [{ type: "text", text: sErr.message }], isError: true };
+    const get = (key, fallback) => settings?.find((s) => s.key === key)?.value ?? fallback;
+    const { data: lastSent } = await supabase.from("scheduled_group_posts").select("id, target_group_name, scheduled_at, last_attempt_at, provider_message_id").eq("status", "sent").not("last_attempt_at", "is", null).order("last_attempt_at", { ascending: false }).limit(1).maybeSingle();
+    const { data: lastFailure } = await supabase.from("scheduled_group_posts").select("id, target_group_name, scheduled_at, last_attempt_at, attempt_count, failure_reason").eq("status", "failed").order("last_attempt_at", { ascending: false }).limit(1).maybeSingle();
+    const { data: queue, error: qErr } = await supabase.from("scheduled_group_posts").select("status, scheduled_at");
+    if (qErr) return { content: [{ type: "text", text: qErr.message }], isError: true };
+    const queue_by_status = {};
+    let overdue_pending = 0;
+    const nowIso = new Date(nowMs).toISOString();
+    for (const row of queue ?? []) {
+      queue_by_status[row.status] = (queue_by_status[row.status] ?? 0) + 1;
+      if (row.status === "pending" && row.scheduled_at && row.scheduled_at < nowIso) overdue_pending += 1;
+    }
+    const { count: sentLastHour } = await supabase.from("scheduled_group_posts").select("id", { count: "exact", head: true }).eq("status", "sent").gte("last_attempt_at", hourAgo);
+    const { count: sentLast24h } = await supabase.from("scheduled_group_posts").select("id", { count: "exact", head: true }).eq("status", "sent").gte("last_attempt_at", dayAgo);
+    const lastTickMs = lastSent?.last_attempt_at ? Date.parse(lastSent.last_attempt_at) : null;
+    const minutesSinceLastSend = lastTickMs ? Math.round((nowMs - lastTickMs) / 6e4) : null;
+    const frozen = String(get("maytapi_outbound_frozen", "false")).toLowerCase() === "true";
+    const freezeUntil = get("maytapi_freeze_until_at", null);
+    const freezeActive = Boolean(freezeUntil && Date.parse(freezeUntil) > nowMs);
+    let verdict;
+    if (frozen || freezeActive) verdict = "paused: outbound is frozen";
+    else if (overdue_pending === 0) verdict = "healthy: nothing overdue in the queue";
+    else if (minutesSinceLastSend !== null && minutesSinceLastSend <= 15)
+      verdict = "healthy: dispatcher ticked within the last 15 minutes";
+    else
+      verdict = "degraded: posts are overdue and no successful send in the last 15 minutes \u2014 likely a cron/auth failure on maytapi-send-group-poll";
+    const health = {
+      verdict,
+      checked_at: nowIso,
+      cron_job_name: "maytapi-send-group-poll",
+      cron_interval_minutes: 5,
+      last_successful_send: lastSent ?? null,
+      minutes_since_last_successful_send: minutesSinceLastSend,
+      last_failure: lastFailure ?? null,
+      queue_by_status,
+      overdue_pending,
+      throughput: {
+        sent_last_hour: sentLastHour ?? 0,
+        hourly_cap: 12,
+        sent_last_24h: sentLast24h ?? 0,
+        daily_cap: Number(get("maytapi_daily_cap", "56"))
+      },
+      auth_status: {
+        // The cron job posts {"trigger":"cron"} to maytapi-send-group, which bypasses
+        // the bearer gate for approved queue rows. A 403 here historically meant a
+        // stale hardcoded publishable key in the pg_cron job definition.
+        mode: "cron trigger body bypass (no bearer required)",
+        known_failure_mode: "HTTP 403 from maytapi-send-group after an API key rotation (stale key in the pg_cron job body).",
+        healthy_signal: "a sent row with last_attempt_at inside the last 15 minutes"
+      },
+      outbound_frozen: frozen,
+      freeze_until: freezeUntil,
+      freeze_active: freezeActive,
+      freeze_reason: get("maytapi_freeze_reason", null)
+    };
+    return {
+      content: [{ type: "text", text: JSON.stringify(health, null, 2) }],
+      structuredContent: { health }
+    };
+  }
+});
+
+// src/lib/mcp/tools/get-maytapi-status.ts
+import { defineTool as defineTool3 } from "npm:@lovable.dev/mcp-js@0.26.1";
 var KEYS = ["maytapi_daily_cap", "maytapi_outbound_frozen", "reactivation_campaign_enabled"];
-var get_maytapi_status_default = defineTool2({
+var get_maytapi_status_default = defineTool3({
   name: "get_maytapi_status",
   title: "Get WhatsApp sending status",
   description: "Current WhatsApp sending settings (daily cap, outbound freeze, reactivation campaign toggle) plus a count of scheduled group posts by status over the last 7 days.",
@@ -158,9 +264,9 @@ var get_maytapi_status_default = defineTool2({
 });
 
 // src/lib/mcp/tools/set-maytapi-cap.ts
-import { defineTool as defineTool3 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool4 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z } from "npm:zod@^3.25.76";
-var set_maytapi_cap_default = defineTool3({
+var set_maytapi_cap_default = defineTool4({
   name: "set_maytapi_cap",
   title: "Set WhatsApp daily cap",
   description: "Set the maximum number of WhatsApp messages the dispatcher may send in a 24-hour period. Requires an admin account.",
@@ -179,9 +285,9 @@ var set_maytapi_cap_default = defineTool3({
 });
 
 // src/lib/mcp/tools/set-maytapi-freeze.ts
-import { defineTool as defineTool4 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool5 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z2 } from "npm:zod@^3.25.76";
-var set_maytapi_freeze_default = defineTool4({
+var set_maytapi_freeze_default = defineTool5({
   name: "set_maytapi_freeze",
   title: "Freeze or unfreeze WhatsApp outbound",
   description: "Freeze (true) or resume (false) all outbound WhatsApp sending. Freezing halts every group and 1-on-1 dispatch immediately. Requires an admin account.",
@@ -200,9 +306,9 @@ var set_maytapi_freeze_default = defineTool4({
 });
 
 // src/lib/mcp/tools/queue-group-post.ts
-import { defineTool as defineTool5 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool6 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z3 } from "npm:zod@^3.25.76";
-var queue_group_post_default = defineTool5({
+var queue_group_post_default = defineTool6({
   name: "queue_group_post",
   title: "Queue a WhatsApp group post",
   description: "Schedule one message to one of the 11 approved WhatsApp groups. The post is inserted with status 'pending' so the dispatcher picks it up. Remember: 1 group per 5-minute tick, so an 11-group wave takes ~55 minutes to clear.",
@@ -247,8 +353,8 @@ var queue_group_post_default = defineTool5({
 });
 
 // src/lib/mcp/tools/get-prospector-status.ts
-import { defineTool as defineTool6 } from "npm:@lovable.dev/mcp-js@0.26.1";
-var get_prospector_status_default = defineTool6({
+import { defineTool as defineTool7 } from "npm:@lovable.dev/mcp-js@0.26.1";
+var get_prospector_status_default = defineTool7({
   name: "get_prospector_status",
   title: "Get prospector cadence status",
   description: "Counts of prospect cadence states by status, plus the next 20 upcoming scheduled sends.",
@@ -272,9 +378,9 @@ var get_prospector_status_default = defineTool6({
 });
 
 // src/lib/mcp/tools/list-contacts.ts
-import { defineTool as defineTool7 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool8 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z4 } from "npm:zod@^3.25.76";
-var list_contacts_default = defineTool7({
+var list_contacts_default = defineTool8({
   name: "list_contacts",
   title: "List contacts",
   description: "List CRM contacts visible to the signed-in user, newest first. Optional filters by lead type, temperature, tag or free-text search on name/phone.",
@@ -304,9 +410,9 @@ var list_contacts_default = defineTool7({
 });
 
 // src/lib/mcp/tools/get-contact.ts
-import { defineTool as defineTool8 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool9 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z5 } from "npm:zod@^3.25.76";
-var get_contact_default = defineTool8({
+var get_contact_default = defineTool9({
   name: "get_contact",
   title: "Get a contact",
   description: "Fetch one contact by id or normalized phone number, together with its 10 most recent activity records.",
@@ -336,9 +442,9 @@ var get_contact_default = defineTool8({
 });
 
 // src/lib/mcp/tools/update-contact.ts
-import { defineTool as defineTool9 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool10 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z6 } from "npm:zod@^3.25.76";
-var update_contact_default = defineTool9({
+var update_contact_default = defineTool10({
   name: "update_contact",
   title: "Update a contact",
   description: "Update editable fields on a contact: name, email, lead type, temperature, tags, or the do-not-contact flag. Phone numbers are never changed here.",
@@ -373,9 +479,9 @@ var update_contact_default = defineTool9({
 });
 
 // src/lib/mcp/tools/add-contact-note.ts
-import { defineTool as defineTool10 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool11 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z7 } from "npm:zod@^3.25.76";
-var add_contact_note_default = defineTool10({
+var add_contact_note_default = defineTool11({
   name: "add_contact_note",
   title: "Add a note to a contact",
   description: "Append a timestamped note to a contact's notes field and record it on the contact activity trail.",
@@ -422,6 +528,7 @@ var mcp_default = defineMcp({
   }),
   tools: [
     get_dispatch_policy_default,
+    get_dispatcher_health_default,
     get_maytapi_status_default,
     set_maytapi_cap_default,
     set_maytapi_freeze_default,
