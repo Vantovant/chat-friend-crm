@@ -1,5 +1,6 @@
 import { auth, defineMcp } from "@lovable.dev/mcp-js";
 import getDispatchPolicy from "./tools/get-dispatch-policy";
+import getDispatcherHealth from "./tools/get-dispatcher-health";
 import getMaytapiStatus from "./tools/get-maytapi-status";
 import setMaytapiCap from "./tools/set-maytapi-cap";
 import setMaytapiFreeze from "./tools/set-maytapi-freeze";
@@ -24,6 +25,7 @@ export default defineMcp({
   }),
   tools: [
     getDispatchPolicy,
+    getDispatcherHealth,
     getMaytapiStatus,
     setMaytapiCap,
     setMaytapiFreeze,

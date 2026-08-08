@@ -53,8 +53,31 @@ export default defineTool({
         "2026-06-27: Burst-sending 11 groups in ~3 seconds triggered a WhatsApp 24-hour restriction.",
         "2026-07-23: Combined suite WhatsApp volume exceeded safe limits; suite-wide 24h freeze applied.",
         '2026-08-06: An 18:45 "15 minutes" wave landed at ~19:35 because of the 5-minute cron drift.',
+        "2026-08-07: The pg_cron job hit HTTP 403 (stale key after rotation); only 1 group received the wave.",
       ],
-    };
+      self_discovery: {
+        mcp_server:
+          "This MCP server exposes every capability as a discoverable tool - no manual action names needed. Call get_dispatcher_health to diagnose stuck posts.",
+        tools: [
+          "get_dispatch_policy",
+          "get_dispatcher_health",
+          "get_maytapi_status",
+          "set_maytapi_cap",
+          "set_maytapi_freeze",
+          "queue_group_post",
+          "get_prospector_status",
+          "list_contacts",
+          "get_contact",
+          "update_contact",
+          "add_contact_note",
+        ],
+        legacy_bridge: {
+          endpoint: "POST /functions/v1/mcp-bridge (shared-token, being retired)",
+          discovery_action: '{"action":"list_actions"} returns the canonical action list',
+          note: "Superseded by this OAuth MCP server. Prefer the tools above; the bridge remains only for legacy write actions (create_task, create_reminder, create_meeting, create_diary_entry).",
+        },
+      },
+
 
     return {
       content: [{ type: "text", text: JSON.stringify(policy, null, 2) }],
