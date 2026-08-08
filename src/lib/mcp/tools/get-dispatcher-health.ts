@@ -1,6 +1,10 @@
 import { defineTool } from "@lovable.dev/mcp-js";
 import { notAuthenticated, supabaseForUser } from "../supabase";
 
+// Deploy provenance stamp: printed at module load (cold boot) so the live build
+// can be identified from edge logs without an OAuth token.
+console.log("[build-stamp] mcp build=2026-08-08T08:30Z tools=11 includes=get_dispatcher_health");
+
 const HEALTH_KEYS = [
   "maytapi_outbound_frozen",
   "maytapi_freeze_until_at",
