@@ -102,6 +102,11 @@ export default defineTool({
 
     const health = {
       verdict,
+      stall_alert: {
+        watchdog_cron: "dispatcher-watchdog (every 15 minutes)",
+        open_alerts: openStallAlerts?.length ?? 0,
+        alerts: openStallAlerts ?? [],
+      },
       checked_at: nowIso,
       cron_job_name: "maytapi-send-group-poll",
       cron_interval_minutes: 5,

@@ -202,6 +202,11 @@ var get_dispatcher_health_default = defineTool2({
       verdict = "degraded: posts are overdue and no successful send in the last 15 minutes \u2014 likely a cron/auth failure on maytapi-send-group-poll";
     const health = {
       verdict,
+      stall_alert: {
+        watchdog_cron: "dispatcher-watchdog (every 15 minutes)",
+        open_alerts: openStallAlerts?.length ?? 0,
+        alerts: openStallAlerts ?? []
+      },
       checked_at: nowIso,
       cron_job_name: "maytapi-send-group-poll",
       cron_interval_minutes: 5,
