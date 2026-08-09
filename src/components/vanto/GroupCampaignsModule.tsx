@@ -91,6 +91,14 @@ export function GroupCampaignsModule() {
     number: string | null;
   }>({ connected: false, status: null, checking: true, number: null });
 
+  // Dispatcher stall alerts raised by the dispatcher-watchdog cron (admins only via RLS)
+  const [stallAlerts, setStallAlerts] = useState<Array<{
+    id: string;
+    target_group_name: string;
+    failure_reason: string | null;
+    created_at: string;
+  }>>([]);
+
   const fetchData = async () => {
     setLoading(true);
     const [groupsRes, postsRes] = await Promise.all([
@@ -123,12 +131,24 @@ export function GroupCampaignsModule() {
     }
   }, []);
 
+  const fetchStallAlerts = useCallback(async () => {
+    const { data } = await supabase
+      .from('maytapi_delivery_alerts')
+      .select('id, target_group_name, failure_reason, created_at')
+      .eq('alert_status', 'open')
+      .like('failure_reason', 'dispatcher_%')
+      .order('created_at', { ascending: false })
+      .limit(20);
+    setStallAlerts(data ?? []);
+  }, []);
+
   useEffect(() => {
     fetchData();
     checkMaytapiHealth();
-    const interval = setInterval(checkMaytapiHealth, 30000);
+    fetchStallAlerts();
+    const interval = setInterval(() => { checkMaytapiHealth(); fetchStallAlerts(); }, 30000);
     return () => clearInterval(interval);
-  }, [checkMaytapiHealth]);
+  }, [checkMaytapiHealth, fetchStallAlerts]);
 
   useEffect(() => {
     const channel = supabase
