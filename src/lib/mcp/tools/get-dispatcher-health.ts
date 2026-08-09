@@ -77,6 +77,14 @@ export default defineTool({
       .eq("status", "sent")
       .gte("last_attempt_at", dayAgo);
 
+    const { data: openStallAlerts } = await supabase
+      .from("maytapi_delivery_alerts")
+      .select("id, target_group_name, failure_reason, created_at")
+      .eq("alert_status", "open")
+      .like("failure_reason", "dispatcher_%")
+      .order("created_at", { ascending: false })
+      .limit(10);
+
     const lastTickMs = lastSent?.last_attempt_at ? Date.parse(lastSent.last_attempt_at) : null;
     const minutesSinceLastSend = lastTickMs ? Math.round((nowMs - lastTickMs) / 60000) : null;
     const frozen = String(get("maytapi_outbound_frozen", "false")).toLowerCase() === "true";
