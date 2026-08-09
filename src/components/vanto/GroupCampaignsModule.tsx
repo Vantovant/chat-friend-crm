@@ -511,6 +511,31 @@ export function GroupCampaignsModule() {
         </CardContent>
       </Card>
 
+      {/* Dispatcher stall alerts (watchdog) */}
+      {stallAlerts.length > 0 && (
+        <Card className="border border-red-500/40 bg-red-500/5">
+          <CardContent className="py-3 px-4 space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium text-red-400">
+              <AlertTriangle size={16} />
+              Dispatcher stall detected — {stallAlerts.length} post{stallAlerts.length === 1 ? '' : 's'} not delivering
+            </div>
+            <ul className="space-y-1 text-xs text-muted-foreground">
+              {stallAlerts.slice(0, 5).map((a) => (
+                <li key={a.id}>
+                  <span className="text-foreground font-medium">{a.target_group_name}</span>
+                  {' · '}{a.failure_reason}
+                </li>
+              ))}
+            </ul>
+            {stallAlerts.length > 5 && (
+              <div className="text-xs text-muted-foreground">+{stallAlerts.length - 5} more open alert(s)</div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+
+
       {/* Scheduler Form */}
       <Card className="border-border">
         <CardHeader className="pb-3">
