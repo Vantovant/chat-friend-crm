@@ -91,6 +91,14 @@ export function GroupCampaignsModule() {
     number: string | null;
   }>({ connected: false, status: null, checking: true, number: null });
 
+  // Dispatcher stall alerts raised by the dispatcher-watchdog cron (admins only via RLS)
+  const [stallAlerts, setStallAlerts] = useState<Array<{
+    id: string;
+    target_group_name: string;
+    failure_reason: string | null;
+    created_at: string;
+  }>>([]);
+
   const fetchData = async () => {
     setLoading(true);
     const [groupsRes, postsRes] = await Promise.all([
@@ -123,12 +131,24 @@ export function GroupCampaignsModule() {
     }
   }, []);
 
+  const fetchStallAlerts = useCallback(async () => {
+    const { data } = await supabase
+      .from('maytapi_delivery_alerts')
+      .select('id, target_group_name, failure_reason, created_at')
+      .eq('alert_status', 'open')
+      .like('failure_reason', 'dispatcher_%')
+      .order('created_at', { ascending: false })
+      .limit(20);
+    setStallAlerts(data ?? []);
+  }, []);
+
   useEffect(() => {
     fetchData();
     checkMaytapiHealth();
-    const interval = setInterval(checkMaytapiHealth, 30000);
+    fetchStallAlerts();
+    const interval = setInterval(() => { checkMaytapiHealth(); fetchStallAlerts(); }, 30000);
     return () => clearInterval(interval);
-  }, [checkMaytapiHealth]);
+  }, [checkMaytapiHealth, fetchStallAlerts]);
 
   useEffect(() => {
     const channel = supabase
@@ -490,6 +510,31 @@ export function GroupCampaignsModule() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Dispatcher stall alerts (watchdog) */}
+      {stallAlerts.length > 0 && (
+        <Card className="border border-red-500/40 bg-red-500/5">
+          <CardContent className="py-3 px-4 space-y-2">
+            <div className="flex items-center gap-2 text-sm font-medium text-red-400">
+              <AlertTriangle size={16} />
+              Dispatcher stall detected — {stallAlerts.length} post{stallAlerts.length === 1 ? '' : 's'} not delivering
+            </div>
+            <ul className="space-y-1 text-xs text-muted-foreground">
+              {stallAlerts.slice(0, 5).map((a) => (
+                <li key={a.id}>
+                  <span className="text-foreground font-medium">{a.target_group_name}</span>
+                  {' · '}{a.failure_reason}
+                </li>
+              ))}
+            </ul>
+            {stallAlerts.length > 5 && (
+              <div className="text-xs text-muted-foreground">+{stallAlerts.length - 5} more open alert(s)</div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+
 
       {/* Scheduler Form */}
       <Card className="border-border">

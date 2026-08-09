@@ -187,6 +187,7 @@ var get_dispatcher_health_default = defineTool2({
     }
     const { count: sentLastHour } = await supabase.from("scheduled_group_posts").select("id", { count: "exact", head: true }).eq("status", "sent").gte("last_attempt_at", hourAgo);
     const { count: sentLast24h } = await supabase.from("scheduled_group_posts").select("id", { count: "exact", head: true }).eq("status", "sent").gte("last_attempt_at", dayAgo);
+    const { data: openStallAlerts } = await supabase.from("maytapi_delivery_alerts").select("id, target_group_name, failure_reason, created_at").eq("alert_status", "open").like("failure_reason", "dispatcher_%").order("created_at", { ascending: false }).limit(10);
     const lastTickMs = lastSent?.last_attempt_at ? Date.parse(lastSent.last_attempt_at) : null;
     const minutesSinceLastSend = lastTickMs ? Math.round((nowMs - lastTickMs) / 6e4) : null;
     const frozen = String(get("maytapi_outbound_frozen", "false")).toLowerCase() === "true";
@@ -201,6 +202,11 @@ var get_dispatcher_health_default = defineTool2({
       verdict = "degraded: posts are overdue and no successful send in the last 15 minutes \u2014 likely a cron/auth failure on maytapi-send-group-poll";
     const health = {
       verdict,
+      stall_alert: {
+        watchdog_cron: "dispatcher-watchdog (every 15 minutes)",
+        open_alerts: openStallAlerts?.length ?? 0,
+        alerts: openStallAlerts ?? []
+      },
       checked_at: nowIso,
       cron_job_name: "maytapi-send-group-poll",
       cron_interval_minutes: 5,
