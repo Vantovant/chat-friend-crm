@@ -79,3 +79,25 @@ export const ALLOWED_GROUPS = [
   "Botswana APLGO Presentations",
   "New Day New Life",
 ] as const;
+
+/**
+ * Resolves the single super_admin owner id (same pattern as mcp-bridge).
+ * Falls back to the token subject if the profiles lookup is unavailable.
+ */
+export async function resolveOwnerId(
+  supabase: ReturnType<typeof supabaseForUser>,
+  ctx: ToolContext,
+): Promise<{ ownerId: string } | { error: string }> {
+  const { data: owners, error } = await supabase
+    .from("profiles")
+    .select("id")
+    .eq("role", "super_admin");
+  if (error) {
+    const fallback = ctx.getUserId();
+    if (fallback) return { ownerId: fallback };
+    return { error: error.message };
+  }
+  if (!owners || owners.length === 0) return { error: "no_super_admin_found" };
+  if (owners.length > 1) return { error: `multiple_super_admins_found (${owners.length})` };
+  return { ownerId: owners[0].id as string };
+}
