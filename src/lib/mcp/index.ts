@@ -10,6 +10,9 @@ import listContacts from "./tools/list-contacts";
 import getContact from "./tools/get-contact";
 import updateContact from "./tools/update-contact";
 import addContactNote from "./tools/add-contact-note";
+import createPlanTask from "./tools/create-plan-task";
+import createPlanMeeting from "./tools/create-plan-meeting";
+import createPlanReminder from "./tools/create-plan-reminder";
 
 const projectRef = import.meta.env.VITE_SUPABASE_PROJECT_ID ?? "project-ref-unset";
 
@@ -35,5 +38,8 @@ export default defineMcp({
     getContact,
     updateContact,
     addContactNote,
+    createPlanTask,
+    createPlanMeeting,
+    createPlanReminder,
   ],
 });

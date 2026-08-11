@@ -73,6 +73,17 @@ var ALLOWED_GROUPS = [
   "Botswana APLGO Presentations",
   "New Day New Life"
 ];
+async function resolveOwnerId(supabase, ctx) {
+  const { data: owners, error } = await supabase.from("profiles").select("id").eq("role", "super_admin");
+  if (error) {
+    const fallback = ctx.getUserId();
+    if (fallback) return { ownerId: fallback };
+    return { error: error.message };
+  }
+  if (!owners || owners.length === 0) return { error: "no_super_admin_found" };
+  if (owners.length > 1) return { error: `multiple_super_admins_found (${owners.length})` };
+  return { ownerId: owners[0].id };
+}
 
 // src/lib/mcp/tools/get-dispatch-policy.ts
 var POLICY_KEYS = [
@@ -522,6 +533,108 @@ var add_contact_note_default = defineTool11({
   }
 });
 
+// src/lib/mcp/tools/create-plan-task.ts
+import { defineTool as defineTool12 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z8 } from "npm:zod@^3.25.76";
+var create_plan_task_default = defineTool12({
+  name: "create_plan_task",
+  title: "Create a plan task",
+  description: "Create a task on the Plan board. Skips creation and returns the existing row when an open task with the same title already exists.",
+  inputSchema: {
+    title: z8.string().min(1).describe("Task title."),
+    priority: z8.enum(["low", "medium", "high", "urgent"]).optional().describe("Task priority (default 'medium').")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  handler: async ({ title, priority }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const owner = await resolveOwnerId(supabase, ctx);
+    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const { data: existing, error: dupErr } = await supabase.from("plan_tasks").select("id, title, priority, status").eq("user_id", owner.ownerId).eq("title", title).neq("status", "done").limit(1);
+    if (dupErr) return { content: [{ type: "text", text: dupErr.message }], isError: true };
+    if (existing && existing.length > 0) {
+      return {
+        content: [{ type: "text", text: JSON.stringify({ ...existing[0], deduped: true }) }],
+        structuredContent: { task: existing[0], deduped: true }
+      };
+    }
+    const { data, error } = await supabase.from("plan_tasks").insert({ title, priority: priority ?? "medium", user_id: owner.ownerId }).select("id, title, priority, status").single();
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    return {
+      content: [{ type: "text", text: JSON.stringify(data) }],
+      structuredContent: { task: data, deduped: false }
+    };
+  }
+});
+
+// src/lib/mcp/tools/create-plan-meeting.ts
+import { defineTool as defineTool13 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z9 } from "npm:zod@^3.25.76";
+var create_plan_meeting_default = defineTool13({
+  name: "create_plan_meeting",
+  title: "Create a plan meeting",
+  description: "Schedule a meeting on the Plan calendar.",
+  inputSchema: {
+    title: z9.string().min(1).describe("Meeting title."),
+    start_time: z9.string().min(1).describe("ISO 8601 start datetime."),
+    location: z9.string().nullish().describe("Optional location.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  handler: async ({ title, start_time, location }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    if (Number.isNaN(Date.parse(start_time))) {
+      return { content: [{ type: "text", text: "start_time must be an ISO 8601 datetime" }], isError: true };
+    }
+    const supabase = supabaseForUser(ctx);
+    const owner = await resolveOwnerId(supabase, ctx);
+    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const { data, error } = await supabase.from("plan_meetings").insert({
+      title,
+      start_time: new Date(start_time).toISOString(),
+      location: location ?? null,
+      user_id: owner.ownerId
+    }).select("id, title, start_time, location").single();
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    return {
+      content: [{ type: "text", text: JSON.stringify(data) }],
+      structuredContent: { meeting: data }
+    };
+  }
+});
+
+// src/lib/mcp/tools/create-plan-reminder.ts
+import { defineTool as defineTool14 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z10 } from "npm:zod@^3.25.76";
+var create_plan_reminder_default = defineTool14({
+  name: "create_plan_reminder",
+  title: "Create a plan reminder",
+  description: "Create a reminder on the Plan board (the 'Remind me to\u2026' text goes in title).",
+  inputSchema: {
+    title: z10.string().min(1).describe("Reminder text."),
+    reminder_time: z10.string().min(1).describe("ISO 8601 datetime for the reminder.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  handler: async ({ title, reminder_time }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    if (Number.isNaN(Date.parse(reminder_time))) {
+      return { content: [{ type: "text", text: "reminder_time must be an ISO 8601 datetime" }], isError: true };
+    }
+    const supabase = supabaseForUser(ctx);
+    const owner = await resolveOwnerId(supabase, ctx);
+    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const { data, error } = await supabase.from("plan_reminders").insert({
+      title,
+      reminder_time: new Date(reminder_time).toISOString(),
+      user_id: owner.ownerId
+    }).select("id, title, reminder_time").single();
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    return {
+      content: [{ type: "text", text: JSON.stringify(data) }],
+      structuredContent: { reminder: data }
+    };
+  }
+});
+
 // src/lib/mcp/index.ts
 var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
@@ -544,7 +657,10 @@ var mcp_default = defineMcp({
     list_contacts_default,
     get_contact_default,
     update_contact_default,
-    add_contact_note_default
+    add_contact_note_default,
+    create_plan_task_default,
+    create_plan_meeting_default,
+    create_plan_reminder_default
   ]
 });
 
