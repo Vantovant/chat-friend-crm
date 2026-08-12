@@ -13,6 +13,7 @@ import addContactNote from "./tools/add-contact-note";
 import createPlanTask from "./tools/create-plan-task";
 import createPlanMeeting from "./tools/create-plan-meeting";
 import createPlanReminder from "./tools/create-plan-reminder";
+import sendWhatsappMessage from "./tools/send-whatsapp-message";
 
 const projectRef = import.meta.env.VITE_SUPABASE_PROJECT_ID ?? "project-ref-unset";
 
@@ -41,5 +42,6 @@ export default defineMcp({
     createPlanTask,
     createPlanMeeting,
     createPlanReminder,
+    sendWhatsappMessage,
   ],
 });
