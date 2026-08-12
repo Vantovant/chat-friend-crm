@@ -446,6 +446,43 @@
           "$schema": "http://json-schema.org/draft-07/schema#"
         },
         "outputSchema": null
+      },
+      {
+        "name": "send_whatsapp_message",
+        "title": "Send a 1:1 WhatsApp message",
+        "description": "Send a real one-to-one WhatsApp message to a single contact via the existing Maytapi integration (NOT a group post). Refuses if the contact is marked do_not_contact, if outbound is frozen, if the shared daily send cap is reached, or if the contact's last inbound message is older than 24 hours (WhatsApp customer service window — a pre-approved template must be used instead). On success the send is logged to the contact activity timeline and the contact's last_outbound_at / last_outbound_provider are updated.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": true
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "contact_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Contact UUID. Provide this or phone_normalized."
+            },
+            "phone_normalized": {
+              "type": "string",
+              "description": "Phone in +E164 format. Provide this or contact_id."
+            },
+            "message_body": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000,
+              "description": "The exact final text to send. No templating is applied."
+            }
+          },
+          "required": [
+            "message_body"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
       }
     ]
   }
