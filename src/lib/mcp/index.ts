@@ -51,5 +51,13 @@ export default defineMcp({
     createPlanMeeting,
     createPlanReminder,
     sendWhatsappMessage,
+    listPlanTasks,
+    completePlanTask,
+    deletePlanTask,
+    listPlanReminders,
+    completePlanReminder,
+    deletePlanReminder,
+    listPlanMeetings,
+    deletePlanMeeting,
   ],
 });
