@@ -14,6 +14,14 @@ import createPlanTask from "./tools/create-plan-task";
 import createPlanMeeting from "./tools/create-plan-meeting";
 import createPlanReminder from "./tools/create-plan-reminder";
 import sendWhatsappMessage from "./tools/send-whatsapp-message";
+import listPlanTasks from "./tools/list-plan-tasks";
+import completePlanTask from "./tools/complete-plan-task";
+import deletePlanTask from "./tools/delete-plan-task";
+import listPlanReminders from "./tools/list-plan-reminders";
+import completePlanReminder from "./tools/complete-plan-reminder";
+import deletePlanReminder from "./tools/delete-plan-reminder";
+import listPlanMeetings from "./tools/list-plan-meetings";
+import deletePlanMeeting from "./tools/delete-plan-meeting";
 
 const projectRef = import.meta.env.VITE_SUPABASE_PROJECT_ID ?? "project-ref-unset";
 
