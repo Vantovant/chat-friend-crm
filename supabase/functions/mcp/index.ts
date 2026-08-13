@@ -163,7 +163,7 @@ var get_dispatch_policy_default = defineTool({
 
 // src/lib/mcp/tools/get-dispatcher-health.ts
 import { defineTool as defineTool2 } from "npm:@lovable.dev/mcp-js@0.26.1";
-console.log("[build-stamp] mcp build=2026-08-08T08:30Z tools=11 includes=get_dispatcher_health");
+console.log("[build-stamp] mcp build=2026-08-13T14:35Z tools=23 includes=list_tasks,delete_meeting");
 var HEALTH_KEYS = [
   "maytapi_outbound_frozen",
   "maytapi_freeze_until_at",

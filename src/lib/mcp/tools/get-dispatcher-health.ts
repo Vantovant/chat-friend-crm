@@ -3,7 +3,7 @@ import { notAuthenticated, supabaseForUser } from "../supabase";
 
 // Deploy provenance stamp: printed at module load (cold boot) so the live build
 // can be identified from edge logs without an OAuth token.
-console.log("[build-stamp] mcp build=2026-08-08T08:30Z tools=11 includes=get_dispatcher_health");
+console.log("[build-stamp] mcp build=2026-08-13T14:35Z tools=23 includes=list_tasks,delete_meeting");
 
 const HEALTH_KEYS = [
   "maytapi_outbound_frozen",
