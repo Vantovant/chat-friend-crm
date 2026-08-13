@@ -43,6 +43,9 @@ function dayBounds(date: string): [string, string] | null {
   return [`${date}T00:00:00.000Z`, `${date}T23:59:59.999Z`]
 }
 
+const BUILD_STAMP = '2026-08-13T13:20Z actions=25 includes=list_tasks,delete_meeting'
+console.log(`[build-stamp] mcp-bridge build=${BUILD_STAMP}`)
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
