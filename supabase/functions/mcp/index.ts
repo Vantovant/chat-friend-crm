@@ -770,6 +770,252 @@ var send_whatsapp_message_default = defineTool15({
   }
 });
 
+// src/lib/mcp/tools/list-plan-tasks.ts
+import { defineTool as defineTool16 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z12 } from "npm:zod@^3.25.76";
+var list_plan_tasks_default = defineTool16({
+  name: "list_tasks",
+  title: "List plan tasks",
+  description: "Read tasks from the Plan board, optionally filtered by status ('pending'/'in_progress'/'done') and/or a single calendar day (matches due_date). Read-only.",
+  inputSchema: {
+    status: z12.string().optional().describe("Filter by status, e.g. 'pending'."),
+    date: z12.string().optional().describe("YYYY-MM-DD \u2014 filters to tasks due on this day."),
+    limit: z12.number().int().min(1).max(100).optional().describe("Max rows (default 50).")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ status, date, limit }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const owner = await resolveOwnerId(supabase, ctx);
+    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    let query = supabase.from("plan_tasks").select("id, title, description, status, priority, due_date, start_date, completed_at, source, created_at").eq("user_id", owner.ownerId).order("due_date", { ascending: true, nullsFirst: false }).limit(limit ?? 50);
+    if (status) query = query.eq("status", status);
+    if (date) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return { content: [{ type: "text", text: "date must be YYYY-MM-DD" }], isError: true };
+      }
+      query = query.gte("due_date", `${date}T00:00:00.000Z`).lte("due_date", `${date}T23:59:59.999Z`);
+    }
+    const { data, error } = await query;
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const result = { tasks: data ?? [], count: data?.length ?? 0 };
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+});
+
+// src/lib/mcp/tools/complete-plan-task.ts
+import { defineTool as defineTool17 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z13 } from "npm:zod@^3.25.76";
+var complete_plan_task_default = defineTool17({
+  name: "complete_task",
+  title: "Mark a plan task done",
+  description: "Mark a Plan board task as done (sets status to 'done' and stamps completed_at). Use list_tasks first to find the task id.",
+  inputSchema: {
+    id: z13.string().uuid().describe("plan_tasks.id \u2014 required.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  handler: async ({ id }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const owner = await resolveOwnerId(supabase, ctx);
+    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const { data: existing, error: fetchErr } = await supabase.from("plan_tasks").select("id").eq("id", id).eq("user_id", owner.ownerId).maybeSingle();
+    if (fetchErr) return { content: [{ type: "text", text: fetchErr.message }], isError: true };
+    if (!existing) return { content: [{ type: "text", text: "Task not found" }], isError: true };
+    const { data, error } = await supabase.from("plan_tasks").update({ status: "done", completed_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("id", id).select("id, title, status, completed_at").single();
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    return {
+      content: [{ type: "text", text: JSON.stringify(data) }],
+      structuredContent: { task: data }
+    };
+  }
+});
+
+// src/lib/mcp/tools/delete-plan-task.ts
+import { defineTool as defineTool18 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z14 } from "npm:zod@^3.25.76";
+var delete_plan_task_default = defineTool18({
+  name: "delete_task",
+  title: "Delete a plan task",
+  description: "Permanently delete a task from the Plan board. This is a hard delete \u2014 there is no undo. Use list_tasks first to find the task id.",
+  inputSchema: {
+    id: z14.string().uuid().describe("plan_tasks.id \u2014 required.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  handler: async ({ id }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const owner = await resolveOwnerId(supabase, ctx);
+    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const { data: existing, error: fetchErr } = await supabase.from("plan_tasks").select("id").eq("id", id).eq("user_id", owner.ownerId).maybeSingle();
+    if (fetchErr) return { content: [{ type: "text", text: fetchErr.message }], isError: true };
+    if (!existing) return { content: [{ type: "text", text: "Task not found" }], isError: true };
+    const { error } = await supabase.from("plan_tasks").delete().eq("id", id);
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    return {
+      content: [{ type: "text", text: JSON.stringify({ deleted_id: id }) }],
+      structuredContent: { deleted_id: id }
+    };
+  }
+});
+
+// src/lib/mcp/tools/list-plan-reminders.ts
+import { defineTool as defineTool19 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z15 } from "npm:zod@^3.25.76";
+var list_plan_reminders_default = defineTool19({
+  name: "list_reminders",
+  title: "List plan reminders",
+  description: "Read reminders from the Plan board, optionally filtered by is_done and/or a single calendar day (matches reminder_time). Read-only.",
+  inputSchema: {
+    is_done: z15.boolean().optional(),
+    date: z15.string().optional().describe("YYYY-MM-DD \u2014 filters to reminders on this day."),
+    limit: z15.number().int().min(1).max(100).optional().describe("Max rows (default 50).")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ is_done, date, limit }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const owner = await resolveOwnerId(supabase, ctx);
+    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    let query = supabase.from("plan_reminders").select("id, title, description, reminder_time, is_done, created_at").eq("user_id", owner.ownerId).order("reminder_time", { ascending: true }).limit(limit ?? 50);
+    if (typeof is_done === "boolean") query = query.eq("is_done", is_done);
+    if (date) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return { content: [{ type: "text", text: "date must be YYYY-MM-DD" }], isError: true };
+      }
+      query = query.gte("reminder_time", `${date}T00:00:00.000Z`).lte("reminder_time", `${date}T23:59:59.999Z`);
+    }
+    const { data, error } = await query;
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const result = { reminders: data ?? [], count: data?.length ?? 0 };
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+});
+
+// src/lib/mcp/tools/complete-plan-reminder.ts
+import { defineTool as defineTool20 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z16 } from "npm:zod@^3.25.76";
+var complete_plan_reminder_default = defineTool20({
+  name: "complete_reminder",
+  title: "Mark a plan reminder done",
+  description: "Mark a Plan board reminder as done (sets is_done to true). Use list_reminders first to find the reminder id.",
+  inputSchema: {
+    id: z16.string().uuid().describe("plan_reminders.id \u2014 required.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  handler: async ({ id }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const owner = await resolveOwnerId(supabase, ctx);
+    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const { data: existing, error: fetchErr } = await supabase.from("plan_reminders").select("id").eq("id", id).eq("user_id", owner.ownerId).maybeSingle();
+    if (fetchErr) return { content: [{ type: "text", text: fetchErr.message }], isError: true };
+    if (!existing) return { content: [{ type: "text", text: "Reminder not found" }], isError: true };
+    const { data, error } = await supabase.from("plan_reminders").update({ is_done: true }).eq("id", id).select("id, title, is_done").single();
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    return {
+      content: [{ type: "text", text: JSON.stringify(data) }],
+      structuredContent: { reminder: data }
+    };
+  }
+});
+
+// src/lib/mcp/tools/delete-plan-reminder.ts
+import { defineTool as defineTool21 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z17 } from "npm:zod@^3.25.76";
+var delete_plan_reminder_default = defineTool21({
+  name: "delete_reminder",
+  title: "Delete a plan reminder",
+  description: "Permanently delete a reminder from the Plan board. This is a hard delete \u2014 there is no undo. Use list_reminders first to find the reminder id.",
+  inputSchema: {
+    id: z17.string().uuid().describe("plan_reminders.id \u2014 required.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  handler: async ({ id }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const owner = await resolveOwnerId(supabase, ctx);
+    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const { data: existing, error: fetchErr } = await supabase.from("plan_reminders").select("id").eq("id", id).eq("user_id", owner.ownerId).maybeSingle();
+    if (fetchErr) return { content: [{ type: "text", text: fetchErr.message }], isError: true };
+    if (!existing) return { content: [{ type: "text", text: "Reminder not found" }], isError: true };
+    const { error } = await supabase.from("plan_reminders").delete().eq("id", id);
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    return {
+      content: [{ type: "text", text: JSON.stringify({ deleted_id: id }) }],
+      structuredContent: { deleted_id: id }
+    };
+  }
+});
+
+// src/lib/mcp/tools/list-plan-meetings.ts
+import { defineTool as defineTool22 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z18 } from "npm:zod@^3.25.76";
+var list_plan_meetings_default = defineTool22({
+  name: "list_meetings",
+  title: "List plan meetings",
+  description: "Read meetings from the Plan calendar, optionally filtered to a single calendar day (matches start_time). Read-only.",
+  inputSchema: {
+    date: z18.string().optional().describe("YYYY-MM-DD \u2014 filters to meetings on this day."),
+    limit: z18.number().int().min(1).max(100).optional().describe("Max rows (default 50).")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ date, limit }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const owner = await resolveOwnerId(supabase, ctx);
+    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    let query = supabase.from("plan_meetings").select("id, title, start_time, location, created_at").eq("user_id", owner.ownerId).order("start_time", { ascending: true }).limit(limit ?? 50);
+    if (date) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return { content: [{ type: "text", text: "date must be YYYY-MM-DD" }], isError: true };
+      }
+      query = query.gte("start_time", `${date}T00:00:00.000Z`).lte("start_time", `${date}T23:59:59.999Z`);
+    }
+    const { data, error } = await query;
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const result = { meetings: data ?? [], count: data?.length ?? 0 };
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+});
+
+// src/lib/mcp/tools/delete-plan-meeting.ts
+import { defineTool as defineTool23 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z19 } from "npm:zod@^3.25.76";
+var delete_plan_meeting_default = defineTool23({
+  name: "delete_meeting",
+  title: "Delete a plan meeting",
+  description: "Permanently delete a meeting from the Plan calendar. This is a hard delete \u2014 there is no undo. Use list_meetings first to find the meeting id.",
+  inputSchema: {
+    id: z19.string().uuid().describe("plan_meetings.id \u2014 required.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  handler: async ({ id }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const owner = await resolveOwnerId(supabase, ctx);
+    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const { data: existing, error: fetchErr } = await supabase.from("plan_meetings").select("id").eq("id", id).eq("user_id", owner.ownerId).maybeSingle();
+    if (fetchErr) return { content: [{ type: "text", text: fetchErr.message }], isError: true };
+    if (!existing) return { content: [{ type: "text", text: "Meeting not found" }], isError: true };
+    const { error } = await supabase.from("plan_meetings").delete().eq("id", id);
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    return {
+      content: [{ type: "text", text: JSON.stringify({ deleted_id: id }) }],
+      structuredContent: { deleted_id: id }
+    };
+  }
+});
+
 // src/lib/mcp/index.ts
 var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
@@ -796,7 +1042,15 @@ var mcp_default = defineMcp({
     create_plan_task_default,
     create_plan_meeting_default,
     create_plan_reminder_default,
-    send_whatsapp_message_default
+    send_whatsapp_message_default,
+    list_plan_tasks_default,
+    complete_plan_task_default,
+    delete_plan_task_default,
+    list_plan_reminders_default,
+    complete_plan_reminder_default,
+    delete_plan_reminder_default,
+    list_plan_meetings_default,
+    delete_plan_meeting_default
   ]
 });
 

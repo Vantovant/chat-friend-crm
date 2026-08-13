@@ -6,7 +6,7 @@ export default defineTool({
   name: "list_meetings",
   title: "List plan meetings",
   description:
-    "Read meetings from the Plan calendar, optionally filtered by a single calendar day (matches start_time). Read-only. Note: there is no completion/done tool for meetings — only tasks and reminders support marking done.",
+    "Read meetings from the Plan calendar, optionally filtered to a single calendar day (matches start_time). Read-only.",
   inputSchema: {
     date: z.string().optional().describe("YYYY-MM-DD — filters to meetings on this day."),
     limit: z.number().int().min(1).max(100).optional().describe("Max rows (default 50)."),
@@ -20,7 +20,7 @@ export default defineTool({
 
     let query = supabase
       .from("plan_meetings")
-      .select("id, title, description, start_time, end_time, location, notes, attendees, created_at")
+      .select("id, title, start_time, location, created_at")
       .eq("user_id", owner.ownerId)
       .order("start_time", { ascending: true })
       .limit(limit ?? 50);
