@@ -36,6 +36,13 @@ function mapTemperature(val: string): 'hot' | 'warm' | 'cold' {
   return 'cold'
 }
 
+// Validates a YYYY-MM-DD string and returns [startOfDayISO, endOfDayISO] in UTC.
+// Used by the list_* actions for single-day filtering.
+function dayBounds(date: string): [string, string] | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null
+  return [`${date}T00:00:00.000Z`, `${date}T23:59:59.999Z`]
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
@@ -75,8 +82,16 @@ Deno.serve(async (req) => {
     'update_contact',
     'add_contact_note',
     'create_task',
+    'list_tasks',
+    'complete_task',
+    'delete_task',
     'create_reminder',
+    'list_reminders',
+    'complete_reminder',
+    'delete_reminder',
     'create_meeting',
+    'list_meetings',
+    'delete_meeting',
     'create_diary_entry',
   ]
 
@@ -105,7 +120,7 @@ Deno.serve(async (req) => {
   try {
     switch (action) {
       case 'list_actions':
-        return json({ ok: true, actions: ACTIONS, bridge_version: '2026-08-07' })
+        return json({ ok: true, actions: ACTIONS, bridge_version: '2026-08-13' })
 
       case 'get_maytapi_status': {
         const keys = ['maytapi_daily_cap', 'maytapi_outbound_frozen', 'reactivation_campaign_enabled']
@@ -434,6 +449,79 @@ Deno.serve(async (req) => {
         return json({ ok: true, task: inserted })
       }
 
+      // NEW: list_tasks — read-only. Filter by status and/or a single
+      // calendar day (matches due_date). Scoped to the resolved super_admin.
+      case 'list_tasks': {
+        const resolved = await resolveOwnerId()
+        if ('errorResponse' in resolved) return resolved.errorResponse
+
+        const status = body.status ? String(body.status) : null
+        const dateStr = body.date ? String(body.date) : null
+        const limit = Number.isInteger(Number(body.limit)) && Number(body.limit) > 0
+          ? Math.min(Number(body.limit), 100) : 50
+
+        let query = supabase.from('plan_tasks')
+          .select('id, title, description, status, priority, due_date, start_date, completed_at, source, created_at')
+          .eq('user_id', resolved.ownerId)
+          .order('due_date', { ascending: true, nullsFirst: false })
+          .limit(limit)
+
+        if (status) query = query.eq('status', status)
+        if (dateStr) {
+          const bounds = dayBounds(dateStr)
+          if (!bounds) return json({ error: 'invalid_date_expected_yyyy_mm_dd' }, 400)
+          query = query.gte('due_date', bounds[0]).lte('due_date', bounds[1])
+        }
+
+        const { data, error } = await query
+        if (error) throw error
+        return json({ ok: true, tasks: data ?? [], count: data?.length ?? 0 })
+      }
+
+      // NEW: complete_task — sets status = 'done' and stamps completed_at,
+      // mirroring the app's own useTasks().update() behavior.
+      case 'complete_task': {
+        const resolved = await resolveOwnerId()
+        if ('errorResponse' in resolved) return resolved.errorResponse
+
+        const id = String(body.id ?? '')
+        if (!id) return json({ error: 'id_required' }, 400)
+
+        const { data: existing, error: fetchErr } = await supabase
+          .from('plan_tasks').select('id').eq('id', id).eq('user_id', resolved.ownerId).maybeSingle()
+        if (fetchErr) throw fetchErr
+        if (!existing) return json({ error: 'task_not_found' }, 404)
+
+        const { data: updated, error } = await supabase
+          .from('plan_tasks')
+          .update({ status: 'done', completed_at: new Date().toISOString() })
+          .eq('id', id)
+          .select('id, title, status, completed_at')
+          .single()
+        if (error) throw error
+        return json({ ok: true, task: updated })
+      }
+
+      // NEW: delete_task — HARD delete. plan_tasks has no deleted_at column
+      // (unlike VantoOS's tasks table), so there is no soft-delete
+      // convention to follow here; matches the app's own useTasks().remove().
+      case 'delete_task': {
+        const resolved = await resolveOwnerId()
+        if ('errorResponse' in resolved) return resolved.errorResponse
+
+        const id = String(body.id ?? '')
+        if (!id) return json({ error: 'id_required' }, 400)
+
+        const { data: existing, error: fetchErr } = await supabase
+          .from('plan_tasks').select('id').eq('id', id).eq('user_id', resolved.ownerId).maybeSingle()
+        if (fetchErr) throw fetchErr
+        if (!existing) return json({ error: 'task_not_found' }, 404)
+
+        const { error } = await supabase.from('plan_tasks').delete().eq('id', id)
+        if (error) throw error
+        return json({ ok: true, deleted_id: id })
+      }
+
       case 'create_reminder': {
         const title = String(body.title ?? '').trim()
         const reminderTime = String(body.reminder_time ?? '')
@@ -458,6 +546,79 @@ Deno.serve(async (req) => {
           .single()
         if (error) throw error
         return json({ ok: true, reminder: inserted })
+      }
+
+      // NEW: list_reminders — read-only. Filter by is_done and/or a single
+      // calendar day (matches reminder_time). Scoped to the resolved
+      // super_admin.
+      case 'list_reminders': {
+        const resolved = await resolveOwnerId()
+        if ('errorResponse' in resolved) return resolved.errorResponse
+
+        const isDone = typeof body.is_done === 'boolean' ? body.is_done : null
+        const dateStr = body.date ? String(body.date) : null
+        const limit = Number.isInteger(Number(body.limit)) && Number(body.limit) > 0
+          ? Math.min(Number(body.limit), 100) : 50
+
+        let query = supabase.from('plan_reminders')
+          .select('id, title, description, reminder_time, is_done, created_at')
+          .eq('user_id', resolved.ownerId)
+          .order('reminder_time', { ascending: true })
+          .limit(limit)
+
+        if (isDone !== null) query = query.eq('is_done', isDone)
+        if (dateStr) {
+          const bounds = dayBounds(dateStr)
+          if (!bounds) return json({ error: 'invalid_date_expected_yyyy_mm_dd' }, 400)
+          query = query.gte('reminder_time', bounds[0]).lte('reminder_time', bounds[1])
+        }
+
+        const { data, error } = await query
+        if (error) throw error
+        return json({ ok: true, reminders: data ?? [], count: data?.length ?? 0 })
+      }
+
+      // NEW: complete_reminder — sets is_done = true, mirroring the app's
+      // own useReminders().update() behavior.
+      case 'complete_reminder': {
+        const resolved = await resolveOwnerId()
+        if ('errorResponse' in resolved) return resolved.errorResponse
+
+        const id = String(body.id ?? '')
+        if (!id) return json({ error: 'id_required' }, 400)
+
+        const { data: existing, error: fetchErr } = await supabase
+          .from('plan_reminders').select('id').eq('id', id).eq('user_id', resolved.ownerId).maybeSingle()
+        if (fetchErr) throw fetchErr
+        if (!existing) return json({ error: 'reminder_not_found' }, 404)
+
+        const { data: updated, error } = await supabase
+          .from('plan_reminders')
+          .update({ is_done: true })
+          .eq('id', id)
+          .select('id, title, is_done')
+          .single()
+        if (error) throw error
+        return json({ ok: true, reminder: updated })
+      }
+
+      // NEW: delete_reminder — HARD delete, matching the app's own
+      // useReminders().remove().
+      case 'delete_reminder': {
+        const resolved = await resolveOwnerId()
+        if ('errorResponse' in resolved) return resolved.errorResponse
+
+        const id = String(body.id ?? '')
+        if (!id) return json({ error: 'id_required' }, 400)
+
+        const { data: existing, error: fetchErr } = await supabase
+          .from('plan_reminders').select('id').eq('id', id).eq('user_id', resolved.ownerId).maybeSingle()
+        if (fetchErr) throw fetchErr
+        if (!existing) return json({ error: 'reminder_not_found' }, 404)
+
+        const { error } = await supabase.from('plan_reminders').delete().eq('id', id)
+        if (error) throw error
+        return json({ ok: true, deleted_id: id })
       }
 
       case 'create_meeting': {
@@ -490,6 +651,54 @@ Deno.serve(async (req) => {
           meeting: inserted,
           note: 'Lightweight add only — no Google Calendar event or WhatsApp/email invite was sent.',
         })
+      }
+
+      // NEW: list_meetings — read-only. Filter by a single calendar day
+      // (matches start_time). Scoped to the resolved super_admin. Note: no
+      // is_done filter is exposed — plan_meetings has no confirmed
+      // completion field in this app.
+      case 'list_meetings': {
+        const resolved = await resolveOwnerId()
+        if ('errorResponse' in resolved) return resolved.errorResponse
+
+        const dateStr = body.date ? String(body.date) : null
+        const limit = Number.isInteger(Number(body.limit)) && Number(body.limit) > 0
+          ? Math.min(Number(body.limit), 100) : 50
+
+        let query = supabase.from('plan_meetings')
+          .select('id, title, description, start_time, end_time, location, notes, attendees, created_at')
+          .eq('user_id', resolved.ownerId)
+          .order('start_time', { ascending: true })
+          .limit(limit)
+
+        if (dateStr) {
+          const bounds = dayBounds(dateStr)
+          if (!bounds) return json({ error: 'invalid_date_expected_yyyy_mm_dd' }, 400)
+          query = query.gte('start_time', bounds[0]).lte('start_time', bounds[1])
+        }
+
+        const { data, error } = await query
+        if (error) throw error
+        return json({ ok: true, meetings: data ?? [], count: data?.length ?? 0 })
+      }
+
+      // NEW: delete_meeting — HARD delete, matching the app's own
+      // useMeetings().remove().
+      case 'delete_meeting': {
+        const resolved = await resolveOwnerId()
+        if ('errorResponse' in resolved) return resolved.errorResponse
+
+        const id = String(body.id ?? '')
+        if (!id) return json({ error: 'id_required' }, 400)
+
+        const { data: existing, error: fetchErr } = await supabase
+          .from('plan_meetings').select('id').eq('id', id).eq('user_id', resolved.ownerId).maybeSingle()
+        if (fetchErr) throw fetchErr
+        if (!existing) return json({ error: 'meeting_not_found' }, 404)
+
+        const { error } = await supabase.from('plan_meetings').delete().eq('id', id)
+        if (error) throw error
+        return json({ ok: true, deleted_id: id })
       }
 
       case 'create_diary_entry': {
