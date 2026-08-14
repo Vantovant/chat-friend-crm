@@ -1137,13 +1137,44 @@ var reply_to_conversation_default = defineTool26({
   }
 });
 
+// src/lib/mcp/tools/list-fb-comments.ts
+import { defineTool as defineTool27 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z23 } from "npm:zod@^3.25.76";
+var list_fb_comments_default = defineTool27({
+  name: "list_fb_comments",
+  title: "List Facebook Page comments",
+  description: "List comments left on the Facebook Page's posts/ads, newest first. Previously these were silently discarded by the ingest webhook \u2014 they're now stored and readable here. Read-only; reply support lands once Page comment-reply permissions are confirmed.",
+  inputSchema: {
+    unreplied_only: z23.boolean().optional().describe("Only return comments where replied = false (default false \u2014 returns all)."),
+    fb_post_id: z23.string().optional().describe("Filter to comments on one specific Facebook post id."),
+    limit: z23.number().int().min(1).max(100).optional().describe("Max rows (default 25).")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ unreplied_only, fb_post_id, limit }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    let query = supabase.from("fb_comments").select(
+      "id, fb_comment_id, fb_post_id, parent_comment_id, commenter_name, commenter_psid, comment_text, verb, replied, reply_text, replied_at, created_time"
+    ).neq("verb", "remove").order("created_time", { ascending: false, nullsFirst: false }).limit(limit ?? 25);
+    if (unreplied_only) query = query.eq("replied", false);
+    if (fb_post_id) query = query.eq("fb_post_id", fb_post_id);
+    const { data, error } = await query;
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const result = { count: data?.length ?? 0, comments: data ?? [] };
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+});
+
 // src/lib/mcp/index.ts
 var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
   name: "get-well-hub",
   title: "Get Well Hub",
-  version: "1.1.0",
-  instructions: "Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation.",
+  version: "1.2.0",
+  instructions: "Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments (read-only \u2014 reply support pending Page permission confirmation).",
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
     acceptedAudiences: "authenticated"
@@ -1174,7 +1205,8 @@ var mcp_default = defineMcp({
     delete_plan_meeting_default,
     list_conversations_default,
     get_conversation_thread_default,
-    reply_to_conversation_default
+    reply_to_conversation_default,
+    list_fb_comments_default
   ]
 });
 

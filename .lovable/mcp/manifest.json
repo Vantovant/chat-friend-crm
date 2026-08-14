@@ -12,7 +12,7 @@
   "mcp": {
     "server": {
       "name": "get-well-hub",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "title": "Get Well Hub"
     },
     "tools": [
@@ -803,6 +803,38 @@
             "conversation_id",
             "message_body"
           ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_fb_comments",
+        "title": "List Facebook Page comments",
+        "description": "List comments left on the Facebook Page's posts/ads, newest first. Previously these were silently discarded by the ingest webhook — they're now stored and readable here. Read-only; reply support lands once Page comment-reply permissions are confirmed.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "unreplied_only": {
+              "type": "boolean",
+              "description": "Only return comments where replied = false (default false — returns all)."
+            },
+            "fb_post_id": {
+              "type": "string",
+              "description": "Filter to comments on one specific Facebook post id."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "description": "Max rows (default 25)."
+            }
+          },
           "additionalProperties": false,
           "$schema": "http://json-schema.org/draft-07/schema#"
         },
