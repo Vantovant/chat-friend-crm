@@ -708,7 +708,7 @@
       {
         "name": "list_conversations",
         "title": "List inbox conversations",
-        "description": "List recent conversations from the unified inbox (Twilio SMS/WhatsApp + Maytapi WhatsApp), newest first. Optionally filter to a single channel or to unread conversations only.",
+        "description": "List recent conversations from the unified inbox (Twilio SMS/WhatsApp + Maytapi WhatsApp + Facebook Messenger), newest first. Optionally filter to a single channel or to unread conversations only. Messenger contacts have no phone number — they're identified by messenger_psid instead.",
         "annotations": {
           "readOnlyHint": true,
           "idempotentHint": true,
@@ -722,6 +722,7 @@
               "enum": [
                 "twilio",
                 "maytapi",
+                "facebook_messenger",
                 "all"
               ],
               "description": "Filter to conversations with at least one message on this channel (default 'all')."
