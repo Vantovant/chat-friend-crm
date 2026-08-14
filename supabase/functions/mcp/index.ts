@@ -163,7 +163,9 @@ var get_dispatch_policy_default = defineTool({
 
 // src/lib/mcp/tools/get-dispatcher-health.ts
 import { defineTool as defineTool2 } from "npm:@lovable.dev/mcp-js@0.26.1";
-console.log("[build-stamp] mcp build=2026-08-13T14:35Z tools=23 includes=list_tasks,delete_meeting");
+console.log(
+  "[build-stamp] mcp build=2026-08-14T13:00Z commit=794df36 tools=26 includes=list_conversations,get_conversation_thread,reply_to_conversation"
+);
 var HEALTH_KEYS = [
   "maytapi_outbound_frozen",
   "maytapi_freeze_until_at",
@@ -1016,13 +1018,132 @@ var delete_plan_meeting_default = defineTool23({
   }
 });
 
+// src/lib/mcp/tools/list-conversations.ts
+import { defineTool as defineTool24 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z20 } from "npm:zod@^3.25.76";
+var list_conversations_default = defineTool24({
+  name: "list_conversations",
+  title: "List inbox conversations",
+  description: "List recent conversations from the unified inbox (Twilio SMS/WhatsApp + Maytapi WhatsApp), newest first. Optionally filter to a single channel or to unread conversations only.",
+  inputSchema: {
+    provider: z20.enum(["twilio", "maytapi", "all"]).optional().describe("Filter to conversations with at least one message on this channel (default 'all')."),
+    unread_only: z20.boolean().optional().describe("Only return conversations with unread_count > 0."),
+    limit: z20.number().int().min(1).max(100).optional().describe("Max rows (default 25).")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ provider, unread_only, limit }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    let convIds = null;
+    if (provider && provider !== "all") {
+      const { data: matches, error: mErr } = await supabase.from("messages").select("conversation_id").eq("provider", provider).order("created_at", { ascending: false }).limit(500);
+      if (mErr) return { content: [{ type: "text", text: mErr.message }], isError: true };
+      convIds = [...new Set((matches ?? []).map((m) => m.conversation_id))];
+      if (convIds.length === 0) {
+        const result2 = { count: 0, conversations: [] };
+        return { content: [{ type: "text", text: JSON.stringify(result2, null, 2) }], structuredContent: result2 };
+      }
+    }
+    let query = supabase.from("conversations").select(
+      "id, contact_id, last_message, last_message_at, last_inbound_at, last_outbound_at, unread_count, status, contacts(name, phone_normalized)"
+    ).order("last_message_at", { ascending: false, nullsFirst: false }).limit(limit ?? 25);
+    if (unread_only) query = query.gt("unread_count", 0);
+    if (convIds) query = query.in("id", convIds);
+    const { data, error } = await query;
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const result = { count: data?.length ?? 0, conversations: data ?? [] };
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+});
+
+// src/lib/mcp/tools/get-conversation-thread.ts
+import { defineTool as defineTool25 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z21 } from "npm:zod@^3.25.76";
+var get_conversation_thread_default = defineTool25({
+  name: "get_conversation_thread",
+  title: "Get a conversation's full message thread",
+  description: "Full message history for one conversation (oldest first), each message tagged with its channel (twilio/maytapi) and whether it was inbound or outbound. Also returns the most recent automated-reply events for this conversation, so you can see whether the whatsapp-auto-reply bot already answered before drafting a manual reply.",
+  inputSchema: {
+    conversation_id: z21.string().uuid().describe("conversations.id \u2014 get this from list_conversations."),
+    limit: z21.number().int().min(1).max(200).optional().describe("Max messages (default 100).")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ conversation_id, limit }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const { data: conv, error: convErr } = await supabase.from("conversations").select("id, contact_id, status, unread_count, contacts(name, phone_normalized)").eq("id", conversation_id).maybeSingle();
+    if (convErr) return { content: [{ type: "text", text: convErr.message }], isError: true };
+    if (!conv) return { content: [{ type: "text", text: "Conversation not found" }], isError: true };
+    const { data: messages, error: msgErr } = await supabase.from("messages").select("id, content, is_outbound, provider, status, status_raw, created_at, provider_message_id").eq("conversation_id", conversation_id).order("created_at", { ascending: true }).limit(limit ?? 100);
+    if (msgErr) return { content: [{ type: "text", text: msgErr.message }], isError: true };
+    const { data: autoReplyEvents } = await supabase.from("auto_reply_events").select("action_taken, reason, template_used, knowledge_found, created_at").eq("conversation_id", conversation_id).order("created_at", { ascending: false }).limit(5);
+    const result = {
+      conversation: conv,
+      messages: messages ?? [],
+      recent_auto_reply_events: autoReplyEvents ?? []
+    };
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+});
+
+// src/lib/mcp/tools/reply-to-conversation.ts
+import { defineTool as defineTool26 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z22 } from "npm:zod@^3.25.76";
+var reply_to_conversation_default = defineTool26({
+  name: "reply_to_conversation",
+  title: "Reply in a conversation",
+  description: "Send a reply into an existing conversation via the existing send-message function, which auto-routes to Twilio or Maytapi based on which channel the contact last messaged in. Enforces the same 24-hour customer-service-window check and price/link safety validator as manual replies sent from the app \u2014 refuses rather than sending unsafe or out-of-window content.",
+  inputSchema: {
+    conversation_id: z22.string().uuid().describe("conversations.id \u2014 get this from list_conversations or get_conversation_thread."),
+    message_body: z22.string().min(1).max(4e3).describe("The exact final text to send. No templating is applied.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  handler: async ({ conversation_id, message_body }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const { data, error } = await supabase.functions.invoke("send-message", {
+      body: { conversation_id, content: message_body }
+    });
+    if (error) {
+      return {
+        content: [{ type: "text", text: `send-message invocation failed: ${error.message}` }],
+        structuredContent: { sent: false, reason: "invoke_error" },
+        isError: true
+      };
+    }
+    if (!data?.ok) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Refused: [${data?.code}] ${data?.message}${data?.hint ? " \u2014 " + data.hint : ""}`
+          }
+        ],
+        structuredContent: { sent: false, ...data },
+        isError: true
+      };
+    }
+    const result = { sent: true, ...data.message };
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+});
+
 // src/lib/mcp/index.ts
 var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
   name: "get-well-hub",
   title: "Get Well Hub",
-  version: "1.0.0",
-  instructions: "Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security.",
+  version: "1.1.0",
+  instructions: "Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation.",
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
     acceptedAudiences: "authenticated"
@@ -1050,7 +1171,10 @@ var mcp_default = defineMcp({
     complete_plan_reminder_default,
     delete_plan_reminder_default,
     list_plan_meetings_default,
-    delete_plan_meeting_default
+    delete_plan_meeting_default,
+    list_conversations_default,
+    get_conversation_thread_default,
+    reply_to_conversation_default
   ]
 });
 
