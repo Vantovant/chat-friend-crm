@@ -52,11 +52,21 @@ Deno.serve(async (req) => {
   const effective = derivedToken || PAGE_TOKEN;
   out.effective_token_source = derivedToken ? 'derived_page_token' : 'system_user_token_fallback';
 
-  // 2. subscribe page to feed
+  // 2. subscribe page to feed (existing behaviour)
   out.subscribe = await j(`${GRAPH}/${PAGE_ID}/subscribed_apps`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ subscribed_fields: 'feed', access_token: effective }).toString(),
+  });
+
+  // 2b. subscribe page to messages (+ messaging_postbacks) for Messenger DMs
+  out.subscribe_messages = await j(`${GRAPH}/${PAGE_ID}/subscribed_apps`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      subscribed_fields: 'feed,messages,messaging_postbacks',
+      access_token: effective,
+    }).toString(),
   });
 
   // 3. confirm page subscription
