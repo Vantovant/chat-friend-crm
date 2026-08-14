@@ -51,10 +51,23 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: 'META_PAGE_ACCESS_TOKEN not configured' }, 200);
     }
 
+    const derived = await derivePageToken(PAGE_TOKEN);
+    if (!derived.ok) {
+      console.error('[fb-reply-comment] page token derivation failed', derived.error);
+      return json({
+        ok: false,
+        stage: 'page_token_derivation',
+        page_id: PAGE_ID,
+        status: derived.status,
+        graph_error: derived.error,
+        error: 'Could not derive a Page access token from the system-user token.',
+      }, 200);
+    }
+
     const r = await fetch(`${GRAPH}/${encodeURIComponent(fb_comment_id)}/comments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ message: reply_text, access_token: PAGE_TOKEN }).toString(),
+      body: new URLSearchParams({ message: reply_text, access_token: derived.token }).toString(),
     });
     const body = await r.json().catch(() => ({}));
 
