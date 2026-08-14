@@ -9,7 +9,10 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const PAGE_TOKEN = Deno.env.get('META_PAGE_ACCESS_TOKEN') ?? '';
+// Fallback to _NEW: the rotated token was stored under META_PAGE_ACCESS_TOKEN_NEW,
+// same fix already applied in fb-verify-subscription. Without this, Graph enrichment
+// (full_picture, canonical permalink_url) silently no-ops since rotation.
+const PAGE_TOKEN = Deno.env.get('META_PAGE_ACCESS_TOKEN') || Deno.env.get('META_PAGE_ACCESS_TOKEN_NEW') || '';
 const PAGE_ID = Deno.env.get('META_PAGE_ID') ?? '';
 const APP_SECRET = Deno.env.get('META_APP_SECRET') ?? '';
 // Webhook verify tokens: accept an explicit webhook token OR the Meta app secret for back-compat.
