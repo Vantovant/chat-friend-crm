@@ -3,7 +3,7 @@ import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 
 const APP_ID = Deno.env.get('META_APP_ID') ?? '';
 const APP_SECRET = Deno.env.get('META_APP_SECRET') ?? '';
-const PAGE_TOKEN = Deno.env.get('META_PAGE_ACCESS_TOKEN') ?? '';
+const PAGE_TOKEN = Deno.env.get('META_PAGE_ACCESS_TOKEN') || Deno.env.get('META_PAGE_ACCESS_TOKEN_NEW') || '';
 const PAGE_ID = Deno.env.get('META_PAGE_ID') ?? '102068582816960';
 const GRAPH = 'https://graph.facebook.com/v19.0';
 
