@@ -781,6 +781,7 @@ export type Database = {
           last_synced_at: string | null
           last_training_invite_at: string | null
           lead_type: Database["public"]["Enums"]["lead_type"]
+          messenger_psid: string | null
           name: string
           name_needs_confirmation: boolean
           notes: string | null
@@ -832,6 +833,7 @@ export type Database = {
           last_synced_at?: string | null
           last_training_invite_at?: string | null
           lead_type?: Database["public"]["Enums"]["lead_type"]
+          messenger_psid?: string | null
           name: string
           name_needs_confirmation?: boolean
           notes?: string | null
@@ -883,6 +885,7 @@ export type Database = {
           last_synced_at?: string | null
           last_training_invite_at?: string | null
           lead_type?: Database["public"]["Enums"]["lead_type"]
+          messenger_psid?: string | null
           name?: string
           name_needs_confirmation?: boolean
           notes?: string | null

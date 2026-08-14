@@ -1024,9 +1024,9 @@ import { z as z20 } from "npm:zod@^3.25.76";
 var list_conversations_default = defineTool24({
   name: "list_conversations",
   title: "List inbox conversations",
-  description: "List recent conversations from the unified inbox (Twilio SMS/WhatsApp + Maytapi WhatsApp), newest first. Optionally filter to a single channel or to unread conversations only.",
+  description: "List recent conversations from the unified inbox (Twilio SMS/WhatsApp + Maytapi WhatsApp + Facebook Messenger), newest first. Optionally filter to a single channel or to unread conversations only. Messenger contacts have no phone number \u2014 they're identified by messenger_psid instead.",
   inputSchema: {
-    provider: z20.enum(["twilio", "maytapi", "all"]).optional().describe("Filter to conversations with at least one message on this channel (default 'all')."),
+    provider: z20.enum(["twilio", "maytapi", "facebook_messenger", "all"]).optional().describe("Filter to conversations with at least one message on this channel (default 'all')."),
     unread_only: z20.boolean().optional().describe("Only return conversations with unread_count > 0."),
     limit: z20.number().int().min(1).max(100).optional().describe("Max rows (default 25).")
   },
@@ -1045,7 +1045,7 @@ var list_conversations_default = defineTool24({
       }
     }
     let query = supabase.from("conversations").select(
-      "id, contact_id, last_message, last_message_at, last_inbound_at, last_outbound_at, unread_count, status, contacts(name, phone_normalized)"
+      "id, contact_id, last_message, last_message_at, last_inbound_at, last_outbound_at, unread_count, status, contacts(name, phone_normalized, messenger_psid)"
     ).order("last_message_at", { ascending: false, nullsFirst: false }).limit(limit ?? 25);
     if (unread_only) query = query.gt("unread_count", 0);
     if (convIds) query = query.in("id", convIds);
