@@ -12,7 +12,20 @@ const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 // Fallback to _NEW: the rotated Page token is stored under META_PAGE_ACCESS_TOKEN_NEW
 // (see fb-ingest / fb-poll-fallback / fb-token-health-check for the same pattern).
 const PAGE_TOKEN = Deno.env.get('META_PAGE_ACCESS_TOKEN') || Deno.env.get('META_PAGE_ACCESS_TOKEN_NEW') || '';
+const PAGE_ID = Deno.env.get('META_PAGE_ID') || '102068582816960';
 const GRAPH = 'https://graph.facebook.com/v19.0';
+
+// Derive a real Page access token from the system-user token. Publishing comments
+// requires a Page token; the system-user token is rejected with "(#3) ...".
+async function derivePageToken(systemToken: string) {
+  const url = `${GRAPH}/${encodeURIComponent(PAGE_ID)}?fields=access_token&access_token=${encodeURIComponent(systemToken)}`;
+  const r = await fetch(url);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok || !body?.access_token) {
+    return { ok: false as const, status: r.status, error: body };
+  }
+  return { ok: true as const, token: body.access_token as string };
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
