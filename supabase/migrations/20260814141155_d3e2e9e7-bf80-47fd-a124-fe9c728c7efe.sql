@@ -1,0 +1,1 @@
+delete from public.fb_comments where fb_comment_id = 'deploycheck_2007a9f';
