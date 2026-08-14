@@ -1102,6 +1102,60 @@ export type Database = {
           },
         ]
       }
+      fb_comments: {
+        Row: {
+          comment_text: string | null
+          commenter_name: string | null
+          commenter_psid: string | null
+          created_time: string | null
+          fb_comment_id: string
+          fb_post_id: string | null
+          fetched_at: string
+          id: string
+          page_id: string | null
+          parent_comment_id: string | null
+          raw_payload: Json | null
+          replied: boolean
+          replied_at: string | null
+          reply_text: string | null
+          verb: string
+        }
+        Insert: {
+          comment_text?: string | null
+          commenter_name?: string | null
+          commenter_psid?: string | null
+          created_time?: string | null
+          fb_comment_id: string
+          fb_post_id?: string | null
+          fetched_at?: string
+          id?: string
+          page_id?: string | null
+          parent_comment_id?: string | null
+          raw_payload?: Json | null
+          replied?: boolean
+          replied_at?: string | null
+          reply_text?: string | null
+          verb?: string
+        }
+        Update: {
+          comment_text?: string | null
+          commenter_name?: string | null
+          commenter_psid?: string | null
+          created_time?: string | null
+          fb_comment_id?: string
+          fb_post_id?: string | null
+          fetched_at?: string
+          id?: string
+          page_id?: string | null
+          parent_comment_id?: string | null
+          raw_payload?: Json | null
+          replied?: boolean
+          replied_at?: string | null
+          reply_text?: string | null
+          verb?: string
+        }
+        Relationships: []
+      }
       fb_dispatch_log: {
         Row: {
           created_at: string
