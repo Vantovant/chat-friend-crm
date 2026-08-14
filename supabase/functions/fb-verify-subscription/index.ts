@@ -32,15 +32,35 @@ Deno.serve(async (req) => {
   // 1. debug_token
   out.debug_token = await j(`${GRAPH}/debug_token?input_token=${encodeURIComponent(PAGE_TOKEN)}&access_token=${encodeURIComponent(appAccess)}`);
 
+  // 1b. derive a real Page token from the system-user token
+  const deriveRes = await j(`${GRAPH}/${PAGE_ID}?fields=access_token&access_token=${encodeURIComponent(PAGE_TOKEN)}`);
+  const derivedToken = (deriveRes.body as { access_token?: string } | undefined)?.access_token ?? '';
+  out.page_token_derivation = {
+    ok: deriveRes.ok && !!derivedToken,
+    status: deriveRes.status,
+    derived_token_prefix: derivedToken.slice(0, 12),
+    derived_token_length: derivedToken.length,
+    error: deriveRes.ok ? null : deriveRes.body,
+  };
+
+  // 1c. debug_token on the derived Page token (page-level permissions)
+  out.derived_debug_token = derivedToken
+    ? await j(`${GRAPH}/debug_token?input_token=${encodeURIComponent(derivedToken)}&access_token=${encodeURIComponent(appAccess)}`)
+    : { skipped: 'derivation failed' };
+
+  // effective token for page-scoped calls
+  const effective = derivedToken || PAGE_TOKEN;
+  out.effective_token_source = derivedToken ? 'derived_page_token' : 'system_user_token_fallback';
+
   // 2. subscribe page to feed
   out.subscribe = await j(`${GRAPH}/${PAGE_ID}/subscribed_apps`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ subscribed_fields: 'feed', access_token: PAGE_TOKEN }).toString(),
+    body: new URLSearchParams({ subscribed_fields: 'feed', access_token: effective }).toString(),
   });
 
   // 3. confirm page subscription
-  out.page_subscribed_apps = await j(`${GRAPH}/${PAGE_ID}/subscribed_apps?access_token=${encodeURIComponent(PAGE_TOKEN)}`);
+  out.page_subscribed_apps = await j(`${GRAPH}/${PAGE_ID}/subscribed_apps?access_token=${encodeURIComponent(effective)}`);
 
   // 4. app-level subscription
   out.app_subscriptions = await j(`${GRAPH}/${APP_ID}/subscriptions?access_token=${encodeURIComponent(appAccess)}`);
