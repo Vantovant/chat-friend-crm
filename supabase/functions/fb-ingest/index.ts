@@ -4,6 +4,10 @@
 //   fetch full post (incl. image), upsert fb_source_posts, fire-and-forget fb-summarize.
 // Phase 6: comment events (item='comment') are no longer discarded as noise —
 //   they're stored in fb_comments for the inbox/reply MCP tools to read.
+// Phase 7: Meta only allows ONE callback URL per app for the 'page' object —
+//   this is that URL. entry[].messaging[] (Messenger DMs) is forwarded as-is,
+//   raw body + original signature header intact, to fb-messenger-inbound,
+//   which verifies the signature itself and does the actual Messenger handling.
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -172,7 +176,10 @@ Deno.serve(async (req) => {
     // Capture raw body once (needed for signature verification)
     const rawBody = await req.text();
     const sigHeader = req.headers.get('x-hub-signature-256');
-    const looksLikeWebhook = rawBody.includes('"entry"') && rawBody.includes('"changes"');
+    // Messenger payloads carry "messaging", not "changes" — broadened so signature
+    // verification isn't silently skipped for pure-Messenger webhook deliveries.
+    const looksLikeWebhook = rawBody.includes('"entry"')
+      && (rawBody.includes('"changes"') || rawBody.includes('"messaging"'));
 
     // Only enforce HMAC for real webhook payloads from Meta.
     // Manual calls from the admin UI (post_url / text) come through user JWT and don't carry this header.
@@ -187,6 +194,32 @@ Deno.serve(async (req) => {
     let body: any = {};
     try { body = rawBody ? JSON.parse(rawBody) : {}; } catch { body = {}; }
     console.log('[fb-ingest] body', rawBody.slice(0, 400));
+
+    // ── Forward Messenger events (Phase 7) ──
+    // Meta only allows one callback URL per app for the 'page' object, and this is it.
+    // entry[].messaging[] payloads are Messenger DMs, not feed/comment events — forward
+    // the exact raw body + original signature header to fb-messenger-inbound, which
+    // re-verifies the signature itself (same body bytes ⇒ same valid HMAC) and does
+    // the actual contact/conversation/message handling. Fire-and-forget: never blocks
+    // or affects this function's own changes-processing below.
+    const hasMessagingEvents = Array.isArray(body.entry)
+      && body.entry.some((e: any) => Array.isArray(e.messaging) && e.messaging.length > 0);
+    if (hasMessagingEvents) {
+      const forwardUrl = `${SUPABASE_URL}/functions/v1/fb-messenger-inbound`;
+      const p = fetch(forwardUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sigHeader ? { 'x-hub-signature-256': sigHeader } : {}),
+        },
+        body: rawBody,
+      }).then(async (r) => {
+        const t = await r.text().catch(() => '');
+        console.log('[fb-ingest] forwarded to fb-messenger-inbound, status:', r.status, t.slice(0, 200));
+      }).catch((e) => console.error('[fb-ingest] forward to fb-messenger-inbound failed:', e));
+      // @ts-ignore
+      if (typeof EdgeRuntime !== 'undefined') EdgeRuntime.waitUntil(p);
+    }
 
     // Supabase client is needed for both post ingestion AND comment storage below.
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
@@ -234,7 +267,7 @@ Deno.serve(async (req) => {
 
     if (candidates.length === 0) {
       // Always 200 to webhook so Meta doesn't retry
-      return json({ ok: true, ingested: 0, comments_ingested: commentsIngested, note: 'no post candidates' }, 200);
+      return json({ ok: true, ingested: 0, comments_ingested: commentsIngested, messenger_forwarded: hasMessagingEvents, note: 'no post candidates' }, 200);
     }
 
     let ingested = 0;
@@ -335,7 +368,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    return json({ ok: true, ingested, comments_ingested: commentsIngested }, 200);
+    return json({ ok: true, ingested, comments_ingested: commentsIngested, messenger_forwarded: hasMessagingEvents }, 200);
   } catch (e) {
     console.error('[fb-ingest] exception', e);
     return json({ ok: false, error: String(e) }, 200);
