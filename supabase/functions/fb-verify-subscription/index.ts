@@ -23,7 +23,7 @@ Deno.serve(async (req) => {
     config: {
       app_id: APP_ID,
       page_id: PAGE_ID,
-      page_token_prefix: PAGE_TOKEN.slice(0, 12),
+      page_token_prefix: PAGE_TOKEN.slice(0, 20),
       page_token_length: PAGE_TOKEN.length,
       app_secret_set: !!APP_SECRET,
     },
