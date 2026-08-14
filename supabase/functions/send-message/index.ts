@@ -1,9 +1,12 @@
 /**
- * Vanto CRM — send-message Edge Function (Phase 5 hardened)
+ * Vanto CRM — send-message Edge Function (Phase 5 hardened, Phase 6: Messenger)
  * - Uses MessagingServiceSid as primary sender routing
  * - NO dangerous fallbacks — fails loudly with structured error JSON
  * - Strict +E.164 normalization with single whatsapp: prefix
  * - Structured error codes for frontend (TWILIO_63007, MISSING_SECRET, etc.)
+ * - Phase 6: routes to Facebook Messenger Send API when the contact's last
+ *   inbound message came via facebook_messenger (identified by messenger_psid,
+ *   not phone — Messenger contacts have no phone until they share one).
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -112,35 +115,60 @@ Deno.serve(async (req) => {
   // ── Load contact ──
   const { data: contact, error: contactErr } = await serviceClient
     .from("contacts")
-    .select("phone, phone_normalized, phone_raw, whatsapp_id")
+    .select("phone, phone_normalized, phone_raw, whatsapp_id, messenger_psid")
     .eq("id", conv.contact_id)
     .maybeSingle();
 
   if (contactErr || !contact) return jsonRes({ ok: false, code: "NOT_FOUND", message: "Contact not found" }, 404);
 
-  // Determine E.164 phone — try all fields in precedence order
-  const rawPhone = contact.phone_normalized || contact.phone || contact.whatsapp_id || contact.phone_raw || "";
-  const phoneE164 = normalizePhoneToE164(rawPhone);
-  if (!phoneE164) {
-    return jsonRes({
-      ok: false,
-      code: "INVALID_PHONE",
-      message: "Contact has no valid phone number",
-      hint: "Fix contact number format (+27…)",
-    }, 400);
+  // ── Detect preferred provider based on most recent inbound message ──
+  // STABILIZATION v5.1 + Phase 6: route replies via the same channel the contact used.
+  const { data: lastInboundMsg } = await serviceClient
+    .from("messages")
+    .select("provider")
+    .eq("conversation_id", conversation_id)
+    .eq("is_outbound", false)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const preferredProvider =
+    lastInboundMsg?.provider === "facebook_messenger" ? "facebook_messenger"
+    : lastInboundMsg?.provider === "maytapi" ? "maytapi"
+    : "twilio";
+  console.log("[send-message] preferredProvider:", preferredProvider, "for conv:", conversation_id);
+
+  // ── Phone validation — skipped entirely for Messenger, which has no real phone ──
+  let phoneE164 = "";
+  if (preferredProvider === "facebook_messenger") {
+    if (!contact.messenger_psid) {
+      return jsonRes({
+        ok: false, code: "MISSING_PSID",
+        message: "Contact has no messenger_psid — cannot send a Messenger reply.",
+      }, 400);
+    }
+  } else {
+    const rawPhone = contact.phone_normalized || contact.phone || contact.whatsapp_id || contact.phone_raw || "";
+    phoneE164 = normalizePhoneToE164(rawPhone);
+    if (!phoneE164) {
+      return jsonRes({
+        ok: false,
+        code: "INVALID_PHONE",
+        message: "Contact has no valid phone number",
+        hint: "Fix contact number format (+27…)",
+      }, 400);
+    }
+    if (phoneE164.startsWith("+27") && phoneE164.length < 12) {
+      return jsonRes({
+        ok: false,
+        code: "INVALID_PHONE",
+        message: `Phone ${phoneE164} is too short for a South African number`,
+        hint: "South African numbers should be +27 followed by 9 digits",
+      }, 400);
+    }
   }
 
-  // Validate length for +27 numbers
-  if (phoneE164.startsWith("+27") && phoneE164.length < 12) {
-    return jsonRes({
-      ok: false,
-      code: "INVALID_PHONE",
-      message: `Phone ${phoneE164} is too short for a South African number`,
-      hint: "South African numbers should be +27 followed by 9 digits",
-    }, 400);
-  }
-
-  // ── Enforce 24h customer care window ──
+  // ── Enforce 24h customer care window (applies to all channels, incl. Messenger) ──
   const lastInbound = conv.last_inbound_at ? new Date(conv.last_inbound_at).getTime() : 0;
   const now = Date.now();
   const withinWindow = lastInbound > 0 && now - lastInbound < 24 * 60 * 60 * 1000;
@@ -150,8 +178,10 @@ Deno.serve(async (req) => {
       ok: false,
       code: "TEMPLATE_REQUIRED",
       error: "template_required",
-      message: "24-hour customer care window has expired. A pre-approved WhatsApp template message is required.",
-      hint: "Send a template message to restart the conversation window.",
+      message: "24-hour customer care window has expired. A pre-approved template/message tag is required.",
+      hint: preferredProvider === "facebook_messenger"
+        ? "Use an approved Messenger message tag to restart the conversation window."
+        : "Send a template message to restart the conversation window.",
     }, 422);
   }
 
@@ -160,7 +190,7 @@ Deno.serve(async (req) => {
   // ── TRACK B SHARED SAFETY VALIDATOR (2026-05-02) ──
   // Mirror of sanitizeOutboundText() in whatsapp-auto-reply/index.ts.
   // Blocks forbidden literals + sub-R100 + premium-tier-too-low; sanitises myaplworld links.
-  // Logs evidence to auto_reply_events.
+  // Logs evidence to auto_reply_events. Channel-agnostic — applies to Messenger too.
   {
     const FORBIDDEN_LITERALS = [
       "R549", "R649", "R433.13", "R866.25", "R15.5", "R15.50",
@@ -231,21 +261,6 @@ Deno.serve(async (req) => {
     }
   }
 
-
-  // ── Detect preferred provider based on most recent inbound message ──
-  // STABILIZATION v5.1: route replies via the same provider the user used (Twilio or Maytapi)
-  const { data: lastInboundMsg } = await serviceClient
-    .from("messages")
-    .select("provider")
-    .eq("conversation_id", conversation_id)
-    .eq("is_outbound", false)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const preferredProvider = (lastInboundMsg?.provider === "maytapi") ? "maytapi" : "twilio";
-  console.log("[send-message] preferredProvider:", preferredProvider, "for conv:", conversation_id);
-
   // ── Insert message (queued) ──
   const { data: msg, error: msgErr } = await serviceClient
     .from("messages")
@@ -265,6 +280,67 @@ Deno.serve(async (req) => {
   if (msgErr || !msg) {
     console.error("[send-message] Insert error:", msgErr?.message);
     return jsonRes({ ok: false, code: "DB_ERROR", message: msgErr?.message || "Insert failed" }, 500);
+  }
+
+  // ── ROUTE: Facebook Messenger send ──
+  if (preferredProvider === "facebook_messenger") {
+    const PAGE_TOKEN = Deno.env.get("META_PAGE_ACCESS_TOKEN") || Deno.env.get("META_PAGE_ACCESS_TOKEN_NEW") || "";
+    const PAGE_ID = Deno.env.get("META_PAGE_ID") || "";
+    if (!PAGE_TOKEN) {
+      await serviceClient.from("messages").update({ status: "failed", status_raw: "failed", error: "Missing META_PAGE_ACCESS_TOKEN" }).eq("id", msg.id);
+      return jsonRes({ ok: false, code: "MISSING_SECRET", message: "META_PAGE_ACCESS_TOKEN not configured" }, 500);
+    }
+    try {
+      // Derive a real Page token from the System User token, same pattern as fb-reply-comment.
+      let sendToken = PAGE_TOKEN;
+      if (PAGE_ID) {
+        const dR = await fetch(`https://graph.facebook.com/v19.0/${PAGE_ID}?fields=access_token&access_token=${PAGE_TOKEN}`);
+        const dD = await dR.json().catch(() => ({}));
+        if (dR.ok && dD?.access_token) sendToken = dD.access_token;
+      }
+
+      const mRes = await fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${sendToken}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recipient: { id: contact.messenger_psid },
+          message: { text: trimmed },
+          messaging_type: "RESPONSE",
+        }),
+      });
+      const mData = await mRes.json().catch(() => ({}));
+
+      if (!mRes.ok) {
+        const errStr = `[FB_MESSENGER_SEND_FAILED] ${mData?.error?.message || "Unknown"}`;
+        await serviceClient.from("messages").update({ status: "failed", status_raw: "failed", error: errStr }).eq("id", msg.id);
+        return jsonRes({
+          ok: false, code: "FB_MESSENGER_SEND_FAILED",
+          message: mData?.error?.message || "Messenger send failed",
+          details: mData,
+        }, 502);
+      }
+
+      await serviceClient.from("messages").update({
+        status: "sent", status_raw: "sent", provider_message_id: mData?.message_id ?? null,
+      }).eq("id", msg.id);
+
+      await serviceClient.from("conversations").update({
+        last_message: trimmed.length > 200 ? trimmed.slice(0, 200) + "…" : trimmed,
+        last_message_at: new Date().toISOString(),
+        last_outbound_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq("id", conversation_id);
+
+      return jsonRes({
+        ok: true, success: true,
+        message: { ...msg, status: "sent", status_raw: "sent", provider_message_id: mData?.message_id ?? null, provider: "facebook_messenger" },
+      });
+    } catch (e: any) {
+      await serviceClient.from("messages").update({
+        status: "failed", status_raw: "failed", error: e?.message || "Network error reaching Messenger Send API",
+      }).eq("id", msg.id);
+      return jsonRes({ ok: false, code: "NETWORK_ERROR", message: e?.message || "Messenger send failed" }, 503);
+    }
   }
 
   // ── ROUTE: Maytapi 1-on-1 send ──
