@@ -2,6 +2,8 @@
 // - GET: handshake (hub.challenge / hub.verify_token)
 // - POST: HMAC-256 verify with META_APP_SECRET, parse entry[].changes[],
 //   fetch full post (incl. image), upsert fb_source_posts, fire-and-forget fb-summarize.
+// Phase 6: comment events (item='comment') are no longer discarded as noise —
+//   they're stored in fb_comments for the inbox/reply MCP tools to read.
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -55,6 +57,47 @@ function extractImageUrl(graphPost: any): string | null {
     }
   }
   return null;
+}
+
+/** Store a Page comment event. Never throws — logs and returns false on failure. */
+async function upsertComment(
+  supabase: ReturnType<typeof createClient>,
+  v: any,
+  pageId: string,
+): Promise<boolean> {
+  const commentId = v.comment_id || v.id;
+  if (!commentId) return false;
+
+  const postId: string | null = v.post_id || null;
+  const parentId: string | null = v.parent_id && v.parent_id !== postId ? v.parent_id : null;
+  const commenterPsid: string | null = v.from?.id ?? null;
+  const commenterName: string | null = v.from?.name ?? null;
+  const commentText = typeof v.message === 'string' ? v.message : '';
+  const createdTime = v.created_time
+    ? (typeof v.created_time === 'number' ? new Date(v.created_time * 1000).toISOString() : String(v.created_time))
+    : new Date().toISOString();
+  const verb = (v.verb ?? 'add').toLowerCase(); // add | edited | remove
+
+  const { error } = await supabase
+    .from('fb_comments')
+    .upsert({
+      fb_comment_id: commentId,
+      fb_post_id: postId,
+      parent_comment_id: parentId,
+      page_id: pageId || null,
+      commenter_psid: commenterPsid,
+      commenter_name: commenterName,
+      comment_text: commentText,
+      verb,
+      created_time: createdTime,
+      raw_payload: v,
+    }, { onConflict: 'fb_comment_id' });
+
+  if (error) {
+    console.error('[fb-ingest] comment upsert err', error.message);
+    return false;
+  }
+  return true;
 }
 
 Deno.serve(async (req) => {
@@ -142,7 +185,11 @@ Deno.serve(async (req) => {
     try { body = rawBody ? JSON.parse(rawBody) : {}; } catch { body = {}; }
     console.log('[fb-ingest] body', rawBody.slice(0, 400));
 
+    // Supabase client is needed for both post ingestion AND comment storage below.
+    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
+
     const candidates: { postId?: string; url?: string; text?: string; createdTime?: string }[] = [];
+    let commentsIngested = 0;
 
     if (body.post_url || body.post_id || body.text) {
       candidates.push({ postId: body.post_id, url: body.post_url, text: body.text });
@@ -151,10 +198,20 @@ Deno.serve(async (req) => {
       for (const entry of body.entry) {
         for (const change of entry.changes ?? []) {
           const v = change.value ?? {};
-          // FILTER: skip reactions, likes, comments, shares without message body.
-          // Only ingest actual page posts (item: 'status' | 'post' | 'photo' | 'video' | 'share' WITH message).
           const item = (v.item ?? '').toLowerCase();
-          const isNoise = ['reaction', 'like', 'comment'].includes(item);
+
+          // Comments are no longer discarded — store them for the inbox tools, then skip
+          // the post-ingestion path (a comment is never itself a page post).
+          if (item === 'comment') {
+            const stored = await upsertComment(supabase, v, PAGE_ID);
+            console.log(`[fb-ingest] comment event stored=${stored} comment_id=${v.comment_id || v.id} post_id=${v.post_id}`);
+            if (stored) commentsIngested++;
+            continue;
+          }
+
+          // FILTER: skip reactions/likes. Only ingest actual page posts
+          // (item: 'status' | 'post' | 'photo' | 'video' | 'share' WITH message).
+          const isNoise = ['reaction', 'like'].includes(item);
           if (isNoise) {
             console.log(`[fb-ingest] skip noise event item=${item} post_id=${v.post_id}`);
             continue;
@@ -174,10 +231,9 @@ Deno.serve(async (req) => {
 
     if (candidates.length === 0) {
       // Always 200 to webhook so Meta doesn't retry
-      return json({ ok: true, ingested: 0, note: 'no candidates' }, 200);
+      return json({ ok: true, ingested: 0, comments_ingested: commentsIngested, note: 'no post candidates' }, 200);
     }
 
-    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
     let ingested = 0;
 
     for (const c of candidates) {
@@ -276,7 +332,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    return json({ ok: true, ingested }, 200);
+    return json({ ok: true, ingested, comments_ingested: commentsIngested }, 200);
   } catch (e) {
     console.error('[fb-ingest] exception', e);
     return json({ ok: false, error: String(e) }, 200);
