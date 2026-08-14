@@ -41,3 +41,6 @@ verify_jwt = false
 
 [functions.dispatcher-watchdog]
 verify_jwt = false
+
+[functions.fb-messenger-inbound]
+verify_jwt = false
