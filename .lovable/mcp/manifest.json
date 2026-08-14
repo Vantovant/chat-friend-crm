@@ -12,7 +12,7 @@
   "mcp": {
     "server": {
       "name": "get-well-hub",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "title": "Get Well Hub"
     },
     "tools": [
@@ -699,6 +699,109 @@
           },
           "required": [
             "id"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_conversations",
+        "title": "List inbox conversations",
+        "description": "List recent conversations from the unified inbox (Twilio SMS/WhatsApp + Maytapi WhatsApp), newest first. Optionally filter to a single channel or to unread conversations only.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "enum": [
+                "twilio",
+                "maytapi",
+                "all"
+              ],
+              "description": "Filter to conversations with at least one message on this channel (default 'all')."
+            },
+            "unread_only": {
+              "type": "boolean",
+              "description": "Only return conversations with unread_count > 0."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "description": "Max rows (default 25)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_conversation_thread",
+        "title": "Get a conversation's full message thread",
+        "description": "Full message history for one conversation (oldest first), each message tagged with its channel (twilio/maytapi) and whether it was inbound or outbound. Also returns the most recent automated-reply events for this conversation, so you can see whether the whatsapp-auto-reply bot already answered before drafting a manual reply.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "conversation_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "conversations.id — get this from list_conversations."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "description": "Max messages (default 100)."
+            }
+          },
+          "required": [
+            "conversation_id"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "reply_to_conversation",
+        "title": "Reply in a conversation",
+        "description": "Send a reply into an existing conversation via the existing send-message function, which auto-routes to Twilio or Maytapi based on which channel the contact last messaged in. Enforces the same 24-hour customer-service-window check and price/link safety validator as manual replies sent from the app — refuses rather than sending unsafe or out-of-window content.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": true
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "conversation_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "conversations.id — get this from list_conversations or get_conversation_thread."
+            },
+            "message_body": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000,
+              "description": "The exact final text to send. No templating is applied."
+            }
+          },
+          "required": [
+            "conversation_id",
+            "message_body"
           ],
           "additionalProperties": false,
           "$schema": "http://json-schema.org/draft-07/schema#"
