@@ -6,10 +6,10 @@ export default defineTool({
   name: "list_conversations",
   title: "List inbox conversations",
   description:
-    "List recent conversations from the unified inbox (Twilio SMS/WhatsApp + Maytapi WhatsApp), newest first. Optionally filter to a single channel or to unread conversations only.",
+    "List recent conversations from the unified inbox (Twilio SMS/WhatsApp + Maytapi WhatsApp + Facebook Messenger), newest first. Optionally filter to a single channel or to unread conversations only. Messenger contacts have no phone number — they're identified by messenger_psid instead.",
   inputSchema: {
     provider: z
-      .enum(["twilio", "maytapi", "all"])
+      .enum(["twilio", "maytapi", "facebook_messenger", "all"])
       .optional()
       .describe("Filter to conversations with at least one message on this channel (default 'all')."),
     unread_only: z.boolean().optional().describe("Only return conversations with unread_count > 0."),
@@ -39,7 +39,7 @@ export default defineTool({
     let query = supabase
       .from("conversations")
       .select(
-        "id, contact_id, last_message, last_message_at, last_inbound_at, last_outbound_at, unread_count, status, contacts(name, phone_normalized)",
+        "id, contact_id, last_message, last_message_at, last_inbound_at, last_outbound_at, unread_count, status, contacts(name, phone_normalized, messenger_psid)",
       )
       .order("last_message_at", { ascending: false, nullsFirst: false })
       .limit(limit ?? 25);
