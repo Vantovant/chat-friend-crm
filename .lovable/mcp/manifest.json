@@ -839,6 +839,39 @@
           "$schema": "http://json-schema.org/draft-07/schema#"
         },
         "outputSchema": null
+      },
+      {
+        "name": "reply_to_fb_comment",
+        "title": "Reply to a Facebook Page comment",
+        "description": "Post a public reply to a comment on the Facebook Page, via the same fb-reply-comment function the in-app Facebook Inbox panel uses. Requires pages_manage_engagement on the Page token — until that's granted in Meta App Review, this returns Meta's rejection error rather than sending anything.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": true
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "fb_comment_id": {
+              "type": "string",
+              "description": "fb_comments.fb_comment_id — get this from list_fb_comments."
+            },
+            "reply_text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000,
+              "description": "The reply text to post publicly under the comment."
+            }
+          },
+          "required": [
+            "fb_comment_id",
+            "reply_text"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
       }
     ]
   }

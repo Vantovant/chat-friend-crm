@@ -26,6 +26,7 @@ import listConversations from "./tools/list-conversations";
 import getConversationThread from "./tools/get-conversation-thread";
 import replyToConversation from "./tools/reply-to-conversation";
 import listFbComments from "./tools/list-fb-comments";
+import replyToFbComment from "./tools/reply-to-fb-comment";
 
 const projectRef = import.meta.env.VITE_SUPABASE_PROJECT_ID ?? "project-ref-unset";
 
@@ -34,7 +35,7 @@ export default defineMcp({
   title: "Get Well Hub",
   version: "1.2.0",
   instructions:
-    "Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations → get_conversation_thread (check recent_auto_reply_events before replying) → reply_to_conversation. For Facebook Page comments, use list_fb_comments (read-only — reply support pending Page permission confirmation).",
+    "Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations → get_conversation_thread (check recent_auto_reply_events before replying) → reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement).",
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
     acceptedAudiences: "authenticated",
@@ -67,5 +68,6 @@ export default defineMcp({
     getConversationThread,
     replyToConversation,
     listFbComments,
+    replyToFbComment,
   ],
 });

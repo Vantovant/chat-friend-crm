@@ -164,7 +164,7 @@ var get_dispatch_policy_default = defineTool({
 // src/lib/mcp/tools/get-dispatcher-health.ts
 import { defineTool as defineTool2 } from "npm:@lovable.dev/mcp-js@0.26.1";
 console.log(
-  "[build-stamp] mcp build=2026-08-14T14:15Z commit=6a2c7a5 tools=27 includes=list_fb_comments"
+  "[build-stamp] mcp build=2026-08-14T20:35Z commit=1ca31d8 tools=28 includes=reply_to_fb_comment"
 );
 var HEALTH_KEYS = [
   "maytapi_outbound_frozen",
@@ -1168,13 +1168,55 @@ var list_fb_comments_default = defineTool27({
   }
 });
 
+// src/lib/mcp/tools/reply-to-fb-comment.ts
+import { defineTool as defineTool28 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z24 } from "npm:zod@^3.25.76";
+var reply_to_fb_comment_default = defineTool28({
+  name: "reply_to_fb_comment",
+  title: "Reply to a Facebook Page comment",
+  description: "Post a public reply to a comment on the Facebook Page, via the same fb-reply-comment function the in-app Facebook Inbox panel uses. Requires pages_manage_engagement on the Page token \u2014 until that's granted in Meta App Review, this returns Meta's rejection error rather than sending anything.",
+  inputSchema: {
+    fb_comment_id: z24.string().describe("fb_comments.fb_comment_id \u2014 get this from list_fb_comments."),
+    reply_text: z24.string().min(1).max(2e3).describe("The reply text to post publicly under the comment.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  handler: async ({ fb_comment_id, reply_text }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const { data, error } = await supabase.functions.invoke("fb-reply-comment", {
+      body: { fb_comment_id, reply_text }
+    });
+    if (error) {
+      return {
+        content: [{ type: "text", text: `fb-reply-comment invocation failed: ${error.message}` }],
+        structuredContent: { sent: false, reason: "invoke_error" },
+        isError: true
+      };
+    }
+    if (!data?.ok) {
+      return {
+        content: [
+          { type: "text", text: `Meta rejected the reply: ${JSON.stringify(data?.graph_error ?? data)}` }
+        ],
+        structuredContent: { sent: false, ...data },
+        isError: true
+      };
+    }
+    const result = { sent: true, reply_id: data.reply_id };
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+});
+
 // src/lib/mcp/index.ts
 var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
   name: "get-well-hub",
   title: "Get Well Hub",
   version: "1.2.0",
-  instructions: "Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments (read-only \u2014 reply support pending Page permission confirmation).",
+  instructions: "Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement).",
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
     acceptedAudiences: "authenticated"
@@ -1206,7 +1248,8 @@ var mcp_default = defineMcp({
     list_conversations_default,
     get_conversation_thread_default,
     reply_to_conversation_default,
-    list_fb_comments_default
+    list_fb_comments_default,
+    reply_to_fb_comment_default
   ]
 });
 
