@@ -5,7 +5,9 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-const PAGE_TOKEN = Deno.env.get('META_PAGE_ACCESS_TOKEN') ?? '';
+// Fallback to _NEW: the rotated token was stored under META_PAGE_ACCESS_TOKEN_NEW.
+// Without this, PAGE_TOKEN is '' and this whole cron poller hard-no-ops every run.
+const PAGE_TOKEN = Deno.env.get('META_PAGE_ACCESS_TOKEN') || Deno.env.get('META_PAGE_ACCESS_TOKEN_NEW') || '';
 const PAGE_ID = Deno.env.get('META_PAGE_ID') ?? '';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
