@@ -7,7 +7,7 @@ import logo from '@/assets/getwellhub-logo.png.asset.json';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import {
   LayoutDashboard, MessageSquare, Users, BarChart3, Zap, Bot, GitBranch,
-  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X, Megaphone, ShieldCheck, ShieldAlert, Brain, AlertCircle, CalendarCheck, BookHeart, Link2, Mail,
+  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X, Megaphone, ShieldCheck, ShieldAlert, Brain, AlertCircle, CalendarCheck, BookHeart, Link2, Mail, Facebook,
 } from 'lucide-react';
 import { InstallAppButton } from './InstallAppButton';
 import { HubSyncBadge } from './HubSyncBadge';
@@ -24,6 +24,7 @@ const navItems: NavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'inbox', label: 'Inbox', icon: MessageSquare },
   { id: 'maytapi-inbox', label: 'Maytapi Inbox', icon: MessageSquare },
+  { id: 'facebook-inbox', label: 'Facebook Inbox', icon: Facebook },
   { id: 'plan', label: 'PLAN', icon: CalendarCheck },
   { id: 'voice-diary', label: 'Voice Diary', icon: BookHeart },
   { id: 'contacts', label: 'Contacts', icon: Users },
@@ -58,6 +59,7 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userName, setUserName] = useState('');
   const [inboxUnread, setInboxUnread] = useState(0);
+  const [fbUnread, setFbUnread] = useState(0);
   const isMobile = useIsMobile();
   const currentUser = useCurrentUser();
   const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
@@ -93,10 +95,36 @@ export function AppSidebar({ activeModule, onModuleChange }: Props) {
     return () => { supabase.removeChannel(channel); };
   }, []);
 
-  // Compute nav items: drop admin-only items for non-admins, then add dynamic badge
+  // Fetch unreplied Facebook comment count
+  useEffect(() => {
+    const fetchFbUnread = async () => {
+      const { count } = await supabase
+        .from('fb_comments')
+        .select('id', { count: 'exact', head: true })
+        .eq('replied', false)
+        .neq('verb', 'remove');
+      setFbUnread(count ?? 0);
+    };
+    fetchFbUnread();
+
+    const channel = supabase
+      .channel('sidebar-fb-unread')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'fb_comments' }, () => {
+        fetchFbUnread();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
+
+  // Compute nav items: drop admin-only items for non-admins, then add dynamic badges
   const navItemsComputed = navItems
     .filter(item => !item.adminOnly || isAdmin)
-    .map(item => item.id === 'inbox' ? { ...item, badge: inboxUnread } : item);
+    .map(item => {
+      if (item.id === 'inbox') return { ...item, badge: inboxUnread };
+      if (item.id === 'facebook-inbox') return { ...item, badge: fbUnread };
+      return item;
+    });
 
   const handleModuleChange = (m: Module) => {
     onModuleChange(m);
