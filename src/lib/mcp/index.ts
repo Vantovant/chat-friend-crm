@@ -22,15 +22,18 @@ import completePlanReminder from "./tools/complete-plan-reminder";
 import deletePlanReminder from "./tools/delete-plan-reminder";
 import listPlanMeetings from "./tools/list-plan-meetings";
 import deletePlanMeeting from "./tools/delete-plan-meeting";
+import listConversations from "./tools/list-conversations";
+import getConversationThread from "./tools/get-conversation-thread";
+import replyToConversation from "./tools/reply-to-conversation";
 
 const projectRef = import.meta.env.VITE_SUPABASE_PROJECT_ID ?? "project-ref-unset";
 
 export default defineMcp({
   name: "get-well-hub",
   title: "Get Well Hub",
-  version: "1.0.0",
+  version: "1.1.0",
   instructions:
-    "Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security.",
+    "Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations → get_conversation_thread (check recent_auto_reply_events before replying) → reply_to_conversation.",
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
     acceptedAudiences: "authenticated",
@@ -59,5 +62,8 @@ export default defineMcp({
     deletePlanReminder,
     listPlanMeetings,
     deletePlanMeeting,
+    listConversations,
+    getConversationThread,
+    replyToConversation,
   ],
 });
