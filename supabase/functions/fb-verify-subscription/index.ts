@@ -72,8 +72,26 @@ Deno.serve(async (req) => {
   // 3. confirm page subscription
   out.page_subscribed_apps = await j(`${GRAPH}/${PAGE_ID}/subscribed_apps?access_token=${encodeURIComponent(effective)}`);
 
+  // 3b. app-level webhook subscription: register callback URL + fields for the 'page' object.
+  // Meta's authoritative config lives here; page_subscribed_apps alone is not enough.
+  const CALLBACK_URL = `${Deno.env.get('SUPABASE_URL')}/functions/v1/fb-ingest`;
+  const VERIFY_TOKEN = Deno.env.get('META_WEBHOOK_VERIFY_TOKEN') || APP_SECRET;
+  out.app_subscribe_page = await j(`${GRAPH}/${APP_ID}/subscriptions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      object: 'page',
+      callback_url: CALLBACK_URL,
+      fields: 'feed,messages,messaging_postbacks,message_reactions,messaging_optins',
+      verify_token: VERIFY_TOKEN,
+      include_values: 'true',
+      access_token: appAccess,
+    }).toString(),
+  });
+
   // 4. app-level subscription
   out.app_subscriptions = await j(`${GRAPH}/${APP_ID}/subscriptions?access_token=${encodeURIComponent(appAccess)}`);
+
 
   return new Response(JSON.stringify(out, null, 2), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
