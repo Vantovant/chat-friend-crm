@@ -40,11 +40,17 @@ export default function Privacy() {
 
           <div>
             <h2 className="text-lg font-semibold mb-2">3. Third-Party Services</h2>
+            <p className="text-muted-foreground mb-2">
+              We use the following service providers to operate the platform. Each processes only the
+              minimum data needed to perform its function, and each has its own privacy/security
+              practices independent of ours. Locations below reflect where each provider processes data.
+            </p>
             <ul className="list-disc pl-6 space-y-1 text-muted-foreground">
-              <li>Lovable Cloud (database, authentication, edge functions, storage).</li>
-              <li>Twilio and Maytapi (WhatsApp messaging providers).</li>
-              <li>Meta / Facebook Graph API (Page post ingestion, Page comment reading/replying, Messenger messaging).</li>
-              <li>Lovable AI Gateway (Google Gemini, OpenAI GPT for copy generation).</li>
+              <li>Lovable Cloud / Supabase (database, authentication, edge functions, storage) — hosted on AWS in Frankfurt, Germany (EU/EEA).</li>
+              <li>Twilio (WhatsApp/SMS messaging provider) — United States.</li>
+              <li>Maytapi (WhatsApp messaging provider).</li>
+              <li>Meta / Facebook Graph API (Page post ingestion, Page comment reading/replying, Messenger messaging) — United States.</li>
+              <li>Lovable AI Gateway, using Google Gemini and/or OpenAI GPT for copy generation and auto-reply drafting — United States.</li>
             </ul>
             <p className="mt-2 text-muted-foreground">
               We do not sell personal data. Data is only shared with the providers strictly required to
