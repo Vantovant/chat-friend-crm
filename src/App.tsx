@@ -8,6 +8,8 @@ import NotFound from "./pages/NotFound";
 import AcceptInvite from "./pages/AcceptInvite";
 import ResetPassword from "./pages/ResetPassword";
 import Privacy from "./pages/Privacy";
+import Terms from "./pages/Terms";
+import DataDeletion from "./pages/DataDeletion";
 import Login from "./pages/Login";
 import Home from "./pages/marketing/Home";
 import Prospector from "./pages/marketing/Prospector";
@@ -39,6 +41,8 @@ const App = () => (
           <Route path="/accept-invite" element={<AcceptInvite />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/privacy" element={<Privacy />} />
+          <Route path="/terms" element={<Terms />} />
+          <Route path="/data-deletion" element={<DataDeletion />} />
 
           {/* MCP OAuth consent */}
           <Route path="/.lovable/oauth/consent" element={<OAuthConsent />} />
