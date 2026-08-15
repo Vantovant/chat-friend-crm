@@ -4,7 +4,7 @@ export default function Privacy() {
       <div className="max-w-3xl mx-auto px-6 py-12">
         <h1 className="text-3xl font-bold mb-2">Privacy Policy</h1>
         <p className="text-sm text-muted-foreground mb-8">
-          Last updated: 20 May 2026
+          Last updated: 15 August 2026
         </p>
 
         <section className="space-y-6 text-sm leading-relaxed">
@@ -21,6 +21,8 @@ export default function Privacy() {
               <li>Contact data you save: name, phone number (E.164), WhatsApp ID, lead type, notes, tags.</li>
               <li>Conversation data: WhatsApp messages sent and received via Twilio / Maytapi integrations.</li>
               <li>Facebook content: Page posts ingested by the Facebook → WhatsApp automation module.</li>
+              <li>Facebook Page comments: commenter name, comment text, and commenter's Facebook ID, for comments left on our Page's posts and ads.</li>
+              <li>Facebook Messenger messages: message content and the sender's Page-Scoped ID (PSID), for messages sent to our Page via Messenger. We attempt to retrieve the sender's first/last name via the Graph API to display it in our inbox.</li>
               <li>System data: audit logs, integration health, AI suggestions, and dispatch results.</li>
             </ul>
           </div>
@@ -31,6 +33,7 @@ export default function Privacy() {
               <li>To deliver CRM functionality: lead management, conversations, campaigns, automations.</li>
               <li>To generate AI-assisted message variants for WhatsApp Groups and Status broadcasts.</li>
               <li>To synchronise approved records with the connected Zazi CRM (one-way push).</li>
+              <li>To read and respond to comments and Messenger conversations on our Facebook Page, so customer questions get timely replies.</li>
               <li>To monitor integration health and prevent abuse, spam, or policy violations.</li>
             </ul>
           </div>
@@ -40,7 +43,7 @@ export default function Privacy() {
             <ul className="list-disc pl-6 space-y-1 text-muted-foreground">
               <li>Lovable Cloud (database, authentication, edge functions, storage).</li>
               <li>Twilio and Maytapi (WhatsApp messaging providers).</li>
-              <li>Meta / Facebook Graph API (Page post ingestion).</li>
+              <li>Meta / Facebook Graph API (Page post ingestion, Page comment reading/replying, Messenger messaging).</li>
               <li>Lovable AI Gateway (Google Gemini, OpenAI GPT for copy generation).</li>
             </ul>
             <p className="mt-2 text-muted-foreground">
@@ -53,9 +56,17 @@ export default function Privacy() {
             <h2 className="text-lg font-semibold mb-2">4. Facebook Page Integration</h2>
             <p className="text-muted-foreground">
               When a Facebook Page is connected, we receive public post content (message, permalink,
-              attachments, posted-at timestamp) via webhook or scheduled polling. We do not collect
-              private messages, friend lists, or profile data of Page visitors. Page access tokens are
+              attachments, posted-at timestamp) via webhook or scheduled polling. Page access tokens are
               stored encrypted and used only to fetch posts you have explicitly published.
+            </p>
+            <p className="mt-2 text-muted-foreground">
+              We also receive, store, and allow our operators to reply to: (a) public comments left on
+              our Page's posts and ads, and (b) private Messenger messages sent to our Page. This data is
+              used solely to provide customer service — answering questions about our products and
+              services in the same place the customer reached out. We do not use this data for
+              advertising, do not share it with third parties beyond the service providers listed in
+              Section 3, and do not collect a Messenger user's friend list or broader profile beyond
+              their name and Page-Scoped ID.
             </p>
           </div>
 
