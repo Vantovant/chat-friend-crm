@@ -3132,6 +3132,81 @@ export type Database = {
           },
         ]
       }
+      sign_and_win_outreach_recipients: {
+        Row: {
+          attempts: number
+          batch_label: string | null
+          contact_id: string | null
+          created_at: string
+          delivered_at: string | null
+          email: string | null
+          error: string | null
+          first_name: string | null
+          id: string
+          last_attempt_at: string | null
+          member_id: string | null
+          name: string | null
+          notes: string | null
+          phone_normalized: string | null
+          provider_message_id: string | null
+          rank: string | null
+          read_at: string | null
+          replied_at: string | null
+          reply_preview: string | null
+          sent_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          batch_label?: string | null
+          contact_id?: string | null
+          created_at?: string
+          delivered_at?: string | null
+          email?: string | null
+          error?: string | null
+          first_name?: string | null
+          id?: string
+          last_attempt_at?: string | null
+          member_id?: string | null
+          name?: string | null
+          notes?: string | null
+          phone_normalized?: string | null
+          provider_message_id?: string | null
+          rank?: string | null
+          read_at?: string | null
+          replied_at?: string | null
+          reply_preview?: string | null
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          batch_label?: string | null
+          contact_id?: string | null
+          created_at?: string
+          delivered_at?: string | null
+          email?: string | null
+          error?: string | null
+          first_name?: string | null
+          id?: string
+          last_attempt_at?: string | null
+          member_id?: string | null
+          name?: string | null
+          notes?: string | null
+          phone_normalized?: string | null
+          provider_message_id?: string | null
+          rank?: string | null
+          read_at?: string | null
+          replied_at?: string | null
+          reply_preview?: string | null
+          sent_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       sync_runs: {
         Row: {
           errors: string[]
