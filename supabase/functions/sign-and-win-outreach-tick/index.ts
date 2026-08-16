@@ -84,7 +84,8 @@ Deno.serve(async (req) => {
   const results: any[] = [];
 
   for (const row of rows) {
-    const message = buildMessage(row.first_name || row.name?.split(" ")[0] || "");
+    const custom = typeof row.custom_message === "string" ? row.custom_message.trim() : "";
+    const message = custom || buildMessage(row.first_name || row.name?.split(" ")[0] || "");
     if (dryRun) {
       results.push({ id: row.id, name: row.name, phone: row.phone_normalized, preview: message });
       continue;

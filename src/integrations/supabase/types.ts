@@ -3138,6 +3138,7 @@ export type Database = {
           batch_label: string | null
           contact_id: string | null
           created_at: string
+          custom_message: string | null
           delivered_at: string | null
           email: string | null
           error: string | null
@@ -3162,6 +3163,7 @@ export type Database = {
           batch_label?: string | null
           contact_id?: string | null
           created_at?: string
+          custom_message?: string | null
           delivered_at?: string | null
           email?: string | null
           error?: string | null
@@ -3186,6 +3188,7 @@ export type Database = {
           batch_label?: string | null
           contact_id?: string | null
           created_at?: string
+          custom_message?: string | null
           delivered_at?: string | null
           email?: string | null
           error?: string | null

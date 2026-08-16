@@ -1,0 +1,1 @@
+ALTER TABLE public.sign_and_win_outreach_recipients ADD COLUMN IF NOT EXISTS custom_message text;
