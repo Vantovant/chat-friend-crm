@@ -22,7 +22,7 @@ Deno.serve(async (req) => {
 
   const READ_FIELDS = [
     'id', 'name', 'link', 'privacy_policy_url', 'terms_of_service_url',
-    'user_support_email', 'app_domains', 'data_deletion_url',
+    'user_support_email', 'app_domains',
   ].join(',');
 
   out.before = await j(`${GRAPH}/${APP_ID}?fields=${READ_FIELDS}&access_token=${encodeURIComponent(appAccess)}`);
