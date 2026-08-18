@@ -10,6 +10,7 @@
  */
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { resolvePageToken } from "../_shared/fb-page-token.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -284,20 +285,18 @@ Deno.serve(async (req) => {
 
   // ── ROUTE: Facebook Messenger send ──
   if (preferredProvider === "facebook_messenger") {
-    const PAGE_TOKEN = Deno.env.get("META_PAGE_ACCESS_TOKEN") || Deno.env.get("META_PAGE_ACCESS_TOKEN_NEW") || "";
-    const PAGE_ID = Deno.env.get("META_PAGE_ID") || "";
-    if (!PAGE_TOKEN) {
-      await serviceClient.from("messages").update({ status: "failed", status_raw: "failed", error: "Missing META_PAGE_ACCESS_TOKEN" }).eq("id", msg.id);
-      return jsonRes({ ok: false, code: "MISSING_SECRET", message: "META_PAGE_ACCESS_TOKEN not configured" }, 500);
+    // Multi-tenant: send as the Page that owns this conversation. Falls back to the
+    // env/admin Page token when the conversation has no connected Page (legacy threads).
+    const { data: convPage } = await serviceClient
+      .from("conversations").select("page_id").eq("id", conversation_id).maybeSingle();
+    const resolvedPage = await resolvePageToken(serviceClient, convPage?.page_id ?? null);
+    if (!resolvedPage.ok || !resolvedPage.token) {
+      const errStr = "No usable Facebook Page token. Connect the Page in Settings \u2192 Facebook Page.";
+      await serviceClient.from("messages").update({ status: "failed", status_raw: "failed", error: errStr }).eq("id", msg.id);
+      return jsonRes({ ok: false, code: "MISSING_PAGE_TOKEN", message: errStr, details: resolvedPage.error }, 500);
     }
     try {
-      // Derive a real Page token from the System User token, same pattern as fb-reply-comment.
-      let sendToken = PAGE_TOKEN;
-      if (PAGE_ID) {
-        const dR = await fetch(`https://graph.facebook.com/v19.0/${PAGE_ID}?fields=access_token&access_token=${PAGE_TOKEN}`);
-        const dD = await dR.json().catch(() => ({}));
-        if (dR.ok && dD?.access_token) sendToken = dD.access_token;
-      }
+      const sendToken = resolvedPage.token;
 
       const mRes = await fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${sendToken}`, {
         method: "POST",

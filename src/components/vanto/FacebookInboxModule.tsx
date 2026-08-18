@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
+import { useCurrentUser } from '@/hooks/use-current-user';
 import { Facebook, MessageCircle, Send, RefreshCw, Loader2, CheckCircle2, Clock, MessagesSquare } from 'lucide-react';
 
 type FbComment = {
@@ -43,9 +44,27 @@ export function FacebookInboxModule() {
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [sending, setSending] = useState<Set<string>>(new Set());
   const [filter, setFilter] = useState<'all' | 'unreplied'>('unreplied');
+  const currentUser = useCurrentUser();
 
   const load = async () => {
     setLoading(true);
+
+    // Multi-tenant scoping: non-admins only see the Pages they personally connected.
+    // Admins keep seeing everything, including the legacy env-configured Page.
+    const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
+    let myPageIds: string[] | null = null;
+    if (currentUser && !isAdmin) {
+      const { data: conns } = await supabase
+        .from('facebook_page_connections')
+        .select('page_id')
+        .eq('status', 'active');
+      myPageIds = [...new Set((conns ?? []).map(c => c.page_id as string))];
+    }
+    if (myPageIds && myPageIds.length === 0) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
 
     // ── Comments ──
     let commentQuery = supabase
@@ -55,6 +74,7 @@ export function FacebookInboxModule() {
       .order('created_time', { ascending: false })
       .limit(100);
     if (filter === 'unreplied') commentQuery = commentQuery.eq('replied', false);
+    if (myPageIds) commentQuery = commentQuery.in('page_id', myPageIds);
     const { data: commentRows } = await commentQuery;
 
     const commentItems: FeedItem[] = ((commentRows as FbComment[]) ?? []).map(c => ({
@@ -74,12 +94,14 @@ export function FacebookInboxModule() {
 
     let messengerItems: FeedItem[] = [];
     if (convIds.length > 0) {
-      const { data: convRows } = await supabase
+      let convQuery = supabase
         .from('conversations')
         .select('id, contact_id, last_message, last_message_at, last_inbound_at, last_outbound_at, unread_count, contacts(name, messenger_psid)')
         .in('id', convIds)
         .order('last_message_at', { ascending: false })
         .limit(100);
+      if (myPageIds) convQuery = convQuery.in('page_id', myPageIds);
+      const { data: convRows } = await convQuery;
 
       messengerItems = ((convRows as unknown as ConvRow[]) ?? [])
         .map(cv => {
@@ -107,7 +129,7 @@ export function FacebookInboxModule() {
     setLoading(false);
   };
 
-  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter]);
+  useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [filter, currentUser?.id]);
 
   const refresh = async () => {
     setRefreshing(true);
