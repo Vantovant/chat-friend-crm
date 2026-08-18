@@ -5,6 +5,7 @@
 // verbatim until that permission is granted via App Review.
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { resolvePageToken } from '../_shared/fb-page-token.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -14,18 +15,6 @@ const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const PAGE_TOKEN = Deno.env.get('META_PAGE_ACCESS_TOKEN') || Deno.env.get('META_PAGE_ACCESS_TOKEN_NEW') || '';
 const PAGE_ID = Deno.env.get('META_PAGE_ID') || '102068582816960';
 const GRAPH = 'https://graph.facebook.com/v19.0';
-
-// Derive a real Page access token from the system-user token. Publishing comments
-// requires a Page token; the system-user token is rejected with "(#3) ...".
-async function derivePageToken(systemToken: string) {
-  const url = `${GRAPH}/${encodeURIComponent(PAGE_ID)}?fields=access_token&access_token=${encodeURIComponent(systemToken)}`;
-  const r = await fetch(url);
-  const body = await r.json().catch(() => ({}));
-  if (!r.ok || !body?.access_token) {
-    return { ok: false as const, status: r.status, error: body };
-  }
-  return { ok: true as const, token: body.access_token as string };
-}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -47,27 +36,29 @@ Deno.serve(async (req) => {
     if (!fb_comment_id || !reply_text) {
       return json({ ok: false, error: 'fb_comment_id and reply_text required' }, 400);
     }
-    if (!PAGE_TOKEN) {
-      return json({ ok: false, error: 'META_PAGE_ACCESS_TOKEN not configured' }, 200);
-    }
+    const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-    const derived = await derivePageToken(PAGE_TOKEN);
-    if (!derived.ok) {
-      console.error('[fb-reply-comment] page token derivation failed', derived.error);
+    // Multi-tenant: use the token of the Page that owns this comment. Falls back to
+    // the env/admin Page token when the comment's Page has no user connection row.
+    const { data: commentRow } = await admin
+      .from('fb_comments').select('page_id').eq('fb_comment_id', fb_comment_id).maybeSingle();
+
+    const resolved = await resolvePageToken(admin, commentRow?.page_id ?? PAGE_ID);
+    if (!resolved.ok || !resolved.token) {
+      console.error('[fb-reply-comment] page token resolution failed', resolved.error);
       return json({
         ok: false,
-        stage: 'page_token_derivation',
-        page_id: PAGE_ID,
-        status: derived.status,
-        graph_error: derived.error,
-        error: 'Could not derive a Page access token from the system-user token.',
+        stage: 'page_token_resolution',
+        page_id: resolved.page_id,
+        graph_error: resolved.error,
+        error: 'No usable Page access token for this Page. Connect the Page in Settings → Facebook Page.',
       }, 200);
     }
 
     const r = await fetch(`${GRAPH}/${encodeURIComponent(fb_comment_id)}/comments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ message: reply_text, access_token: derived.token }).toString(),
+      body: new URLSearchParams({ message: reply_text, access_token: resolved.token }).toString(),
     });
     const body = await r.json().catch(() => ({}));
 
@@ -76,7 +67,6 @@ Deno.serve(async (req) => {
       return json({ ok: false, status: r.status, graph_error: body }, 200);
     }
 
-    const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
     await admin.from('fb_comments').update({
       replied: true, reply_text, replied_at: new Date().toISOString(),
     }).eq('fb_comment_id', fb_comment_id);
