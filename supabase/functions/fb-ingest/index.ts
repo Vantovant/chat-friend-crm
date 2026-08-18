@@ -239,7 +239,7 @@ Deno.serve(async (req) => {
           // Comments are no longer discarded — store them for the inbox tools, then skip
           // the post-ingestion path (a comment is never itself a page post).
           if (item === 'comment') {
-            const stored = await upsertComment(supabase, v, PAGE_ID);
+            const stored = await upsertComment(supabase, v, eventPageId);
             console.log(`[fb-ingest] comment event stored=${stored} comment_id=${v.comment_id || v.id} post_id=${v.post_id}`);
             if (stored) commentsIngested++;
             continue;

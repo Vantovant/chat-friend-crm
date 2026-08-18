@@ -7,6 +7,7 @@
 // with channel='facebook_messenger' so the same safety-checked bot logic applies.
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { resolvePageToken, pageOwner } from '../_shared/fb-page-token.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -68,6 +69,16 @@ Deno.serve(async (req) => {
     let stored = 0;
 
     for (const entry of body.entry ?? []) {
+      // entry.id is the Page that received the DM — this is what makes ingest multi-tenant.
+      const eventPageId: string | null = entry?.id ? String(entry.id) : null;
+      const ownerUserId = (await pageOwner(svc, eventPageId)) ?? VANTO_USER_ID;
+      const pageToken = (await resolvePageToken(svc, eventPageId)).token ?? PAGE_TOKEN;
+      if (eventPageId) {
+        await svc.from('facebook_page_connections')
+          .update({ last_webhook_confirmed_at: new Date().toISOString() })
+          .eq('page_id', eventPageId).eq('status', 'active');
+      }
+
       for (const evt of entry.messaging ?? []) {
         // Skip echoes of our own sends, delivery/read receipts, and non-text events for now.
         if (evt.message?.is_echo) continue;
@@ -91,9 +102,9 @@ Deno.serve(async (req) => {
         } else {
           // Best-effort profile name lookup — non-fatal if it fails (e.g. permission not yet live).
           let name = `Messenger user ${psid.slice(-6)}`;
-          if (PAGE_TOKEN) {
+          if (pageToken) {
             try {
-              const r = await fetch(`${GRAPH}/${psid}?fields=first_name,last_name&access_token=${PAGE_TOKEN}`);
+              const r = await fetch(`${GRAPH}/${psid}?fields=first_name,last_name&access_token=${pageToken}`);
               const d = await r.json();
               if (r.ok && (d.first_name || d.last_name)) {
                 name = [d.first_name, d.last_name].filter(Boolean).join(' ');
@@ -109,7 +120,7 @@ Deno.serve(async (req) => {
               name,
               phone: `psid:${psid}`,
               messenger_psid: psid,
-              assigned_to: VANTO_USER_ID,
+              assigned_to: ownerUserId,
               tags: ['source:facebook_messenger'],
             })
             .select('id')
@@ -128,9 +139,10 @@ Deno.serve(async (req) => {
           .from('conversations').select('id').eq('contact_id', contactId).limit(1).maybeSingle();
         if (existingConv) {
           convId = existingConv.id;
+          if (eventPageId) await svc.from('conversations').update({ page_id: eventPageId }).eq('id', convId).is('page_id', null);
         } else {
           const { data: createdConv, error: convErr } = await svc
-            .from('conversations').insert({ contact_id: contactId, status: 'active' }).select('id').single();
+            .from('conversations').insert({ contact_id: contactId, status: 'active', page_id: eventPageId }).select('id').single();
           if (convErr || !createdConv) {
             console.error('[fb-messenger-inbound] conv create err', convErr?.message);
             continue;
