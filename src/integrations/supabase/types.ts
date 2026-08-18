@@ -935,6 +935,7 @@ export type Database = {
           last_message_at: string | null
           last_outbound_at: string | null
           last_synced_at: string | null
+          page_id: string | null
           status: Database["public"]["Enums"]["comm_status"]
           unread_count: number
           updated_at: string
@@ -948,6 +949,7 @@ export type Database = {
           last_message_at?: string | null
           last_outbound_at?: string | null
           last_synced_at?: string | null
+          page_id?: string | null
           status?: Database["public"]["Enums"]["comm_status"]
           unread_count?: number
           updated_at?: string
@@ -961,6 +963,7 @@ export type Database = {
           last_message_at?: string | null
           last_outbound_at?: string | null
           last_synced_at?: string | null
+          page_id?: string | null
           status?: Database["public"]["Enums"]["comm_status"]
           unread_count?: number
           updated_at?: string
@@ -1104,6 +1107,45 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      facebook_page_connections: {
+        Row: {
+          connected_at: string
+          id: string
+          last_webhook_confirmed_at: string | null
+          page_access_token: string
+          page_id: string
+          page_name: string | null
+          status: string
+          token_expires_at: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          connected_at?: string
+          id?: string
+          last_webhook_confirmed_at?: string | null
+          page_access_token: string
+          page_id: string
+          page_name?: string | null
+          status?: string
+          token_expires_at?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          connected_at?: string
+          id?: string
+          last_webhook_confirmed_at?: string | null
+          page_access_token?: string
+          page_id?: string
+          page_name?: string | null
+          status?: string
+          token_expires_at?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       fb_comments: {
         Row: {
