@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useIsMobile } from '@/hooks/use-mobile';
-import { User, Bell, Shield, Users, ChevronRight, Mail, Loader2, CheckCircle, X, Clock, Edit2, Bot, Key, MessageSquare, Sparkles, ShieldAlert, Phone, Cloud } from 'lucide-react';
+import { User, Bell, Shield, Users, ChevronRight, Mail, Loader2, CheckCircle, X, Clock, Edit2, Bot, Key, MessageSquare, Sparkles, ShieldAlert, Phone, Cloud, Facebook } from 'lucide-react';
 import { MyMaytapiAccount } from './MyMaytapiAccount';
 import { GoogleContactsSync } from './GoogleContactsSync';
+import { FacebookPageConnection } from './FacebookPageConnection';
 import ProspectorControls from './ProspectorControls';
 import AITrainerPanel from './AITrainerPanel';
 import { cn } from '@/lib/utils';
@@ -16,6 +17,7 @@ const settingSections = [
   { id: 'auto-reply', icon: MessageSquare, label: 'Auto-Reply', description: 'WhatsApp auto-reply settings' },
   { id: 'my-maytapi', icon: Phone, label: 'My Maytapi Account', description: 'Connect your personal WhatsApp' },
   { id: 'google-contacts', icon: Cloud, label: 'Google Contacts', description: 'Two-way sync with Google' },
+  { id: 'facebook-page', icon: Facebook, label: 'Facebook Page', description: 'Connect your own Page' },
   { id: 'ai-trainer', icon: Sparkles, label: 'AI Trainer', description: 'Teach & correct the AI' },
   { id: 'prospector', icon: ShieldAlert, label: 'Prospector Controls', description: 'Kill switches & emergency mode' },
   { id: 'notifications', icon: Bell, label: 'Notifications', description: 'Alert preferences' },
@@ -592,6 +594,7 @@ export function SettingsModule() {
 
         {activeSection === 'my-maytapi' && <MyMaytapiAccount />}
         {activeSection === 'google-contacts' && <GoogleContactsSync />}
+        {activeSection === 'facebook-page' && <FacebookPageConnection />}
 
         {activeSection === 'ai-trainer' && <AITrainerPanel />}
 
