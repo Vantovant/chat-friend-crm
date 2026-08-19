@@ -232,8 +232,10 @@ Deno.serve(async (req) => {
     }
     if (Array.isArray(body.entry)) {
       for (const entry of body.entry) {
+        const eventPageId: string = entry?.id ? String(entry.id) : PAGE_ID;
         for (const change of entry.changes ?? []) {
           const v = change.value ?? {};
+
           const item = (v.item ?? '').toLowerCase();
 
           // Comments are no longer discarded — store them for the inbox tools, then skip
