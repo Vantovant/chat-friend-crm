@@ -44,13 +44,14 @@ Deno.serve(async (req) => {
 
     const state = await createState(userId, redirectTo);
     const redirectUri = `${SUPABASE_URL}/functions/v1/facebook-oauth-callback`;
-    const url = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${encodeURIComponent(APP_ID)}`
+    let url = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${encodeURIComponent(APP_ID)}`
       + `&redirect_uri=${encodeURIComponent(redirectUri)}`
       + `&scope=${encodeURIComponent(SCOPES)}`
       + `&response_type=code`
       + `&state=${encodeURIComponent(state)}`;
+    if (LOGIN_CONFIG_ID) url += `&config_id=${encodeURIComponent(LOGIN_CONFIG_ID)}`;
 
-    return json({ ok: true, url, redirect_uri: redirectUri }, 200);
+    return json({ ok: true, url, redirect_uri: redirectUri, config_id: LOGIN_CONFIG_ID || null }, 200);
   } catch (e) {
     console.error('[facebook-oauth-start] exception', e);
     return json({ ok: false, error: String(e) }, 200);
