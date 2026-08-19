@@ -1,0 +1,1 @@
+DELETE FROM public.fb_comments WHERE fb_comment_id = 'stage2_test_20260819_1';

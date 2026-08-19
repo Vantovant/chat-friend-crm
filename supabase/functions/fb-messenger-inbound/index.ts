@@ -140,9 +140,10 @@ Deno.serve(async (req) => {
         if (existingConv) {
           convId = existingConv.id;
           if (eventPageId) await svc.from('conversations').update({ page_id: eventPageId }).eq('id', convId).is('page_id', null);
+          await svc.from('conversations').update({ owner_user_id: ownerUserId }).eq('id', convId).is('owner_user_id', null);
         } else {
           const { data: createdConv, error: convErr } = await svc
-            .from('conversations').insert({ contact_id: contactId, status: 'active', page_id: eventPageId }).select('id').single();
+            .from('conversations').insert({ contact_id: contactId, status: 'active', page_id: eventPageId, owner_user_id: ownerUserId }).select('id').single();
           if (convErr || !createdConv) {
             console.error('[fb-messenger-inbound] conv create err', convErr?.message);
             continue;

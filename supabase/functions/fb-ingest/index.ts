@@ -10,6 +10,7 @@
 //   which verifies the signature itself and does the actual Messenger handling.
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { pageOwner, resolvePageToken } from '../_shared/fb-page-token.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -28,6 +29,9 @@ const VERIFY_TOKENS = Array.from(new Set([WEBHOOK_VERIFY_TOKEN, APP_SECRET]
 const LEGACY_VERIFY_TOKEN_SHA256 = 'e4bfab9b169c1b9cdb5266df9aaa1959989d98d6c4a94364e5d18964cb107a64';
 
 const GRAPH = 'https://graph.facebook.com/v19.0';
+// Legacy owner for the original admin Page (env-secret path) — preserves Vanto's access
+// for every row that has no user-connected Page behind it.
+const VANTO_USER_ID = 'e336f0a0-ccf5-4992-9607-25c5bf590b11';
 
 async function verifySignature(rawBody: string, header: string | null): Promise<boolean> {
   if (!APP_SECRET) return true; // dev fallback
@@ -71,6 +75,7 @@ async function upsertComment(
   supabase: ReturnType<typeof createClient>,
   v: any,
   pageId: string,
+  ownerUserId: string | null,
 ): Promise<boolean> {
   const commentId = v.comment_id || v.id;
   if (!commentId) return false;
@@ -92,6 +97,7 @@ async function upsertComment(
       fb_post_id: postId,
       parent_comment_id: parentId,
       page_id: pageId || null,
+      owner_user_id: ownerUserId,
       commenter_psid: commenterPsid,
       commenter_name: commenterName,
       comment_text: commentText,
@@ -224,7 +230,7 @@ Deno.serve(async (req) => {
     // Supabase client is needed for both post ingestion AND comment storage below.
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-    const candidates: { postId?: string; url?: string; text?: string; createdTime?: string }[] = [];
+    const candidates: { postId?: string; url?: string; text?: string; createdTime?: string; pageId?: string }[] = [];
     let commentsIngested = 0;
 
     if (body.post_url || body.post_id || body.text) {
@@ -233,6 +239,9 @@ Deno.serve(async (req) => {
     if (Array.isArray(body.entry)) {
       for (const entry of body.entry) {
         const eventPageId: string = entry?.id ? String(entry.id) : PAGE_ID;
+        // Multi-tenant routing: a Page connected by a user owns its rows; anything else
+        // (i.e. the original admin Page wired through env secrets) stays with Vanto.
+        const eventOwnerUserId = (await pageOwner(supabase, eventPageId)) ?? VANTO_USER_ID;
         for (const change of entry.changes ?? []) {
           const v = change.value ?? {};
 
@@ -241,7 +250,7 @@ Deno.serve(async (req) => {
           // Comments are no longer discarded — store them for the inbox tools, then skip
           // the post-ingestion path (a comment is never itself a page post).
           if (item === 'comment') {
-            const stored = await upsertComment(supabase, v, eventPageId);
+            const stored = await upsertComment(supabase, v, eventPageId, eventOwnerUserId);
             console.log(`[fb-ingest] comment event stored=${stored} comment_id=${v.comment_id || v.id} post_id=${v.post_id}`);
             if (stored) commentsIngested++;
             continue;
@@ -262,7 +271,7 @@ Deno.serve(async (req) => {
             : undefined;
           // Require either a post id OR a message body; otherwise it's not a real post.
           if (!postId && !link && !message) continue;
-          candidates.push({ postId, url: link, text: message, createdTime });
+          candidates.push({ postId, url: link, text: message, createdTime, pageId: eventPageId });
         }
       }
     }
@@ -294,9 +303,16 @@ Deno.serve(async (req) => {
 
       // ENRICHMENT only: Graph API for full_picture + canonical permalink.
       // If this fails (token expired), we still ingest with webhook payload.
-      if (postId && PAGE_TOKEN) {
+      // Use the connected Page's own token when this event came from a connected Page;
+      // otherwise fall back to the env secret token (Vanto's Page) exactly as before.
+      let enrichToken = PAGE_TOKEN;
+      if (c.pageId) {
+        const rp = await resolvePageToken(supabase, c.pageId);
+        if (rp.ok && rp.token) enrichToken = rp.token;
+      }
+      if (postId && enrichToken) {
         try {
-          const r = await fetch(`${GRAPH}/${postId}?fields=id,message,permalink_url,created_time,full_picture,attachments{media,url,type,title,subattachments}&access_token=${PAGE_TOKEN}`);
+          const r = await fetch(`${GRAPH}/${postId}?fields=id,message,permalink_url,created_time,full_picture,attachments{media,url,type,title,subattachments}&access_token=${enrichToken}`);
           const d = await r.json();
           if (r.ok) {
             message = d.message ?? message;
