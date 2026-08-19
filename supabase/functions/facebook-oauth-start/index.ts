@@ -8,6 +8,8 @@ import { createState } from '../_shared/fb-oauth-state.ts';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const APP_ID = Deno.env.get('META_APP_ID') ?? '';
+// Facebook Login for Business apps require a Business Login configuration id.
+const LOGIN_CONFIG_ID = Deno.env.get('META_LOGIN_CONFIG_ID') ?? '';
 
 const SCOPES = [
   'pages_show_list',
