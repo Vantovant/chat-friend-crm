@@ -935,6 +935,7 @@ export type Database = {
           last_message_at: string | null
           last_outbound_at: string | null
           last_synced_at: string | null
+          owner_user_id: string | null
           page_id: string | null
           status: Database["public"]["Enums"]["comm_status"]
           unread_count: number
@@ -949,6 +950,7 @@ export type Database = {
           last_message_at?: string | null
           last_outbound_at?: string | null
           last_synced_at?: string | null
+          owner_user_id?: string | null
           page_id?: string | null
           status?: Database["public"]["Enums"]["comm_status"]
           unread_count?: number
@@ -963,6 +965,7 @@ export type Database = {
           last_message_at?: string | null
           last_outbound_at?: string | null
           last_synced_at?: string | null
+          owner_user_id?: string | null
           page_id?: string | null
           status?: Database["public"]["Enums"]["comm_status"]
           unread_count?: number
@@ -974,6 +977,13 @@ export type Database = {
             columns: ["contact_id"]
             isOneToOne: false
             referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversations_owner_user_id_fkey"
+            columns: ["owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -1157,6 +1167,7 @@ export type Database = {
           fb_post_id: string | null
           fetched_at: string
           id: string
+          owner_user_id: string | null
           page_id: string | null
           parent_comment_id: string | null
           raw_payload: Json | null
@@ -1174,6 +1185,7 @@ export type Database = {
           fb_post_id?: string | null
           fetched_at?: string
           id?: string
+          owner_user_id?: string | null
           page_id?: string | null
           parent_comment_id?: string | null
           raw_payload?: Json | null
@@ -1191,6 +1203,7 @@ export type Database = {
           fb_post_id?: string | null
           fetched_at?: string
           id?: string
+          owner_user_id?: string | null
           page_id?: string | null
           parent_comment_id?: string | null
           raw_payload?: Json | null
@@ -1199,7 +1212,15 @@ export type Database = {
           reply_text?: string | null
           verb?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "fb_comments_owner_user_id_fkey"
+            columns: ["owner_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       fb_dispatch_log: {
         Row: {
