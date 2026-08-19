@@ -90,7 +90,7 @@ export function FacebookInboxModule() {
         .in('id', convIds)
         .order('last_message_at', { ascending: false })
         .limit(100);
-      if (myPageIds) convQuery = convQuery.in('page_id', myPageIds);
+      if (ownerScope) convQuery = convQuery.eq('owner_user_id', ownerScope);
       const { data: convRows } = await convQuery;
 
       messengerItems = ((convRows as unknown as ConvRow[]) ?? [])
