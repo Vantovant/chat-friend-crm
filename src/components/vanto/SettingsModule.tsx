@@ -4,6 +4,7 @@ import { User, Bell, Shield, Users, ChevronRight, Mail, Loader2, CheckCircle, X,
 import { MyMaytapiAccount } from './MyMaytapiAccount';
 import { GoogleContactsSync } from './GoogleContactsSync';
 import { FacebookPageConnection } from './FacebookPageConnection';
+import { FacebookPageConnect } from './FacebookPageConnect';
 import ProspectorControls from './ProspectorControls';
 import AITrainerPanel from './AITrainerPanel';
 import { cn } from '@/lib/utils';
@@ -594,7 +595,12 @@ export function SettingsModule() {
 
         {activeSection === 'my-maytapi' && <MyMaytapiAccount />}
         {activeSection === 'google-contacts' && <GoogleContactsSync />}
-        {activeSection === 'facebook-page' && <FacebookPageConnection />}
+        {activeSection === 'facebook-page' && (
+          <div className="space-y-4">
+            <FacebookPageConnection />
+            <FacebookPageConnect />
+          </div>
+        )}
 
         {activeSection === 'ai-trainer' && <AITrainerPanel />}
 
