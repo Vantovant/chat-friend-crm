@@ -1,39 +1,93 @@
-# Facebook Multi-Tenant — Scoping & Estimate (no code yet)
+# Part 1 Investigation — Facebook Connect "Can't load URL"
 
-Both parts read and understood: Part 1 (OAuth "Can't load URL"), Part 2 (multi-tenant ingestion). Nothing will be implemented, migrated, or deployed until you give explicit go-ahead after this morning's campaign is safely underway.
+Investigation only. No code, config, or deploys changed.
 
-## URGENT finding — comment ingestion is broken right now (before the ad launches)
+## What I checked
 
-Your item 3 is a real, live bug, not a misread and not dead code.
+1. Read `supabase/functions/facebook-oauth-start/index.ts` in full.
+2. Probed the live Facebook dialog with this app's real App ID (949132717953322) and the
+   exact redirect URI the function sends, plus two control URIs, and read the raw
+   HTTP response headers from Facebook.
 
-- `supabase/functions/fb-ingest/index.ts` line 242: `await upsertComment(supabase, v, eventPageId)`. `eventPageId` is declared nowhere in that file (only in `fb-messenger-inbound`, a different function).
-- It was introduced yesterday, 18 Aug 2026 18:13 UTC (commit 55e384f, part of the multi-tenant groundwork) and is deployed.
-- At runtime this throws a ReferenceError the moment a comment event arrives. It is inside the outer try/catch, so the webhook still answers Meta (no retries, no visible alarm), but the comment is silently dropped — and because the throw happens mid-loop, any remaining changes in the same payload are dropped too.
-- Data agrees: the newest row in `fb_comments` is 18 Aug 12:33 UTC — nothing since the 18:13 deploy.
-- Messenger DMs are unaffected: they are forwarded to `fb-messenger-inbound` earlier in the request, and that function is correct.
+## Finding 1 — the app is a "Facebook Login for Business" app
 
-Fix is one line (derive the page id from `entry.id`, which is already in the loop scope). ~10 minutes including a redeploy and a live comment test. This is not part of the multi-tenant work and I recommend doing it before or alongside the campaign — say the word and it's the only thing I touch.
+Facebook's own 302 response to our authorization URL ends with:
 
-## Corrections to the spec's assumptions about the current codebase
+```text
+...&display=page&locale=sv_SE&pl_dbl=0&is_business_login=1
+```
 
-- 2.1 partially already done: `fb_comments.page_id` exists and is populated on all 8 rows; `conversations.page_id` exists (2 rows populated). No new column is strictly needed for filtering — ownership can be derived by joining `page_id` to `facebook_page_connections`. A denormalised `owner_user_id` is still worth adding for query simplicity and for rows whose Page has no connection row, but the spec overstates the schema gap.
-- 2.5 already done: `fb-reply-comment` and the Messenger path in `send-message` already resolve the per-Page token via `_shared/fb-page-token.ts` (`resolvePageToken`), with env-token fallback for Vanto's Page. No work expected here beyond a regression test.
-- 2.2 auto-subscribe already done: `facebook-oauth-callback` already calls `POST /{page-id}/subscribed_apps` with the Page's own token after storing the connection.
-- 2.3 partially done: `fb-messenger-inbound` already routes by `entry.id` and resolves owner/token per Page. `fb-ingest` (comments + post enrichment) is the one that is still single-Page hardcoded.
-- `facebook_page_connections` has zero rows — correct, so today every path is on the env fallback, which is exactly why Vanto's Page is low-risk during the change.
-- Risk the spec doesn't call out: filtering the Facebook Inbox by owner is the one change that can make existing data disappear from a user's view. Backfill must run in the same migration as the filter going live, and admins should keep an unfiltered view.
-- Part 1 is likely Meta-side, not code-side. `facebook-oauth-start` builds `redirect_uri` from `SUPABASE_URL` at request time (no caching), and the callback uses the identical string — so a byte-mismatch is unlikely. The remaining candidates are: Facebook Login for Business requires a Business login *configuration* (a config id passed as `config_id`, not plain `scope`), and unverified Business Manager. I can't change Meta dashboard settings from here; that part is investigation plus instructions for you.
+`is_business_login=1` is Facebook echoing back that this App ID is configured with
+**Facebook Login for Business**, not classic Facebook Login. That is the key difference the
+spec suspected, and it is now confirmed from Facebook's side rather than assumed.
 
-## Estimates
+For Login for Business, the authorization request must carry a **`config_id`** — the id of a
+Business Login configuration created in the Meta App Dashboard (Facebook Login for Business →
+Configurations). In that mode:
 
-- Hotfix `eventPageId`: 10 min, isolated, no schema change. Recommended first.
-- Part 1 (OAuth fix): 1–2 h of my time to instrument the start function, log the exact dialog URL, and test a plain-Login config. Realistically half a day elapsed, because resolution may depend on a Meta-side setting or Business verification only you can action.
-- Part 2 (multi-tenant ingestion): 3–5 h implementation across one migration (owner_user_id + backfill to Vanto), `fb-ingest` routing, inbox filtering, plus regression checks after each step. Split into three deploys so each is separately reversible; the inbox filter goes last.
+- `config_id` selects the permission set, the asset type (Pages), and the token type.
+- The `scope` parameter is ignored (permissions come from the configuration).
+- Requests without `config_id` are handled inconsistently and commonly dead-end on the
+  "Can't load URL" / invalid-request screen after login.
 
-Part 1 does block end-to-end testing of Part 2, but not its implementation — Part 2 can be built and verified against Vanto's Page while Part 1 is unblocked with Meta.
+## Finding 2 — how the URL is currently built
 
-## Sequencing I propose
+`facebook-oauth-start` builds:
 
-1. (Now, if you approve) one-line `eventPageId` hotfix so the ad campaign's comments actually land.
-2. Campaign settles → Part 1 investigation.
-3. Part 2 in three reversible deploys: schema + backfill → `fb-ingest` routing → inbox filter.
+```text
+https://www.facebook.com/v19.0/dialog/oauth
+  ?client_id=<META_APP_ID>
+  &redirect_uri=https://<project>.supabase.co/functions/v1/facebook-oauth-callback
+  &scope=pages_show_list,pages_read_engagement,pages_read_user_content,
+         pages_manage_metadata,pages_manage_engagement,pages_messaging
+  &response_type=code
+  &state=<HMAC-signed>
+```
+
+So: correct endpoint host and path, correct `response_type`, signed `state` — but
+**no `config_id`**, and it relies purely on `scope`. That matches a classic Facebook Login
+app, not this one.
+
+Note the API version: the request is pinned to `v19.0` while Facebook's response header
+reports `facebook-api-version: v25.0`. Not the cause of the error, but worth aligning.
+
+## What I could NOT confirm
+
+Whether the redirect URI is present in **Valid OAuth Redirect URIs**. Facebook defers that
+validation until after login — a deliberately invalid control URI
+(`https://example.com/definitely-not-allowed`) produced the exact same 302 to `login.php` as
+our real one, so an unauthenticated probe cannot distinguish them. Reading it requires either
+the App Dashboard or an app-access-token read, and the earlier `fb-app-settings` attempt
+showed writes are blocked by Error #10. So the redirect-URI allow-list remains a second
+possible contributor and must be verified in the dashboard.
+
+## Proposed fix (not implemented — awaiting approval)
+
+1. **You (dashboard, no code):** In the Meta App Dashboard → Facebook Login for Business →
+   Configurations, create (or open the existing) configuration with:
+   - Access type: **Business** (Page assets)
+   - Permissions: `pages_show_list`, `pages_read_engagement`, `pages_read_user_content`,
+     `pages_manage_metadata`, `pages_manage_engagement`, `pages_messaging`
+   - Token type: **User access token** (so `/me/accounts` still returns Page tokens, which is
+     what `facebook-oauth-callback` already expects — no callback change needed)
+
+   Then send me the **Configuration ID**.
+
+2. **You (dashboard):** Confirm
+   `https://nqyyvqcmcyggvlcswkio.supabase.co/functions/v1/facebook-oauth-callback` is listed
+   verbatim under Valid OAuth Redirect URIs.
+
+3. **Me (one small change, on approval):** Add a `META_LOGIN_CONFIG_ID` secret and append
+   `&config_id=<id>` to the dialog URL in `facebook-oauth-start`. Keep `scope` as a fallback
+   for when the secret is absent, so nothing changes if the config id is not set. Optionally
+   bump `v19.0` → `v23.0`.
+
+   Blast radius: `facebook-oauth-start` only. `fb-ingest`, `fb_comments`, `messages`,
+   `conversations`, and the live ad campaign are untouched.
+
+4. **Verify:** run the connect flow end to end and confirm a row lands in
+   `facebook_page_connections` with a Page name.
+
+If step 1 shows there is no Business Login configuration and one cannot be created, the
+alternative is switching the app's login product back to classic Facebook Login — a bigger,
+riskier dashboard change I would not recommend while the ad campaign is live.
