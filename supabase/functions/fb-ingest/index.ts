@@ -230,7 +230,7 @@ Deno.serve(async (req) => {
     // Supabase client is needed for both post ingestion AND comment storage below.
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-    const candidates: { postId?: string; url?: string; text?: string; createdTime?: string }[] = [];
+    const candidates: { postId?: string; url?: string; text?: string; createdTime?: string; pageId?: string }[] = [];
     let commentsIngested = 0;
 
     if (body.post_url || body.post_id || body.text) {
@@ -306,8 +306,8 @@ Deno.serve(async (req) => {
       // Use the connected Page's own token when this event came from a connected Page;
       // otherwise fall back to the env secret token (Vanto's Page) exactly as before.
       let enrichToken = PAGE_TOKEN;
-      if ((c as any).pageId) {
-        const rp = await resolvePageToken(supabase, (c as any).pageId);
+      if (c.pageId) {
+        const rp = await resolvePageToken(supabase, c.pageId);
         if (rp.ok && rp.token) enrichToken = rp.token;
       }
       if (postId && enrichToken) {
