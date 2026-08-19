@@ -49,22 +49,11 @@ export function FacebookInboxModule() {
   const load = async () => {
     setLoading(true);
 
-    // Multi-tenant scoping: non-admins only see the Pages they personally connected.
-    // Admins keep seeing everything, including the legacy env-configured Page.
+    // Multi-tenant scoping (Stage 3): rows are tagged at ingest time with owner_user_id,
+    // so we filter on that directly instead of re-deriving Page ids client-side.
+    // Admins/super-admins keep the full view, including the legacy env-configured Page.
     const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'super_admin';
-    let myPageIds: string[] | null = null;
-    if (currentUser && !isAdmin) {
-      const { data: conns } = await supabase
-        .from('facebook_page_connections')
-        .select('page_id')
-        .eq('status', 'active');
-      myPageIds = [...new Set((conns ?? []).map(c => c.page_id as string))];
-    }
-    if (myPageIds && myPageIds.length === 0) {
-      setItems([]);
-      setLoading(false);
-      return;
-    }
+    const ownerScope: string | null = currentUser && !isAdmin ? currentUser.id : null;
 
     // ── Comments ──
     let commentQuery = supabase
@@ -74,7 +63,8 @@ export function FacebookInboxModule() {
       .order('created_time', { ascending: false })
       .limit(100);
     if (filter === 'unreplied') commentQuery = commentQuery.eq('replied', false);
-    if (myPageIds) commentQuery = commentQuery.in('page_id', myPageIds);
+    if (ownerScope) commentQuery = commentQuery.eq('owner_user_id', ownerScope);
+
     const { data: commentRows } = await commentQuery;
 
     const commentItems: FeedItem[] = ((commentRows as FbComment[]) ?? []).map(c => ({
@@ -100,7 +90,7 @@ export function FacebookInboxModule() {
         .in('id', convIds)
         .order('last_message_at', { ascending: false })
         .limit(100);
-      if (myPageIds) convQuery = convQuery.in('page_id', myPageIds);
+      if (ownerScope) convQuery = convQuery.eq('owner_user_id', ownerScope);
       const { data: convRows } = await convQuery;
 
       messengerItems = ((convRows as unknown as ConvRow[]) ?? [])
