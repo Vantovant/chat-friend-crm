@@ -46,10 +46,12 @@ Deno.serve(async (req) => {
     const redirectUri = `${SUPABASE_URL}/functions/v1/facebook-oauth-callback`;
     let url = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${encodeURIComponent(APP_ID)}`
       + `&redirect_uri=${encodeURIComponent(redirectUri)}`
-      + `&scope=${encodeURIComponent(SCOPES)}`
       + `&response_type=code`
       + `&state=${encodeURIComponent(state)}`;
+    // Per Meta docs: with a Business Login config, permissions come from the config —
+    // `scope` must not be combined with `config_id`.
     if (LOGIN_CONFIG_ID) url += `&config_id=${encodeURIComponent(LOGIN_CONFIG_ID)}`;
+    else url += `&scope=${encodeURIComponent(SCOPES)}`;
 
     return json({ ok: true, url, redirect_uri: redirectUri, config_id: LOGIN_CONFIG_ID || null }, 200);
   } catch (e) {
