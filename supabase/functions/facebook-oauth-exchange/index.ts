@@ -56,14 +56,40 @@ Deno.serve(async (req) => {
 
     // --- code -> user token ---
     // Codes minted by the JS SDK are exchanged with an EMPTY redirect_uri (Meta docs).
-    // Fall back to the registered settings URI for codes from a redirect flow.
-    let tok = await exchangeCode(code, '');
-    if (!tok.ok) tok = await exchangeCode(code, `${APP_URL}/settings/facebook`);
+    // Fall back to the registered settings URI(s) for codes from a redirect flow,
+    // trying both non-www and www variants (Meta matches these exactly).
+    const wwwUrl = APP_URL.replace(/^(https?:\/\/)(?!www\.)/i, '$1www.');
+    const attempts: Array<{ label: string; uri: string }> = [
+      { label: 'empty', uri: '' },
+      { label: 'non_www', uri: `${APP_URL}/settings/facebook` },
+      { label: 'www', uri: `${wwwUrl}/settings/facebook` },
+    ];
+
+    let tok: { ok: boolean; body: any } = { ok: false, body: {} };
+    const failures: Array<{ label: string; redirect_uri: string; meta_code: unknown; meta_subcode: unknown; message: unknown }> = [];
+    for (const a of attempts) {
+      const res = await exchangeCode(code, a.uri);
+      if (res.ok) {
+        tok = res;
+        console.log(`[fb-exchange] code exchange succeeded with redirect_uri variant "${a.label}" (${a.uri || '<empty>'})`);
+        break;
+      }
+      failures.push({
+        label: a.label,
+        redirect_uri: a.uri || '<empty>',
+        meta_code: res.body?.error?.code ?? null,
+        meta_subcode: res.body?.error?.error_subcode ?? null,
+        message: res.body?.error?.message ?? null,
+      });
+      tok = res;
+    }
+
     if (!tok.ok) {
-      console.error('[fb-exchange] code exchange failed', JSON.stringify(tok.body).slice(0, 500));
+      console.error('[fb-exchange] code exchange failed on all redirect_uri variants', JSON.stringify(failures));
       return createErrorResponse(tok.body?.error?.message || 'Could not exchange the Facebook code.', 400, {
         step: 'code_exchange',
         meta_code: tok.body?.error?.code ?? null,
+        attempts: failures,
       });
     }
 
