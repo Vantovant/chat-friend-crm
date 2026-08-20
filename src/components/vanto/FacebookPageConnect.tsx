@@ -72,18 +72,18 @@ export function FacebookPageConnect() {
     setError(null);
     try {
       const FB = await loadFbSdk();
-      const code: string = await new Promise((resolve, reject) => {
+      const accessToken: string = await new Promise((resolve, reject) => {
         FB.login(
           (response: any) => {
-            const c = response?.authResponse?.code;
-            if (c) resolve(c);
-            else reject(new Error(response?.status === 'unknown' ? 'Login was cancelled.' : 'Facebook did not return an authorization code.'));
+            const t = response?.authResponse?.accessToken;
+            if (t) resolve(t);
+            else reject(new Error(response?.status === 'unknown' ? 'Login was cancelled.' : 'Facebook did not return an access token.'));
           },
-          { config_id: CONFIG_ID, response_type: 'code', override_default_response_type: true, display: 'popup' },
+          { config_id: CONFIG_ID, response_type: 'token', override_default_response_type: true, display: 'popup' },
         );
       });
 
-      const { data, error: fnError } = await supabase.functions.invoke('facebook-oauth-exchange', { body: { code, config_id: CONFIG_ID } });
+      const { data, error: fnError } = await supabase.functions.invoke('facebook-oauth-exchange', { body: { accessToken, config_id: CONFIG_ID } });
       const d = data as { success?: boolean; page_name?: string; error?: string; step?: string } | null;
       if (fnError || !d?.success) {
         setError(`${d?.step ? `[${d.step}] ` : ''}${d?.error || fnError?.message || 'Unknown error while connecting.'}`);
