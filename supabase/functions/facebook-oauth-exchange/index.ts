@@ -63,6 +63,7 @@ Deno.serve(async (req) => {
     const expiresIn: number | null = typeof ll.expires_in === 'number' ? ll.expires_in : null;
 
     // --- diagnostic: inspect granted scopes on the long-lived user token ---
+    let granularPageIds: string[] = [];
     try {
       const dbgRes = await fetch(`${GRAPH}/debug_token?input_token=${encodeURIComponent(userToken)}`
         + `&access_token=${encodeURIComponent(`${APP_ID}|${APP_SECRET}`)}`);
@@ -79,6 +80,13 @@ Deno.serve(async (req) => {
         granular_scopes: d.granular_scopes ?? null,
         error: dbg?.error ?? d?.error ?? null,
       }));
+      const gs: Array<{ scope?: string; target_ids?: string[] }> = Array.isArray(d?.granular_scopes) ? d.granular_scopes : [];
+      const ids = new Set<string>();
+      for (const g of gs) {
+        if (!g?.scope || !String(g.scope).startsWith('pages_')) continue;
+        for (const t of g.target_ids ?? []) if (t) ids.add(String(t));
+      }
+      granularPageIds = [...ids];
     } catch (e) {
       console.log('[fb-exchange][debug_token] failed', String(e));
     }
@@ -91,11 +99,33 @@ Deno.serve(async (req) => {
       console.error('[fb-exchange] /me/accounts failed', JSON.stringify(pages).slice(0, 500));
       return createErrorResponse(pages?.error?.message || 'Could not read your Facebook Pages.', 400, { step: 'me_accounts' });
     }
-    const list: Array<{ id?: string; name?: string; access_token?: string }> = Array.isArray(pages?.data) ? pages.data : [];
-    if (list.length === 0) {
-      console.error('[fb-exchange] no pages returned for user', userId);
-      return createErrorResponse('No Facebook Pages were returned for this account. Make sure you selected a Page you manage.', 400, { step: 'me_accounts' });
+    let list: Array<{ id?: string; name?: string; access_token?: string }> = Array.isArray(pages?.data) ? pages.data : [];
+    if (list.length > 0) {
+      console.log('[fb-exchange] page discovery path = me_accounts', JSON.stringify({ count: list.length }));
+    } else if (granularPageIds.length > 0) {
+      // Business Login asset-scoped tokens often don't populate /me/accounts.
+      // Resolve each granted Page asset directly.
+      console.log('[fb-exchange] /me/accounts empty; falling back to granular_scopes', JSON.stringify({ page_ids: granularPageIds }));
+      const resolved: Array<{ id?: string; name?: string; access_token?: string }> = [];
+      for (const pid of granularPageIds) {
+        const r = await fetch(`${GRAPH}/${encodeURIComponent(pid)}?fields=id,name,access_token&access_token=${encodeURIComponent(userToken)}`);
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok || !body?.id || !body?.access_token) {
+          console.error('[fb-exchange][granular] could not resolve page', pid, JSON.stringify(body).slice(0, 400));
+          continue;
+        }
+        resolved.push({ id: String(body.id), name: body.name ?? null, access_token: body.access_token });
+      }
+      if (resolved.length > 0) {
+        console.log('[fb-exchange] page discovery path = granular_scopes', JSON.stringify({ count: resolved.length }));
+        list = resolved;
+      }
     }
+    if (list.length === 0) {
+      console.error('[fb-exchange] no pages returned for user', userId, JSON.stringify({ granular_page_ids: granularPageIds }));
+      return createErrorResponse('No Facebook Pages were returned for this account. Make sure you selected a Page you manage.', 400, { step: 'page_discovery' });
+    }
+
 
     const expiresAt = expiresIn ? new Date(Date.now() + expiresIn * 1000).toISOString() : null;
     const now = new Date().toISOString();
