@@ -12,16 +12,6 @@ const APP_URL = Deno.env.get('APP_URL') ?? 'https://getwellhub.dev';
 const GRAPH = 'https://graph.facebook.com/v19.0';
 const SUBSCRIBED_FIELDS = 'feed,messages,messaging_postbacks';
 
-async function exchangeCode(code: string, redirectUri: string) {
-  const url = `${GRAPH}/oauth/access_token?client_id=${encodeURIComponent(APP_ID)}`
-    + `&client_secret=${encodeURIComponent(APP_SECRET)}`
-    + `&redirect_uri=${encodeURIComponent(redirectUri)}`
-    + `&code=${encodeURIComponent(code)}`;
-  const res = await fetch(url);
-  const body = await res.json().catch(() => ({}));
-  return { ok: res.ok && !!body?.access_token, body };
-}
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
@@ -42,68 +32,36 @@ Deno.serve(async (req) => {
 
     // --- params ---
     const payload = await req.json().catch(() => ({}));
-    const code = typeof payload?.code === 'string' ? payload.code.trim() : '';
-    if (!code) {
-      console.error('[fb-exchange] missing code');
-      return createErrorResponse('Missing authorization code.', 400, { step: 'params' });
+    const shortToken = typeof payload?.accessToken === 'string' ? payload.accessToken.trim() : '';
+    if (!shortToken) {
+      console.error('[fb-exchange] missing accessToken');
+      return createErrorResponse('Missing Facebook access token.', 400, { step: 'params' });
     }
 
     // --- env ---
-    if (!APP_ID || !APP_SECRET || !APP_URL) {
-      console.error('[fb-exchange] missing env', { APP_ID: !!APP_ID, APP_SECRET: !!APP_SECRET, APP_URL: !!APP_URL });
+    if (!APP_ID || !APP_SECRET) {
+      console.error('[fb-exchange] missing env', { APP_ID: !!APP_ID, APP_SECRET: !!APP_SECRET });
       return createErrorResponse('Server configuration error: Facebook app credentials are not set.', 500, { step: 'config' });
     }
 
-    // --- code -> user token ---
-    // Codes minted by the JS SDK are exchanged with an EMPTY redirect_uri (Meta docs).
-    // Fall back to the registered settings URI(s) for codes from a redirect flow,
-    // trying both non-www and www variants (Meta matches these exactly).
-    const wwwUrl = APP_URL.replace(/^(https?:\/\/)(?!www\.)/i, '$1www.');
-    const attempts: Array<{ label: string; uri: string }> = [
-      { label: 'empty', uri: '' },
-      { label: 'non_www', uri: `${APP_URL}/settings/facebook` },
-      { label: 'www', uri: `${wwwUrl}/settings/facebook` },
-    ];
-
-    let tok: { ok: boolean; body: any } = { ok: false, body: {} };
-    const failures: Array<{ label: string; redirect_uri: string; meta_code: unknown; meta_subcode: unknown; message: unknown }> = [];
-    for (const a of attempts) {
-      const res = await exchangeCode(code, a.uri);
-      if (res.ok) {
-        tok = res;
-        console.log(`[fb-exchange] code exchange succeeded with redirect_uri variant "${a.label}" (${a.uri || '<empty>'})`);
-        break;
-      }
-      failures.push({
-        label: a.label,
-        redirect_uri: a.uri || '<empty>',
-        meta_code: res.body?.error?.code ?? null,
-        meta_subcode: res.body?.error?.error_subcode ?? null,
-        message: res.body?.error?.message ?? null,
-      });
-      tok = res;
-    }
-
-    if (!tok.ok) {
-      console.error('[fb-exchange] code exchange failed on all redirect_uri variants', JSON.stringify(failures));
-      return createErrorResponse(tok.body?.error?.message || 'Could not exchange the Facebook code.', 400, {
-        step: 'code_exchange',
-        meta_code: tok.body?.error?.code ?? null,
-        attempts: failures,
-      });
-    }
-
-    // --- long-lived upgrade (best effort) ---
-    let userToken: string = tok.body.access_token;
-    let expiresIn: number | null = typeof tok.body.expires_in === 'number' ? tok.body.expires_in : null;
+    // --- short-lived user token -> long-lived user token (required) ---
     const llRes = await fetch(`${GRAPH}/oauth/access_token?grant_type=fb_exchange_token`
       + `&client_id=${encodeURIComponent(APP_ID)}&client_secret=${encodeURIComponent(APP_SECRET)}`
-      + `&fb_exchange_token=${encodeURIComponent(userToken)}`);
+      + `&fb_exchange_token=${encodeURIComponent(shortToken)}`);
     const ll = await llRes.json().catch(() => ({}));
-    if (llRes.ok && ll?.access_token) {
-      userToken = ll.access_token;
-      expiresIn = typeof ll.expires_in === 'number' ? ll.expires_in : expiresIn;
+    if (!llRes.ok || !ll?.access_token) {
+      console.error('[fb-exchange] long-lived token exchange failed', JSON.stringify({
+        meta_code: ll?.error?.code ?? null,
+        meta_subcode: ll?.error?.error_subcode ?? null,
+        message: ll?.error?.message ?? null,
+      }));
+      return createErrorResponse(ll?.error?.message || 'Could not upgrade the Facebook access token.', 400, {
+        step: 'long_lived_exchange',
+        meta_code: ll?.error?.code ?? null,
+      });
     }
+    const userToken: string = ll.access_token;
+    const expiresIn: number | null = typeof ll.expires_in === 'number' ? ll.expires_in : null;
 
     // --- pages ---
     const pagesRes = await fetch(`${GRAPH}/me/accounts?fields=id,name,access_token&access_token=${encodeURIComponent(userToken)}`);
