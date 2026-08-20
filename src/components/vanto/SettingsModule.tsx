@@ -595,12 +595,7 @@ export function SettingsModule() {
 
         {activeSection === 'my-maytapi' && <MyMaytapiAccount />}
         {activeSection === 'google-contacts' && <GoogleContactsSync />}
-        {activeSection === 'facebook-page' && (
-          <div className="space-y-4">
-            <FacebookPageConnection />
-            <FacebookPageConnect />
-          </div>
-        )}
+        {activeSection === 'facebook-page' && <FacebookPageConnect />}
 
         {activeSection === 'ai-trainer' && <AITrainerPanel />}
 

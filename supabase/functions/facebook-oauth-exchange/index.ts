@@ -8,7 +8,7 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const APP_ID = Deno.env.get('META_APP_ID') ?? '';
 const APP_SECRET = Deno.env.get('META_APP_SECRET') ?? '';
-const APP_URL = Deno.env.get('APP_URL') ?? '';
+const APP_URL = Deno.env.get('APP_URL') ?? 'https://getwellhub.dev';
 const GRAPH = 'https://graph.facebook.com/v19.0';
 const SUBSCRIBED_FIELDS = 'feed,messages,messaging_postbacks';
 
