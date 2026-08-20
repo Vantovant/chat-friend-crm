@@ -62,7 +62,29 @@ Deno.serve(async (req) => {
     const userToken: string = ll.access_token;
     const expiresIn: number | null = typeof ll.expires_in === 'number' ? ll.expires_in : null;
 
+    // --- diagnostic: inspect granted scopes on the long-lived user token ---
+    try {
+      const dbgRes = await fetch(`${GRAPH}/debug_token?input_token=${encodeURIComponent(userToken)}`
+        + `&access_token=${encodeURIComponent(`${APP_ID}|${APP_SECRET}`)}`);
+      const dbg = await dbgRes.json().catch(() => ({}));
+      const d = dbg?.data ?? {};
+      console.log('[fb-exchange][debug_token]', JSON.stringify({
+        http_status: dbgRes.status,
+        is_valid: d.is_valid ?? null,
+        type: d.type ?? null,
+        app_id: d.app_id ?? null,
+        expires_at: d.expires_at ?? null,
+        data_access_expires_at: d.data_access_expires_at ?? null,
+        scopes: d.scopes ?? null,
+        granular_scopes: d.granular_scopes ?? null,
+        error: dbg?.error ?? d?.error ?? null,
+      }));
+    } catch (e) {
+      console.log('[fb-exchange][debug_token] failed', String(e));
+    }
+
     // --- pages ---
+
     const pagesRes = await fetch(`${GRAPH}/me/accounts?fields=id,name,access_token&access_token=${encodeURIComponent(userToken)}`);
     const pages = await pagesRes.json().catch(() => ({}));
     if (!pagesRes.ok) {
