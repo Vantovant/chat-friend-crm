@@ -3,7 +3,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { User, Bell, Shield, Users, ChevronRight, Mail, Loader2, CheckCircle, X, Clock, Edit2, Bot, Key, MessageSquare, Sparkles, ShieldAlert, Phone, Cloud, Facebook } from 'lucide-react';
 import { MyMaytapiAccount } from './MyMaytapiAccount';
 import { GoogleContactsSync } from './GoogleContactsSync';
-import { FacebookPageConnection } from './FacebookPageConnection';
+// FacebookPageConnection (redirect flow) kept in repo as a rollback safety net.
 import { FacebookPageConnect } from './FacebookPageConnect';
 import ProspectorControls from './ProspectorControls';
 import AITrainerPanel from './AITrainerPanel';
@@ -595,12 +595,7 @@ export function SettingsModule() {
 
         {activeSection === 'my-maytapi' && <MyMaytapiAccount />}
         {activeSection === 'google-contacts' && <GoogleContactsSync />}
-        {activeSection === 'facebook-page' && (
-          <div className="space-y-4">
-            <FacebookPageConnection />
-            <FacebookPageConnect />
-          </div>
-        )}
+        {activeSection === 'facebook-page' && <FacebookPageConnect />}
 
         {activeSection === 'ai-trainer' && <AITrainerPanel />}
 
