@@ -350,16 +350,10 @@ Deno.serve(async (req) => {
       const messageBody = render(stepDef.content, { name: firstName });
       const recipient = toE164(contact);
 
-      const lastInboundMs = contact.last_inbound_at
-        ? new Date(contact.last_inbound_at).getTime()
-        : (conv?.last_inbound_at ? new Date(conv.last_inbound_at).getTime() : 0);
-      const windowOpen = lastInboundMs > 0 && Date.now() - lastInboundMs < 24 * 3600 * 1000;
-      const wantsTwilio = stepDef.sendMode === "twilio_or_maytapi" && windowOpen && !!conv?.id;
-
       if (dryRun) {
         diag.previews.push({
           contact_id: contact.id, name: contact.name, step: nextStepNum,
-          channel: wantsTwilio ? "twilio" : "maytapi",
+          channel: "maytapi",
           recipient, preview: messageBody,
         });
         continue;
