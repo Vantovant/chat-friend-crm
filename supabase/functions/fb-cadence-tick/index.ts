@@ -390,10 +390,10 @@ Deno.serve(async (req) => {
       let sendOk = false;
       let providerMessageId: string | null = null;
       let sendError: string | null = null;
-      let channel: "twilio" | "maytapi" = "maytapi";
+      const channel: "maytapi" = "maytapi";
 
       // ── All steps go straight to Maytapi (no 24h window gate) ──
-      if (!sendOk) {
+      {
         try {
           const r = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
             method: "POST",
