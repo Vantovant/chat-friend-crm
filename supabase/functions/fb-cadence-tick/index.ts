@@ -34,7 +34,7 @@ type StepDef = { step: number; offsetH: number; sendMode: string; content: strin
 
 const FALLBACK_STEPS: StepDef[] = [
   {
-    step: 1, offsetH: 2, sendMode: "twilio_or_maytapi", templateKey: `${SEQUENCE_KEY}_step1`,
+    step: 1, offsetH: 2, sendMode: "maytapi", templateKey: `${SEQUENCE_KEY}_step1`,
     content:
       "Hi {name} 👋 It's Vanto from Get Well Africa — thanks for reaching out through our Facebook advert. Would it be okay if I gave you a quick call to answer your questions properly? If now isn't a good time, just say so and I'll leave it.\n\n— Vanto",
   },
