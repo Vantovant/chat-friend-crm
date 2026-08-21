@@ -392,31 +392,7 @@ Deno.serve(async (req) => {
       let sendError: string | null = null;
       let channel: "twilio" | "maytapi" = "maytapi";
 
-      // ── Step 1 inside the 24h window: try Twilio first, fall back to Maytapi ──
-      if (wantsTwilio) {
-        try {
-          const r = await fetch(`${SUPABASE_URL}/functions/v1/send-message`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-vanto-internal-key": SERVICE_KEY,
-            },
-            body: JSON.stringify({ conversation_id: conv!.id, content: messageBody, message_type: "text" }),
-          });
-          const d = await r.json().catch(() => ({}));
-          if (r.ok && d?.ok !== false) {
-            sendOk = true;
-            channel = "twilio";
-            providerMessageId = d?.provider_message_id || d?.message_id || null;
-          } else {
-            console.warn("[fb-cadence-tick] twilio path failed, falling back to maytapi:", d?.code || r.status);
-          }
-        } catch (e) {
-          console.warn("[fb-cadence-tick] twilio path threw, falling back to maytapi:", (e as Error).message);
-        }
-      }
-
-      // ── Maytapi path (steps 2/3, or step 1 when the window is closed / Twilio refused) ──
+      // ── All steps go straight to Maytapi (no 24h window gate) ──
       if (!sendOk) {
         try {
           const r = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
