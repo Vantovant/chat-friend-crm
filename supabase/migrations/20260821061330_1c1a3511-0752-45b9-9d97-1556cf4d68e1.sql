@@ -1,0 +1,1 @@
+REVOKE ALL ON FUNCTION public.enroll_fb_campaign_cadence() FROM PUBLIC, anon, authenticated;
