@@ -34,7 +34,7 @@ type StepDef = { step: number; offsetH: number; sendMode: string; content: strin
 
 const FALLBACK_STEPS: StepDef[] = [
   {
-    step: 1, offsetH: 2, sendMode: "twilio_or_maytapi", templateKey: `${SEQUENCE_KEY}_step1`,
+    step: 1, offsetH: 2, sendMode: "maytapi", templateKey: `${SEQUENCE_KEY}_step1`,
     content:
       "Hi {name} 👋 It's Vanto from Get Well Africa — thanks for reaching out through our Facebook advert. Would it be okay if I gave you a quick call to answer your questions properly? If now isn't a good time, just say so and I'll leave it.\n\n— Vanto",
   },
@@ -350,16 +350,10 @@ Deno.serve(async (req) => {
       const messageBody = render(stepDef.content, { name: firstName });
       const recipient = toE164(contact);
 
-      const lastInboundMs = contact.last_inbound_at
-        ? new Date(contact.last_inbound_at).getTime()
-        : (conv?.last_inbound_at ? new Date(conv.last_inbound_at).getTime() : 0);
-      const windowOpen = lastInboundMs > 0 && Date.now() - lastInboundMs < 24 * 3600 * 1000;
-      const wantsTwilio = stepDef.sendMode === "twilio_or_maytapi" && windowOpen && !!conv?.id;
-
       if (dryRun) {
         diag.previews.push({
           contact_id: contact.id, name: contact.name, step: nextStepNum,
-          channel: wantsTwilio ? "twilio" : "maytapi",
+          channel: "maytapi",
           recipient, preview: messageBody,
         });
         continue;
@@ -396,34 +390,10 @@ Deno.serve(async (req) => {
       let sendOk = false;
       let providerMessageId: string | null = null;
       let sendError: string | null = null;
-      let channel: "twilio" | "maytapi" = "maytapi";
+      const channel: "maytapi" = "maytapi";
 
-      // ── Step 1 inside the 24h window: try Twilio first, fall back to Maytapi ──
-      if (wantsTwilio) {
-        try {
-          const r = await fetch(`${SUPABASE_URL}/functions/v1/send-message`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-vanto-internal-key": SERVICE_KEY,
-            },
-            body: JSON.stringify({ conversation_id: conv!.id, content: messageBody, message_type: "text" }),
-          });
-          const d = await r.json().catch(() => ({}));
-          if (r.ok && d?.ok !== false) {
-            sendOk = true;
-            channel = "twilio";
-            providerMessageId = d?.provider_message_id || d?.message_id || null;
-          } else {
-            console.warn("[fb-cadence-tick] twilio path failed, falling back to maytapi:", d?.code || r.status);
-          }
-        } catch (e) {
-          console.warn("[fb-cadence-tick] twilio path threw, falling back to maytapi:", (e as Error).message);
-        }
-      }
-
-      // ── Maytapi path (steps 2/3, or step 1 when the window is closed / Twilio refused) ──
-      if (!sendOk) {
+      // ── All steps go straight to Maytapi (no 24h window gate) ──
+      {
         try {
           const r = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
             method: "POST",
