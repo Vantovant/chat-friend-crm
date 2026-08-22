@@ -121,7 +121,7 @@ export default defineTool({
         sent_last_hour: sentLastHour ?? 0,
         hourly_cap: 12,
         sent_last_24h: sentLast24h ?? 0,
-        daily_cap: Number(get("maytapi_daily_cap", "56")),
+        daily_cap: Number(get("maytapi_daily_cap", "30")),
       },
       auth_status: {
         // The cron job posts {"trigger":"cron"} to maytapi-send-group, which bypasses

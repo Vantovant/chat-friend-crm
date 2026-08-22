@@ -37,7 +37,7 @@ export default defineTool({
         hourly_cap: Number(get("maytapi_hourly_cap", "12")),
         max_per_invocation: Number(get("maytapi_max_per_invocation", "1")),
       },
-      daily_cap: Number(get("maytapi_daily_cap", "56")),
+      daily_cap: Number(get("maytapi_daily_cap", "30")),
       outbound_frozen: String(get("maytapi_outbound_frozen", "false")).toLowerCase() === "true",
       freeze_until: get("maytapi_freeze_until_at", null),
       approved_groups: ALLOWED_GROUPS,
