@@ -29,6 +29,10 @@ const MAX_BATCH = 25;
 const MAX_ENROLL_PER_TICK = 50;
 const PER_MINUTE_LIMIT = 3;
 const NOT_READY_ALERT_THRESHOLD = 6;
+// Owner policy: automated outreach is a SINGLE first touch. Steps 2–3 stay defined
+// (for reference/manual use) but are never auto-sent.
+const ONE_SHOT_MAX_STEP = 1;
+
 
 type StepDef = { step: number; offsetH: number; sendMode: string; content: string; templateKey: string };
 
@@ -269,7 +273,10 @@ Deno.serve(async (req) => {
 
       diag.processed++;
       const nextStepNum = (row.current_step || 0) + 1;
-      const stepDef = steps.find((s) => s.step === nextStepNum);
+      // ONE-SHOT POLICY: automated messaging is a single first touch only.
+      // Anything beyond step 1 is human follow-up, so complete the row instead of sending.
+      const stepDef = nextStepNum > ONE_SHOT_MAX_STEP ? undefined : steps.find((s) => s.step === nextStepNum);
+
       if (!stepDef) {
         await sb.from("prospect_cadence_state").update({
           status: "completed", completed_at: now.toISOString(), next_send_at: null, updated_at: now.toISOString(),
