@@ -209,7 +209,7 @@ Deno.serve(async (req) => {
     // ── Due rows ──
     const { data: due, error: dueErr } = await sb
       .from("prospect_cadence_state")
-      .select("id, contact_id, sequence_key, current_step, next_send_at, status, meta")
+      .select("id, contact_id, sequence_key, current_step, next_send_at, status, meta, started_at")
       .eq("status", "active")
       .eq("sequence_key", SEQUENCE_KEY)
       .lte("next_send_at", now.toISOString())
@@ -331,27 +331,43 @@ Deno.serve(async (req) => {
         .limit(1)
         .maybeSingle();
 
-      // ── Universal pre-send guard ──
+      // ── Universal pre-send guard (includes the human-contact gate) ──
       {
         const { shouldSendFollowup } = await import("../_shared/should-send-followup.ts");
         const guard = await shouldSendFollowup(sb, contact as any, {
           conversationId: conv?.id || null,
           caller: "fb-cadence-tick",
+          enrolledAt: row.started_at || null,
         });
         if (!guard.ok) {
           if (!dryRun) {
-            await sb.from("prospect_cadence_state").update({
-              status: "active",
-              next_send_at: guard.retry_after || new Date(Date.now() + 6 * 3600000).toISOString(),
-              pause_reason: `guard:${guard.reason}`.slice(0, 200),
-              updated_at: now.toISOString(),
-            }).eq("id", row.id);
+            if (guard.human_touch) {
+              // A human already engaged this contact — retire the row permanently.
+              await sb.from("prospect_cadence_state").update({
+                status: "completed",
+                completed_at: now.toISOString(),
+                next_send_at: null,
+                pause_reason: `guard:${guard.reason}`.slice(0, 200),
+                updated_at: now.toISOString(),
+              }).eq("id", row.id);
+              diag.completed++;
+            } else {
+              await sb.from("prospect_cadence_state").update({
+                status: "active",
+                next_send_at: guard.retry_after || new Date(Date.now() + 6 * 3600000).toISOString(),
+                pause_reason: `guard:${guard.reason}`.slice(0, 200),
+                updated_at: now.toISOString(),
+              }).eq("id", row.id);
+              diag.skipped++;
+            }
+          } else {
+            diag.skipped++;
           }
-          diag.skipped++;
           diag.previews.push({ contact_id: contact.id, step: nextStepNum, skipped: `guard:${guard.reason}` });
           continue;
         }
       }
+
 
       const firstName = (contact.name || "").split(/\s+/)[0] || "there";
       const messageBody = render(stepDef.content, { name: firstName });
@@ -415,7 +431,7 @@ Deno.serve(async (req) => {
             }),
           });
           const d = await r.json().catch(() => ({}));
-          channel = "maytapi";
+          // (channel is fixed to "maytapi" — do NOT reassign, it is a const)
           if (r.status === 423) {
             // Maytapi went down mid-batch — reschedule, release the slot, stop the run.
             await releaseMessageSlot(sb, contact.id);
@@ -452,10 +468,10 @@ Deno.serve(async (req) => {
       if (sendOk) {
         diag.sent++;
         sentInWindow++;
-        const nextDef = steps.find((s) => s.step === nextStepNum + 1);
-        const nextAt = nextDef
-          ? new Date(now.getTime() + (nextDef.offsetH - stepDef.offsetH) * 3600 * 1000).toISOString()
-          : null;
+        // ONE-SHOT: never schedule a follow-up step. Human takes it from here.
+        const nextDef = undefined as StepDef | undefined;
+        const nextAt = null;
+
         const history = Array.isArray(row.meta?.channel_history) ? row.meta.channel_history : [];
         await sb.from("prospect_cadence_state").update({
           current_step: nextStepNum,
