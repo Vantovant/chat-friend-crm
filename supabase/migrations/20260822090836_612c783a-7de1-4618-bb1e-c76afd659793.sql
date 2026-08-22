@@ -1,0 +1,1 @@
+insert into public.integration_settings(key, value) values('maytapi_daily_cap','30') on conflict (key) do update set value = excluded.value;
