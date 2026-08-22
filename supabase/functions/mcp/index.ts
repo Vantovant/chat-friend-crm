@@ -114,7 +114,7 @@ var get_dispatch_policy_default = defineTool({
         hourly_cap: Number(get("maytapi_hourly_cap", "12")),
         max_per_invocation: Number(get("maytapi_max_per_invocation", "1"))
       },
-      daily_cap: Number(get("maytapi_daily_cap", "56")),
+      daily_cap: Number(get("maytapi_daily_cap", "30")),
       outbound_frozen: String(get("maytapi_outbound_frozen", "false")).toLowerCase() === "true",
       freeze_until: get("maytapi_freeze_until_at", null),
       approved_groups: ALLOWED_GROUPS,
@@ -232,7 +232,7 @@ var get_dispatcher_health_default = defineTool2({
         sent_last_hour: sentLastHour ?? 0,
         hourly_cap: 12,
         sent_last_24h: sentLast24h ?? 0,
-        daily_cap: Number(get("maytapi_daily_cap", "56"))
+        daily_cap: Number(get("maytapi_daily_cap", "30"))
       },
       auth_status: {
         // The cron job posts {"trigger":"cron"} to maytapi-send-group, which bypasses
@@ -688,15 +688,14 @@ var send_whatsapp_message_default = defineTool15({
         { reason: "outbound_frozen", freeze_until: freezeUntil }
       );
     }
-    const dailyCap = Number(get("maytapi_daily_cap", "56"));
+    const dailyCap = Number(get("maytapi_daily_cap", "30"));
     const since24h = new Date(now - DAY_MS).toISOString();
-    const { count: groupSent } = await supabase.from("scheduled_group_posts").select("id", { count: "exact", head: true }).in("status", ["sent", "delivered"]).gte("last_attempt_at", since24h);
     const { count: directSent } = await supabase.from("contact_activity").select("id", { count: "exact", head: true }).eq("type", "maytapi_message").filter("metadata->>direction", "eq", "outbound").gte("created_at", since24h);
-    const usedToday = (groupSent ?? 0) + (directSent ?? 0);
+    const usedToday = directSent ?? 0;
     if (Number.isFinite(dailyCap) && usedToday >= dailyCap) {
       return err(
-        `Refused: shared Maytapi daily cap reached (${usedToday}/${dailyCap} in the last 24h). No message was sent.`,
-        { reason: "daily_cap_reached", used_last_24h: usedToday, daily_cap: dailyCap }
+        `Refused: 1-on-1 Maytapi daily cap reached (${usedToday}/${dailyCap} one-on-one messages in the last 24h). No message was sent.`,
+        { reason: "daily_cap_reached", used_last_24h: usedToday, daily_cap: dailyCap, scope: "one_on_one_only" }
       );
     }
     const { data: lastInboundActivity } = await supabase.from("contact_activity").select("created_at").eq("contact_id", contact.id).eq("type", "maytapi_message").filter("metadata->>direction", "eq", "inbound").order("created_at", { ascending: false }).limit(1).maybeSingle();

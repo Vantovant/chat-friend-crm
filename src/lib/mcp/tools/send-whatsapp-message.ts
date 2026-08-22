@@ -77,24 +77,20 @@ export default defineTool({
       );
     }
 
-    const dailyCap = Number(get("maytapi_daily_cap", "56"));
+    const dailyCap = Number(get("maytapi_daily_cap", "30"));
     const since24h = new Date(now - DAY_MS).toISOString();
-    const { count: groupSent } = await supabase
-      .from("scheduled_group_posts")
-      .select("id", { count: "exact", head: true })
-      .in("status", ["sent", "delivered"])
-      .gte("last_attempt_at", since24h);
+    // 1-on-1 only: group posts have their own separate throttles and do NOT count here.
     const { count: directSent } = await supabase
       .from("contact_activity")
       .select("id", { count: "exact", head: true })
       .eq("type", "maytapi_message")
       .filter("metadata->>direction", "eq", "outbound")
       .gte("created_at", since24h);
-    const usedToday = (groupSent ?? 0) + (directSent ?? 0);
+    const usedToday = directSent ?? 0;
     if (Number.isFinite(dailyCap) && usedToday >= dailyCap) {
       return err(
-        `Refused: shared Maytapi daily cap reached (${usedToday}/${dailyCap} in the last 24h). No message was sent.`,
-        { reason: "daily_cap_reached", used_last_24h: usedToday, daily_cap: dailyCap },
+        `Refused: 1-on-1 Maytapi daily cap reached (${usedToday}/${dailyCap} one-on-one messages in the last 24h). No message was sent.`,
+        { reason: "daily_cap_reached", used_last_24h: usedToday, daily_cap: dailyCap, scope: "one_on_one_only" },
       );
     }
 
