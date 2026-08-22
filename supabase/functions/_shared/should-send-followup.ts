@@ -33,12 +33,62 @@ export interface GuardResult {
   reason?: string;
   retry_after?: string; // ISO
   matched_text?: string;
+  human_touch?: boolean; // true when a human has already personally engaged this contact
+}
+
+// Activity types that mean a HUMAN (owner, agent, or an assistant acting on their behalf)
+// personally engaged this contact. Automated sends are deliberately excluded.
+const HUMAN_ACTIVITY_TYPES = ["note_added", "call", "human_handover", "meeting_scheduled"];
+
+/**
+ * Human-contact gate.
+ * A contact is considered "personally engaged" when either:
+ *   • contacts.notes is non-null / non-empty (any manual note ever logged), or
+ *   • a contact_activity row of a human type exists (after `sinceISO` when given).
+ * Automated cadences must never message such a contact again.
+ */
+export async function hasHumanTouch(
+  supabase: any,
+  contactId: string,
+  sinceISO?: string | null,
+): Promise<{ touched: boolean; reason?: string }> {
+  if (!contactId) return { touched: false };
+
+  const { data: c } = await supabase
+    .from("contacts")
+    .select("notes")
+    .eq("id", contactId)
+    .maybeSingle();
+  if (c?.notes && String(c.notes).trim().length > 0) {
+    return { touched: true, reason: "human_contact:notes" };
+  }
+
+  let q = supabase
+    .from("contact_activity")
+    .select("type, created_at")
+    .eq("contact_id", contactId)
+    .in("type", HUMAN_ACTIVITY_TYPES)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (sinceISO) q = q.gte("created_at", sinceISO);
+  const { data: act } = await q;
+  if (act && act.length > 0) {
+    return { touched: true, reason: `human_contact:${act[0].type}` };
+  }
+  return { touched: false };
 }
 
 export async function shouldSendFollowup(
   supabase: any,
   contact: GuardContact,
-  opts?: { conversationId?: string | null; caller?: string }
+  opts?: {
+    conversationId?: string | null;
+    caller?: string;
+    /** Cadence enrolment time — human activity after this point blocks the send. */
+    enrolledAt?: string | null;
+    /** Escape hatch; defaults to enforcing the human-contact gate. */
+    skipHumanGate?: boolean;
+  }
 ): Promise<GuardResult> {
   if (!contact) return { ok: false, reason: "contact_missing" };
   if (contact.is_deleted) return { ok: false, reason: "contact_deleted" };
@@ -47,6 +97,15 @@ export async function shouldSendFollowup(
   if (contact.lead_type && PROMOTED_TYPES.has(contact.lead_type)) {
     return { ok: false, reason: `promoted_lead_type:${contact.lead_type}` };
   }
+
+  // ── Human-contact gate ── never auto-message someone a human already engaged.
+  if (opts?.skipHumanGate !== true) {
+    const touch = await hasHumanTouch(supabase, contact.id, opts?.enrolledAt ?? null);
+    if (touch.touched) {
+      return { ok: false, reason: touch.reason || "human_contact", human_touch: true };
+    }
+  }
+
 
   // Load settings (with defaults)
   const { data: cfg } = await supabase
