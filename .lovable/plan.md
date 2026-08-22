@@ -1,71 +1,54 @@
-# New WhatsApp cadence: `fb_campaign_response_v1`
+# fb_campaign_response_v1 — diagnosis report (no changes made)
 
-A fresh 3-step "can I call you" follow-up for Facebook-campaign leads, fully isolated from `prospect_7touch_v1` and its 16 currently paused rows (verified in the database — engine flag `cadence_engine_enabled` is currently `false`, daily cap 40).
+## 1. The exact bug (confirmed)
 
-## What exists today (verified)
+`supabase/functions/fb-cadence-tick/index.ts`:
 
-- `cadence-tick` edge function runs the engine. It only processes `sequence_key IN ('prospect_7touch_v1','registered_9step_v1')`, sends **exclusively via `maytapi-send-direct`**, and shares one global kill switch (`cadence_engine_enabled`) plus one daily counter (`reserve_cadence_send_slot`).
-- `maytapi-send-direct` already performs the Maytapi readiness check (`assertMaytapiReady`) and returns HTTP **423** with "Maytapi phone is not ready" — that 423 is what stalled the old batch in June.
-- `prospect_cadence_state` (contact_id, sequence_key, current_step, status, next_send_at, pause_reason, meta) and `cadence_log` are generic — no schema change needed.
-- `followup_templates` (intent_state, step_number, delay_hours, send_mode, template_text, enabled) is the natural home for the new copy.
-- 17 live contacts currently carry the tag `FB Campaign Response`.
-- No Twilio path exists in the cadence engine today; Twilio outbound goes through `send-message`, which enforces the 24-hour care window and rejects sends outside it.
+- line 393: `const channel: "maytapi" = "maytapi";`
+- line 411: `channel = "maytapi";`  ← reassigning a `const`
 
-## Approach: a separate tick function, not an extension of `cadence-tick`
+This throws `TypeError: Assignment to constant variable.` **after** the `fetch` to `maytapi-send-direct` has already returned. So:
 
-Adding the sequence into `cadence-tick` would mean the new leads share the old sequence's kill switch and burst-failure breaker — the exact mechanism that froze the old batch. Instead:
+1. The WhatsApp message **is actually sent**.
+2. The throw is swallowed by the surrounding `try/catch`, which sets `sendError = "Assignment to constant variable."` and leaves `sendOk = false`.
+3. Because `sendOk` is false, the code takes the failure branch: it releases the rate-limit slot, writes a `cadence_log` row with `status='failed'`, and **does not advance `current_step`** — it only sets `next_send_at = now + 2h` and `pause_reason = 'send_failed:...'`.
 
-- **New edge function `fb-cadence-tick`**, cron every 15 minutes, with its own kill switch `fb_cadence_enabled` and its own daily cap `fb_cadence_daily_limit` (default 30).
-- It reads/writes the same `prospect_cadence_state` / `cadence_log` tables, filtered strictly to `sequence_key = 'fb_campaign_response_v1'`. `cadence-tick` never sees these rows because its query is an explicit `IN (...)` on the two old keys.
-- It reuses the existing shared guards unchanged: quiet hours 20:00–06:00 SAST, `shouldSendFollowup` (cross-provider cooldown, inbound quiet period, soft-refusal, DNC/deleted/muted, promoted lead types), and the `reserve_cadence_send_slot` daily reservation.
+Result: the same step-1 message re-fires every ~2 hours, indefinitely, while the CRM believes nothing was ever delivered. This matches the WhatsApp screenshots exactly (yesterday 10:31, today 08:45, next 10:45).
 
-## The three steps
+Scope: this is **not** contact-specific. Every send through this function hits the same line. Live counts:
 
-| Step | Timing from enrollment | Channel | Intent |
-|---|---|---|---|
-| 1 | +2h | Twilio if the 24h window is open, else Maytapi | Soft "saw your message from our Facebook ad — okay if I give you a quick call?" |
-| 2 | +24h | Maytapi (handoff) | "You reached out yesterday — still happy for me to call you?" |
-| 3 | +72h | Maytapi | Final soft close, door left open |
+- 24 rows `status='active'` in `fb_campaign_response_v1`
+- 10 currently carrying `pause_reason = 'send_failed:Assignment to constant variable.'`
+- 24 `cadence_log` rows with `error like 'Assignment%'` — i.e. 24 messages that were delivered but recorded as failed
+- The rows that show `current_step=1` with a clean `pause_reason` advanced before the regression; the ones stuck at step 0/1 with the error are looping.
 
-Copy is stored in `followup_templates` with `intent_state = 'FB_CAMPAIGN_RESPONSE_V1'`, `step_number` 1–3, `delay_hours` 2/24/72, and `send_mode` `twilio_or_maytapi` / `maytapi`. The function loads templates from the table at tick time with a hardcoded fallback string per step, so copy can be edited without redeploying.
+## 2. Human-contact / registration gating — definitive answer
 
-## Twilio → Maytapi handoff rule
+**There is no gate for prior human contact, and none for registration.**
 
-At send time the function computes the contact's last inbound timestamp (`contacts.last_inbound_at`, falling back to the newest inbound message on the conversation):
+- `contacts` has **no `registration_status` column** (verified against `information_schema`).
+- The only promotion gate is `lead_type in (registered, buyer, vip)` — in `fb-cadence-tick` and in `_shared/should-send-followup.ts`. Vuyisile registered in the backoffice but his `lead_type` is still `prospect`, so nothing stopped him.
+- `contacts.notes` and `contact_activity` are **never read** by the cadence engine. Manual calls/notes logged via MCP have zero effect on sending.
+- The `shouldSendFollowup` guard does check a 6h outbound cooldown and a 12h inbound quiet window — but it reads `contacts.last_outbound_at`, which is **NULL** for every affected contact (manual WhatsApp sends from the owner's own phone never stamp it). So the cooldown never fires.
 
-- Step 1 only: if `now - last_inbound_at < 24h` and Twilio credentials are configured, send through the Twilio path (`send-message`, which itself re-checks the window). If `send-message` reports the window closed, immediately retry the same step through Maytapi rather than failing the step.
-- Steps 2 and 3: always Maytapi.
-- The chosen channel is recorded in `cadence_log.template_key` suffix and in `prospect_cadence_state.meta.channel_history`.
+13 of the 24 active contacts have manual notes in their record (calls, personal replies, orders raised) and are still being auto-messaged as if untouched — including Vuyisile Nashwa, Mr W Matthew's Masilela (ready to order), Dorcas (existing customer, retention call), Johannes (skeptical, trust message already sent), Mnotho, Kgosi!, Nathan, Siboniso, Bee, Lady V.
 
-## Maytapi readiness safety
+## 3. Affected contacts (all 24 active)
 
-Before any Maytapi send, the function calls `maytapi-health` (or the same `assertMaytapiReady` shared logic) once per tick. If the phone is not ready:
+Stuck with the bug error (looping): Johannes (+27645395208), MARIA4LIVE (+27603581888), Mr W Matthew's Masilela (+27827041386), NkatekoAkani (+27797560375), Kgosi! (+27649676389), Nathan Somerset West (+27605649341), Siboniso Manzi (+27767373579), Vuyisile Nashwa (+27739474228), plus 2 further rows in the same state.
 
-- No sends are attempted this tick.
-- Due rows are left `active` and pushed out by 1 hour (`next_send_at`), not paused — so the queue self-resumes when Maytapi reconnects, instead of freezing like the old batch.
-- After 6 consecutive not-ready ticks, write a `system_logs` critical row and fire `send-admin-alert`, but still keep rescheduling rather than disabling the sequence.
-- A 423 from `maytapi-send-direct` on an individual send is treated the same way (reschedule +1h, release the reserved daily slot).
+Active, no error yet (will hit it on next send): Andries Mphane, BABA, Bee, Dorcas, Elias, Ephraim, Lady V, maiezo, Mnotho, Moitoi, nonkosi, Nonku, Vee Mo Foundation and the remaining step-0 enrollments — all due 09:45–12:45 today.
 
-## Auto-enrollment (ongoing, not one-off)
+## Recommended fix (awaiting your go-ahead — nothing changed yet)
 
-Two complementary mechanisms so future leads never need a manual trigger:
+1. **Immediate stop-the-bleeding:** set `integration_settings.fb_cadence_enabled = false` so no further duplicate sends go out today.
+2. **Fix the bug:** change `const channel` to a plain literal (drop the reassignment at line 411).
+3. **Repair state:** for the 10 rows whose `cadence_log` shows a delivered-but-"failed" send, advance `current_step` and clear `pause_reason` so they don't re-fire; re-mark those `cadence_log` rows as `sent`.
+4. **Add a human-contact gate** (new, requires your sign-off on the rule): skip/complete a cadence row when the contact has a manual note or `contact_activity` entry newer than the cadence enrolment, or when a human outbound has been logged — and stamp `last_outbound_at` on manual sends so the existing 6h cooldown actually works.
+5. **Registration gate:** since there is no `registration_status` field, either add one or agree that registering flips `lead_type` to `registered` (which the existing gate already respects).
 
-1. **Database trigger** on `contacts` (AFTER INSERT OR UPDATE OF tags): when `'FB Campaign Response' = ANY(tags)`, `is_deleted` is false, `do_not_contact` is false, and no `prospect_cadence_state` row exists for that contact with `sequence_key = 'fb_campaign_response_v1'`, insert one with `current_step = 0`, `status = 'active'`, `next_send_at = now() + interval '2 hours'`, `started_at = now()`, `meta = {"source":"tag_trigger"}`. `SECURITY DEFINER`, `search_path = public`, and idempotent via a partial unique index on `(contact_id, sequence_key)`.
-2. **Sweep inside `fb-cadence-tick`**: each run also enrolls any tagged contact that somehow has no state row (covers bulk imports that bypass the trigger, and backfills the 17 contacts already tagged). Capped at 50 enrollments per tick.
+## Technical notes
 
-## Stop conditions
-
-A contact exits the sequence when any of these occur (checked each tick, mirroring the old engine): a new inbound message arrives after the last step was sent (`status = 'replied'`), `lead_type` becomes registered/buyer/vip (`completed`, reason `converted`), DNC / deleted (`opted_out`), `auto_reply_enabled = false` (`paused`), or step 3 completes (`completed`). The tag being removed also stops future steps.
-
-## Technical summary
-
-- Migration: seed 3 rows in `followup_templates`; add partial unique index on `prospect_cadence_state (contact_id, sequence_key)`; add `enroll_fb_campaign_cadence()` trigger function + trigger on `contacts`; seed `integration_settings` keys `fb_cadence_enabled` (`false` initially, so nothing sends until you flip it) and `fb_cadence_daily_limit` (`30`).
-- New function: `supabase/functions/fb-cadence-tick/index.ts`; cron every 15 min via `supabase/config.toml`.
-- Untouched: `cadence-tick`, `prospect_7touch_v1`, `registered_9step_v1`, and all 16 paused rows.
-- Rollback: set `fb_cadence_enabled = false` (or drop the trigger); no existing behaviour changes.
-
-## Go-live sequence
-
-1. Apply the migration and deploy the function with the switch off.
-2. Run one dry tick to confirm the 17 tagged contacts enroll and previews render correctly.
-3. Flip `fb_cadence_enabled = true`.
+- File: `supabase/functions/fb-cadence-tick/index.ts` lines 390–471.
+- Guard: `supabase/functions/_shared/should-send-followup.ts`.
+- Same `try/catch`-swallows-throw pattern should be audited in the sibling ticks (`cadence-tick`, `recovery-tick`, `phase3-tick`) — a delivered-then-throw path there would produce the same duplicate-send loop.
