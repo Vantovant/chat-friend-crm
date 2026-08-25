@@ -26,6 +26,8 @@ const corsHeaders = {
 const SEQUENCE_KEY = "prospect_7touch_v1";
 const REGISTERED_SEQUENCE_KEY = "registered_9step_v1";
 const ACTIVE_SEQUENCE_KEYS = [SEQUENCE_KEY, REGISTERED_SEQUENCE_KEY];
+// ONE-SHOT POLICY (owner-approved): every automated cadence sends ONE message only.
+const ONE_SHOT_MAX_STEP = 1;
 
 // step → { offsetHoursFromStart, defaultContent, templateKey }
 const STEPS = [
