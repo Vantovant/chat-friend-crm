@@ -415,7 +415,8 @@ Deno.serve(async (req) => {
         sentInWindow++;
         if (welcomeBundleMark) { try { await welcomeBundleMark(); } catch (_e) {} }
         // Schedule next step
-        const nextDef = rowSteps.find((s) => s.step === nextStepNum + 1);
+        // ONE-SHOT POLICY: never schedule a follow-up step.
+        const nextDef = nextStepNum + 1 > ONE_SHOT_MAX_STEP ? undefined : rowSteps.find((s) => s.step === nextStepNum + 1);
         const nextAt = nextDef
           ? new Date(now.getTime() + (nextDef.offsetH - stepDef.offsetH) * 3600 * 1000).toISOString()
           : null;
