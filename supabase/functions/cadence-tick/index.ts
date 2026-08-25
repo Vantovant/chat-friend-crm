@@ -183,7 +183,8 @@ Deno.serve(async (req) => {
       diag.processed++;
       const nextStepNum = (row.current_step || 0) + 1;
       const rowSteps = stepsFor(row.sequence_key);
-      const stepDef = rowSteps.find((s) => s.step === nextStepNum);
+      // ONE-SHOT POLICY: automated cadences send a single touch only, then retire.
+      const stepDef = nextStepNum > ONE_SHOT_MAX_STEP ? undefined : rowSteps.find((s) => s.step === nextStepNum);
       if (!stepDef) {
         // No more steps → mark completed
         await sb.from("prospect_cadence_state").update({
