@@ -26,6 +26,8 @@ const corsHeaders = {
 const SEQUENCE_KEY = "prospect_7touch_v1";
 const REGISTERED_SEQUENCE_KEY = "registered_9step_v1";
 const ACTIVE_SEQUENCE_KEYS = [SEQUENCE_KEY, REGISTERED_SEQUENCE_KEY];
+// ONE-SHOT POLICY (owner-approved): every automated cadence sends ONE message only.
+const ONE_SHOT_MAX_STEP = 1;
 
 // step → { offsetHoursFromStart, defaultContent, templateKey }
 const STEPS = [
@@ -183,7 +185,8 @@ Deno.serve(async (req) => {
       diag.processed++;
       const nextStepNum = (row.current_step || 0) + 1;
       const rowSteps = stepsFor(row.sequence_key);
-      const stepDef = rowSteps.find((s) => s.step === nextStepNum);
+      // ONE-SHOT POLICY: automated cadences send a single touch only, then retire.
+      const stepDef = nextStepNum > ONE_SHOT_MAX_STEP ? undefined : rowSteps.find((s) => s.step === nextStepNum);
       if (!stepDef) {
         // No more steps → mark completed
         await sb.from("prospect_cadence_state").update({
@@ -414,7 +417,8 @@ Deno.serve(async (req) => {
         sentInWindow++;
         if (welcomeBundleMark) { try { await welcomeBundleMark(); } catch (_e) {} }
         // Schedule next step
-        const nextDef = rowSteps.find((s) => s.step === nextStepNum + 1);
+        // ONE-SHOT POLICY: never schedule a follow-up step.
+        const nextDef = nextStepNum + 1 > ONE_SHOT_MAX_STEP ? undefined : rowSteps.find((s) => s.step === nextStepNum + 1);
         const nextAt = nextDef
           ? new Date(now.getTime() + (nextDef.offsetH - stepDef.offsetH) * 3600 * 1000).toISOString()
           : null;

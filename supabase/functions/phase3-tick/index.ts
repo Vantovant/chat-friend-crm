@@ -14,7 +14,8 @@ const corsHeaders = {
 };
 
 const STEP_DELAYS_HOURS = [2, 24, 72]; // step 0 → 2h, step 1 → 24h after step 0, step 2 → 72h after step 0
-const MAX_STEPS = 3;
+// ONE-SHOT POLICY (owner-approved): send a single touch only, then retire the row.
+const MAX_STEPS = 1;
 
 function renderTemplate(text: string, vars: Record<string, string>): string {
   return text.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k) => vars[k] ?? "");
