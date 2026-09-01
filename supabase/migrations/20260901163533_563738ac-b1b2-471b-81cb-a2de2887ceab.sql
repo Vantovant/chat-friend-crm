@@ -1,0 +1,2 @@
+ALTER TABLE public.whatsapp_group_members ADD COLUMN IF NOT EXISTS left_detected_at timestamptz;
+CREATE INDEX IF NOT EXISTS idx_wgm_group_status ON public.whatsapp_group_members (group_jid, last_seen_in_group_status);
