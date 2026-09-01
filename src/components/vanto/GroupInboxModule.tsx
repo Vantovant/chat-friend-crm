@@ -209,6 +209,31 @@ export function GroupInboxModule() {
                 </div>
               </div>
             )}
+            {strategy && (
+              <div className="p-3 border-b border-border">
+                <div className="rounded-lg border border-accent/30 bg-accent/5 p-3">
+                  <button
+                    onClick={() => setStrategyOpen((v) => !v)}
+                    className="w-full flex items-center gap-2 text-left"
+                  >
+                    <TrendingUp size={14} className="text-accent-foreground shrink-0" />
+                    <span className="text-xs font-semibold flex-1">This week's strategy</span>
+                    <ChevronDown
+                      size={14}
+                      className={cn('text-muted-foreground transition-transform', strategyOpen && 'rotate-180')}
+                    />
+                  </button>
+                  <p
+                    className={cn(
+                      'text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap mt-2',
+                      !strategyOpen && 'line-clamp-3'
+                    )}
+                  >
+                    {strategy}
+                  </p>
+                </div>
+              </div>
+            )}
             <div className="p-3 space-y-2 border-b border-border">
               <div className="relative">
 
