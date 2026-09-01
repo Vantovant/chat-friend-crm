@@ -12,7 +12,7 @@
   "mcp": {
     "server": {
       "name": "get-well-hub",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "title": "Get Well Hub"
     },
     "tools": [
@@ -868,6 +868,145 @@
           "required": [
             "fb_comment_id",
             "reply_text"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_group_overview",
+        "title": "Get WhatsApp group overview",
+        "description": "Answers \"how many people are in the WhatsApp group\" questions. Returns the live in-group member count for the APLGO | Health and Biz group broken down by engagement classification (active / warm / dormant / ghost), the timestamp of the most recent group health scan, today's engagement digest (if generated) and this week's engagement strategy (if generated). Members who have left the group are excluded.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "group_jid": {
+              "type": "string",
+              "description": "WhatsApp group JID. Defaults to 120363419298058298@g.us (APLGO | Health and Biz)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_group_welcome_status",
+        "title": "Get group welcome sequence status",
+        "description": "Read the state of the automated new-joiner welcome sequence for the WhatsApp group: how many people are enrolled at each stage (pending / step1_sent / step2_sent / completed / failed / paused) and how many were enrolled in the last 7 days.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "group_jid": {
+              "type": "string",
+              "description": "WhatsApp group JID. Defaults to 120363419298058298@g.us (APLGO | Health and Biz)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_group_dm_candidates",
+        "title": "List group DM pilot candidates",
+        "description": "List WhatsApp group members eligible for a scoped 1-on-1 pilot DM. Eligibility (identical to the group-dm-pilot backend): matched to a CRM contact, classification active or warm, still in the group, contact not deleted and not do_not_contact, not currently in an active welcome sequence, and not already messaged by this pilot in the last 30 days. Returns at most zazi_pilot_batch_size candidates. Read-only — sends nothing.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "group_jid": {
+              "type": "string",
+              "description": "WhatsApp group JID. Defaults to 120363419298058298@g.us (APLGO | Health and Biz)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "create_group_dm_batch",
+        "title": "Draft a group DM pilot batch",
+        "description": "Draft (does NOT send) a scoped 1-on-1 pilot DM batch for WhatsApp group members. Every member_id is re-validated against the full eligibility rules server-side. Returns the draft batch id plus rich per-recipient review context (contact name/email/lead_type/temperature/tags, full notes, and the last 5 contact activity rows) so a human can review before calling approve_group_dm_batch.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "member_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "minItems": 1,
+              "description": "whatsapp_group_members.id values from list_group_dm_candidates."
+            },
+            "message_body": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000,
+              "description": "The exact final text to send to each recipient."
+            },
+            "group_jid": {
+              "type": "string",
+              "description": "WhatsApp group JID. Defaults to 120363419298058298@g.us."
+            },
+            "notes": {
+              "type": "string",
+              "description": "Optional internal note stored with the batch."
+            }
+          },
+          "required": [
+            "member_ids",
+            "message_body"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "approve_group_dm_batch",
+        "title": "Approve and send a group DM pilot batch",
+        "description": "DESTRUCTIVE: actually sends the real 1-on-1 WhatsApp messages of a drafted pilot batch. Hard-refuses unless zazi_group_dm_mode is exactly 'pilot_manual', outbound is not frozen, the batch exists with status 'draft', the batch is within zazi_pilot_batch_size, and the 1-on-1 daily cap would not be exceeded. Every recipient is re-checked for do_not_contact and the 30-day no-repeat rule immediately before sending. Sends go through the same maytapi-send-direct pipeline used by send_whatsapp_message, spaced at least 6 seconds apart, and are logged to group_dm_pilot_sends and the contact activity timeline.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": true,
+          "idempotentHint": false,
+          "openWorldHint": true
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "batch_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "The draft batch id returned by create_group_dm_batch."
+            }
+          },
+          "required": [
+            "batch_id"
           ],
           "additionalProperties": false,
           "$schema": "http://json-schema.org/draft-07/schema#"

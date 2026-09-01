@@ -205,9 +205,9 @@ var get_dispatcher_health_default = defineTool2({
     const minutesSinceLastSend = lastTickMs ? Math.round((nowMs - lastTickMs) / 6e4) : null;
     const frozen = String(get("maytapi_outbound_frozen", "false")).toLowerCase() === "true";
     const freezeUntil = get("maytapi_freeze_until_at", null);
-    const freezeActive = Boolean(freezeUntil && Date.parse(freezeUntil) > nowMs);
+    const freezeActive2 = Boolean(freezeUntil && Date.parse(freezeUntil) > nowMs);
     let verdict;
-    if (frozen || freezeActive) verdict = "paused: outbound is frozen";
+    if (frozen || freezeActive2) verdict = "paused: outbound is frozen";
     else if (overdue_pending === 0) verdict = "healthy: nothing overdue in the queue";
     else if (minutesSinceLastSend !== null && minutesSinceLastSend <= 15)
       verdict = "healthy: dispatcher ticked within the last 15 minutes";
@@ -244,7 +244,7 @@ var get_dispatcher_health_default = defineTool2({
       },
       outbound_frozen: frozen,
       freeze_until: freezeUntil,
-      freeze_active: freezeActive,
+      freeze_active: freezeActive2,
       freeze_reason: get("maytapi_freeze_reason", null)
     };
     return {
@@ -681,8 +681,8 @@ var send_whatsapp_message_default = defineTool15({
     const get = (k, fallback = null) => settingRows?.find((s) => s.key === k)?.value ?? fallback;
     const frozenFlag = String(get("maytapi_outbound_frozen", "false")).trim().toLowerCase() === "true";
     const freezeUntil = get("maytapi_freeze_until_at");
-    const freezeActive = frozenFlag && (!freezeUntil || Date.parse(freezeUntil) > now);
-    if (freezeActive) {
+    const freezeActive2 = frozenFlag && (!freezeUntil || Date.parse(freezeUntil) > now);
+    if (freezeActive2) {
       return err(
         `Refused: WhatsApp outbound is frozen${freezeUntil ? ` until ${freezeUntil}` : ""}${get("maytapi_freeze_reason") ? ` (${get("maytapi_freeze_reason")})` : ""}. No message was sent.`,
         { reason: "outbound_frozen", freeze_until: freezeUntil }
@@ -1209,13 +1209,444 @@ var reply_to_fb_comment_default = defineTool28({
   }
 });
 
+// src/lib/mcp/tools/get-group-overview.ts
+import { defineTool as defineTool29 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z25 } from "npm:zod@^3.25.76";
+
+// src/lib/mcp/tools/group-eligibility.ts
+var DEFAULT_GROUP_JID = "120363419298058298@g.us";
+var DAY_MS2 = 24 * 60 * 60 * 1e3;
+var THIRTY_DAYS_MS = 30 * DAY_MS2;
+var INTER_SEND_FLOOR_MS = 6e3;
+var mask = (phone) => phone ? `***${String(phone).slice(-4)}` : null;
+var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function getSettings(supabase, keys) {
+  const { data } = await supabase.from("integration_settings").select("key,value").in("key", keys);
+  const out = {};
+  for (const row of data ?? []) {
+    out[row.key] = String(row.value ?? "").trim();
+  }
+  return out;
+}
+async function pilotBatchSize(supabase) {
+  const s = await getSettings(supabase, ["zazi_pilot_batch_size"]);
+  const n = parseInt(s.zazi_pilot_batch_size || "5", 10);
+  return Number.isFinite(n) && n > 0 ? n : 5;
+}
+async function freezeActive(supabase) {
+  const s = await getSettings(supabase, ["maytapi_outbound_frozen", "maytapi_freeze_until_at"]);
+  const flag = (s.maytapi_outbound_frozen || "false").toLowerCase() === "true";
+  const until = s.maytapi_freeze_until_at || null;
+  return { frozen: flag && (!until || Date.parse(until) > Date.now()), until };
+}
+async function dailyCapState(supabase) {
+  const s = await getSettings(supabase, ["maytapi_daily_cap"]);
+  const cap = Number(s.maytapi_daily_cap || "30");
+  const { count } = await supabase.from("contact_activity").select("id", { count: "exact", head: true }).eq("type", "maytapi_message").filter("metadata->>direction", "eq", "outbound").gte("created_at", new Date(Date.now() - DAY_MS2).toISOString());
+  return { cap, used: count ?? 0 };
+}
+async function recentlyReachedMemberIds(supabase) {
+  const { data } = await supabase.from("group_dm_pilot_sends").select("member_id").in("status", ["sent", "delivered"]).gte("sent_at", new Date(Date.now() - THIRTY_DAYS_MS).toISOString());
+  return new Set((data ?? []).map((r) => r.member_id).filter(Boolean));
+}
+async function activeWelcomeMemberIds(supabase) {
+  const { data } = await supabase.from("group_welcome_sequences").select("member_id, status").not("status", "in", "(completed,failed)");
+  return new Set((data ?? []).map((r) => r.member_id).filter(Boolean));
+}
+async function eligibleMembers(supabase, opts = {}) {
+  const groupJid = opts.groupJid || DEFAULT_GROUP_JID;
+  let q = supabase.from("whatsapp_group_members").select("id, contact_id, phone_normalized, classification, crm_last_activity_at, first_seen_at").eq("group_jid", groupJid).eq("last_seen_in_group_status", "in_group").not("contact_id", "is", null).in("classification", ["active", "warm"]).order("crm_last_activity_at", { ascending: false, nullsFirst: false });
+  if (opts.memberIds?.length) q = q.in("id", opts.memberIds);
+  const { data: members, error } = await q.limit(opts.memberIds?.length ? opts.memberIds.length : 200);
+  if (error) throw new Error(error.message);
+  const rows = members ?? [];
+  if (!rows.length) return [];
+  const contactIds = [...new Set(rows.map((m) => m.contact_id))];
+  const { data: contacts } = await supabase.from("contacts").select("id, name, phone_normalized, do_not_contact, is_deleted, last_inbound_at").in("id", contactIds);
+  const cById = new Map((contacts ?? []).map((c) => [c.id, c]));
+  const reached = await recentlyReachedMemberIds(supabase);
+  const inWelcome = await activeWelcomeMemberIds(supabase);
+  const eligible = rows.filter((m) => {
+    const c = cById.get(m.contact_id);
+    return c && !c.is_deleted && c.do_not_contact !== true && !reached.has(m.id) && !inWelcome.has(m.id);
+  }).map((m) => {
+    const c = cById.get(m.contact_id);
+    return {
+      member_id: m.id,
+      contact_id: m.contact_id,
+      name: c?.name ?? null,
+      phone_normalized: c?.phone_normalized ?? m.phone_normalized ?? null,
+      phone_masked: mask(c?.phone_normalized ?? m.phone_normalized),
+      classification: m.classification ?? null,
+      last_inbound_at: c?.last_inbound_at ?? null,
+      crm_last_activity_at: m.crm_last_activity_at ?? null
+    };
+  });
+  return typeof opts.limit === "number" ? eligible.slice(0, opts.limit) : eligible;
+}
+
+// src/lib/mcp/tools/get-group-overview.ts
+var get_group_overview_default = defineTool29({
+  name: "get_group_overview",
+  title: "Get WhatsApp group overview",
+  description: `Answers "how many people are in the WhatsApp group" questions. Returns the live in-group member count for the APLGO | Health and Biz group broken down by engagement classification (active / warm / dormant / ghost), the timestamp of the most recent group health scan, today's engagement digest (if generated) and this week's engagement strategy (if generated). Members who have left the group are excluded.`,
+  inputSchema: {
+    group_jid: z25.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`)
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ group_jid }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const groupJid = group_jid || DEFAULT_GROUP_JID;
+    const { data: members, error } = await supabase.from("whatsapp_group_members").select("id, classification, contact_id").eq("group_jid", groupJid).eq("last_seen_in_group_status", "in_group");
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const rows = members ?? [];
+    const counts = { active: 0, warm: 0, dormant: 0, ghost: 0, unclassified: 0 };
+    let matched = 0;
+    for (const m of rows) {
+      const k = m.classification ?? "";
+      if (k in counts && k !== "unclassified") counts[k] += 1;
+      else counts.unclassified += 1;
+      if (m.contact_id) matched += 1;
+    }
+    const { data: health } = await supabase.from("group_health_reports").select("created_at").eq("group_jid", groupJid).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    const todayStart = /* @__PURE__ */ new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+    const { data: digest } = await supabase.from("group_engagement_digests").select("digest_text, created_at").eq("group_jid", groupJid).gte("created_at", todayStart.toISOString()).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1e3).toISOString();
+    const { data: strategy } = await supabase.from("group_engagement_strategies").select("strategy_text, created_at").eq("group_jid", groupJid).gte("created_at", weekAgo).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    const result = {
+      group_jid: groupJid,
+      total_in_group: rows.length,
+      matched_to_crm_contacts: matched,
+      classification_counts: counts,
+      last_scan_at: health?.created_at ?? null,
+      todays_digest: digest?.digest_text ?? null,
+      this_weeks_strategy: strategy?.strategy_text ?? null
+    };
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+});
+
+// src/lib/mcp/tools/get-group-welcome-status.ts
+import { defineTool as defineTool30 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z26 } from "npm:zod@^3.25.76";
+var get_group_welcome_status_default = defineTool30({
+  name: "get_group_welcome_status",
+  title: "Get group welcome sequence status",
+  description: "Read the state of the automated new-joiner welcome sequence for the WhatsApp group: how many people are enrolled at each stage (pending / step1_sent / step2_sent / completed / failed / paused) and how many were enrolled in the last 7 days.",
+  inputSchema: {
+    group_jid: z26.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`)
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ group_jid }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const groupJid = group_jid || DEFAULT_GROUP_JID;
+    const { data, error } = await supabase.from("group_welcome_sequences").select("id, status, created_at").eq("group_jid", groupJid);
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const rows = data ?? [];
+    const counts = {
+      pending: 0,
+      step1_sent: 0,
+      step2_sent: 0,
+      completed: 0,
+      failed: 0,
+      paused: 0
+    };
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1e3;
+    let last7 = 0;
+    for (const r of rows) {
+      const k = r.status ?? "unknown";
+      counts[k] = (counts[k] ?? 0) + 1;
+      if (r.created_at && Date.parse(r.created_at) >= sevenDaysAgo) last7 += 1;
+    }
+    const result = {
+      group_jid: groupJid,
+      total_enrolled: rows.length,
+      status_counts: counts,
+      enrolled_last_7_days: last7
+    };
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+});
+
+// src/lib/mcp/tools/list-group-dm-candidates.ts
+import { defineTool as defineTool31 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z27 } from "npm:zod@^3.25.76";
+var list_group_dm_candidates_default = defineTool31({
+  name: "list_group_dm_candidates",
+  title: "List group DM pilot candidates",
+  description: "List WhatsApp group members eligible for a scoped 1-on-1 pilot DM. Eligibility (identical to the group-dm-pilot backend): matched to a CRM contact, classification active or warm, still in the group, contact not deleted and not do_not_contact, not currently in an active welcome sequence, and not already messaged by this pilot in the last 30 days. Returns at most zazi_pilot_batch_size candidates. Read-only \u2014 sends nothing.",
+  inputSchema: {
+    group_jid: z27.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`)
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ group_jid }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const groupJid = group_jid || DEFAULT_GROUP_JID;
+    try {
+      const limit = await pilotBatchSize(supabase);
+      const candidates = await eligibleMembers(supabase, { limit, groupJid });
+      const result = {
+        group_jid: groupJid,
+        batch_size: limit,
+        candidates: candidates.map(({ phone_normalized: _omit, ...rest }) => rest)
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: result
+      };
+    } catch (e) {
+      return {
+        content: [{ type: "text", text: e instanceof Error ? e.message : "eligibility_query_failed" }],
+        isError: true
+      };
+    }
+  }
+});
+
+// src/lib/mcp/tools/create-group-dm-batch.ts
+import { defineTool as defineTool32 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z28 } from "npm:zod@^3.25.76";
+var FB_NOTE = "Facebook comments cannot be automatically matched to this contact \u2014 fb_comments has no contact_id link, only a Facebook-internal commenter ID with no phone number. If this person has commented on Facebook, that history is not visible here.";
+var create_group_dm_batch_default = defineTool32({
+  name: "create_group_dm_batch",
+  title: "Draft a group DM pilot batch",
+  description: "Draft (does NOT send) a scoped 1-on-1 pilot DM batch for WhatsApp group members. Every member_id is re-validated against the full eligibility rules server-side. Returns the draft batch id plus rich per-recipient review context (contact name/email/lead_type/temperature/tags, full notes, and the last 5 contact activity rows) so a human can review before calling approve_group_dm_batch.",
+  inputSchema: {
+    member_ids: z28.array(z28.string().uuid()).min(1).describe("whatsapp_group_members.id values from list_group_dm_candidates."),
+    message_body: z28.string().min(1).max(4e3).describe("The exact final text to send to each recipient."),
+    group_jid: z28.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID}.`),
+    notes: z28.string().optional().describe("Optional internal note stored with the batch.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  handler: async ({ member_ids, message_body, group_jid, notes }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const groupJid = group_jid || DEFAULT_GROUP_JID;
+    const messageBody = message_body.trim();
+    const err2 = (text, extra) => ({
+      content: [{ type: "text", text }],
+      structuredContent: { created: false, ...extra ?? {} },
+      isError: true
+    });
+    try {
+      const limit = await pilotBatchSize(supabase);
+      if (member_ids.length > limit) {
+        return err2(`Batch too large: ${member_ids.length} > zazi_pilot_batch_size (${limit}).`);
+      }
+      const eligible = await eligibleMembers(supabase, { memberIds: member_ids, groupJid });
+      const eligibleIds = new Set(eligible.map((e) => e.member_id));
+      const rejected = member_ids.filter((id) => !eligibleIds.has(id));
+      if (rejected.length) {
+        return err2("One or more member_ids are not eligible.", { rejected_member_ids: rejected });
+      }
+      const { data: batch, error } = await supabase.from("group_dm_pilot_batches").insert({
+        group_jid: groupJid,
+        status: "draft",
+        member_ids,
+        message_body: messageBody,
+        notes: notes ?? null
+      }).select("id, status, created_at").single();
+      if (error) return err2(error.message);
+      const cIds = eligible.map((e) => e.contact_id).filter(Boolean);
+      const { data: fullContacts } = await supabase.from("contacts").select("id, name, email, lead_type, temperature, tags, notes").in("id", cIds);
+      const fullById = new Map((fullContacts ?? []).map((c) => [c.id, c]));
+      const { data: acts } = await supabase.from("contact_activity").select("contact_id, type, metadata, created_at").in("contact_id", cIds).order("created_at", { ascending: false }).limit(500);
+      const actsByContact = /* @__PURE__ */ new Map();
+      for (const a of acts ?? []) {
+        const list = actsByContact.get(a.contact_id) ?? [];
+        if (list.length >= 5) continue;
+        const md = a.metadata ?? {};
+        const preview = md.body_preview ?? (typeof md.body === "string" ? md.body.slice(0, 140) : null);
+        list.push({ type: a.type, direction: md.direction ?? null, preview, created_at: a.created_at });
+        actsByContact.set(a.contact_id, list);
+      }
+      const result = {
+        created: true,
+        batch_id: batch.id,
+        status: "draft",
+        group_jid: groupJid,
+        message_body: messageBody,
+        recipients: eligible.map((e) => {
+          const fc = fullById.get(e.contact_id) ?? null;
+          const nm = (fc?.name ?? e.name ?? "").trim();
+          return {
+            member_id: e.member_id,
+            contact_id: e.contact_id,
+            name: e.name,
+            phone_masked: e.phone_masked,
+            classification: e.classification,
+            contact_confirmed: Boolean(e.contact_id),
+            full_contact: fc ? { name: fc.name, email: fc.email, lead_type: fc.lead_type, temperature: fc.temperature, tags: fc.tags } : null,
+            notes: fc?.notes ?? null,
+            name_looks_incomplete: nm.length > 0 && !/\s/.test(nm),
+            recent_activity: actsByContact.get(e.contact_id) ?? [],
+            facebook_comment_note: FB_NOTE
+          };
+        }),
+        next_step: "Review the recipients, then call approve_group_dm_batch with this batch_id to actually send."
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: result
+      };
+    } catch (e) {
+      return err2(e instanceof Error ? e.message : "create_batch_failed");
+    }
+  }
+});
+
+// src/lib/mcp/tools/approve-group-dm-batch.ts
+import { defineTool as defineTool33 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z29 } from "npm:zod@^3.25.76";
+var approve_group_dm_batch_default = defineTool33({
+  name: "approve_group_dm_batch",
+  title: "Approve and send a group DM pilot batch",
+  description: "DESTRUCTIVE: actually sends the real 1-on-1 WhatsApp messages of a drafted pilot batch. Hard-refuses unless zazi_group_dm_mode is exactly 'pilot_manual', outbound is not frozen, the batch exists with status 'draft', the batch is within zazi_pilot_batch_size, and the 1-on-1 daily cap would not be exceeded. Every recipient is re-checked for do_not_contact and the 30-day no-repeat rule immediately before sending. Sends go through the same maytapi-send-direct pipeline used by send_whatsapp_message, spaced at least 6 seconds apart, and are logged to group_dm_pilot_sends and the contact activity timeline.",
+  inputSchema: {
+    batch_id: z29.string().uuid().describe("The draft batch id returned by create_group_dm_batch.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+  handler: async ({ batch_id }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const err2 = (text, extra) => ({
+      content: [{ type: "text", text }],
+      structuredContent: { sent: 0, refused: true, ...extra ?? {} },
+      isError: true
+    });
+    try {
+      const settings = await getSettings(supabase, ["zazi_group_dm_mode"]);
+      if (settings.zazi_group_dm_mode !== "pilot_manual") {
+        return err2("Refused: zazi_group_dm_mode is not 'pilot_manual'. Nothing was sent.", {
+          mode: settings.zazi_group_dm_mode || null
+        });
+      }
+      const fz = await freezeActive(supabase);
+      if (fz.frozen) {
+        return err2(`Refused: Maytapi outbound is frozen${fz.until ? ` until ${fz.until}` : ""}. Nothing was sent.`, {
+          freeze_until: fz.until
+        });
+      }
+      const { data: batch } = await supabase.from("group_dm_pilot_batches").select("id, status, member_ids, message_body, group_jid").eq("id", batch_id).maybeSingle();
+      if (!batch) return err2("Refused: batch not found.");
+      const b = batch;
+      if (b.status !== "draft") {
+        return err2(`Refused: batch status is '${b.status}', expected 'draft'. Nothing was sent.`);
+      }
+      const limit = await pilotBatchSize(supabase);
+      const memberIds = b.member_ids ?? [];
+      if (memberIds.length > limit) {
+        return err2(`Refused: batch size ${memberIds.length} exceeds zazi_pilot_batch_size (${limit}).`);
+      }
+      const cap = await dailyCapState(supabase);
+      if (Number.isFinite(cap.cap) && cap.used + memberIds.length > cap.cap) {
+        return err2(
+          `Refused: 1-on-1 daily cap would be exceeded (${cap.used}/${cap.cap} used, batch of ${memberIds.length}).`,
+          { used_last_24h: cap.used, daily_cap: cap.cap }
+        );
+      }
+      const eligible = await eligibleMembers(supabase, {
+        memberIds,
+        groupJid: b.group_jid || DEFAULT_GROUP_JID
+      });
+      const byId = new Map(eligible.map((e) => [e.member_id, e]));
+      const skipped = memberIds.filter((id) => !byId.has(id));
+      const results = [];
+      let first = true;
+      for (const memberId of memberIds) {
+        const r = byId.get(memberId);
+        if (!r) continue;
+        if (!first) await sleep(INTER_SEND_FLOOR_MS);
+        first = false;
+        let status = "failed";
+        let providerMessageId = null;
+        let errorDetail = null;
+        try {
+          const { data: sendResult, error: fnErr } = await supabase.functions.invoke("maytapi-send-direct", {
+            body: {
+              to_number: r.phone_normalized,
+              message: b.message_body,
+              contact_id: r.contact_id,
+              source: "group_dm_pilot_mcp"
+            }
+          });
+          const sr = sendResult;
+          if (fnErr) errorDetail = fnErr.message;
+          else if (!sr?.success) errorDetail = sr?.error ?? sr?.reason ?? "unknown provider error";
+          else {
+            status = "sent";
+            providerMessageId = sr?.message_id ?? null;
+          }
+        } catch (e) {
+          errorDetail = e instanceof Error ? e.message : "send_exception";
+        }
+        const sentAt = (/* @__PURE__ */ new Date()).toISOString();
+        await supabase.from("group_dm_pilot_sends").insert({
+          batch_id,
+          member_id: memberId,
+          contact_id: r.contact_id,
+          phone_normalized: r.phone_normalized,
+          status,
+          provider_message_id: providerMessageId,
+          sent_at: status === "sent" ? sentAt : null,
+          error_detail: errorDetail
+        });
+        if (status === "sent") {
+          await supabase.from("contact_activity").insert({
+            contact_id: r.contact_id,
+            type: "maytapi_message",
+            performed_by: ctx.getUserId() ?? null,
+            metadata: {
+              direction: "outbound",
+              maytapi_message_id: providerMessageId,
+              phone_last4: String(r.phone_normalized ?? "").slice(-4),
+              msg_type: "text",
+              body_preview: String(b.message_body ?? "").slice(0, 140),
+              body: b.message_body,
+              source: "group_dm_pilot_mcp",
+              batch_id,
+              sent_at: sentAt
+            }
+          });
+          await supabase.from("contacts").update({ last_outbound_at: sentAt, last_outbound_provider: "maytapi" }).eq("id", r.contact_id);
+        }
+        results.push({ member_id: memberId, name: r.name, phone_masked: r.phone_masked, status, error: errorDetail });
+      }
+      await supabase.from("group_dm_pilot_batches").update({ status: "sent", approved_at: (/* @__PURE__ */ new Date()).toISOString(), approved_by: ctx.getUserId() ?? null }).eq("id", batch_id);
+      const result = {
+        batch_id,
+        sent: results.filter((r) => r.status === "sent").length,
+        failed: results.filter((r) => r.status === "failed").length,
+        results,
+        skipped_member_ids: skipped
+      };
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: result
+      };
+    } catch (e) {
+      return err2(e instanceof Error ? e.message : "approve_batch_failed");
+    }
+  }
+});
+
 // src/lib/mcp/index.ts
 var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
   name: "get-well-hub",
   title: "Get Well Hub",
-  version: "1.2.0",
-  instructions: "Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement).",
+  version: "1.3.0",
+  instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement). For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual').`,
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
     acceptedAudiences: "authenticated"
@@ -1248,7 +1679,12 @@ var mcp_default = defineMcp({
     get_conversation_thread_default,
     reply_to_conversation_default,
     list_fb_comments_default,
-    reply_to_fb_comment_default
+    reply_to_fb_comment_default,
+    get_group_overview_default,
+    get_group_welcome_status_default,
+    list_group_dm_candidates_default,
+    create_group_dm_batch_default,
+    approve_group_dm_batch_default
   ]
 });
 
