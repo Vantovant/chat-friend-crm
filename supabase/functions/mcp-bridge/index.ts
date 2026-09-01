@@ -127,6 +127,26 @@ Deno.serve(async (req) => {
     return { ownerId: owners[0].id }
   }
 
+  // group-dm-pilot returns meaningful non-2xx refusals (403 governance gate, 400
+  // validation). supabase.functions.invoke turns those into an error and drops the
+  // body, so read the underlying Response and pass the refusal through verbatim.
+  async function callGroupDmPilot(payload: Record<string, unknown>): Promise<Response> {
+    const { data, error } = await supabase.functions.invoke('group-dm-pilot', { body: payload })
+    if (error) {
+      const ctx = (error as unknown as { context?: Response }).context
+      if (ctx && typeof ctx.text === 'function') {
+        const text = await ctx.text()
+        try {
+          return json(JSON.parse(text), ctx.status)
+        } catch {
+          return json({ error: 'group_dm_pilot_error', message: text }, ctx.status || 502)
+        }
+      }
+      return json({ error: 'group_dm_pilot_error', message: error.message }, 502)
+    }
+    return json(data)
+  }
+
   try {
     switch (action) {
       case 'list_actions':
@@ -807,35 +827,23 @@ Deno.serve(async (req) => {
 
       case 'list_group_dm_candidates': {
         const gjid = String(body.group_jid ?? DEFAULT_GROUP_JID)
-        const { data, error } = await supabase.functions.invoke('group-dm-pilot', {
-          body: { action: 'list_candidates', group_jid: gjid },
-        })
-        if (error) return json({ error: 'group_dm_pilot_error', message: error.message }, 502)
-        return json(data)
+        return await callGroupDmPilot({ action: 'list_candidates', group_jid: gjid })
       }
 
       case 'create_group_dm_batch': {
         const gjid = String(body.group_jid ?? DEFAULT_GROUP_JID)
-        const { data, error } = await supabase.functions.invoke('group-dm-pilot', {
-          body: {
-            action: 'create_batch',
-            group_jid: gjid,
-            member_ids: body.member_ids,
-            message_body: body.message_body,
-          },
+        return await callGroupDmPilot({
+          action: 'create_batch',
+          group_jid: gjid,
+          member_ids: body.member_ids,
+          message_body: body.message_body,
         })
-        if (error) return json({ error: 'group_dm_pilot_error', message: error.message }, 502)
-        return json(data)
       }
 
       case 'approve_group_dm_batch': {
         const gjid = String(body.group_jid ?? DEFAULT_GROUP_JID)
-        const { data, error } = await supabase.functions.invoke('group-dm-pilot', {
-          body: { action: 'approve_and_send', group_jid: gjid, batch_id: body.batch_id },
-        })
-        // Pass refusals through untouched — governance gates are authoritative.
-        if (error) return json({ error: 'group_dm_pilot_error', message: error.message }, 502)
-        return json(data)
+        // Refusals (governance gate, cap) pass through verbatim.
+        return await callGroupDmPilot({ action: 'approve_and_send', group_jid: gjid, batch_id: body.batch_id })
       }
 
       default:
