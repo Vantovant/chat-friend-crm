@@ -74,5 +74,10 @@ export default defineMcp({
     replyToConversation,
     listFbComments,
     replyToFbComment,
+    getGroupOverview,
+    getGroupWelcomeStatus,
+    listGroupDmCandidates,
+    createGroupDmBatch,
+    approveGroupDmBatch,
   ],
 });
