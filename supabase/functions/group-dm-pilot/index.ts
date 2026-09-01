@@ -83,7 +83,16 @@ async function recentlyReachedMemberIds(svc: Svc): Promise<Set<string>> {
   return new Set(((data ?? []) as any[]).map((r) => r.member_id).filter(Boolean));
 }
 
-/** Eligibility: matched contact, active/warm, not do_not_contact, not reached in 30d. */
+/** Member ids currently in an active (not completed/failed) welcome sequence. */
+async function activeWelcomeMemberIds(svc: Svc): Promise<Set<string>> {
+  const { data } = await svc
+    .from("group_welcome_sequences")
+    .select("member_id, status")
+    .not("status", "in", "(completed,failed)");
+  return new Set(((data ?? []) as any[]).map((r) => r.member_id).filter(Boolean));
+}
+
+/** Eligibility: matched contact, active/warm, not do_not_contact, not reached in 30d, not in an active welcome sequence. */
 async function eligibleMembers(svc: Svc, opts: { limit?: number; memberIds?: string[] } = {}) {
   let q = svc
     .from("whatsapp_group_members")
@@ -106,11 +115,12 @@ async function eligibleMembers(svc: Svc, opts: { limit?: number; memberIds?: str
     .in("id", contactIds);
   const cById = new Map(((contacts ?? []) as any[]).map((c) => [c.id, c]));
   const reached = await recentlyReachedMemberIds(svc);
+  const inWelcome = await activeWelcomeMemberIds(svc);
 
   const eligible = rows
     .filter((m) => {
       const c = cById.get(m.contact_id);
-      return c && !c.is_deleted && c.do_not_contact !== true && !reached.has(m.id);
+      return c && !c.is_deleted && c.do_not_contact !== true && !reached.has(m.id) && !inWelcome.has(m.id);
     })
     .map((m) => {
       const c = cById.get(m.contact_id);
