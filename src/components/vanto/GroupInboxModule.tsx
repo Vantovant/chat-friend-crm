@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Loader2, Search, Users, ArrowLeft, UserCog, RefreshCw } from 'lucide-react';
+import { Loader2, Search, Users, ArrowLeft, UserCog, RefreshCw, Sparkles, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
+
 
 const GROUP_JID = '120363419298058298@g.us';
 const GROUP_NAME = 'APLGO | Health and Biz';
@@ -69,7 +70,10 @@ export function GroupInboxModule() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | Classification>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [digest, setDigest] = useState<string | null>(null);
+  const [digestOpen, setDigestOpen] = useState(false);
   const isMobile = useIsMobile();
+
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -109,7 +113,17 @@ export function GroupInboxModule() {
     setMembers(rows);
     setMessages((msgs || []) as GroupMessage[]);
     setLoading(false);
+
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: dg } = await supabase
+      .from('group_engagement_digests')
+      .select('digest_text')
+      .eq('group_jid', GROUP_JID)
+      .eq('digest_date', today)
+      .maybeSingle();
+    setDigest((dg as any)?.digest_text || null);
   }, []);
+
 
   useEffect(() => { load(); }, [load]);
 
@@ -156,8 +170,34 @@ export function GroupInboxModule() {
         {/* Left: member list */}
         {showList && (
           <aside className="w-full sm:w-80 border-r border-border flex flex-col min-h-0">
+            {digest && (
+              <div className="p-3 border-b border-border">
+                <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+                  <button
+                    onClick={() => setDigestOpen((v) => !v)}
+                    className="w-full flex items-center gap-2 text-left"
+                  >
+                    <Sparkles size={14} className="text-primary shrink-0" />
+                    <span className="text-xs font-semibold flex-1">Today's group digest</span>
+                    <ChevronDown
+                      size={14}
+                      className={cn('text-muted-foreground transition-transform', digestOpen && 'rotate-180')}
+                    />
+                  </button>
+                  <p
+                    className={cn(
+                      'text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap mt-2',
+                      !digestOpen && 'line-clamp-3'
+                    )}
+                  >
+                    {digest}
+                  </p>
+                </div>
+              </div>
+            )}
             <div className="p-3 space-y-2 border-b border-border">
               <div className="relative">
+
                 <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={search}
