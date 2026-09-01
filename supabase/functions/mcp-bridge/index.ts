@@ -733,6 +733,111 @@ Deno.serve(async (req) => {
         return json({ ok: true, entry: inserted })
       }
 
+      // ── Group Inbox actions (APLGO | Health and Biz) ──────────────────
+      case 'get_group_overview': {
+        const gjid = String(body.group_jid ?? DEFAULT_GROUP_JID)
+        const { data: members, error: mErr } = await supabase
+          .from('whatsapp_group_members')
+          .select('classification')
+          .eq('group_jid', gjid)
+          .eq('last_seen_in_group_status', 'in_group')
+        if (mErr) throw mErr
+        const counts: Record<string, number> = { active: 0, warm: 0, dormant: 0, ghost: 0 }
+        for (const m of (members ?? []) as any[]) {
+          const c = String(m.classification ?? 'unknown')
+          counts[c] = (counts[c] ?? 0) + 1
+        }
+        counts.total = (members ?? []).length
+
+        const { data: health } = await supabase
+          .from('group_health_reports')
+          .select('generated_at')
+          .eq('group_jid', gjid)
+          .order('generated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        const today = new Date().toISOString().slice(0, 10)
+        const { data: digest } = await supabase
+          .from('group_engagement_digests')
+          .select('digest_text, digest_date')
+          .eq('group_jid', gjid)
+          .eq('digest_date', today)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+        const { data: strategy } = await supabase
+          .from('group_engagement_strategies')
+          .select('strategy_text, week_of')
+          .eq('group_jid', gjid)
+          .gte('week_of', weekAgo)
+          .order('week_of', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+
+        return json({
+          ok: true,
+          group_jid: gjid,
+          counts,
+          last_scan_at: (health as any)?.generated_at ?? null,
+          digest_today: (digest as any)?.digest_text ?? null,
+          strategy_this_week: (strategy as any)?.strategy_text ?? null,
+          strategy_week_of: (strategy as any)?.week_of ?? null,
+        })
+      }
+
+      case 'get_group_welcome_status': {
+        const gjid = String(body.group_jid ?? DEFAULT_GROUP_JID)
+        const { data: seqs, error } = await supabase
+          .from('group_welcome_sequences')
+          .select('status')
+          .eq('group_jid', gjid)
+        if (error) throw error
+        const byStatus: Record<string, number> = {
+          pending: 0, step1_sent: 0, step2_sent: 0, completed: 0, failed: 0, paused: 0,
+        }
+        for (const s of (seqs ?? []) as any[]) {
+          const st = String(s.status ?? 'unknown')
+          byStatus[st] = (byStatus[st] ?? 0) + 1
+        }
+        return json({ ok: true, group_jid: gjid, total_enrolled: (seqs ?? []).length, by_status: byStatus })
+      }
+
+      case 'list_group_dm_candidates': {
+        const gjid = String(body.group_jid ?? DEFAULT_GROUP_JID)
+        const { data, error } = await supabase.functions.invoke('group-dm-pilot', {
+          body: { action: 'list_candidates', group_jid: gjid },
+        })
+        if (error) return json({ error: 'group_dm_pilot_error', message: error.message }, 502)
+        return json(data)
+      }
+
+      case 'create_group_dm_batch': {
+        const gjid = String(body.group_jid ?? DEFAULT_GROUP_JID)
+        const { data, error } = await supabase.functions.invoke('group-dm-pilot', {
+          body: {
+            action: 'create_batch',
+            group_jid: gjid,
+            member_ids: body.member_ids,
+            message_body: body.message_body,
+          },
+        })
+        if (error) return json({ error: 'group_dm_pilot_error', message: error.message }, 502)
+        return json(data)
+      }
+
+      case 'approve_group_dm_batch': {
+        const gjid = String(body.group_jid ?? DEFAULT_GROUP_JID)
+        const { data, error } = await supabase.functions.invoke('group-dm-pilot', {
+          body: { action: 'approve_and_send', group_jid: gjid, batch_id: body.batch_id },
+        })
+        // Pass refusals through untouched — governance gates are authoritative.
+        if (error) return json({ error: 'group_dm_pilot_error', message: error.message }, 502)
+        return json(data)
+      }
+
       default:
         return json({ error: 'unknown_action', action, available_actions: ACTIONS }, 400)
 
