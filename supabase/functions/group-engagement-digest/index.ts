@@ -220,12 +220,12 @@ ${lines.join('\n').slice(0, 20000)}`;
       const { data: existing } = await supabase
         .from('plan_tasks')
         .select('id')
-        .eq('user_id', owners[0].id)
+        .eq('user_id', owners[0].user_id)
         .eq('title', title)
         .limit(1);
       if (!existing || existing.length === 0) {
         const { error: tErr } = await supabase.from('plan_tasks').insert({
-          user_id: owners[0].id,
+          user_id: owners[0].user_id,
           title,
           priority: 'low',
           status: 'pending',
