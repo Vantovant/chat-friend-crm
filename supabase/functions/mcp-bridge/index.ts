@@ -98,6 +98,11 @@ Deno.serve(async (req) => {
     'list_meetings',
     'delete_meeting',
     'create_diary_entry',
+    'get_group_overview',
+    'get_group_welcome_status',
+    'list_group_dm_candidates',
+    'create_group_dm_batch',
+    'approve_group_dm_batch',
   ]
 
   // Resolves the single super_admin profile row. This bridge authenticates via a
