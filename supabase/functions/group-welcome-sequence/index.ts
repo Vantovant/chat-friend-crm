@@ -33,12 +33,11 @@ const json = (body: unknown, status = 200) =>
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const mask = (p?: string | null) => (p ? `***${String(p).slice(-4)}` : null);
 
-// Copy is intentionally verbatim from the approved brief. Placeholders are literal —
-// do not substitute links or numbers here.
+// Copy is intentionally verbatim from the approved brief.
 const STEP_MESSAGES: Record<1 | 2 | 3, string> = {
-  1: "Hi! Welcome to APLGO | Health and Biz 🎉 I'm really glad you're here. This group is where we share health tips, product info, and business opportunities with APLGO. It's a big group so it can be hard to ask personal questions in there — if you ever want to ask me anything one-on-one, feel free to message me directly here anytime. No pressure at all, just wanted to personally welcome you!",
-  2: "Hope you're settling in! I'd love to get to know you a bit better — could you share your full name and email address with me? It just helps me keep track of everyone properly and reach out with anything relevant to you specifically.",
-  3: "One last thing — if you'd like to explore getting started for free with APLGO, here's the link: [REGISTRATION_LINK_PLACEHOLDER]. No obligation, just wanted to make sure you knew it was there. Welcome again to the group!",
+  1: "Hi! Welcome to APLGO | Health and Biz 🎉 I'm really glad you're here. This group is where we share health tips, product info, and business opportunities with APLGO. It's a big group so it can be hard to ask personal questions in there — if you ever want to ask me anything one-on-one, feel free to message me here directly anytime, or WhatsApp/call +27 79 083 1530. No pressure at all, just wanted to personally welcome you!",
+  2: "Hope you're settling in! Quick heads up: you can set up a free APLGO account anytime — no cost, no obligation, just gives you access to explore the products and the business side properly. Here's the link: https://backoffice.aplgo.com/register/?sp=787262\n\nYou can also browse products here: https://getwellafrica.com/shop\n\nIf you'd rather I just talk you through it instead of doing it yourself, message me and I'll help personally.",
+  3: "Just checking in — were you able to take a look at APLGO? If you registered, well done, welcome to the family! If not yet, no rush at all — the free account link is always here when you're ready: https://backoffice.aplgo.com/register/?sp=787262\n\nAnd if you have any questions at all, I'm just a message away. Glad to have you in the group!",
 };
 
 const STEP_STATUS: Record<1 | 2 | 3, string> = {
