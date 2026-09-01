@@ -307,9 +307,11 @@ Deno.serve(async (req) => {
           .eq("id", r.id);
 
         if (r.contact_id) {
-          await svc.from("contact_activity").insert({
+          const { error: actErr } = await svc.from("contact_activity").insert({
             contact_id: r.contact_id,
             type: "maytapi_message",
+            // performed_by is NOT NULL — use the system actor uuid like other automations.
+            performed_by: "00000000-0000-0000-0000-000000000000",
             metadata: {
               direction: "outbound",
               maytapi_message_id: providerMessageId,
