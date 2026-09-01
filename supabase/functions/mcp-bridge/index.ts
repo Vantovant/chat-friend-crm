@@ -812,18 +812,28 @@ Deno.serve(async (req) => {
         const gjid = String(body.group_jid ?? DEFAULT_GROUP_JID)
         const { data: seqs, error } = await supabase
           .from('group_welcome_sequences')
-          .select('status')
+          .select('status, created_at')
           .eq('group_jid', gjid)
         if (error) throw error
         const byStatus: Record<string, number> = {
           pending: 0, step1_sent: 0, step2_sent: 0, completed: 0, failed: 0, paused: 0,
         }
+        const weekAgoTs = Date.now() - 7 * 24 * 60 * 60 * 1000
+        let last7 = 0
         for (const s of (seqs ?? []) as any[]) {
           const st = String(s.status ?? 'unknown')
           byStatus[st] = (byStatus[st] ?? 0) + 1
+          if (s.created_at && Date.parse(s.created_at) >= weekAgoTs) last7++
         }
-        return json({ ok: true, group_jid: gjid, total_enrolled: (seqs ?? []).length, by_status: byStatus })
+        return json({
+          ok: true,
+          group_jid: gjid,
+          total_enrolled: (seqs ?? []).length,
+          enrolled_last_7_days: last7,
+          by_status: byStatus,
+        })
       }
+
 
       case 'list_group_dm_candidates': {
         const gjid = String(body.group_jid ?? DEFAULT_GROUP_JID)
