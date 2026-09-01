@@ -203,7 +203,7 @@ Deno.serve(async (req) => {
       const cIds = eligible.map((e) => e.contact_id).filter(Boolean);
       const { data: fullContacts } = await svc
         .from("contacts")
-        .select("id, name, email, lead_type, temperature, tags")
+        .select("id, name, email, lead_type, temperature, tags, notes")
         .in("id", cIds);
       const fullById = new Map(((fullContacts ?? []) as any[]).map((c) => [c.id, c]));
 
@@ -223,6 +223,34 @@ Deno.serve(async (req) => {
         actsByContact.set(a.contact_id, list);
       }
 
+      // Real conversation text (Twilio/Maytapi) via conversations → messages.
+      const msgsByContact = new Map<string, any[]>();
+      const { data: convs } = await svc
+        .from("conversations")
+        .select("id, contact_id")
+        .in("contact_id", cIds);
+      const convRows = (convs ?? []) as any[];
+      const contactByConv = new Map(convRows.map((c) => [c.id, c.contact_id]));
+      if (convRows.length) {
+        const { data: msgs } = await svc
+          .from("messages")
+          .select("conversation_id, content, is_outbound, created_at")
+          .in("conversation_id", convRows.map((c) => c.id))
+          .order("created_at", { ascending: false })
+          .limit(500);
+        for (const m of ((msgs ?? []) as any[])) {
+          const cid = contactByConv.get(m.conversation_id);
+          if (!cid) continue;
+          const list = msgsByContact.get(cid) ?? [];
+          if (list.length >= 10) continue;
+          list.push({ content: m.content, is_outbound: m.is_outbound, created_at: m.created_at });
+          msgsByContact.set(cid, list);
+        }
+      }
+
+      const FB_NOTE =
+        "Facebook comments cannot be automatically matched to this contact — fb_comments has no contact_id link, only a Facebook-internal commenter ID with no phone number. If this person has commented on Facebook, that history is not visible here.";
+
       return json({
         success: true,
         batch_id: (batch as any).id,
@@ -241,11 +269,15 @@ Deno.serve(async (req) => {
             full_contact: fc
               ? { name: fc.name, email: fc.email, lead_type: fc.lead_type, temperature: fc.temperature, tags: fc.tags }
               : null,
+            notes: fc?.notes ?? null,
             name_looks_incomplete: nm.length > 0 && !/\s/.test(nm),
+            recent_messages: msgsByContact.get(e.contact_id) ?? [],
             recent_activity: actsByContact.get(e.contact_id) ?? [],
+            facebook_comment_note: FB_NOTE,
           };
         }),
       });
+
 
     }
 
