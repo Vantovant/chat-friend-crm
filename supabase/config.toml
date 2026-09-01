@@ -44,3 +44,7 @@ verify_jwt = false
 
 [functions.fb-messenger-inbound]
 verify_jwt = false
+
+[functions.group-engagement-digest]
+verify_jwt = false
+
