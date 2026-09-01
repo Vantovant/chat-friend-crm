@@ -1774,6 +1774,7 @@ export type Database = {
           joined_at: string | null
           last_step_sent_at: string | null
           member_id: string | null
+          name_capture_attempts: number
           name_captured: string | null
           phone_normalized: string | null
           status: string
@@ -1790,6 +1791,7 @@ export type Database = {
           joined_at?: string | null
           last_step_sent_at?: string | null
           member_id?: string | null
+          name_capture_attempts?: number
           name_captured?: string | null
           phone_normalized?: string | null
           status?: string
@@ -1806,6 +1808,7 @@ export type Database = {
           joined_at?: string | null
           last_step_sent_at?: string | null
           member_id?: string | null
+          name_capture_attempts?: number
           name_captured?: string | null
           phone_normalized?: string | null
           status?: string
