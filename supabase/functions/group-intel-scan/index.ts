@@ -310,6 +310,9 @@ export async function scanGroup(
     suggested_action: sugg.action,
     risk_notes: sugg.risk,
     reconnect_shortlist: shortlist.slice(0, 25),
+    left_marked: leftMarked,
+    left_error: leftError,
+
     auto_send_blocked: true,
     mode: "audit_only",
     persistence,
