@@ -7,7 +7,7 @@ import logo from '@/assets/getwellhub-logo.png.asset.json';
 import { useCurrentUser } from '@/hooks/use-current-user';
 import {
   LayoutDashboard, MessageSquare, Users, BarChart3, Zap, Bot, GitBranch,
-  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X, Megaphone, ShieldCheck, ShieldAlert, Brain, AlertCircle, CalendarCheck, BookHeart, Link2, Mail, Facebook,
+  Puzzle, Terminal, Settings, ChevronLeft, ChevronRight, Bell, LogOut, BookOpen, FileText, Menu, X, Megaphone, ShieldCheck, ShieldAlert, Brain, AlertCircle, CalendarCheck, BookHeart, Link2, Mail, Facebook, Users2,
 } from 'lucide-react';
 import { InstallAppButton } from './InstallAppButton';
 import { HubSyncBadge } from './HubSyncBadge';
@@ -25,6 +25,7 @@ const navItems: NavItem[] = [
   { id: 'inbox', label: 'Inbox', icon: MessageSquare },
   { id: 'maytapi-inbox', label: 'Maytapi Inbox', icon: MessageSquare },
   { id: 'facebook-inbox', label: 'Facebook Inbox', icon: Facebook },
+  { id: 'group-inbox', label: 'Group Inbox', icon: Users2 },
   { id: 'plan', label: 'PLAN', icon: CalendarCheck },
   { id: 'voice-diary', label: 'Voice Diary', icon: BookHeart },
   { id: 'contacts', label: 'Contacts', icon: Users },
