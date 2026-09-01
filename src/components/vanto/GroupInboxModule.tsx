@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Loader2, Search, Users, ArrowLeft, UserCog, RefreshCw, Sparkles, ChevronDown } from 'lucide-react';
+import { Loader2, Search, Users, ArrowLeft, UserCog, RefreshCw, Sparkles, ChevronDown, TrendingUp } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 
@@ -72,6 +72,8 @@ export function GroupInboxModule() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [digest, setDigest] = useState<string | null>(null);
   const [digestOpen, setDigestOpen] = useState(false);
+  const [strategy, setStrategy] = useState<string | null>(null);
+  const [strategyOpen, setStrategyOpen] = useState(false);
   const isMobile = useIsMobile();
 
 
@@ -115,13 +117,25 @@ export function GroupInboxModule() {
     setLoading(false);
 
     const today = new Date().toISOString().slice(0, 10);
-    const { data: dg } = await supabase
-      .from('group_engagement_digests')
-      .select('digest_text')
-      .eq('group_jid', GROUP_JID)
-      .eq('digest_date', today)
-      .maybeSingle();
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const [{ data: dg }, { data: st }] = await Promise.all([
+      supabase
+        .from('group_engagement_digests')
+        .select('digest_text')
+        .eq('group_jid', GROUP_JID)
+        .eq('digest_date', today)
+        .maybeSingle(),
+      supabase
+        .from('group_engagement_strategies')
+        .select('strategy_text')
+        .eq('group_jid', GROUP_JID)
+        .gte('week_of', weekAgo)
+        .order('week_of', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
     setDigest((dg as any)?.digest_text || null);
+    setStrategy((st as any)?.strategy_text || null);
   }, []);
 
 
@@ -191,6 +205,31 @@ export function GroupInboxModule() {
                     )}
                   >
                     {digest}
+                  </p>
+                </div>
+              </div>
+            )}
+            {strategy && (
+              <div className="p-3 border-b border-border">
+                <div className="rounded-lg border border-accent/30 bg-accent/5 p-3">
+                  <button
+                    onClick={() => setStrategyOpen((v) => !v)}
+                    className="w-full flex items-center gap-2 text-left"
+                  >
+                    <TrendingUp size={14} className="text-accent-foreground shrink-0" />
+                    <span className="text-xs font-semibold flex-1">This week's strategy</span>
+                    <ChevronDown
+                      size={14}
+                      className={cn('text-muted-foreground transition-transform', strategyOpen && 'rotate-180')}
+                    />
+                  </button>
+                  <p
+                    className={cn(
+                      'text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap mt-2',
+                      !strategyOpen && 'line-clamp-3'
+                    )}
+                  >
+                    {strategy}
                   </p>
                 </div>
               </div>
