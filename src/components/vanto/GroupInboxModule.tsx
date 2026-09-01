@@ -170,8 +170,34 @@ export function GroupInboxModule() {
         {/* Left: member list */}
         {showList && (
           <aside className="w-full sm:w-80 border-r border-border flex flex-col min-h-0">
+            {digest && (
+              <div className="p-3 border-b border-border">
+                <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+                  <button
+                    onClick={() => setDigestOpen((v) => !v)}
+                    className="w-full flex items-center gap-2 text-left"
+                  >
+                    <Sparkles size={14} className="text-primary shrink-0" />
+                    <span className="text-xs font-semibold flex-1">Today's group digest</span>
+                    <ChevronDown
+                      size={14}
+                      className={cn('text-muted-foreground transition-transform', digestOpen && 'rotate-180')}
+                    />
+                  </button>
+                  <p
+                    className={cn(
+                      'text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap mt-2',
+                      !digestOpen && 'line-clamp-3'
+                    )}
+                  >
+                    {digest}
+                  </p>
+                </div>
+              </div>
+            )}
             <div className="p-3 space-y-2 border-b border-border">
               <div className="relative">
+
                 <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={search}
