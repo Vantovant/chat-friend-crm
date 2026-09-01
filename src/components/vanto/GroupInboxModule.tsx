@@ -70,7 +70,10 @@ export function GroupInboxModule() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<'all' | Classification>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [digest, setDigest] = useState<string | null>(null);
+  const [digestOpen, setDigestOpen] = useState(false);
   const isMobile = useIsMobile();
+
 
   const load = useCallback(async () => {
     setLoading(true);
