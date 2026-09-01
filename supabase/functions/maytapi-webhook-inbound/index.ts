@@ -646,6 +646,114 @@ Deno.serve(async (req) => {
         } catch { /* noop */ }
       }
 
+      // ── Reply-based name capture (AI) for welcome-sequence contacts ──
+      // Never blocks normal inbound handling.
+      try {
+        const bodyText = String(text || "").trim();
+        if (bodyText && bodyText.length < 120) {
+          const { data: wrow } = await supabase
+            .from("group_welcome_sequences")
+            .select("id, name_captured, name_capture_attempts, contact_id")
+            .eq("phone_normalized", phoneE164)
+            .not("status", "in", '("completed","failed")')
+            .limit(1)
+            .maybeSingle();
+
+          const seq: any = wrow;
+          if (seq && isPlaceholderName(seq.name_captured) && (seq.name_capture_attempts ?? 0) < 3) {
+            // Count this attempt regardless of outcome.
+            await supabase
+              .from("group_welcome_sequences")
+              .update({ name_capture_attempts: (seq.name_capture_attempts ?? 0) + 1 })
+              .eq("id", seq.id);
+
+            const aiKey = Deno.env.get("LOVABLE_API_KEY") || "";
+            if (aiKey) {
+              const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+                method: "POST",
+                headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  model: "google/gemini-3-flash-preview",
+                  temperature: 0,
+                  max_tokens: 120,
+                  messages: [
+                    {
+                      role: "system",
+                      content:
+                        'You classify short WhatsApp replies. Given the message text, decide if the person is introducing or stating their OWN name, and extract it. Respond with ONLY a JSON object: {"is_name": boolean, "name": string|null, "confidence": "high"|"low"}. High confidence = clearly a name given in response to being asked their name (e.g. "It\'s Thabo", "Nomvula Khumalo", "my name is Sipho Dlamini"). Low confidence = ambiguous, could be a name or something else. is_name must be false if it is clearly not a name (a question, a greeting, an emoji, etc). No markdown, no commentary.',
+                    },
+                    { role: "user", content: bodyText },
+                  ],
+                }),
+              });
+
+              if (!aiRes.ok) {
+                console.warn("[maytapi-inbound] name-capture AI error:", aiRes.status, await aiRes.text());
+              } else {
+                const aiJson = await aiRes.json();
+                const raw = String(aiJson?.choices?.[0]?.message?.content || "")
+                  .replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+                let parsed: any = null;
+                try { parsed = JSON.parse(raw); } catch { /* noop */ }
+
+                const candidate = typeof parsed?.name === "string" ? parsed.name.trim() : "";
+                if (parsed?.is_name === true && candidate) {
+                  const masked = phoneE164.slice(0, 6) + "****" + phoneE164.slice(-3);
+                  if (parsed.confidence === "high") {
+                    await supabase
+                      .from("group_welcome_sequences")
+                      .update({ name_captured: candidate })
+                      .eq("id", seq.id);
+
+                    const linkedId = seq.contact_id || contact?.id || null;
+                    if (linkedId) {
+                      const { data: c } = await supabase
+                        .from("contacts").select("id, name").eq("id", linkedId).maybeSingle();
+                      if (c && isPlaceholderName((c as any).name)) {
+                        await supabase.from("contacts").update({
+                          name: candidate,
+                          first_name: candidate.split(/\s+/)[0] || null,
+                        }).eq("id", linkedId);
+                      }
+                    }
+                    console.log("[maytapi-inbound] AI name captured (high):", candidate);
+                  } else {
+                    const title = "Possible name to confirm — check group welcome contact";
+                    const { data: owners } = await supabase
+                      .from("user_roles").select("user_id").eq("role", "super_admin");
+                    const ownerId = owners && owners.length === 1 ? owners[0].user_id : null;
+                    if (ownerId) {
+                      const { data: existingTask } = await supabase
+                        .from("plan_tasks")
+                        .select("id")
+                        .eq("user_id", ownerId)
+                        .eq("title", title)
+                        .neq("status", "done")
+                        .ilike("description", `%${masked}%`)
+                        .limit(1);
+                      if (!existingTask || existingTask.length === 0) {
+                        await supabase.from("plan_tasks").insert({
+                          user_id: ownerId,
+                          title,
+                          description: `Phone: ${masked}\nCandidate name: ${candidate}\nOriginal message: ${bodyText}`,
+                          priority: "low",
+                          status: "pending",
+                          source: "maytapi-webhook-inbound",
+                        });
+                      }
+                    }
+                    console.log("[maytapi-inbound] AI name candidate (low) queued for review:", candidate);
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.error("[maytapi-inbound] name-capture check failed:", (e as any)?.message || e);
+      }
+
+
 
       if (contact) {
         if (isRealPushName(senderName) && isPlaceholderName(contact.name)) {
