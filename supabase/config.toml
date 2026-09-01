@@ -48,3 +48,6 @@ verify_jwt = false
 [functions.group-engagement-digest]
 verify_jwt = false
 
+
+[functions.group-engagement-strategy]
+verify_jwt = false
