@@ -25,6 +25,7 @@ const navItems: NavItem[] = [
   { id: 'inbox', label: 'Inbox', icon: MessageSquare },
   { id: 'maytapi-inbox', label: 'Maytapi Inbox', icon: MessageSquare },
   { id: 'facebook-inbox', label: 'Facebook Inbox', icon: Facebook },
+  { id: 'group-inbox', label: 'Group Inbox', icon: Users2 },
   { id: 'plan', label: 'PLAN', icon: CalendarCheck },
   { id: 'voice-diary', label: 'Voice Diary', icon: BookHeart },
   { id: 'contacts', label: 'Contacts', icon: Users },
