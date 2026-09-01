@@ -58,3 +58,6 @@ verify_jwt = false
 [functions.group-welcome-sequence]
 verify_jwt = false
 
+
+[functions.group-data-quality-snapshot]
+verify_jwt = false

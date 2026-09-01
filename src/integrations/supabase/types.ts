@@ -1556,6 +1556,39 @@ export type Database = {
         }
         Relationships: []
       }
+      group_data_quality_snapshots: {
+        Row: {
+          created_at: string
+          group_jid: string
+          id: string
+          matched_members: number | null
+          placeholder_name_count: number | null
+          real_name_count: number | null
+          snapshot_date: string
+          total_members: number | null
+        }
+        Insert: {
+          created_at?: string
+          group_jid: string
+          id?: string
+          matched_members?: number | null
+          placeholder_name_count?: number | null
+          real_name_count?: number | null
+          snapshot_date?: string
+          total_members?: number | null
+        }
+        Update: {
+          created_at?: string
+          group_jid?: string
+          id?: string
+          matched_members?: number | null
+          placeholder_name_count?: number | null
+          real_name_count?: number | null
+          snapshot_date?: string
+          total_members?: number | null
+        }
+        Relationships: []
+      }
       group_dm_pilot_batches: {
         Row: {
           approved_at: string | null
