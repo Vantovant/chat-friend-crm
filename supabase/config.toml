@@ -51,3 +51,6 @@ verify_jwt = false
 
 [functions.group-engagement-strategy]
 verify_jwt = false
+
+[functions.group-dm-pilot]
+verify_jwt = false

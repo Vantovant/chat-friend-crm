@@ -127,6 +127,18 @@ Deno.serve(async (req) => {
           .update({ status: newStatus, status_raw: String(ackStatus) })
           .eq("provider_message_id", msgId);
 
+        // Group DM pilot sends (delivery truth for the pilot auto-pause checker)
+        if (newStatus === "delivered" || newStatus === "failed") {
+          await supabase.from("group_dm_pilot_sends")
+            .update({
+              status: newStatus,
+              delivery_checked_at: new Date().toISOString(),
+              ...(newStatus === "failed" ? { error_detail: `provider ack: ${ackStatus}` } : {}),
+            })
+            .eq("provider_message_id", msgId);
+        }
+
+
         // Reactivation campaign tracking
         const patch: Record<string, unknown> = { status: newStatus };
         if (newStatus === "delivered") patch.delivered_at = new Date().toISOString();

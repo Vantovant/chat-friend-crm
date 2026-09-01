@@ -1556,6 +1556,99 @@ export type Database = {
         }
         Relationships: []
       }
+      group_dm_pilot_batches: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          created_at: string
+          group_jid: string
+          id: string
+          member_ids: string[]
+          message_body: string | null
+          notes: string | null
+          status: string
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          group_jid: string
+          id?: string
+          member_ids?: string[]
+          message_body?: string | null
+          notes?: string | null
+          status?: string
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          created_at?: string
+          group_jid?: string
+          id?: string
+          member_ids?: string[]
+          message_body?: string | null
+          notes?: string | null
+          status?: string
+        }
+        Relationships: []
+      }
+      group_dm_pilot_sends: {
+        Row: {
+          batch_id: string | null
+          contact_id: string | null
+          created_at: string
+          delivery_checked_at: string | null
+          error_detail: string | null
+          id: string
+          member_id: string | null
+          phone_normalized: string | null
+          provider_message_id: string | null
+          sent_at: string | null
+          status: string
+        }
+        Insert: {
+          batch_id?: string | null
+          contact_id?: string | null
+          created_at?: string
+          delivery_checked_at?: string | null
+          error_detail?: string | null
+          id?: string
+          member_id?: string | null
+          phone_normalized?: string | null
+          provider_message_id?: string | null
+          sent_at?: string | null
+          status?: string
+        }
+        Update: {
+          batch_id?: string | null
+          contact_id?: string | null
+          created_at?: string
+          delivery_checked_at?: string | null
+          error_detail?: string | null
+          id?: string
+          member_id?: string | null
+          phone_normalized?: string | null
+          provider_message_id?: string | null
+          sent_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "group_dm_pilot_sends_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "group_dm_pilot_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "group_dm_pilot_sends_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: false
+            referencedRelation: "whatsapp_group_members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       group_engagement_digests: {
         Row: {
           created_at: string
