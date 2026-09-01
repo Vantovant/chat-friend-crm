@@ -771,9 +771,9 @@ Deno.serve(async (req) => {
 
         const { data: health } = await supabase
           .from('group_health_reports')
-          .select('generated_at')
+          .select('created_at')
           .eq('group_jid', gjid)
-          .order('generated_at', { ascending: false })
+          .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle()
 
@@ -801,7 +801,7 @@ Deno.serve(async (req) => {
           ok: true,
           group_jid: gjid,
           counts,
-          last_scan_at: (health as any)?.generated_at ?? null,
+          last_scan_at: (health as any)?.created_at ?? null,
           digest_today: (digest as any)?.digest_text ?? null,
           strategy_this_week: (strategy as any)?.strategy_text ?? null,
           strategy_week_of: (strategy as any)?.week_of ?? null,
