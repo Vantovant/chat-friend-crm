@@ -324,6 +324,7 @@ Deno.serve(async (req) => {
               sent_at: nowIso,
             },
           });
+          if (actErr) console.error("[group-welcome-sequence] contact_activity insert failed:", actErr.message);
           await svc.from("contacts")
             .update({ last_outbound_at: nowIso, last_outbound_provider: "maytapi" })
             .eq("id", r.contact_id);
