@@ -93,6 +93,7 @@ Deno.serve(async (req) => {
         .from("whatsapp_group_members")
         .select("id, contact_id, phone_normalized, first_seen_at")
         .eq("group_jid", GROUP_JID)
+        .eq("last_seen_in_group_status", "in_group")
         .gte("first_seen_at", since);
       if (error) return json({ success: false, error: error.message }, 500);
 

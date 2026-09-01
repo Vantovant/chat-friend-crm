@@ -84,6 +84,7 @@ export function GroupInboxModule() {
         .from('whatsapp_group_members')
         .select('id, phone_normalized, contact_id, classification, first_seen_at, crm_last_activity_at, role')
         .eq('group_jid', GROUP_JID)
+        .eq('last_seen_in_group_status', 'in_group')
         .limit(2000),
       supabase
         .from('maytapi_messages')
