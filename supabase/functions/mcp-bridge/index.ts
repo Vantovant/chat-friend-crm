@@ -43,7 +43,9 @@ function dayBounds(date: string): [string, string] | null {
   return [`${date}T00:00:00.000Z`, `${date}T23:59:59.999Z`]
 }
 
-const BUILD_STAMP = '2026-08-13T13:20Z actions=25 includes=list_tasks,delete_meeting'
+const DEFAULT_GROUP_JID = '120363419298058298@g.us' // APLGO | Health and Biz
+
+const BUILD_STAMP = '2026-09-01T18:00Z actions=30 includes=group_inbox_actions'
 console.log(`[build-stamp] mcp-bridge build=${BUILD_STAMP}`)
 
 Deno.serve(async (req) => {
