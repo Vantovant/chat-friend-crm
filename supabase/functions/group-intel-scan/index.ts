@@ -62,6 +62,9 @@ export type GroupScanReport = {
   suggested_action: string;
   risk_notes: string;
   reconnect_shortlist: any[];
+  left_marked?: number;
+  left_error?: string | null;
+
   auto_send_blocked: true;
   mode: "audit_only";
   persistence: GroupPersistence;
