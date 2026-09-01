@@ -210,9 +210,10 @@ ${lines.join('\n').slice(0, 20000)}`;
     // matching the mcp-bridge create_task pattern.
     let taskCreated = false;
     const { data: owners } = await supabase
-      .from('profiles')
-      .select('id')
+      .from('user_roles')
+      .select('user_id')
       .eq('role', 'super_admin');
+
 
     if (owners && owners.length === 1) {
       const title = `Group digest ready — ${GROUP_NAME} (${digestDate})`;
