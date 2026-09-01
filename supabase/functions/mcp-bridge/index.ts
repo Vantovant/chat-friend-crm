@@ -45,7 +45,7 @@ function dayBounds(date: string): [string, string] | null {
 
 const DEFAULT_GROUP_JID = '120363419298058298@g.us' // APLGO | Health and Biz
 
-const BUILD_STAMP = '2026-09-01T18:00Z actions=30 includes=group_inbox_actions'
+const BUILD_STAMP = '2026-09-01T18:05Z actions=30 includes=group_inbox_actions'
 console.log(`[build-stamp] mcp-bridge build=${BUILD_STAMP}`)
 
 Deno.serve(async (req) => {
@@ -150,7 +150,7 @@ Deno.serve(async (req) => {
   try {
     switch (action) {
       case 'list_actions':
-        return json({ ok: true, actions: ACTIONS, bridge_version: '2026-08-13' })
+        return json({ ok: true, actions: ACTIONS, bridge_version: '2026-09-01' })
 
       case 'get_maytapi_status': {
         const keys = ['maytapi_daily_cap', 'maytapi_outbound_frozen', 'reactivation_campaign_enabled']
