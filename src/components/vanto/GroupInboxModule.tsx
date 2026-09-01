@@ -113,7 +113,17 @@ export function GroupInboxModule() {
     setMembers(rows);
     setMessages((msgs || []) as GroupMessage[]);
     setLoading(false);
+
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: dg } = await supabase
+      .from('group_engagement_digests')
+      .select('digest_text')
+      .eq('group_jid', GROUP_JID)
+      .eq('digest_date', today)
+      .maybeSingle();
+    setDigest((dg as any)?.digest_text || null);
   }, []);
+
 
   useEffect(() => { load(); }, [load]);
 
