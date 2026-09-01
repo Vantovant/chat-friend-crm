@@ -97,13 +97,70 @@ Deno.serve(async (req) => {
       if (error) return json({ success: false, error: error.message }, 500);
 
       const rows = (joiners ?? []) as any[];
-      if (!rows.length) return json({ success: true, found: 0, enrolled: 0, already_enrolled: 0 });
+      if (!rows.length) return json({ success: true, found: 0, enrolled: 0, already_enrolled: 0, contacts_created: 0, contacts_linked: 0 });
+
+      // ── Ensure every joiner has a contact_id so all sends count toward the
+      //    shared maytapi daily cap. Find-before-create on phone_normalized.
+      let contactsCreated = 0;
+      let contactsLinked = 0;
+      for (const r of rows) {
+        if (r.contact_id || !r.phone_normalized) continue;
+        const phone = String(r.phone_normalized);
+        const { data: found } = await svc
+          .from("contacts")
+          .select("id")
+          .eq("phone_normalized", phone)
+          .eq("is_deleted", false)
+          .limit(1)
+          .maybeSingle();
+
+        let contactId = (found as any)?.id ?? null;
+        if (!contactId) {
+          const { data: created, error: cErr } = await svc
+            .from("contacts")
+            .insert({
+              name: phone,
+              phone,
+              phone_raw: phone,
+              phone_normalized: phone,
+              whatsapp_id: phone,
+              lead_type: "prospect",
+              interest: "medium",
+              temperature: "cold",
+              contact_source: "group_welcome_sequence",
+              is_deleted: false,
+              do_not_contact: false,
+            })
+            .select("id")
+            .single();
+          if (cErr) {
+            console.error("[group-welcome-sequence] contact create failed:", cErr.message);
+            continue;
+          }
+          contactId = (created as any).id;
+          contactsCreated++;
+        }
+        r.contact_id = contactId;
+        await svc.from("whatsapp_group_members").update({ contact_id: contactId }).eq("id", r.id);
+        contactsLinked++;
+      }
 
       const { data: existing } = await svc
         .from("group_welcome_sequences")
-        .select("member_id")
+        .select("id, member_id, contact_id")
         .in("member_id", rows.map((r) => r.id));
-      const seen = new Set(((existing ?? []) as any[]).map((r) => r.member_id));
+      const existingRows = ((existing ?? []) as any[]);
+      const seen = new Set(existingRows.map((r) => r.member_id));
+
+      // Backfill contact_id on sequences enrolled before this change.
+      let backfilled = 0;
+      for (const e of existingRows) {
+        if (e.contact_id) continue;
+        const m = rows.find((r) => r.id === e.member_id);
+        if (!m?.contact_id) continue;
+        await svc.from("group_welcome_sequences").update({ contact_id: m.contact_id }).eq("id", e.id);
+        backfilled++;
+      }
 
       const toInsert = rows
         .filter((r) => !seen.has(r.id))
@@ -134,6 +191,9 @@ Deno.serve(async (req) => {
         found: rows.length,
         enrolled,
         already_enrolled: rows.length - toInsert.length,
+        contacts_created: contactsCreated,
+        contacts_linked: contactsLinked,
+        sequences_backfilled: backfilled,
       });
     }
 
