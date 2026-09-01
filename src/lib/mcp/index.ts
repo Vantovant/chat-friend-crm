@@ -27,6 +27,11 @@ import getConversationThread from "./tools/get-conversation-thread";
 import replyToConversation from "./tools/reply-to-conversation";
 import listFbComments from "./tools/list-fb-comments";
 import replyToFbComment from "./tools/reply-to-fb-comment";
+import getGroupOverview from "./tools/get-group-overview";
+import getGroupWelcomeStatus from "./tools/get-group-welcome-status";
+import listGroupDmCandidates from "./tools/list-group-dm-candidates";
+import createGroupDmBatch from "./tools/create-group-dm-batch";
+import approveGroupDmBatch from "./tools/approve-group-dm-batch";
 
 const projectRef = import.meta.env.VITE_SUPABASE_PROJECT_ID ?? "project-ref-unset";
 
