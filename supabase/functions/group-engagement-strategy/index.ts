@@ -63,6 +63,7 @@ Deno.serve(async (req) => {
       .from('whatsapp_group_members')
       .select('phone_normalized, contact_id, classification')
       .eq('group_jid', GROUP_JID)
+      .eq('last_seen_in_group_status', 'in_group')
       .limit(5000);
     if (gErr) throw gErr;
 

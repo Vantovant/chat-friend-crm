@@ -3910,6 +3910,7 @@ export type Database = {
           id: string
           last_scanned_at: string
           last_seen_in_group_status: string
+          left_detected_at: string | null
           phone_normalized: string
           role: string | null
         }
@@ -3923,6 +3924,7 @@ export type Database = {
           id?: string
           last_scanned_at?: string
           last_seen_in_group_status?: string
+          left_detected_at?: string | null
           phone_normalized: string
           role?: string | null
         }
@@ -3936,6 +3938,7 @@ export type Database = {
           id?: string
           last_scanned_at?: string
           last_seen_in_group_status?: string
+          left_detected_at?: string | null
           phone_normalized?: string
           role?: string | null
         }

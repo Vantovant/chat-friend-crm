@@ -98,6 +98,7 @@ async function eligibleMembers(svc: Svc, opts: { limit?: number; memberIds?: str
     .from("whatsapp_group_members")
     .select("id, contact_id, phone_normalized, classification, crm_last_activity_at, first_seen_at")
     .eq("group_jid", GROUP_JID)
+    .eq("last_seen_in_group_status", "in_group")
     .not("contact_id", "is", null)
     .in("classification", ["active", "warm"])
     .order("crm_last_activity_at", { ascending: false, nullsFirst: false });

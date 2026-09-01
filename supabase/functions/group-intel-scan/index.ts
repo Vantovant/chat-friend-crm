@@ -62,6 +62,9 @@ export type GroupScanReport = {
   suggested_action: string;
   risk_notes: string;
   reconnect_shortlist: any[];
+  left_marked?: number;
+  left_error?: string | null;
+
   auto_send_blocked: true;
   mode: "audit_only";
   persistence: GroupPersistence;
@@ -228,6 +231,36 @@ export async function scanGroup(
   }
 
   const sugg = suggestion(buckets);
+
+  // ── Departure detection: rows we already have that are NOT in this live scan
+  //    get flagged as 'left'. Rejoiners flip back to 'in_group' via the upsert below.
+  let leftMarked = 0;
+  let leftError: string | null = null;
+  try {
+    const livePhones = new Set(phonesNormalized);
+    const { data: existingRows, error: exErr } = await svc
+      .from("whatsapp_group_members")
+      .select("id, phone_normalized, last_seen_in_group_status")
+      .eq("group_jid", group.group_jid)
+      .limit(10000);
+    if (exErr) throw exErr;
+    const departedIds = (existingRows || [])
+      .filter((r: any) => !livePhones.has(r.phone_normalized) && r.last_seen_in_group_status !== "left")
+      .map((r: any) => r.id);
+    for (let i = 0; i < departedIds.length; i += 500) {
+      const slice = departedIds.slice(i, i + 500);
+      const { error: uErr } = await svc
+        .from("whatsapp_group_members")
+        .update({ last_seen_in_group_status: "left", left_detected_at: new Date().toISOString() })
+        .in("id", slice);
+      if (uErr) throw uErr;
+      leftMarked += slice.length;
+    }
+  } catch (e) {
+    leftError = (e as Error)?.message || String(e);
+    console.error(`[group-intel-scan] left-detection failed for ${group.group_jid}: ${leftError}`);
+  }
+
   const memberRows = phonesNormalized.map((phone) => {
     const c = contactByPhone[phone];
     const lastIn = c ? lastInboundByContact[c.id] || null : null;
@@ -239,11 +272,13 @@ export async function scanGroup(
       contact_id: c?.id ?? null,
       classification: cls,
       crm_last_activity_at: lastIn,
-      last_seen_in_group_status: "insufficient_data",
+      last_seen_in_group_status: "in_group",
+      left_detected_at: null,
       evidence: { source: fetched.source, has_contact: !!c, dnc: !!c?.do_not_contact },
       last_scanned_at: new Date().toISOString(),
     };
   });
+
 
   const persistence: GroupPersistence = {
     members_attempted: memberRows.length,
@@ -278,6 +313,9 @@ export async function scanGroup(
     suggested_action: sugg.action,
     risk_notes: sugg.risk,
     reconnect_shortlist: shortlist.slice(0, 25),
+    left_marked: leftMarked,
+    left_error: leftError,
+
     auto_send_blocked: true,
     mode: "audit_only",
     persistence,
