@@ -199,19 +199,54 @@ Deno.serve(async (req) => {
         .single();
       if (error) return json({ success: false, error: error.message }, 500);
 
+      // ── Read-only review context (no effect on send logic) ─────────────
+      const cIds = eligible.map((e) => e.contact_id).filter(Boolean);
+      const { data: fullContacts } = await svc
+        .from("contacts")
+        .select("id, name, email, lead_type, temperature, tags")
+        .in("id", cIds);
+      const fullById = new Map(((fullContacts ?? []) as any[]).map((c) => [c.id, c]));
+
+      const { data: acts } = await svc
+        .from("contact_activity")
+        .select("contact_id, type, metadata, created_at")
+        .in("contact_id", cIds)
+        .order("created_at", { ascending: false })
+        .limit(500);
+      const actsByContact = new Map<string, any[]>();
+      for (const a of ((acts ?? []) as any[])) {
+        const list = actsByContact.get(a.contact_id) ?? [];
+        if (list.length >= 5) continue;
+        const md = (a.metadata ?? {}) as Record<string, any>;
+        const preview = md.body_preview ?? (typeof md.body === "string" ? md.body.slice(0, 140) : null);
+        list.push({ type: a.type, direction: md.direction ?? null, preview, created_at: a.created_at });
+        actsByContact.set(a.contact_id, list);
+      }
+
       return json({
         success: true,
         batch_id: (batch as any).id,
         status: "draft",
         message_body: messageBody,
-        recipients: eligible.map((e) => ({
-          member_id: e.member_id,
-          contact_id: e.contact_id,
-          name: e.name,
-          phone_masked: e.phone_masked,
-          classification: e.classification,
-        })),
+        recipients: eligible.map((e) => {
+          const fc = fullById.get(e.contact_id) ?? null;
+          const nm = (fc?.name ?? e.name ?? "").trim();
+          return {
+            member_id: e.member_id,
+            contact_id: e.contact_id,
+            name: e.name,
+            phone_masked: e.phone_masked,
+            classification: e.classification,
+            contact_confirmed: Boolean(e.contact_id),
+            full_contact: fc
+              ? { name: fc.name, email: fc.email, lead_type: fc.lead_type, temperature: fc.temperature, tags: fc.tags }
+              : null,
+            name_looks_incomplete: nm.length > 0 && !/\s/.test(nm),
+            recent_activity: actsByContact.get(e.contact_id) ?? [],
+          };
+        }),
       });
+
     }
 
     // ── approve_and_send ─────────────────────────────────────────────────
