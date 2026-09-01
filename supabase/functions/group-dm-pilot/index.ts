@@ -332,10 +332,10 @@ Deno.serve(async (req) => {
         .lt("sent_at", cutoff);
 
       const rows = (pending ?? []) as any[];
-      if (!rows.length) return json({ success: true, checked: 0, failures: 0, paused: false });
 
       // Delivery truth comes from the provider ack callbacks already handled in
-      // maytapi-webhook-inbound, which write into public.messages by provider_message_id.
+      // maytapi-webhook-inbound, which write into public.messages by provider_message_id
+      // (and directly into group_dm_pilot_sends when an ack arrives).
       const ids = rows.map((r) => r.provider_message_id).filter(Boolean);
       const statusById = new Map<string, string>();
       if (ids.length) {
@@ -366,22 +366,46 @@ Deno.serve(async (req) => {
         if (newStatus === "failed") failures.push(r);
       }
 
-      if (failures.length) {
-        await svc
-          .from("integration_settings")
-          .update({ value: "disabled", updated_at: nowIso })
-          .eq("key", "zazi_group_dm_mode");
+      // Also catch rows already marked failed by the ack webhook in the last 24h.
+      const { data: ackFailed } = await svc
+        .from("group_dm_pilot_sends")
+        .select("id, contact_id, phone_normalized")
+        .eq("status", "failed")
+        .gte("sent_at", new Date(Date.now() - DAY_MS).toISOString());
+      for (const f of ((ackFailed ?? []) as any[])) {
+        if (!failures.some((x) => x.id === f.id)) failures.push(f);
+      }
 
-        const names: string[] = [];
-        for (const f of failures) {
-          const { data: c } = await svc.from("contacts").select("name").eq("id", f.contact_id).maybeSingle();
-          names.push(`${(c as any)?.name ?? "Unknown"} (${mask(f.phone_normalized)})`);
+      let paused = false;
+      if (failures.length) {
+        const mode = (await getSettings(svc, ["zazi_group_dm_mode"])).zazi_group_dm_mode;
+        if (mode !== "disabled") {
+          await svc
+            .from("integration_settings")
+            .update({ value: "disabled", updated_at: nowIso })
+            .eq("key", "zazi_group_dm_mode");
+          paused = true;
         }
+
+        const title = "Pilot DM auto-paused — delivery failure detected";
         const owner = await superAdminId(svc);
-        if (owner) {
+        const { data: existingTask } = await svc
+          .from("plan_tasks")
+          .select("id")
+          .eq("title", title)
+          .neq("status", "completed")
+          .limit(1)
+          .maybeSingle();
+
+        if (owner && !existingTask) {
+          const names: string[] = [];
+          for (const f of failures) {
+            const { data: c } = await svc.from("contacts").select("name").eq("id", f.contact_id).maybeSingle();
+            names.push(`${(c as any)?.name ?? "Unknown"} (${mask(f.phone_normalized)})`);
+          }
           await svc.from("plan_tasks").insert({
             user_id: owner,
-            title: "Pilot DM auto-paused — delivery failure detected",
+            title,
             description:
               `Group DM pilot was automatically paused (zazi_group_dm_mode → 'disabled') because ` +
               `${failures.length} message(s) failed or were undelivered: ${names.join(", ")}. ` +
@@ -394,7 +418,8 @@ Deno.serve(async (req) => {
         }
       }
 
-      return json({ success: true, checked: rows.length, failures: failures.length, paused: failures.length > 0 });
+      return json({ success: true, checked: rows.length, failures: failures.length, paused });
+
     }
 
     return json({ success: false, error: `Unknown action '${action}'` }, 400);
