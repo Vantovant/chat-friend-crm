@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Loader2, Search, Users, ArrowLeft, UserCog, RefreshCw } from 'lucide-react';
+import { Loader2, Search, Users, ArrowLeft, UserCog, RefreshCw, Sparkles, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
+
 
 const GROUP_JID = '120363419298058298@g.us';
 const GROUP_NAME = 'APLGO | Health and Biz';
