@@ -33,12 +33,11 @@ const json = (body: unknown, status = 200) =>
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const mask = (p?: string | null) => (p ? `***${String(p).slice(-4)}` : null);
 
-// Copy is intentionally verbatim from the approved brief. Placeholders are literal —
-// do not substitute links or numbers here.
+// Copy is intentionally verbatim from the approved brief.
 const STEP_MESSAGES: Record<1 | 2 | 3, string> = {
-  1: "Hi! Welcome to APLGO | Health and Biz 🎉 I'm really glad you're here. This group is where we share health tips, product info, and business opportunities with APLGO. It's a big group so it can be hard to ask personal questions in there — if you ever want to ask me anything one-on-one, feel free to message me directly here anytime. No pressure at all, just wanted to personally welcome you!",
-  2: "Hope you're settling in! I'd love to get to know you a bit better — could you share your full name and email address with me? It just helps me keep track of everyone properly and reach out with anything relevant to you specifically.",
-  3: "One last thing — if you'd like to explore getting started for free with APLGO, here's the link: [REGISTRATION_LINK_PLACEHOLDER]. No obligation, just wanted to make sure you knew it was there. Welcome again to the group!",
+  1: "Hi! Welcome to APLGO | Health and Biz 🎉 I'm really glad you're here. This group is where we share health tips, product info, and business opportunities with APLGO. It's a big group so it can be hard to ask personal questions in there — if you ever want to ask me anything one-on-one, feel free to message me here directly anytime, or WhatsApp/call +27 79 083 1530. No pressure at all, just wanted to personally welcome you!",
+  2: "Hope you're settling in! Quick heads up: you can set up a free APLGO account anytime — no cost, no obligation, just gives you access to explore the products and the business side properly. Here's the link: https://backoffice.aplgo.com/register/?sp=787262\n\nYou can also browse products here: https://getwellafrica.com/shop\n\nIf you'd rather I just talk you through it instead of doing it yourself, message me and I'll help personally.",
+  3: "Just checking in — were you able to take a look at APLGO? If you registered, well done, welcome to the family! If not yet, no rush at all — the free account link is always here when you're ready: https://backoffice.aplgo.com/register/?sp=787262\n\nAnd if you have any questions at all, I'm just a message away. Glad to have you in the group!",
 };
 
 const STEP_STATUS: Record<1 | 2 | 3, string> = {
@@ -98,13 +97,70 @@ Deno.serve(async (req) => {
       if (error) return json({ success: false, error: error.message }, 500);
 
       const rows = (joiners ?? []) as any[];
-      if (!rows.length) return json({ success: true, found: 0, enrolled: 0, already_enrolled: 0 });
+      if (!rows.length) return json({ success: true, found: 0, enrolled: 0, already_enrolled: 0, contacts_created: 0, contacts_linked: 0 });
+
+      // ── Ensure every joiner has a contact_id so all sends count toward the
+      //    shared maytapi daily cap. Find-before-create on phone_normalized.
+      let contactsCreated = 0;
+      let contactsLinked = 0;
+      for (const r of rows) {
+        if (r.contact_id || !r.phone_normalized) continue;
+        const phone = String(r.phone_normalized);
+        const { data: found } = await svc
+          .from("contacts")
+          .select("id")
+          .eq("phone_normalized", phone)
+          .eq("is_deleted", false)
+          .limit(1)
+          .maybeSingle();
+
+        let contactId = (found as any)?.id ?? null;
+        if (!contactId) {
+          const { data: created, error: cErr } = await svc
+            .from("contacts")
+            .insert({
+              name: phone,
+              phone,
+              phone_raw: phone,
+              phone_normalized: phone,
+              whatsapp_id: phone,
+              lead_type: "prospect",
+              interest: "medium",
+              temperature: "cold",
+              contact_source: "group_welcome_sequence",
+              is_deleted: false,
+              do_not_contact: false,
+            })
+            .select("id")
+            .single();
+          if (cErr) {
+            console.error("[group-welcome-sequence] contact create failed:", cErr.message);
+            continue;
+          }
+          contactId = (created as any).id;
+          contactsCreated++;
+        }
+        r.contact_id = contactId;
+        await svc.from("whatsapp_group_members").update({ contact_id: contactId }).eq("id", r.id);
+        contactsLinked++;
+      }
 
       const { data: existing } = await svc
         .from("group_welcome_sequences")
-        .select("member_id")
+        .select("id, member_id, contact_id")
         .in("member_id", rows.map((r) => r.id));
-      const seen = new Set(((existing ?? []) as any[]).map((r) => r.member_id));
+      const existingRows = ((existing ?? []) as any[]);
+      const seen = new Set(existingRows.map((r) => r.member_id));
+
+      // Backfill contact_id on sequences enrolled before this change.
+      let backfilled = 0;
+      for (const e of existingRows) {
+        if (e.contact_id) continue;
+        const m = rows.find((r) => r.id === e.member_id);
+        if (!m?.contact_id) continue;
+        await svc.from("group_welcome_sequences").update({ contact_id: m.contact_id }).eq("id", e.id);
+        backfilled++;
+      }
 
       const toInsert = rows
         .filter((r) => !seen.has(r.id))
@@ -135,6 +191,9 @@ Deno.serve(async (req) => {
         found: rows.length,
         enrolled,
         already_enrolled: rows.length - toInsert.length,
+        contacts_created: contactsCreated,
+        contacts_linked: contactsLinked,
+        sequences_backfilled: backfilled,
       });
     }
 

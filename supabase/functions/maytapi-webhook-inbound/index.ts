@@ -626,6 +626,27 @@ Deno.serve(async (req) => {
       const isRealPushName = (n: string): boolean =>
         !!n && n.trim().length >= 2 && !isPlaceholderName(n);
 
+      // Group welcome sequence: capture the WA push name on the active sequence row.
+      if (isRealPushName(senderName)) {
+        try {
+          const { data: wseq } = await supabase
+            .from("group_welcome_sequences")
+            .select("id, name_captured")
+            .eq("phone_normalized", phoneE164)
+            .not("status", "in", '("completed","failed")')
+            .limit(1)
+            .maybeSingle();
+          if (wseq && isPlaceholderName((wseq as any).name_captured)) {
+            await supabase
+              .from("group_welcome_sequences")
+              .update({ name_captured: senderName })
+              .eq("id", (wseq as any).id);
+            console.log("[maytapi-inbound] welcome sequence name_captured set:", senderName);
+          }
+        } catch { /* noop */ }
+      }
+
+
       if (contact) {
         if (isRealPushName(senderName) && isPlaceholderName(contact.name)) {
           const { error: nameErr } = await supabase
