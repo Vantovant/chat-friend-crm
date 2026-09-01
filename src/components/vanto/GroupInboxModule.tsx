@@ -72,6 +72,8 @@ export function GroupInboxModule() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [digest, setDigest] = useState<string | null>(null);
   const [digestOpen, setDigestOpen] = useState(false);
+  const [strategy, setStrategy] = useState<string | null>(null);
+  const [strategyOpen, setStrategyOpen] = useState(false);
   const isMobile = useIsMobile();
 
 
