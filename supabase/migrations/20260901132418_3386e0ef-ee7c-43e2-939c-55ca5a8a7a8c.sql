@@ -1,0 +1,1 @@
+ALTER TABLE public.group_welcome_sequences ADD COLUMN IF NOT EXISTS name_capture_attempts integer NOT NULL DEFAULT 0;
