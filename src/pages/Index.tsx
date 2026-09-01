@@ -13,6 +13,7 @@ const InboxModule = lazy(() => import('@/components/vanto/InboxModule').then(m =
 const MaytapiInboxModule = lazy(() => import('@/components/vanto/MaytapiInboxModule').then(m => ({ default: m.MaytapiInboxModule })));
 const MaytapiUnmatchedModule = lazy(() => import('@/components/vanto/MaytapiUnmatchedModule').then(m => ({ default: m.MaytapiUnmatchedModule })));
 const FacebookInboxModule = lazy(() => import('@/components/vanto/FacebookInboxModule').then(m => ({ default: m.FacebookInboxModule })));
+const GroupInboxModule = lazy(() => import('@/components/vanto/GroupInboxModule').then(m => ({ default: m.GroupInboxModule })));
 const ContactsModule = lazy(() => import('@/components/vanto/ContactsModule').then(m => ({ default: m.ContactsModule })));
 const CRMModule = lazy(() => import('@/components/vanto/CRMModule').then(m => ({ default: m.CRMModule })));
 const AutomationsModule = lazy(() => import('@/components/vanto/AutomationsModule').then(m => ({ default: m.AutomationsModule })));
