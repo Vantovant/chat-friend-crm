@@ -54,3 +54,7 @@ verify_jwt = false
 
 [functions.group-dm-pilot]
 verify_jwt = false
+
+[functions.group-welcome-sequence]
+verify_jwt = false
+

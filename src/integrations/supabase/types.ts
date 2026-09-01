@@ -1763,6 +1763,65 @@ export type Database = {
         }
         Relationships: []
       }
+      group_welcome_sequences: {
+        Row: {
+          contact_id: string | null
+          created_at: string
+          email_captured: string | null
+          error_detail: string | null
+          group_jid: string | null
+          id: string
+          joined_at: string | null
+          last_step_sent_at: string | null
+          member_id: string | null
+          name_captured: string | null
+          phone_normalized: string | null
+          status: string
+          step: number
+          updated_at: string
+        }
+        Insert: {
+          contact_id?: string | null
+          created_at?: string
+          email_captured?: string | null
+          error_detail?: string | null
+          group_jid?: string | null
+          id?: string
+          joined_at?: string | null
+          last_step_sent_at?: string | null
+          member_id?: string | null
+          name_captured?: string | null
+          phone_normalized?: string | null
+          status?: string
+          step?: number
+          updated_at?: string
+        }
+        Update: {
+          contact_id?: string | null
+          created_at?: string
+          email_captured?: string | null
+          error_detail?: string | null
+          group_jid?: string | null
+          id?: string
+          joined_at?: string | null
+          last_step_sent_at?: string | null
+          member_id?: string | null
+          name_captured?: string | null
+          phone_normalized?: string | null
+          status?: string
+          step?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "group_welcome_sequences_member_id_fkey"
+            columns: ["member_id"]
+            isOneToOne: true
+            referencedRelation: "whatsapp_group_members"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       hot_lead_alerts: {
         Row: {
           alert_channel: string | null
