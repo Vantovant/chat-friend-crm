@@ -307,9 +307,11 @@ Deno.serve(async (req) => {
           .eq("id", r.id);
 
         if (r.contact_id) {
-          await svc.from("contact_activity").insert({
+          const { error: actErr } = await svc.from("contact_activity").insert({
             contact_id: r.contact_id,
             type: "maytapi_message",
+            // performed_by is NOT NULL — use the system actor uuid like other automations.
+            performed_by: "00000000-0000-0000-0000-000000000000",
             metadata: {
               direction: "outbound",
               maytapi_message_id: providerMessageId,
@@ -322,6 +324,7 @@ Deno.serve(async (req) => {
               sent_at: nowIso,
             },
           });
+          if (actErr) console.error("[group-welcome-sequence] contact_activity insert failed:", actErr.message);
           await svc.from("contacts")
             .update({ last_outbound_at: nowIso, last_outbound_provider: "maytapi" })
             .eq("id", r.contact_id);
