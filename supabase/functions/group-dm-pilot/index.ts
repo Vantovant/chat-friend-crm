@@ -387,7 +387,7 @@ Deno.serve(async (req) => {
               `${failures.length} message(s) failed or were undelivered: ${names.join(", ")}. ` +
               `Review these recipients and the WhatsApp number's health before manually re-enabling 'pilot_manual'.`,
             priority: "urgent",
-            status: "todo",
+            status: "pending",
             source: "group-dm-pilot",
             source_ref: { failed_send_ids: failures.map((f) => f.id) },
           });
