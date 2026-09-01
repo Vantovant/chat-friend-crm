@@ -96,6 +96,7 @@ const Index = () => {
       case 'maytapi-unmatched': return <MaytapiUnmatchedModule />;
       case 'facebook-inbox': return <FacebookInboxModule />;
       case 'group-inbox': return <GroupInboxModule />;
+      case 'group-scoreboard': return <GroupScoreboardModule />;
       case 'contacts': return <ContactsModule />;
       case 'crm': return <CRMModule />;
       case 'automations': return <AutomationsModule />;
