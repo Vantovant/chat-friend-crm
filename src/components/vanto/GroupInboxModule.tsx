@@ -117,13 +117,25 @@ export function GroupInboxModule() {
     setLoading(false);
 
     const today = new Date().toISOString().slice(0, 10);
-    const { data: dg } = await supabase
-      .from('group_engagement_digests')
-      .select('digest_text')
-      .eq('group_jid', GROUP_JID)
-      .eq('digest_date', today)
-      .maybeSingle();
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const [{ data: dg }, { data: st }] = await Promise.all([
+      supabase
+        .from('group_engagement_digests')
+        .select('digest_text')
+        .eq('group_jid', GROUP_JID)
+        .eq('digest_date', today)
+        .maybeSingle(),
+      supabase
+        .from('group_engagement_strategies')
+        .select('strategy_text')
+        .eq('group_jid', GROUP_JID)
+        .gte('week_of', weekAgo)
+        .order('week_of', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
     setDigest((dg as any)?.digest_text || null);
+    setStrategy((st as any)?.strategy_text || null);
   }, []);
 
 
