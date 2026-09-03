@@ -102,6 +102,68 @@ Deno.serve(async (req) => {
       status: "received",
     });
 
+    // ── BRANCH 0: Group participant events (join / leave / remove) — ADDITIVE 2026-09-03 ──
+    // Maytapi delivers these as a notification-style callback. Shapes seen in the wild:
+    //   { type:"message", message:{ type:"notification", notification:"add"|"remove"|"leave", participants:[...] }, conversation:"...@g.us" }
+    //   { type:"group_participants"|"participants", action:"add"|"remove"|"leave", participants:[...], conversation:"...@g.us" }
+    // We log every one of them; the rest of the handler is untouched.
+    try {
+      const gMsg = payload.message || {};
+      const notif = String(
+        gMsg.notification || gMsg.action || payload.notification || payload.action || "",
+      ).toLowerCase();
+      const notifType = String(gMsg.type || payload.type || "").toLowerCase();
+      const groupJid = String(payload.conversation || gMsg.chatId || gMsg.from || "");
+      const isParticipantEvent =
+        groupJid.includes("@g.us") &&
+        (["add", "remove", "leave", "join", "invite"].includes(notif) ||
+          ["group_participants", "participants", "group_notification"].includes(notifType));
+
+      if (isParticipantEvent) {
+        const eventType =
+          notif === "add" || notif === "join" || notif === "invite"
+            ? "joined"
+            : notif === "leave"
+              ? "left"
+              : "removed";
+
+        const rawParticipants: any[] =
+          gMsg.participants || payload.participants || gMsg.participant || payload.participant || [];
+        const list = Array.isArray(rawParticipants) ? rawParticipants : [rawParticipants];
+
+        const rows = list
+          .map((p: any) => {
+            const phoneRaw = typeof p === "string" ? p : (p?.id || p?.phone || p?.number || "");
+            const phone = normalizePhoneToE164(String(phoneRaw));
+            if (!phone) return null;
+            return {
+              group_jid: groupJid,
+              member_phone: phone,
+              member_name: (typeof p === "object" ? (p?.name || p?.pushname || null) : null) ||
+                payload?.user?.name || null,
+              event_type: eventType,
+              event_time: new Date(
+                payload.timestamp ? Number(payload.timestamp) * 1000 : Date.now(),
+              ).toISOString(),
+              raw_payload: payload,
+            };
+          })
+          .filter(Boolean);
+
+        if (rows.length) {
+          const { error: memErr } = await supabase
+            .from("whatsapp_group_membership_events")
+            .insert(rows as any[]);
+          if (memErr) console.warn("[maytapi-inbound] membership event insert warn:", memErr.message);
+          else console.log(`[maytapi-inbound] logged ${rows.length} ${eventType} event(s) for ${groupJid}`);
+        }
+      }
+    } catch (memCatch: any) {
+      console.warn("[maytapi-inbound] membership event branch failed (non-fatal):", memCatch?.message);
+    }
+
+
+
     // ── BRANCH 1: Delivery ack (existing Group Campaigns flow) ──
     const msgId = payload.message?.id || payload.msgId || payload.data?.msgId;
     const ackStatus = payload.ack ?? payload.status;
