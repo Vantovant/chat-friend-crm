@@ -3944,6 +3944,39 @@ export type Database = {
         }
         Relationships: []
       }
+      whatsapp_group_membership_events: {
+        Row: {
+          created_at: string
+          event_time: string
+          event_type: string
+          group_jid: string
+          id: string
+          member_name: string | null
+          member_phone: string
+          raw_payload: Json | null
+        }
+        Insert: {
+          created_at?: string
+          event_time?: string
+          event_type: string
+          group_jid: string
+          id?: string
+          member_name?: string | null
+          member_phone: string
+          raw_payload?: Json | null
+        }
+        Update: {
+          created_at?: string
+          event_time?: string
+          event_type?: string
+          group_jid?: string
+          id?: string
+          member_name?: string | null
+          member_phone?: string
+          raw_payload?: Json | null
+        }
+        Relationships: []
+      }
       whatsapp_group_overrides: {
         Row: {
           created_at: string
