@@ -58,7 +58,7 @@ export default defineTool({
       const { data: contacts } = await supabase
         .from("contacts")
         .select(
-          "id, name, phone, phone_normalized, lead_type, lead_temperature, interest_level, notes, last_contacted_at, last_outbound_at, last_inbound_at",
+          "id, name, phone, phone_normalized, lead_type, temperature, interest, notes, last_conversation_summary, last_outbound_at, last_inbound_at",
         )
         .in("phone_normalized", phones);
       for (const c of contacts ?? []) {
@@ -103,10 +103,10 @@ export default defineTool({
               contact_id: c.id,
               name: c.name,
               lead_type: c.lead_type ?? null,
-              lead_temperature: c.lead_temperature ?? null,
-              interest_level: c.interest_level ?? null,
+              temperature: c.temperature ?? null,
+              interest: c.interest ?? null,
               notes: c.notes ?? null,
-              last_contacted_at: c.last_contacted_at ?? null,
+              last_conversation_summary: c.last_conversation_summary ?? null,
               last_outbound_at: c.last_outbound_at ?? null,
               last_inbound_at: c.last_inbound_at ?? null,
             }
