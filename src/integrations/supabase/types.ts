@@ -3899,6 +3899,30 @@ export type Database = {
         }
         Relationships: []
       }
+      whatsapp_group_member_snapshots: {
+        Row: {
+          created_at: string
+          group_jid: string
+          id: string
+          phone_normalized: string
+          snapshot_at: string
+        }
+        Insert: {
+          created_at?: string
+          group_jid: string
+          id?: string
+          phone_normalized: string
+          snapshot_at?: string
+        }
+        Update: {
+          created_at?: string
+          group_jid?: string
+          id?: string
+          phone_normalized?: string
+          snapshot_at?: string
+        }
+        Relationships: []
+      }
       whatsapp_group_members: {
         Row: {
           classification: string | null
@@ -3941,6 +3965,51 @@ export type Database = {
           left_detected_at?: string | null
           phone_normalized?: string
           role?: string | null
+        }
+        Relationships: []
+      }
+      whatsapp_group_membership_anomalies: {
+        Row: {
+          affected_count: number
+          affected_phones: Json
+          anomaly_type: string
+          created_at: string
+          detected_at: string
+          group_jid: string
+          id: string
+          pct_affected: number
+          reason: string | null
+          reviewed: boolean
+          total_members: number
+          updated_at: string
+        }
+        Insert: {
+          affected_count?: number
+          affected_phones?: Json
+          anomaly_type?: string
+          created_at?: string
+          detected_at?: string
+          group_jid: string
+          id?: string
+          pct_affected?: number
+          reason?: string | null
+          reviewed?: boolean
+          total_members?: number
+          updated_at?: string
+        }
+        Update: {
+          affected_count?: number
+          affected_phones?: Json
+          anomaly_type?: string
+          created_at?: string
+          detected_at?: string
+          group_jid?: string
+          id?: string
+          pct_affected?: number
+          reason?: string | null
+          reviewed?: boolean
+          total_members?: number
+          updated_at?: string
         }
         Relationships: []
       }
