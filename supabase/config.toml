@@ -61,3 +61,6 @@ verify_jwt = false
 
 [functions.group-data-quality-snapshot]
 verify_jwt = false
+
+[functions.group-membership-poll]
+verify_jwt = false
