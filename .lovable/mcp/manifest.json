@@ -1058,6 +1058,48 @@
           "$schema": "http://json-schema.org/draft-07/schema#"
         },
         "outputSchema": null
+      },
+      {
+        "name": "list_group_messages",
+        "title": "List WhatsApp group messages",
+        "description": "Reads real message content from a WhatsApp group (who said what, when) for investigating specific group activity. Use this when you need actual chat content rather than just headcounts, membership events, or dispatch logs.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "group_jid": {
+              "type": "string",
+              "description": "WhatsApp group JID. Defaults to 120363419298058298@g.us (APLGO | Health and Biz)."
+            },
+            "since": {
+              "type": "string",
+              "format": "date-time",
+              "description": "ISO timestamp. Defaults to 24 hours ago."
+            },
+            "until": {
+              "type": "string",
+              "format": "date-time",
+              "description": "ISO timestamp upper bound."
+            },
+            "sender_phone": {
+              "type": "string",
+              "description": "Filter to a specific sender in +E.164 format."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "description": "Max messages (default 100, cap 500)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
       }
     ]
   }
