@@ -46,7 +46,7 @@ export default defineTool({
     let q = supabase
       .from("maytapi_messages")
       .select(
-        "id, direction, phone_e164, phone_last4, body, body_preview, media_type, status, received_at, contact_id, contacts(name)",
+        "id, direction, phone_e164, phone_last4, body, body_preview, media_type, status, received_at, contact_id",
       )
       .eq("conversation_key", groupJid)
       .gte("received_at", sinceTs)
@@ -59,6 +59,20 @@ export default defineTool({
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
 
     const rows = (messages ?? []) as Record<string, any>[];
+
+    // No FK from maytapi_messages.contact_id to contacts.id exists, so an
+    // embedded contacts(name) join fails. Resolve sender names in a second query.
+    const contactIds = [...new Set(rows.map((m) => m.contact_id).filter((id): id is string => !!id))];
+    const nameById = new Map<string, string | null>();
+    if (contactIds.length > 0) {
+      const { data: contacts, error: contactsErr } = await supabase
+        .from("contacts")
+        .select("id, name")
+        .in("id", contactIds);
+      if (contactsErr) return { content: [{ type: "text", text: contactsErr.message }], isError: true };
+      for (const c of contacts ?? []) nameById.set(c.id, c.name ?? null);
+    }
+
     const result = {
       group_jid: groupJid,
       since: sinceTs,
@@ -70,7 +84,7 @@ export default defineTool({
         direction: m.direction,
         sender_phone: m.phone_e164,
         phone_last4: m.phone_last4,
-        sender_name: (m.contacts as { name?: string | null } | null)?.name ?? null,
+        sender_name: (m.contact_id ? nameById.get(m.contact_id) : null) ?? null,
         body: m.body,
         body_preview: m.body_preview,
         media_type: m.media_type,

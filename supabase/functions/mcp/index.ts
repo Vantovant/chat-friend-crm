@@ -1760,13 +1760,20 @@ var list_group_messages_default = defineTool35({
     const groupJid = group_jid || DEFAULT_GROUP_JID;
     const sinceTs = since || new Date(Date.now() - 24 * 60 * 60 * 1e3).toISOString();
     let q = supabase.from("maytapi_messages").select(
-      "id, direction, phone_e164, phone_last4, body, body_preview, media_type, status, received_at, contact_id, contacts(name)"
+      "id, direction, phone_e164, phone_last4, body, body_preview, media_type, status, received_at, contact_id"
     ).eq("conversation_key", groupJid).gte("received_at", sinceTs).order("received_at", { ascending: true });
     if (until) q = q.lte("received_at", until);
     if (sender_phone) q = q.eq("phone_e164", sender_phone);
     const { data: messages, error } = await q.limit(limit ?? 100);
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
     const rows = messages ?? [];
+    const contactIds = [...new Set(rows.map((m) => m.contact_id).filter((id) => !!id))];
+    const nameById = /* @__PURE__ */ new Map();
+    if (contactIds.length > 0) {
+      const { data: contacts, error: contactsErr } = await supabase.from("contacts").select("id, name").in("id", contactIds);
+      if (contactsErr) return { content: [{ type: "text", text: contactsErr.message }], isError: true };
+      for (const c of contacts ?? []) nameById.set(c.id, c.name ?? null);
+    }
     const result = {
       group_jid: groupJid,
       since: sinceTs,
@@ -1778,7 +1785,7 @@ var list_group_messages_default = defineTool35({
         direction: m.direction,
         sender_phone: m.phone_e164,
         phone_last4: m.phone_last4,
-        sender_name: m.contacts?.name ?? null,
+        sender_name: (m.contact_id ? nameById.get(m.contact_id) : null) ?? null,
         body: m.body,
         body_preview: m.body_preview,
         media_type: m.media_type,
