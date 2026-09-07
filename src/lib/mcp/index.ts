@@ -33,6 +33,7 @@ import listGroupDmCandidates from "./tools/list-group-dm-candidates";
 import createGroupDmBatch from "./tools/create-group-dm-batch";
 import approveGroupDmBatch from "./tools/approve-group-dm-batch";
 import listGroupMembershipEvents from "./tools/list-group-membership-events";
+import listGroupMessages from "./tools/list-group-messages";
 
 const projectRef = import.meta.env.VITE_SUPABASE_PROJECT_ID ?? "project-ref-unset";
 
