@@ -1739,13 +1739,68 @@ var list_group_membership_events_default = defineTool34({
   }
 });
 
+// src/lib/mcp/tools/list-group-messages.ts
+import { defineTool as defineTool35 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z31 } from "npm:zod@^3.25.76";
+var list_group_messages_default = defineTool35({
+  name: "list_group_messages",
+  title: "List WhatsApp group messages",
+  description: "Reads real message content from a WhatsApp group (who said what, when) for investigating specific group activity. Use this when you need actual chat content rather than just headcounts, membership events, or dispatch logs.",
+  inputSchema: {
+    group_jid: z31.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`),
+    since: z31.string().datetime().optional().describe("ISO timestamp. Defaults to 24 hours ago."),
+    until: z31.string().datetime().optional().describe("ISO timestamp upper bound."),
+    sender_phone: z31.string().optional().describe("Filter to a specific sender in +E.164 format."),
+    limit: z31.number().int().min(1).max(500).optional().describe("Max messages (default 100, cap 500).")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ group_jid, since, until, sender_phone, limit }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const groupJid = group_jid || DEFAULT_GROUP_JID;
+    const sinceTs = since || new Date(Date.now() - 24 * 60 * 60 * 1e3).toISOString();
+    let q = supabase.from("maytapi_messages").select(
+      "id, direction, phone_e164, phone_last4, body, body_preview, media_type, status, received_at, contact_id, contacts(name)"
+    ).eq("conversation_key", groupJid).gte("received_at", sinceTs).order("received_at", { ascending: true });
+    if (until) q = q.lte("received_at", until);
+    if (sender_phone) q = q.eq("phone_e164", sender_phone);
+    const { data: messages, error } = await q.limit(limit ?? 100);
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const rows = messages ?? [];
+    const result = {
+      group_jid: groupJid,
+      since: sinceTs,
+      until: until ?? null,
+      sender_phone: sender_phone ?? null,
+      count: rows.length,
+      messages: rows.map((m) => ({
+        id: m.id,
+        direction: m.direction,
+        sender_phone: m.phone_e164,
+        phone_last4: m.phone_last4,
+        sender_name: m.contacts?.name ?? null,
+        body: m.body,
+        body_preview: m.body_preview,
+        media_type: m.media_type,
+        status: m.status,
+        received_at: m.received_at,
+        contact_id: m.contact_id
+      }))
+    };
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+});
+
 // src/lib/mcp/index.ts
 var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
   name: "get-well-hub",
   title: "Get Well Hub",
-  version: "1.4.0",
-  instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement). For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual').`,
+  version: "1.5.0",
+  instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement). For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for actual group chat content (who said what, when) use list_group_messages; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual').`,
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
     acceptedAudiences: "authenticated"
@@ -1784,7 +1839,8 @@ var mcp_default = defineMcp({
     list_group_dm_candidates_default,
     create_group_dm_batch_default,
     approve_group_dm_batch_default,
-    list_group_membership_events_default
+    list_group_membership_events_default,
+    list_group_messages_default
   ]
 });
 
