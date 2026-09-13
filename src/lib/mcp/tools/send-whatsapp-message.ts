@@ -79,20 +79,41 @@ export default defineTool({
 
     const dailyCap = Number(get("maytapi_daily_cap", "30"));
     const since24h = new Date(now - DAY_MS).toISOString();
+    // Start of the current SAST (UTC+2) calendar day, expressed in UTC.
+    const sastNow = new Date(now + 2 * 60 * 60 * 1000);
+    const sastDayStart = new Date(
+      Date.UTC(sastNow.getUTCFullYear(), sastNow.getUTCMonth(), sastNow.getUTCDate()) - 2 * 60 * 60 * 1000,
+    ).toISOString();
+
     // 1-on-1 only: group posts have their own separate throttles and do NOT count here.
-    const { count: directSent } = await supabase
-      .from("contact_activity")
-      .select("id", { count: "exact", head: true })
-      .eq("type", "maytapi_message")
-      .filter("metadata->>direction", "eq", "outbound")
-      .gte("created_at", since24h);
-    const usedToday = directSent ?? 0;
+    const countDirectSince = async (fromIso: string) => {
+      const { count } = await supabase
+        .from("contact_activity")
+        .select("id", { count: "exact", head: true })
+        .eq("type", "maytapi_message")
+        .filter("metadata->>direction", "eq", "outbound")
+        .gte("created_at", fromIso);
+      return count ?? 0;
+    };
+    const usedToday = await countDirectSince(since24h);
+    const usedSastDay = await countDirectSince(sastDayStart);
+
     if (Number.isFinite(dailyCap) && usedToday >= dailyCap) {
       return err(
-        `Refused: 1-on-1 Maytapi daily cap reached (${usedToday}/${dailyCap} one-on-one messages in the last 24h). No message was sent.`,
-        { reason: "daily_cap_reached", used_last_24h: usedToday, daily_cap: dailyCap, scope: "one_on_one_only" },
+        `Refused: 1-on-1 Maytapi daily cap reached (${usedToday}/${dailyCap} one-on-one messages in the rolling last 24h; ` +
+          `${usedSastDay} so far on today's SAST calendar day). No message was sent.`,
+        {
+          reason: "daily_cap_reached",
+          used_last_24h: usedToday,
+          used_today_sast: usedSastDay,
+          window_start_24h: since24h,
+          sast_day_start: sastDayStart,
+          daily_cap: dailyCap,
+          scope: "one_on_one_only",
+        },
       );
     }
+
 
     // ── 4. 24-hour customer service window ────────────────────────────────
     const { data: lastInboundActivity } = await supabase
