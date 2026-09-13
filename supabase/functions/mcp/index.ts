@@ -778,7 +778,16 @@ var send_whatsapp_message_default = defineTool15({
       provider_message_id: providerMessageId,
       sent_at: sentAt,
       window: "within_24h_session",
-      daily_cap: { used_last_24h: usedToday + 1, cap: dailyCap }
+      daily_cap: {
+        cap: dailyCap,
+        used_last_24h: usedToday + 1,
+        used_today_sast: usedSastDay + 1,
+        remaining_vs_rolling_24h: Number.isFinite(dailyCap) ? Math.max(dailyCap - (usedToday + 1), 0) : null,
+        window_start_24h: since24h,
+        sast_day_start: sastDayStart,
+        scope: "one_on_one_only (group posts excluded)",
+        note: "used_last_24h is a rolling 24-hour window and can include sends from yesterday afternoon; used_today_sast is the SAST calendar day."
+      }
     };
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
