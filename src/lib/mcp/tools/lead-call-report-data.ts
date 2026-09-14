@@ -49,6 +49,20 @@ export type LeadRow = {
   summary: unknown | null;
 };
 
+export type LeadCallDebug = {
+  contacts_fetched: number;
+  conv_error: string | null;
+  convs_fetched: number;
+  conv_ids: number;
+  twilio_msgs_error: string | null;
+  twilio_msgs_fetched: number;
+  maytapi_msgs_error: string | null;
+  maytapi_msgs_fetched: number;
+  contacts_with_twilio: number;
+  composed_before_cap: number;
+  selected_after_cap: number;
+};
+
 export function displayName(c: { name: string | null; first_name: string | null; last_name: string | null; phone: string | null }): string {
   if (c.name && c.name.trim()) return c.name;
   const fn = [c.first_name, c.last_name].filter(Boolean).join(" ").trim();
@@ -60,8 +74,11 @@ type Client = ReturnType<typeof supabaseForUser>;
 /**
  * Mirrors LeadCallReport.tsx load(): contacts with at least one Twilio message,
  * folding Maytapi messages into counts/timestamps for those contacts.
+ *
+ * TEMP: includes a `debug` block (row counts + any query errors at each step)
+ * so a 0-row result can be diagnosed without guessing. Remove once confirmed healthy.
  */
-export async function loadLeadCallRows(supabase: Client): Promise<{ rows: LeadRow[] } | { error: string }> {
+export async function loadLeadCallRows(supabase: Client): Promise<{ rows: LeadRow[]; debug: LeadCallDebug } | { error: string }> {
   const { data: contacts, error: cErr } = await supabase
     .from("contacts")
     .select(
@@ -73,12 +90,27 @@ export async function loadLeadCallRows(supabase: Client): Promise<{ rows: LeadRo
   if (cErr) return { error: cErr.message };
 
   const all = (contacts ?? []) as Record<string, any>[];
-  if (all.length === 0) return { rows: [] };
+  const debug: LeadCallDebug = {
+    contacts_fetched: all.length,
+    conv_error: null,
+    convs_fetched: 0,
+    conv_ids: 0,
+    twilio_msgs_error: null,
+    twilio_msgs_fetched: 0,
+    maytapi_msgs_error: null,
+    maytapi_msgs_fetched: 0,
+    contacts_with_twilio: 0,
+    composed_before_cap: 0,
+    selected_after_cap: 0,
+  };
+  if (all.length === 0) return { rows: [], debug };
 
   const ids = all.map((c) => c.id as string);
   const phones = all.map((c) => c.phone_normalized).filter(Boolean) as string[];
 
-  const { data: convs } = await supabase.from("conversations").select("id, contact_id").in("contact_id", ids);
+  const { data: convs, error: convErr } = await supabase.from("conversations").select("id, contact_id").in("contact_id", ids);
+  debug.conv_error = convErr?.message ?? null;
+  debug.convs_fetched = (convs ?? []).length;
   const convIdToContact = new Map<string, string>();
   const convIds: string[] = [];
   for (const c of (convs ?? []) as Record<string, any>[]) {
@@ -86,15 +118,18 @@ export async function loadLeadCallRows(supabase: Client): Promise<{ rows: LeadRo
     convIdToContact.set(c.id, c.contact_id);
     convIds.push(c.id);
   }
+  debug.conv_ids = convIds.length;
 
   const twilioByContact = new Map<string, ThreadMsg[]>();
   if (convIds.length > 0) {
-    const { data: msgs } = await supabase
+    const { data: msgs, error: msgErr } = await supabase
       .from("messages")
       .select("conversation_id, content, is_outbound, created_at")
       .in("conversation_id", convIds)
       .order("created_at", { ascending: true })
       .limit(5000);
+    debug.twilio_msgs_error = msgErr?.message ?? null;
+    debug.twilio_msgs_fetched = (msgs ?? []).length;
     for (const m of (msgs ?? []) as Record<string, any>[]) {
       const cid = convIdToContact.get(m.conversation_id);
       if (!cid) continue;
@@ -105,12 +140,14 @@ export async function loadLeadCallRows(supabase: Client): Promise<{ rows: LeadRo
   }
 
   const maytapiByContact = new Map<string, ThreadMsg[]>();
-  const { data: mMsgs } = await supabase
+  const { data: mMsgs, error: mMsgErr } = await supabase
     .from("maytapi_messages")
     .select("contact_id, phone_e164, direction, body, received_at")
     .or(`contact_id.in.(${ids.join(",")}),phone_e164.in.(${phones.map((p) => `"${p}"`).join(",") || '""'})`)
     .order("received_at", { ascending: true })
     .limit(5000);
+  debug.maytapi_msgs_error = mMsgErr?.message ?? null;
+  debug.maytapi_msgs_fetched = (mMsgs ?? []).length;
   const phoneToContact = new Map<string, string>();
   for (const c of all) if (c.phone_normalized) phoneToContact.set(c.phone_normalized, c.id);
   for (const m of (mMsgs ?? []) as Record<string, any>[]) {
@@ -158,12 +195,16 @@ export async function loadLeadCallRows(supabase: Client): Promise<{ rows: LeadRo
     })
     .filter((r) => (r as LeadRow & { _hasTwilio: boolean })._hasTwilio);
 
+  debug.contacts_with_twilio = composed.length;
+  debug.composed_before_cap = composed.length;
+
   const distributors = composed.filter((r) => r.is_distributor);
   const rest = composed
     .filter((r) => !r.is_distributor)
     .sort((a, b) => (b.last_message || b.updated_at).localeCompare(a.last_message || a.updated_at));
   const capRoom = Math.max(0, HARD_CAP - distributors.length);
   const selected = [...distributors, ...rest.slice(0, capRoom)];
+  debug.selected_after_cap = selected.length;
 
   const selIds = selected.map((r) => r.id);
   if (selIds.length > 0) {
@@ -176,5 +217,5 @@ export async function loadLeadCallRows(supabase: Client): Promise<{ rows: LeadRo
     for (const r of selected) r.summary = map.get(r.id) ?? null;
   }
 
-  return { rows: selected };
+  return { rows: selected, debug };
 }
