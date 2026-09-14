@@ -1900,10 +1900,25 @@ async function loadLeadCallRows(supabase) {
   ).eq("is_deleted", false).order("updated_at", { ascending: false }).limit(500);
   if (cErr) return { error: cErr.message };
   const all = contacts ?? [];
-  if (all.length === 0) return { rows: [] };
+  const debug = {
+    contacts_fetched: all.length,
+    conv_error: null,
+    convs_fetched: 0,
+    conv_ids: 0,
+    twilio_msgs_error: null,
+    twilio_msgs_fetched: 0,
+    maytapi_msgs_error: null,
+    maytapi_msgs_fetched: 0,
+    contacts_with_twilio: 0,
+    composed_before_cap: 0,
+    selected_after_cap: 0
+  };
+  if (all.length === 0) return { rows: [], debug };
   const ids = all.map((c) => c.id);
   const phones = all.map((c) => c.phone_normalized).filter(Boolean);
-  const { data: convs } = await supabase.from("conversations").select("id, contact_id").in("contact_id", ids);
+  const { data: convs, error: convErr } = await supabase.from("conversations").select("id, contact_id").in("contact_id", ids);
+  debug.conv_error = convErr?.message ?? null;
+  debug.convs_fetched = (convs ?? []).length;
   const convIdToContact = /* @__PURE__ */ new Map();
   const convIds = [];
   for (const c of convs ?? []) {
@@ -1911,9 +1926,12 @@ async function loadLeadCallRows(supabase) {
     convIdToContact.set(c.id, c.contact_id);
     convIds.push(c.id);
   }
+  debug.conv_ids = convIds.length;
   const twilioByContact = /* @__PURE__ */ new Map();
   if (convIds.length > 0) {
-    const { data: msgs } = await supabase.from("messages").select("conversation_id, content, is_outbound, created_at").in("conversation_id", convIds).order("created_at", { ascending: true }).limit(5e3);
+    const { data: msgs, error: msgErr } = await supabase.from("messages").select("conversation_id, content, is_outbound, created_at").in("conversation_id", convIds).order("created_at", { ascending: true }).limit(5e3);
+    debug.twilio_msgs_error = msgErr?.message ?? null;
+    debug.twilio_msgs_fetched = (msgs ?? []).length;
     for (const m of msgs ?? []) {
       const cid = convIdToContact.get(m.conversation_id);
       if (!cid) continue;
@@ -1923,7 +1941,9 @@ async function loadLeadCallRows(supabase) {
     }
   }
   const maytapiByContact = /* @__PURE__ */ new Map();
-  const { data: mMsgs } = await supabase.from("maytapi_messages").select("contact_id, phone_e164, direction, body, received_at").or(`contact_id.in.(${ids.join(",")}),phone_e164.in.(${phones.map((p) => `"${p}"`).join(",") || '""'})`).order("received_at", { ascending: true }).limit(5e3);
+  const { data: mMsgs, error: mMsgErr } = await supabase.from("maytapi_messages").select("contact_id, phone_e164, direction, body, received_at").or(`contact_id.in.(${ids.join(",")}),phone_e164.in.(${phones.map((p) => `"${p}"`).join(",") || '""'})`).order("received_at", { ascending: true }).limit(5e3);
+  debug.maytapi_msgs_error = mMsgErr?.message ?? null;
+  debug.maytapi_msgs_fetched = (mMsgs ?? []).length;
   const phoneToContact = /* @__PURE__ */ new Map();
   for (const c of all) if (c.phone_normalized) phoneToContact.set(c.phone_normalized, c.id);
   for (const m of mMsgs ?? []) {
@@ -1964,10 +1984,13 @@ async function loadLeadCallRows(supabase) {
       _hasTwilio: twilio.length > 0
     };
   }).filter((r) => r._hasTwilio);
+  debug.contacts_with_twilio = composed.length;
+  debug.composed_before_cap = composed.length;
   const distributors = composed.filter((r) => r.is_distributor);
   const rest = composed.filter((r) => !r.is_distributor).sort((a, b) => (b.last_message || b.updated_at).localeCompare(a.last_message || a.updated_at));
   const capRoom = Math.max(0, HARD_CAP - distributors.length);
   const selected = [...distributors, ...rest.slice(0, capRoom)];
+  debug.selected_after_cap = selected.length;
   const selIds = selected.map((r) => r.id);
   if (selIds.length > 0) {
     const { data: cachedRows } = await supabase.from("lead_call_summaries").select("contact_id, summary").in("contact_id", selIds);
@@ -1975,29 +1998,38 @@ async function loadLeadCallRows(supabase) {
     for (const r of cachedRows ?? []) map.set(r.contact_id, r.summary);
     for (const r of selected) r.summary = map.get(r.id) ?? null;
   }
-  return { rows: selected };
+  return { rows: selected, debug };
 }
 
 // src/lib/mcp/tools/get-lead-call-report.ts
+var dateStr = z32.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
 var get_lead_call_report_default = defineTool36({
   name: "get_lead_call_report",
   title: "Get the Lead Call Report",
-  description: "Read the Lead Call Report: contacts who have at least one Twilio message, with computed first inquiry date, last message date, message count, distributor-interest flag, and any cached AI summary. Mirrors the in-app Lead Call Report (src/components/vanto/reports/LeadCallReport.tsx) but is sortable newest-first.",
+  description: "Read the Lead Call Report: contacts who have at least one Twilio message, with computed first inquiry date, last message date, message count, distributor-interest flag, and any cached AI summary. Mirrors the in-app Lead Call Report (src/components/vanto/reports/LeadCallReport.tsx), including its First Inquiry / Last Msg date-range filters, and is sortable newest-first or oldest-first.",
   inputSchema: {
     sort_by: z32.enum(["last_message", "first_inquiry", "msgs"]).optional().describe("Sort field (default last_message)."),
     sort_dir: z32.enum(["asc", "desc"]).optional().describe("Sort direction (default desc = newest first)."),
     only_distributors: z32.boolean().optional().describe("Only contacts flagged with distributor interest."),
     search: z32.string().optional().describe("Free-text match on name or phone."),
+    first_inquiry_from: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose first inquiry is on/after this date."),
+    first_inquiry_to: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose first inquiry is on/before this date."),
+    last_message_from: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose last message is on/after this date."),
+    last_message_to: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose last message is on/before this date."),
     limit: z32.number().int().min(1).max(100).optional().describe("Max rows (default 50, cap 100).")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-  handler: async ({ sort_by, sort_dir, only_distributors, search, limit }, ctx) => {
+  handler: async ({ sort_by, sort_dir, only_distributors, search, first_inquiry_from, first_inquiry_to, last_message_from, last_message_to, limit }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
     const loaded = await loadLeadCallRows(supabase);
     if ("error" in loaded) return { content: [{ type: "text", text: loaded.error }], isError: true };
     let rows = loaded.rows;
     if (only_distributors) rows = rows.filter((r) => r.is_distributor);
+    if (first_inquiry_from) rows = rows.filter((r) => r.first_inquiry && r.first_inquiry.slice(0, 10) >= first_inquiry_from);
+    if (first_inquiry_to) rows = rows.filter((r) => r.first_inquiry && r.first_inquiry.slice(0, 10) <= first_inquiry_to);
+    if (last_message_from) rows = rows.filter((r) => r.last_message && r.last_message.slice(0, 10) >= last_message_from);
+    if (last_message_to) rows = rows.filter((r) => r.last_message && r.last_message.slice(0, 10) <= last_message_to);
     const q = (search ?? "").trim().toLowerCase();
     if (q) {
       const qDigits = q.replace(/\D/g, "");
@@ -2028,7 +2060,7 @@ var get_lead_call_report_default = defineTool36({
       msg_count: r.msg_count,
       summary: r.summary
     }));
-    const result = { count: contacts.length, contacts };
+    const result = { count: contacts.length, contacts, _debug: loaded.debug };
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       structuredContent: result
