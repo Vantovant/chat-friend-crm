@@ -1889,6 +1889,12 @@ var DISTRIBUTOR_PATTERNS = [
   /\bbecome (a )?(distributor|member|partner)\b/i
 ];
 var HARD_CAP = 100;
+var IN_CHUNK_SIZE = 80;
+function chunk(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
 function displayName(c) {
   if (c.name && c.name.trim()) return c.name;
   const fn = [c.first_name, c.last_name].filter(Boolean).join(" ").trim();
@@ -1916,22 +1922,27 @@ async function loadLeadCallRows(supabase) {
   if (all.length === 0) return { rows: [], debug };
   const ids = all.map((c) => c.id);
   const phones = all.map((c) => c.phone_normalized).filter(Boolean);
-  const { data: convs, error: convErr } = await supabase.from("conversations").select("id, contact_id").in("contact_id", ids);
-  debug.conv_error = convErr?.message ?? null;
-  debug.convs_fetched = (convs ?? []).length;
   const convIdToContact = /* @__PURE__ */ new Map();
   const convIds = [];
-  for (const c of convs ?? []) {
-    if (!c.contact_id) continue;
-    convIdToContact.set(c.id, c.contact_id);
-    convIds.push(c.id);
+  const convErrors = [];
+  for (const idChunk of chunk(ids, IN_CHUNK_SIZE)) {
+    const { data: convs, error: convErr } = await supabase.from("conversations").select("id, contact_id").in("contact_id", idChunk);
+    if (convErr) convErrors.push(convErr.message);
+    debug.convs_fetched += (convs ?? []).length;
+    for (const c of convs ?? []) {
+      if (!c.contact_id) continue;
+      convIdToContact.set(c.id, c.contact_id);
+      convIds.push(c.id);
+    }
   }
+  debug.conv_error = convErrors.length > 0 ? convErrors.join(" | ") : null;
   debug.conv_ids = convIds.length;
   const twilioByContact = /* @__PURE__ */ new Map();
-  if (convIds.length > 0) {
-    const { data: msgs, error: msgErr } = await supabase.from("messages").select("conversation_id, content, is_outbound, created_at").in("conversation_id", convIds).order("created_at", { ascending: true }).limit(5e3);
-    debug.twilio_msgs_error = msgErr?.message ?? null;
-    debug.twilio_msgs_fetched = (msgs ?? []).length;
+  const twilioErrors = [];
+  for (const convIdChunk of chunk(convIds, IN_CHUNK_SIZE)) {
+    const { data: msgs, error: msgErr } = await supabase.from("messages").select("conversation_id, content, is_outbound, created_at").in("conversation_id", convIdChunk).order("created_at", { ascending: true }).limit(5e3);
+    if (msgErr) twilioErrors.push(msgErr.message);
+    debug.twilio_msgs_fetched += (msgs ?? []).length;
     for (const m of msgs ?? []) {
       const cid = convIdToContact.get(m.conversation_id);
       if (!cid) continue;
@@ -1940,19 +1951,32 @@ async function loadLeadCallRows(supabase) {
       twilioByContact.set(cid, arr);
     }
   }
+  debug.twilio_msgs_error = twilioErrors.length > 0 ? twilioErrors.join(" | ") : null;
   const maytapiByContact = /* @__PURE__ */ new Map();
-  const { data: mMsgs, error: mMsgErr } = await supabase.from("maytapi_messages").select("contact_id, phone_e164, direction, body, received_at").or(`contact_id.in.(${ids.join(",")}),phone_e164.in.(${phones.map((p) => `"${p}"`).join(",") || '""'})`).order("received_at", { ascending: true }).limit(5e3);
-  debug.maytapi_msgs_error = mMsgErr?.message ?? null;
-  debug.maytapi_msgs_fetched = (mMsgs ?? []).length;
+  const maytapiErrors = [];
   const phoneToContact = /* @__PURE__ */ new Map();
   for (const c of all) if (c.phone_normalized) phoneToContact.set(c.phone_normalized, c.id);
-  for (const m of mMsgs ?? []) {
-    const cid = m.contact_id || (m.phone_e164 ? phoneToContact.get(m.phone_e164) : null);
-    if (!cid) continue;
-    const arr = maytapiByContact.get(cid) ?? [];
-    arr.push({ ts: m.received_at, direction: m.direction === "outbound" ? "out" : "in", channel: "maytapi", body: m.body ?? "" });
-    maytapiByContact.set(cid, arr);
+  function recordMaytapiRows(rows) {
+    debug.maytapi_msgs_fetched += rows.length;
+    for (const m of rows) {
+      const cid = m.contact_id || (m.phone_e164 ? phoneToContact.get(m.phone_e164) : null);
+      if (!cid) continue;
+      const arr = maytapiByContact.get(cid) ?? [];
+      arr.push({ ts: m.received_at, direction: m.direction === "outbound" ? "out" : "in", channel: "maytapi", body: m.body ?? "" });
+      maytapiByContact.set(cid, arr);
+    }
   }
+  for (const idChunk of chunk(ids, IN_CHUNK_SIZE)) {
+    const { data: mMsgs, error: mErr } = await supabase.from("maytapi_messages").select("contact_id, phone_e164, direction, body, received_at").in("contact_id", idChunk).order("received_at", { ascending: true }).limit(5e3);
+    if (mErr) maytapiErrors.push(mErr.message);
+    else recordMaytapiRows(mMsgs ?? []);
+  }
+  for (const phoneChunk of chunk(phones, IN_CHUNK_SIZE)) {
+    const { data: mMsgs, error: mErr } = await supabase.from("maytapi_messages").select("contact_id, phone_e164, direction, body, received_at").in("phone_e164", phoneChunk).order("received_at", { ascending: true }).limit(5e3);
+    if (mErr) maytapiErrors.push(mErr.message);
+    else recordMaytapiRows(mMsgs ?? []);
+  }
+  debug.maytapi_msgs_error = maytapiErrors.length > 0 ? maytapiErrors.join(" | ") : null;
   const composed = all.map((c) => {
     const twilio = twilioByContact.get(c.id) ?? [];
     const maytapi = maytapiByContact.get(c.id) ?? [];
@@ -1993,10 +2017,12 @@ async function loadLeadCallRows(supabase) {
   debug.selected_after_cap = selected.length;
   const selIds = selected.map((r) => r.id);
   if (selIds.length > 0) {
-    const { data: cachedRows } = await supabase.from("lead_call_summaries").select("contact_id, summary").in("contact_id", selIds);
-    const map = /* @__PURE__ */ new Map();
-    for (const r of cachedRows ?? []) map.set(r.contact_id, r.summary);
-    for (const r of selected) r.summary = map.get(r.id) ?? null;
+    for (const idChunk of chunk(selIds, IN_CHUNK_SIZE)) {
+      const { data: cachedRows } = await supabase.from("lead_call_summaries").select("contact_id, summary").in("contact_id", idChunk);
+      const map = /* @__PURE__ */ new Map();
+      for (const r of cachedRows ?? []) map.set(r.contact_id, r.summary);
+      for (const r of selected) if (map.has(r.id)) r.summary = map.get(r.id) ?? null;
+    }
   }
   return { rows: selected, debug };
 }
