@@ -3,20 +3,29 @@ import { z } from "zod";
 import { notAuthenticated, supabaseForUser } from "../supabase";
 import { loadLeadCallRows } from "./lead-call-report-data";
 
+const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
+
 export default defineTool({
   name: "get_lead_call_report",
   title: "Get the Lead Call Report",
   description:
-    "Read the Lead Call Report: contacts who have at least one Twilio message, with computed first inquiry date, last message date, message count, distributor-interest flag, and any cached AI summary. Mirrors the in-app Lead Call Report (src/components/vanto/reports/LeadCallReport.tsx) but is sortable newest-first.",
+    "Read the Lead Call Report: contacts who have at least one Twilio message, with computed first inquiry date, last message date, message count, distributor-interest flag, and any cached AI summary. Mirrors the in-app Lead Call Report (src/components/vanto/reports/LeadCallReport.tsx), including its First Inquiry / Last Msg date-range filters, and is sortable newest-first or oldest-first.",
   inputSchema: {
     sort_by: z.enum(["last_message", "first_inquiry", "msgs"]).optional().describe("Sort field (default last_message)."),
     sort_dir: z.enum(["asc", "desc"]).optional().describe("Sort direction (default desc = newest first)."),
     only_distributors: z.boolean().optional().describe("Only contacts flagged with distributor interest."),
     search: z.string().optional().describe("Free-text match on name or phone."),
+    first_inquiry_from: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose first inquiry is on/after this date."),
+    first_inquiry_to: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose first inquiry is on/before this date."),
+    last_message_from: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose last message is on/after this date."),
+    last_message_to: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose last message is on/before this date."),
     limit: z.number().int().min(1).max(100).optional().describe("Max rows (default 50, cap 100)."),
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-  handler: async ({ sort_by, sort_dir, only_distributors, search, limit }, ctx) => {
+  handler: async (
+    { sort_by, sort_dir, only_distributors, search, first_inquiry_from, first_inquiry_to, last_message_from, last_message_to, limit },
+    ctx,
+  ) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
 
@@ -25,6 +34,13 @@ export default defineTool({
 
     let rows = loaded.rows;
     if (only_distributors) rows = rows.filter((r) => r.is_distributor);
+
+    // Same YYYY-MM-DD string-slice comparison as LeadCallReport.tsx's `filtered` memo.
+    if (first_inquiry_from) rows = rows.filter((r) => r.first_inquiry && r.first_inquiry.slice(0, 10) >= first_inquiry_from);
+    if (first_inquiry_to) rows = rows.filter((r) => r.first_inquiry && r.first_inquiry.slice(0, 10) <= first_inquiry_to);
+    if (last_message_from) rows = rows.filter((r) => r.last_message && r.last_message.slice(0, 10) >= last_message_from);
+    if (last_message_to) rows = rows.filter((r) => r.last_message && r.last_message.slice(0, 10) <= last_message_to);
+
     const q = (search ?? "").trim().toLowerCase();
     if (q) {
       const qDigits = q.replace(/\D/g, "");
