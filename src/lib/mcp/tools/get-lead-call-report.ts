@@ -74,7 +74,9 @@ export default defineTool({
       summary: r.summary,
     }));
 
-    const result = { count: contacts.length, contacts };
+    // TEMP: surface loadLeadCallRows' debug block so a 0-row result can be
+    // diagnosed without guessing. Remove once root-caused.
+    const result = { count: contacts.length, contacts, _debug: loaded.debug };
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       structuredContent: result,
