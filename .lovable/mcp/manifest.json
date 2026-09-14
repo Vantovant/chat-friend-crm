@@ -245,7 +245,7 @@
       {
         "name": "update_contact",
         "title": "Update a contact",
-        "description": "Update editable fields on a contact: name, email, lead type, temperature, tags, or the do-not-contact flag. Phone numbers are never changed here.",
+        "description": "Update editable fields on a contact: name, email, lead type, temperature, tags, notes, pipeline stage, or the do-not-contact flag. Phone numbers are never changed here. A pipeline stage change is logged to contact_activity.",
         "annotations": {
           "readOnlyHint": false,
           "destructiveHint": false,
@@ -298,6 +298,24 @@
             },
             "do_not_contact": {
               "type": "boolean"
+            },
+            "notes": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "stage_id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Pipeline stage UUID, or null to unassign."
             }
           },
           "required": [

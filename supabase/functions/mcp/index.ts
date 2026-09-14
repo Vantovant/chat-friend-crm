@@ -467,7 +467,7 @@ import { z as z6 } from "npm:zod@^3.25.76";
 var update_contact_default = defineTool10({
   name: "update_contact",
   title: "Update a contact",
-  description: "Update editable fields on a contact: name, email, lead type, temperature, tags, or the do-not-contact flag. Phone numbers are never changed here.",
+  description: "Update editable fields on a contact: name, email, lead type, temperature, tags, notes, pipeline stage, or the do-not-contact flag. Phone numbers are never changed here. A pipeline stage change is logged to contact_activity.",
   inputSchema: {
     contact_id: z6.string().uuid().describe("Contact UUID."),
     name: z6.string().optional(),
@@ -475,7 +475,9 @@ var update_contact_default = defineTool10({
     lead_type: z6.enum(["prospect", "registered", "buyer", "vip"]).optional(),
     temperature: z6.enum(["hot", "warm", "cold"]).optional(),
     tags: z6.array(z6.string()).optional(),
-    do_not_contact: z6.boolean().optional()
+    do_not_contact: z6.boolean().optional(),
+    notes: z6.string().nullable().optional(),
+    stage_id: z6.string().uuid().nullable().optional().describe("Pipeline stage UUID, or null to unassign.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   handler: async (input, ctx) => {
@@ -489,11 +491,45 @@ var update_contact_default = defineTool10({
       return { content: [{ type: "text", text: "No updatable fields provided" }], isError: true };
     }
     const supabase = supabaseForUser(ctx);
-    const { data, error } = await supabase.from("contacts").update(updates).eq("id", contact_id).eq("is_deleted", false).select("id, name, phone_normalized, email, lead_type, temperature, tags, do_not_contact, updated_at").single();
+    let prevStageId = null;
+    const stageChangeRequested = fields.stage_id !== void 0;
+    if (stageChangeRequested) {
+      const { data: current, error: readErr } = await supabase.from("contacts").select("stage_id").eq("id", contact_id).eq("is_deleted", false).maybeSingle();
+      if (readErr) return { content: [{ type: "text", text: readErr.message }], isError: true };
+      if (!current) return { content: [{ type: "text", text: "Contact not found" }], isError: true };
+      prevStageId = current.stage_id ?? null;
+    }
+    const { data, error } = await supabase.from("contacts").update(updates).eq("id", contact_id).eq("is_deleted", false).select("id, name, phone_normalized, email, lead_type, temperature, tags, notes, stage_id, do_not_contact, updated_at").single();
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    let stage_change_logged = false;
+    const newStageId = fields.stage_id ?? null;
+    if (stageChangeRequested && prevStageId !== newStageId) {
+      const stageIds = [prevStageId, newStageId].filter((id) => !!id);
+      const nameById = /* @__PURE__ */ new Map();
+      if (stageIds.length > 0) {
+        const { data: stages } = await supabase.from("pipeline_stages").select("id, name").in("id", stageIds);
+        for (const s of stages ?? []) nameById.set(s.id, s.name);
+      }
+      const performedBy = ctx.getUserId();
+      if (performedBy) {
+        const { error: actErr } = await supabase.from("contact_activity").insert({
+          contact_id,
+          performed_by: performedBy,
+          type: "stage_changed",
+          metadata: {
+            from_stage: prevStageId && nameById.get(prevStageId) || "Unassigned",
+            to_stage: newStageId && nameById.get(newStageId) || "Unassigned",
+            from_stage_id: prevStageId,
+            to_stage_id: newStageId,
+            source: "lead_call_report"
+          }
+        });
+        stage_change_logged = !actErr;
+      }
+    }
     return {
-      content: [{ type: "text", text: JSON.stringify(data) }],
-      structuredContent: { contact: data }
+      content: [{ type: "text", text: JSON.stringify({ contact: data, stage_change_logged }) }],
+      structuredContent: { contact: data, stage_change_logged }
     };
   }
 });
