@@ -25,6 +25,22 @@ export const DISTRIBUTOR_PATTERNS: RegExp[] = [
 
 export const HARD_CAP = 100;
 
+// PostgREST .in() filters land in the URL query string. With up to 500
+// contact UUIDs in one call, the resulting URL (~20k chars) trips an
+// HTTP/2 protocol error on this edge runtime's HTTP client (confirmed live:
+// "stream error detected: unspecific protocol error" from the conversations
+// query, "Bad Request" from the maytapi_messages .or() query, both with
+// 500 ids in a single filter). Chunking keeps each request's URL well
+// under that ceiling. 80 ids/chunk keeps each request comfortably small
+// even for the maytapi query, which packs both ids and phone numbers.
+const IN_CHUNK_SIZE = 80;
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
 export type ThreadMsg = { ts: string; direction: "in" | "out"; channel: "twilio" | "maytapi"; body: string };
 
 export type LeadRow = {
@@ -75,8 +91,8 @@ type Client = ReturnType<typeof supabaseForUser>;
  * Mirrors LeadCallReport.tsx load(): contacts with at least one Twilio message,
  * folding Maytapi messages into counts/timestamps for those contacts.
  *
- * TEMP: includes a `debug` block (row counts + any query errors at each step)
- * so a 0-row result can be diagnosed without guessing. Remove once confirmed healthy.
+ * Includes a `debug` block (row counts + any query errors captured per chunk)
+ * so a future 0-row result can be diagnosed without guessing.
  */
 export async function loadLeadCallRows(supabase: Client): Promise<{ rows: LeadRow[]; debug: LeadCallDebug } | { error: string }> {
   const { data: contacts, error: cErr } = await supabase
@@ -108,28 +124,35 @@ export async function loadLeadCallRows(supabase: Client): Promise<{ rows: LeadRo
   const ids = all.map((c) => c.id as string);
   const phones = all.map((c) => c.phone_normalized).filter(Boolean) as string[];
 
-  const { data: convs, error: convErr } = await supabase.from("conversations").select("id, contact_id").in("contact_id", ids);
-  debug.conv_error = convErr?.message ?? null;
-  debug.convs_fetched = (convs ?? []).length;
+  // --- conversations, chunked by contact_id ---
   const convIdToContact = new Map<string, string>();
   const convIds: string[] = [];
-  for (const c of (convs ?? []) as Record<string, any>[]) {
-    if (!c.contact_id) continue;
-    convIdToContact.set(c.id, c.contact_id);
-    convIds.push(c.id);
+  const convErrors: string[] = [];
+  for (const idChunk of chunk(ids, IN_CHUNK_SIZE)) {
+    const { data: convs, error: convErr } = await supabase.from("conversations").select("id, contact_id").in("contact_id", idChunk);
+    if (convErr) convErrors.push(convErr.message);
+    debug.convs_fetched += (convs ?? []).length;
+    for (const c of (convs ?? []) as Record<string, any>[]) {
+      if (!c.contact_id) continue;
+      convIdToContact.set(c.id, c.contact_id);
+      convIds.push(c.id);
+    }
   }
+  debug.conv_error = convErrors.length > 0 ? convErrors.join(" | ") : null;
   debug.conv_ids = convIds.length;
 
+  // --- twilio messages, chunked by conversation_id ---
   const twilioByContact = new Map<string, ThreadMsg[]>();
-  if (convIds.length > 0) {
+  const twilioErrors: string[] = [];
+  for (const convIdChunk of chunk(convIds, IN_CHUNK_SIZE)) {
     const { data: msgs, error: msgErr } = await supabase
       .from("messages")
       .select("conversation_id, content, is_outbound, created_at")
-      .in("conversation_id", convIds)
+      .in("conversation_id", convIdChunk)
       .order("created_at", { ascending: true })
       .limit(5000);
-    debug.twilio_msgs_error = msgErr?.message ?? null;
-    debug.twilio_msgs_fetched = (msgs ?? []).length;
+    if (msgErr) twilioErrors.push(msgErr.message);
+    debug.twilio_msgs_fetched += (msgs ?? []).length;
     for (const m of (msgs ?? []) as Record<string, any>[]) {
       const cid = convIdToContact.get(m.conversation_id);
       if (!cid) continue;
@@ -138,25 +161,47 @@ export async function loadLeadCallRows(supabase: Client): Promise<{ rows: LeadRo
       twilioByContact.set(cid, arr);
     }
   }
+  debug.twilio_msgs_error = twilioErrors.length > 0 ? twilioErrors.join(" | ") : null;
 
+  // --- maytapi messages, chunked separately by contact_id and by phone_e164 (still two OR'd
+  //     clauses per request, but each request now carries far fewer values) ---
   const maytapiByContact = new Map<string, ThreadMsg[]>();
-  const { data: mMsgs, error: mMsgErr } = await supabase
-    .from("maytapi_messages")
-    .select("contact_id, phone_e164, direction, body, received_at")
-    .or(`contact_id.in.(${ids.join(",")}),phone_e164.in.(${phones.map((p) => `"${p}"`).join(",") || '""'})`)
-    .order("received_at", { ascending: true })
-    .limit(5000);
-  debug.maytapi_msgs_error = mMsgErr?.message ?? null;
-  debug.maytapi_msgs_fetched = (mMsgs ?? []).length;
+  const maytapiErrors: string[] = [];
   const phoneToContact = new Map<string, string>();
   for (const c of all) if (c.phone_normalized) phoneToContact.set(c.phone_normalized, c.id);
-  for (const m of (mMsgs ?? []) as Record<string, any>[]) {
-    const cid = m.contact_id || (m.phone_e164 ? phoneToContact.get(m.phone_e164) : null);
-    if (!cid) continue;
-    const arr = maytapiByContact.get(cid) ?? [];
-    arr.push({ ts: m.received_at, direction: m.direction === "outbound" ? "out" : "in", channel: "maytapi", body: m.body ?? "" });
-    maytapiByContact.set(cid, arr);
+
+  function recordMaytapiRows(rows: Record<string, any>[]) {
+    debug.maytapi_msgs_fetched += rows.length;
+    for (const m of rows) {
+      const cid = m.contact_id || (m.phone_e164 ? phoneToContact.get(m.phone_e164) : null);
+      if (!cid) continue;
+      const arr = maytapiByContact.get(cid) ?? [];
+      arr.push({ ts: m.received_at, direction: m.direction === "outbound" ? "out" : "in", channel: "maytapi", body: m.body ?? "" });
+      maytapiByContact.set(cid, arr);
+    }
   }
+
+  for (const idChunk of chunk(ids, IN_CHUNK_SIZE)) {
+    const { data: mMsgs, error: mErr } = await supabase
+      .from("maytapi_messages")
+      .select("contact_id, phone_e164, direction, body, received_at")
+      .in("contact_id", idChunk)
+      .order("received_at", { ascending: true })
+      .limit(5000);
+    if (mErr) maytapiErrors.push(mErr.message);
+    else recordMaytapiRows((mMsgs ?? []) as Record<string, any>[]);
+  }
+  for (const phoneChunk of chunk(phones, IN_CHUNK_SIZE)) {
+    const { data: mMsgs, error: mErr } = await supabase
+      .from("maytapi_messages")
+      .select("contact_id, phone_e164, direction, body, received_at")
+      .in("phone_e164", phoneChunk)
+      .order("received_at", { ascending: true })
+      .limit(5000);
+    if (mErr) maytapiErrors.push(mErr.message);
+    else recordMaytapiRows((mMsgs ?? []) as Record<string, any>[]);
+  }
+  debug.maytapi_msgs_error = maytapiErrors.length > 0 ? maytapiErrors.join(" | ") : null;
 
   const composed: LeadRow[] = all
     .map((c) => {
@@ -208,13 +253,12 @@ export async function loadLeadCallRows(supabase: Client): Promise<{ rows: LeadRo
 
   const selIds = selected.map((r) => r.id);
   if (selIds.length > 0) {
-    const { data: cachedRows } = await supabase
-      .from("lead_call_summaries")
-      .select("contact_id, summary")
-      .in("contact_id", selIds);
-    const map = new Map<string, unknown>();
-    for (const r of (cachedRows ?? []) as Record<string, any>[]) map.set(r.contact_id, r.summary);
-    for (const r of selected) r.summary = map.get(r.id) ?? null;
+    for (const idChunk of chunk(selIds, IN_CHUNK_SIZE)) {
+      const { data: cachedRows } = await supabase.from("lead_call_summaries").select("contact_id, summary").in("contact_id", idChunk);
+      const map = new Map<string, unknown>();
+      for (const r of (cachedRows ?? []) as Record<string, any>[]) map.set(r.contact_id, r.summary);
+      for (const r of selected) if (map.has(r.id)) r.summary = map.get(r.id) ?? null;
+    }
   }
 
   return { rows: selected, debug };
