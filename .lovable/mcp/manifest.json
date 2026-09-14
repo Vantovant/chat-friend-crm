@@ -12,7 +12,7 @@
   "mcp": {
     "server": {
       "name": "get-well-hub",
-      "version": "1.5.0",
+      "version": "1.6.0",
       "title": "Get Well Hub"
     },
     "tools": [
@@ -216,6 +216,89 @@
         "outputSchema": null
       },
       {
+        "name": "get_lead_call_report",
+        "title": "Get the Lead Call Report",
+        "description": "Read the Lead Call Report: contacts who have at least one Twilio message, with computed first inquiry date, last message date, message count, distributor-interest flag, and any cached AI summary. Mirrors the in-app Lead Call Report (src/components/vanto/reports/LeadCallReport.tsx) but is sortable newest-first.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sort_by": {
+              "type": "string",
+              "enum": [
+                "last_message",
+                "first_inquiry",
+                "msgs"
+              ],
+              "description": "Sort field (default last_message)."
+            },
+            "sort_dir": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "description": "Sort direction (default desc = newest first)."
+            },
+            "only_distributors": {
+              "type": "boolean",
+              "description": "Only contacts flagged with distributor interest."
+            },
+            "search": {
+              "type": "string",
+              "description": "Free-text match on name or phone."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "description": "Max rows (default 50, cap 100)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "generate_lead_call_summaries",
+        "title": "Generate Lead Call Report summaries",
+        "description": "Generate (or regenerate) AI summaries for Lead Call Report contacts by invoking the same summarize-lead-conversation edge function the in-app 'Generate summaries' button uses. Pass specific contact_ids, or omit to auto-target contacts from get_lead_call_report that don't have a cached summary yet.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "contact_ids": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "description": "Specific contacts to summarize."
+            },
+            "missing_only": {
+              "type": "boolean",
+              "description": "When contact_ids omitted, only contacts without a cached summary (default true)."
+            },
+            "force": {
+              "type": "boolean",
+              "description": "Force regeneration even if cached (default false)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
         "name": "get_contact",
         "title": "Get a contact",
         "description": "Fetch one contact by id or normalized phone number, together with its 10 most recent activity records.",
@@ -245,7 +328,7 @@
       {
         "name": "update_contact",
         "title": "Update a contact",
-        "description": "Update editable fields on a contact: name, email, lead type, temperature, tags, or the do-not-contact flag. Phone numbers are never changed here.",
+        "description": "Update editable fields on a contact: name, email, lead type, temperature, tags, notes, pipeline stage, or the do-not-contact flag. Phone numbers are never changed here. A pipeline stage change is logged to contact_activity.",
         "annotations": {
           "readOnlyHint": false,
           "destructiveHint": false,
@@ -298,6 +381,24 @@
             },
             "do_not_contact": {
               "type": "boolean"
+            },
+            "notes": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "stage_id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Pipeline stage UUID, or null to unassign."
             }
           },
           "required": [

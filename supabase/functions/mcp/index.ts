@@ -467,7 +467,7 @@ import { z as z6 } from "npm:zod@^3.25.76";
 var update_contact_default = defineTool10({
   name: "update_contact",
   title: "Update a contact",
-  description: "Update editable fields on a contact: name, email, lead type, temperature, tags, or the do-not-contact flag. Phone numbers are never changed here.",
+  description: "Update editable fields on a contact: name, email, lead type, temperature, tags, notes, pipeline stage, or the do-not-contact flag. Phone numbers are never changed here. A pipeline stage change is logged to contact_activity.",
   inputSchema: {
     contact_id: z6.string().uuid().describe("Contact UUID."),
     name: z6.string().optional(),
@@ -475,7 +475,9 @@ var update_contact_default = defineTool10({
     lead_type: z6.enum(["prospect", "registered", "buyer", "vip"]).optional(),
     temperature: z6.enum(["hot", "warm", "cold"]).optional(),
     tags: z6.array(z6.string()).optional(),
-    do_not_contact: z6.boolean().optional()
+    do_not_contact: z6.boolean().optional(),
+    notes: z6.string().nullable().optional(),
+    stage_id: z6.string().uuid().nullable().optional().describe("Pipeline stage UUID, or null to unassign.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   handler: async (input, ctx) => {
@@ -489,11 +491,45 @@ var update_contact_default = defineTool10({
       return { content: [{ type: "text", text: "No updatable fields provided" }], isError: true };
     }
     const supabase = supabaseForUser(ctx);
-    const { data, error } = await supabase.from("contacts").update(updates).eq("id", contact_id).eq("is_deleted", false).select("id, name, phone_normalized, email, lead_type, temperature, tags, do_not_contact, updated_at").single();
+    let prevStageId = null;
+    const stageChangeRequested = fields.stage_id !== void 0;
+    if (stageChangeRequested) {
+      const { data: current, error: readErr } = await supabase.from("contacts").select("stage_id").eq("id", contact_id).eq("is_deleted", false).maybeSingle();
+      if (readErr) return { content: [{ type: "text", text: readErr.message }], isError: true };
+      if (!current) return { content: [{ type: "text", text: "Contact not found" }], isError: true };
+      prevStageId = current.stage_id ?? null;
+    }
+    const { data, error } = await supabase.from("contacts").update(updates).eq("id", contact_id).eq("is_deleted", false).select("id, name, phone_normalized, email, lead_type, temperature, tags, notes, stage_id, do_not_contact, updated_at").single();
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    let stage_change_logged = false;
+    const newStageId = fields.stage_id ?? null;
+    if (stageChangeRequested && prevStageId !== newStageId) {
+      const stageIds = [prevStageId, newStageId].filter((id) => !!id);
+      const nameById = /* @__PURE__ */ new Map();
+      if (stageIds.length > 0) {
+        const { data: stages } = await supabase.from("pipeline_stages").select("id, name").in("id", stageIds);
+        for (const s of stages ?? []) nameById.set(s.id, s.name);
+      }
+      const performedBy = ctx.getUserId();
+      if (performedBy) {
+        const { error: actErr } = await supabase.from("contact_activity").insert({
+          contact_id,
+          performed_by: performedBy,
+          type: "stage_changed",
+          metadata: {
+            from_stage: prevStageId && nameById.get(prevStageId) || "Unassigned",
+            to_stage: newStageId && nameById.get(newStageId) || "Unassigned",
+            from_stage_id: prevStageId,
+            to_stage_id: newStageId,
+            source: "lead_call_report"
+          }
+        });
+        stage_change_logged = !actErr;
+      }
+    }
     return {
-      content: [{ type: "text", text: JSON.stringify(data) }],
-      structuredContent: { contact: data }
+      content: [{ type: "text", text: JSON.stringify({ contact: data, stage_change_logged }) }],
+      structuredContent: { contact: data, stage_change_logged }
     };
   }
 });
@@ -1826,13 +1862,249 @@ var list_group_messages_default = defineTool35({
   }
 });
 
+// src/lib/mcp/tools/get-lead-call-report.ts
+import { defineTool as defineTool36 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z32 } from "npm:zod@^3.25.76";
+
+// src/lib/mcp/tools/lead-call-report-data.ts
+var DISTRIBUTOR_PATTERNS = [
+  /\bdistributor(s)?\b/i,
+  /\bdistributorship\b/i,
+  /\br\s?375\b/i,
+  /\bmembership\b/i,
+  /\bmember\s?(ship)? fee\b/i,
+  /\bbusiness associate\b/i,
+  /\bbe(ing)? (a )?(distributor(s)?|member|business associate|partner)\b/i,
+  /\bhow (do|can) i (be|become|join|register|sign up)\b.*\b(distributor(s)?|member|business associate|partner)\b/i,
+  /\binterested\b.{0,80}\b(distributor(s)?|membership|member|business opportunity|business associate|partner)\b/i,
+  /\b(distributor(s)?|membership|business opportunity|business associate|partner)\b.{0,80}\binterested\b/i,
+  /\bi want to (be|become|join|register|sign up)\b.*\b(distributor(s)?|member|business associate|partner)\b/i,
+  /\bjoin (aplgo|the business|as a distributor)\b/i,
+  /\bbusiness opportunity\b/i,
+  /\bopportunity to earn\b/i,
+  /\bearn (extra )?(income|money)\b/i,
+  /\bsponsor me\b/i,
+  /\bsign me up\b/i,
+  /\bregister (me )?as (a )?distributor\b/i,
+  /\bbecome (a )?(distributor|member|partner)\b/i
+];
+var HARD_CAP = 100;
+function displayName(c) {
+  if (c.name && c.name.trim()) return c.name;
+  const fn = [c.first_name, c.last_name].filter(Boolean).join(" ").trim();
+  return fn || c.phone || "Unnamed";
+}
+async function loadLeadCallRows(supabase) {
+  const { data: contacts, error: cErr } = await supabase.from("contacts").select(
+    "id, name, first_name, last_name, phone, phone_normalized, email, lead_type, temperature, interest, tags, notes, stage_id, created_at, updated_at"
+  ).eq("is_deleted", false).order("updated_at", { ascending: false }).limit(500);
+  if (cErr) return { error: cErr.message };
+  const all = contacts ?? [];
+  if (all.length === 0) return { rows: [] };
+  const ids = all.map((c) => c.id);
+  const phones = all.map((c) => c.phone_normalized).filter(Boolean);
+  const { data: convs } = await supabase.from("conversations").select("id, contact_id").in("contact_id", ids);
+  const convIdToContact = /* @__PURE__ */ new Map();
+  const convIds = [];
+  for (const c of convs ?? []) {
+    if (!c.contact_id) continue;
+    convIdToContact.set(c.id, c.contact_id);
+    convIds.push(c.id);
+  }
+  const twilioByContact = /* @__PURE__ */ new Map();
+  if (convIds.length > 0) {
+    const { data: msgs } = await supabase.from("messages").select("conversation_id, content, is_outbound, created_at").in("conversation_id", convIds).order("created_at", { ascending: true }).limit(5e3);
+    for (const m of msgs ?? []) {
+      const cid = convIdToContact.get(m.conversation_id);
+      if (!cid) continue;
+      const arr = twilioByContact.get(cid) ?? [];
+      arr.push({ ts: m.created_at, direction: m.is_outbound ? "out" : "in", channel: "twilio", body: m.content ?? "" });
+      twilioByContact.set(cid, arr);
+    }
+  }
+  const maytapiByContact = /* @__PURE__ */ new Map();
+  const { data: mMsgs } = await supabase.from("maytapi_messages").select("contact_id, phone_e164, direction, body, received_at").or(`contact_id.in.(${ids.join(",")}),phone_e164.in.(${phones.map((p) => `"${p}"`).join(",") || '""'})`).order("received_at", { ascending: true }).limit(5e3);
+  const phoneToContact = /* @__PURE__ */ new Map();
+  for (const c of all) if (c.phone_normalized) phoneToContact.set(c.phone_normalized, c.id);
+  for (const m of mMsgs ?? []) {
+    const cid = m.contact_id || (m.phone_e164 ? phoneToContact.get(m.phone_e164) : null);
+    if (!cid) continue;
+    const arr = maytapiByContact.get(cid) ?? [];
+    arr.push({ ts: m.received_at, direction: m.direction === "outbound" ? "out" : "in", channel: "maytapi", body: m.body ?? "" });
+    maytapiByContact.set(cid, arr);
+  }
+  const composed = all.map((c) => {
+    const twilio = twilioByContact.get(c.id) ?? [];
+    const maytapi = maytapiByContact.get(c.id) ?? [];
+    const thread = [...twilio, ...maytapi].sort((a, b) => a.ts.localeCompare(b.ts));
+    const firstInbound = thread.find((m) => m.direction === "in");
+    const lastMsg = thread[thread.length - 1];
+    const blob = `${c.lead_type || ""} ${c.interest || ""} ${c.notes || ""} ${(c.tags ?? []).join(" ")} ${thread.map((m) => m.body).join(" ")}`;
+    const isDistributor = String(c.interest || "").toLowerCase() === "business" || DISTRIBUTOR_PATTERNS.some((rx) => rx.test(blob));
+    return {
+      id: c.id,
+      name: c.name ?? null,
+      first_name: c.first_name ?? null,
+      last_name: c.last_name ?? null,
+      phone: c.phone ?? null,
+      phone_normalized: c.phone_normalized ?? null,
+      lead_type: c.lead_type ?? null,
+      interest: c.interest ?? null,
+      notes: c.notes ?? null,
+      tags: c.tags ?? null,
+      stage_id: c.stage_id ?? null,
+      created_at: c.created_at,
+      updated_at: c.updated_at,
+      is_distributor: isDistributor,
+      first_inquiry: firstInbound?.ts ?? c.created_at,
+      last_message: lastMsg?.ts ?? null,
+      msg_count: thread.length,
+      thread,
+      summary: null,
+      _hasTwilio: twilio.length > 0
+    };
+  }).filter((r) => r._hasTwilio);
+  const distributors = composed.filter((r) => r.is_distributor);
+  const rest = composed.filter((r) => !r.is_distributor).sort((a, b) => (b.last_message || b.updated_at).localeCompare(a.last_message || a.updated_at));
+  const capRoom = Math.max(0, HARD_CAP - distributors.length);
+  const selected = [...distributors, ...rest.slice(0, capRoom)];
+  const selIds = selected.map((r) => r.id);
+  if (selIds.length > 0) {
+    const { data: cachedRows } = await supabase.from("lead_call_summaries").select("contact_id, summary").in("contact_id", selIds);
+    const map = /* @__PURE__ */ new Map();
+    for (const r of cachedRows ?? []) map.set(r.contact_id, r.summary);
+    for (const r of selected) r.summary = map.get(r.id) ?? null;
+  }
+  return { rows: selected };
+}
+
+// src/lib/mcp/tools/get-lead-call-report.ts
+var get_lead_call_report_default = defineTool36({
+  name: "get_lead_call_report",
+  title: "Get the Lead Call Report",
+  description: "Read the Lead Call Report: contacts who have at least one Twilio message, with computed first inquiry date, last message date, message count, distributor-interest flag, and any cached AI summary. Mirrors the in-app Lead Call Report (src/components/vanto/reports/LeadCallReport.tsx) but is sortable newest-first.",
+  inputSchema: {
+    sort_by: z32.enum(["last_message", "first_inquiry", "msgs"]).optional().describe("Sort field (default last_message)."),
+    sort_dir: z32.enum(["asc", "desc"]).optional().describe("Sort direction (default desc = newest first)."),
+    only_distributors: z32.boolean().optional().describe("Only contacts flagged with distributor interest."),
+    search: z32.string().optional().describe("Free-text match on name or phone."),
+    limit: z32.number().int().min(1).max(100).optional().describe("Max rows (default 50, cap 100).")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ sort_by, sort_dir, only_distributors, search, limit }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const loaded = await loadLeadCallRows(supabase);
+    if ("error" in loaded) return { content: [{ type: "text", text: loaded.error }], isError: true };
+    let rows = loaded.rows;
+    if (only_distributors) rows = rows.filter((r) => r.is_distributor);
+    const q = (search ?? "").trim().toLowerCase();
+    if (q) {
+      const qDigits = q.replace(/\D/g, "");
+      rows = rows.filter((r) => {
+        const name = `${r.name ?? ""} ${r.first_name ?? ""} ${r.last_name ?? ""}`.toLowerCase();
+        if (name.includes(q)) return true;
+        const phoneDigits = (r.phone ?? "").replace(/\D/g, "");
+        return !!qDigits && phoneDigits.includes(qDigits);
+      });
+    }
+    const key = sort_by ?? "last_message";
+    const mul = (sort_dir ?? "desc") === "asc" ? 1 : -1;
+    rows = [...rows].sort((a, b) => {
+      if (key === "msgs") return (a.msg_count - b.msg_count) * mul;
+      const av = (key === "first_inquiry" ? a.first_inquiry : a.last_message) ?? "";
+      const bv = (key === "first_inquiry" ? b.first_inquiry : b.last_message) ?? "";
+      return av.localeCompare(bv) * mul;
+    });
+    const contacts = rows.slice(0, limit ?? 50).map((r) => ({
+      id: r.id,
+      name: r.name,
+      phone: r.phone,
+      phone_normalized: r.phone_normalized,
+      lead_type: r.lead_type,
+      is_distributor: r.is_distributor,
+      first_inquiry: r.first_inquiry,
+      last_message: r.last_message,
+      msg_count: r.msg_count,
+      summary: r.summary
+    }));
+    const result = { count: contacts.length, contacts };
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+});
+
+// src/lib/mcp/tools/generate-lead-call-summaries.ts
+import { defineTool as defineTool37 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z33 } from "npm:zod@^3.25.76";
+var generate_lead_call_summaries_default = defineTool37({
+  name: "generate_lead_call_summaries",
+  title: "Generate Lead Call Report summaries",
+  description: "Generate (or regenerate) AI summaries for Lead Call Report contacts by invoking the same summarize-lead-conversation edge function the in-app 'Generate summaries' button uses. Pass specific contact_ids, or omit to auto-target contacts from get_lead_call_report that don't have a cached summary yet.",
+  inputSchema: {
+    contact_ids: z33.array(z33.string().uuid()).optional().describe("Specific contacts to summarize."),
+    missing_only: z33.boolean().optional().describe("When contact_ids omitted, only contacts without a cached summary (default true)."),
+    force: z33.boolean().optional().describe("Force regeneration even if cached (default false).")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  handler: async ({ contact_ids, missing_only, force }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const loaded = await loadLeadCallRows(supabase);
+    if ("error" in loaded) return { content: [{ type: "text", text: loaded.error }], isError: true };
+    let targets;
+    if (contact_ids && contact_ids.length > 0) {
+      const wanted = new Set(contact_ids);
+      targets = loaded.rows.filter((r) => wanted.has(r.id));
+    } else {
+      targets = missing_only ?? true ? loaded.rows.filter((r) => !r.summary) : loaded.rows;
+    }
+    const summaries = [];
+    let failed = 0;
+    const concurrency = 4;
+    let cursor = 0;
+    async function worker() {
+      while (cursor < targets.length) {
+        const row = targets[cursor++];
+        try {
+          const { data, error } = await supabase.functions.invoke("summarize-lead-conversation", {
+            body: {
+              contact_id: row.id,
+              name: displayName(row),
+              messages: row.thread,
+              force: force ?? false
+            }
+          });
+          if (error) throw error;
+          summaries.push({ contact_id: row.id, summary: data?.summary ?? null });
+        } catch {
+          failed++;
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, targets.length) }, () => worker()));
+    const result = {
+      requested: targets.length,
+      succeeded: summaries.length,
+      failed,
+      summaries
+    };
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+});
+
 // src/lib/mcp/index.ts
 var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
   name: "get-well-hub",
   title: "Get Well Hub",
-  version: "1.5.0",
-  instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement). For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for actual group chat content (who said what, when) use list_group_messages; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual').`,
+  version: "1.6.0",
+  instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement). For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for actual group chat content (who said what, when) use list_group_messages; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual'). For the Lead Call Report, use get_lead_call_report (sorted newest-first by default) and generate_lead_call_summaries to fill in missing AI summaries; edit a lead's type/notes/pipeline stage via update_contact.`,
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
     acceptedAudiences: "authenticated"
@@ -1846,6 +2118,8 @@ var mcp_default = defineMcp({
     queue_group_post_default,
     get_prospector_status_default,
     list_contacts_default,
+    get_lead_call_report_default,
+    generate_lead_call_summaries_default,
     get_contact_default,
     update_contact_default,
     add_contact_note_default,
