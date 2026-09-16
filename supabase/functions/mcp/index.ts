@@ -1270,9 +1270,157 @@ var reply_to_fb_comment_default = defineTool28({
   }
 });
 
-// src/lib/mcp/tools/get-group-overview.ts
+// src/lib/mcp/tools/create-fb-post.ts
 import { defineTool as defineTool29 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z25 } from "npm:zod@^3.25.76";
+var create_fb_post_default = defineTool29({
+  name: "create_fb_post",
+  title: "Create a Facebook Page post",
+  description: "Publish or natively schedule a post on a connected Facebook Page, via the fb-create-post function (Page access token resolved server-side). SAFETY: this never posts on a bare call \u2014 you must pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true for an immediate publish. Passing both is an error. If image_url is set the post goes to the Page's /photos endpoint with the message as the caption. Posting requires pages_manage_posts on that Page's stored access; the function pre-checks this and returns a clear reconnect message instead of a raw Graph error.",
+  inputSchema: {
+    page_id: z25.string().describe("Facebook Page id to post to, e.g. 102068582816960 (Get Well Africa). Must be an active connected Page."),
+    message: z25.string().min(1).max(5e3).describe("The post text (used as the photo caption when image_url is set)."),
+    scheduled_publish_time: z25.string().optional().describe("ISO 8601 timestamp, 10 minutes to 75 days in the future. Uses Facebook's native scheduling. Omit for an immediate publish."),
+    image_url: z25.string().optional().describe("Public https image URL. When set, the post is created as a photo post with message as the caption."),
+    publish_now: z25.boolean().optional().describe("Must be explicitly true to publish immediately when scheduled_publish_time is omitted. Guards against accidental instant posting.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  handler: async ({ page_id, message, scheduled_publish_time, image_url, publish_now }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    if (scheduled_publish_time && publish_now) {
+      const result2 = {
+        posted: false,
+        reason: "conflicting_intent",
+        detail: "Pass either scheduled_publish_time or publish_now: true, not both."
+      };
+      return { content: [{ type: "text", text: JSON.stringify(result2, null, 2) }], structuredContent: result2, isError: true };
+    }
+    if (!scheduled_publish_time && publish_now !== true) {
+      const result2 = {
+        posted: false,
+        reason: "explicit_intent_required",
+        detail: "Nothing was posted. To schedule, pass scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead). To publish right now, pass publish_now: true."
+      };
+      return { content: [{ type: "text", text: JSON.stringify(result2, null, 2) }], structuredContent: result2, isError: true };
+    }
+    const supabase = supabaseForUser(ctx);
+    const { data, error } = await supabase.functions.invoke("fb-create-post", {
+      body: { page_id, message, scheduled_publish_time, image_url, publish_now }
+    });
+    if (error) {
+      return {
+        content: [{ type: "text", text: `fb-create-post invocation failed: ${error.message}` }],
+        structuredContent: { posted: false, reason: "invoke_error" },
+        isError: true
+      };
+    }
+    if (!data?.ok) {
+      return {
+        content: [{ type: "text", text: `Post not created: ${JSON.stringify(data?.graph_error ?? data?.error ?? data)}` }],
+        structuredContent: { posted: false, ...data },
+        isError: true
+      };
+    }
+    const result = {
+      posted: true,
+      fb_post_id: data.fb_post_id,
+      page_id: data.page_id,
+      page_name: data.page_name ?? null,
+      status: data.status,
+      scheduled_publish_time: data.scheduled_publish_time ?? null,
+      permalink_url: data.permalink_url ?? null
+    };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+  }
+});
+
+// src/lib/mcp/tools/list-fb-posts.ts
+import { defineTool as defineTool30 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z26 } from "npm:zod@^3.25.76";
+var list_fb_posts_default = defineTool30({
+  name: "list_fb_posts",
+  title: "List Facebook Page posts",
+  description: "Read-only. Lists Facebook Page posts created through create_fb_post (status published / scheduled / failed, including ones still queued on Facebook's scheduler) merged with organic Page posts already ingested into fb_source_posts. Newest first by scheduled or published time. Use this to answer 'what's scheduled for the next few days' without a raw database query.",
+  inputSchema: {
+    page_id: z26.string().optional().describe("Filter to one Facebook Page id."),
+    status: z26.enum(["published", "scheduled", "failed", "organic"]).optional().describe("Filter by status. 'organic' returns only Page posts ingested from Facebook rather than created here."),
+    since: z26.string().optional().describe("ISO 8601 lower bound on the post's scheduled/published time."),
+    until: z26.string().optional().describe("ISO 8601 upper bound on the post's scheduled/published time."),
+    limit: z26.number().int().min(1).max(100).optional().describe("Max rows returned (default 25).")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ page_id, status, since, until, limit }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const max = limit ?? 25;
+    const rows = [];
+    if (status !== "organic") {
+      let q = supabase.from("fb_outbound_posts").select(
+        "id, page_id, page_name, fb_post_id, message, image_url, permalink_url, status, scheduled_publish_time, published_at, created_at, graph_error"
+      ).order("created_at", { ascending: false }).limit(max * 2);
+      if (page_id) q = q.eq("page_id", page_id);
+      if (status) q = q.eq("status", status);
+      const { data, error } = await q;
+      if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+      for (const r of data ?? []) {
+        rows.push({
+          origin: "mcp",
+          id: r.id,
+          page_id: r.page_id,
+          page_name: r.page_name ?? null,
+          fb_post_id: r.fb_post_id ?? null,
+          message: r.message ?? null,
+          image_url: r.image_url ?? null,
+          permalink_url: r.permalink_url ?? null,
+          status: r.status,
+          scheduled_publish_time: r.scheduled_publish_time ?? null,
+          published_at: r.published_at ?? null,
+          effective_time: r.scheduled_publish_time ?? r.published_at ?? r.created_at ?? null,
+          graph_error: r.graph_error ?? null
+        });
+      }
+    }
+    if (!status || status === "organic" || status === "published") {
+      const { data, error } = await supabase.from("fb_source_posts").select("id, fb_post_id, raw_message, permalink_url, posted_at").order("posted_at", { ascending: false, nullsFirst: false }).limit(max * 2);
+      if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+      for (const r of data ?? []) {
+        rows.push({
+          origin: "organic",
+          id: r.id,
+          page_id: null,
+          page_name: null,
+          fb_post_id: r.fb_post_id ?? null,
+          message: r.raw_message ?? null,
+          image_url: null,
+          permalink_url: r.permalink_url ?? null,
+          status: "published",
+          scheduled_publish_time: null,
+          published_at: r.posted_at ?? null,
+          effective_time: r.posted_at ?? null,
+          graph_error: null
+        });
+      }
+    }
+    const sinceMs = since ? Date.parse(since) : null;
+    const untilMs = until ? Date.parse(until) : null;
+    const filtered = rows.filter((r) => {
+      if (!r.effective_time) return !sinceMs && !untilMs;
+      const t = Date.parse(r.effective_time);
+      if (sinceMs && t < sinceMs) return false;
+      if (untilMs && t > untilMs) return false;
+      return true;
+    }).sort((a, b) => Date.parse(b.effective_time ?? "0") - Date.parse(a.effective_time ?? "0")).slice(0, max);
+    const result = { count: filtered.length, posts: filtered };
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      structuredContent: result
+    };
+  }
+});
+
+// src/lib/mcp/tools/get-group-overview.ts
+import { defineTool as defineTool31 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z27 } from "npm:zod@^3.25.76";
 
 // src/lib/mcp/tools/group-eligibility.ts
 var DEFAULT_GROUP_JID = "120363419298058298@g.us";
@@ -1347,12 +1495,12 @@ async function eligibleMembers(supabase, opts = {}) {
 }
 
 // src/lib/mcp/tools/get-group-overview.ts
-var get_group_overview_default = defineTool29({
+var get_group_overview_default = defineTool31({
   name: "get_group_overview",
   title: "Get WhatsApp group overview",
   description: `Answers "how many people are in the WhatsApp group" questions. Returns the live in-group member count for the APLGO | Health and Biz group broken down by engagement classification (active / warm / dormant / ghost), the timestamp of the most recent group health scan, today's engagement digest (if generated) and this week's engagement strategy (if generated). Members who have left the group are excluded.`,
   inputSchema: {
-    group_jid: z25.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`)
+    group_jid: z27.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`)
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ group_jid }, ctx) => {
@@ -1393,14 +1541,14 @@ var get_group_overview_default = defineTool29({
 });
 
 // src/lib/mcp/tools/get-group-welcome-status.ts
-import { defineTool as defineTool30 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z26 } from "npm:zod@^3.25.76";
-var get_group_welcome_status_default = defineTool30({
+import { defineTool as defineTool32 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z28 } from "npm:zod@^3.25.76";
+var get_group_welcome_status_default = defineTool32({
   name: "get_group_welcome_status",
   title: "Get group welcome sequence status",
   description: "Read the state of the automated new-joiner welcome sequence for the WhatsApp group: how many people are enrolled at each stage (pending / step1_sent / step2_sent / completed / failed / paused) and how many were enrolled in the last 7 days.",
   inputSchema: {
-    group_jid: z26.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`)
+    group_jid: z28.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`)
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ group_jid }, ctx) => {
@@ -1439,14 +1587,14 @@ var get_group_welcome_status_default = defineTool30({
 });
 
 // src/lib/mcp/tools/list-group-dm-candidates.ts
-import { defineTool as defineTool31 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z27 } from "npm:zod@^3.25.76";
-var list_group_dm_candidates_default = defineTool31({
+import { defineTool as defineTool33 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z29 } from "npm:zod@^3.25.76";
+var list_group_dm_candidates_default = defineTool33({
   name: "list_group_dm_candidates",
   title: "List group DM pilot candidates",
   description: "List WhatsApp group members eligible for a scoped 1-on-1 pilot DM. Eligibility (identical to the group-dm-pilot backend): matched to a CRM contact, classification active or warm, still in the group, contact not deleted and not do_not_contact, not currently in an active welcome sequence, and not already messaged by this pilot in the last 30 days. Returns at most zazi_pilot_batch_size candidates. Read-only \u2014 sends nothing.",
   inputSchema: {
-    group_jid: z27.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`)
+    group_jid: z29.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`)
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ group_jid }, ctx) => {
@@ -1475,18 +1623,18 @@ var list_group_dm_candidates_default = defineTool31({
 });
 
 // src/lib/mcp/tools/create-group-dm-batch.ts
-import { defineTool as defineTool32 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z28 } from "npm:zod@^3.25.76";
+import { defineTool as defineTool34 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z30 } from "npm:zod@^3.25.76";
 var FB_NOTE = "Facebook comments cannot be automatically matched to this contact \u2014 fb_comments has no contact_id link, only a Facebook-internal commenter ID with no phone number. If this person has commented on Facebook, that history is not visible here.";
-var create_group_dm_batch_default = defineTool32({
+var create_group_dm_batch_default = defineTool34({
   name: "create_group_dm_batch",
   title: "Draft a group DM pilot batch",
   description: "Draft (does NOT send) a scoped 1-on-1 pilot DM batch for WhatsApp group members. Every member_id is re-validated against the full eligibility rules server-side. Returns the draft batch id plus rich per-recipient review context (contact name/email/lead_type/temperature/tags, full notes, and the last 5 contact activity rows) so a human can review before calling approve_group_dm_batch.",
   inputSchema: {
-    member_ids: z28.array(z28.string().uuid()).min(1).describe("whatsapp_group_members.id values from list_group_dm_candidates."),
-    message_body: z28.string().min(1).max(4e3).describe("The exact final text to send to each recipient."),
-    group_jid: z28.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID}.`),
-    notes: z28.string().optional().describe("Optional internal note stored with the batch.")
+    member_ids: z30.array(z30.string().uuid()).min(1).describe("whatsapp_group_members.id values from list_group_dm_candidates."),
+    message_body: z30.string().min(1).max(4e3).describe("The exact final text to send to each recipient."),
+    group_jid: z30.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID}.`),
+    notes: z30.string().optional().describe("Optional internal note stored with the batch.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   handler: async ({ member_ids, message_body, group_jid, notes }, ctx) => {
@@ -1567,14 +1715,14 @@ var create_group_dm_batch_default = defineTool32({
 });
 
 // src/lib/mcp/tools/approve-group-dm-batch.ts
-import { defineTool as defineTool33 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z29 } from "npm:zod@^3.25.76";
-var approve_group_dm_batch_default = defineTool33({
+import { defineTool as defineTool35 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z31 } from "npm:zod@^3.25.76";
+var approve_group_dm_batch_default = defineTool35({
   name: "approve_group_dm_batch",
   title: "Approve and send a group DM pilot batch",
   description: "DESTRUCTIVE: actually sends the real 1-on-1 WhatsApp messages of a drafted pilot batch. Hard-refuses unless zazi_group_dm_mode is exactly 'pilot_manual', outbound is not frozen, the batch exists with status 'draft', the batch is within zazi_pilot_batch_size, and the 1-on-1 daily cap would not be exceeded. Every recipient is re-checked for do_not_contact and the 30-day no-repeat rule immediately before sending. Sends go through the same maytapi-send-direct pipeline used by send_whatsapp_message, spaced at least 6 seconds apart, and are logged to group_dm_pilot_sends and the contact activity timeline.",
   inputSchema: {
-    batch_id: z29.string().uuid().describe("The draft batch id returned by create_group_dm_batch.")
+    batch_id: z31.string().uuid().describe("The draft batch id returned by create_group_dm_batch.")
   },
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   handler: async ({ batch_id }, ctx) => {
@@ -1702,21 +1850,21 @@ var approve_group_dm_batch_default = defineTool33({
 });
 
 // src/lib/mcp/tools/list-group-membership-events.ts
-import { defineTool as defineTool34 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z30 } from "npm:zod@^3.25.76";
+import { defineTool as defineTool36 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z32 } from "npm:zod@^3.25.76";
 function digits(v) {
   return (v || "").replace(/\D/g, "");
 }
-var list_group_membership_events_default = defineTool34({
+var list_group_membership_events_default = defineTool36({
   name: "list_group_membership_events",
   title: "List WhatsApp group membership events",
   description: "Historical log of who joined, left, or was removed from a WhatsApp group. Unlike get_group_overview (a live snapshot that excludes people who have left), this returns membership change events over a time window, enriched with CRM contact data (id, classification, notes, last engagement) when the phone matches an existing contact \u2014 so you can review communication history for people who left.",
   inputSchema: {
-    group_jid: z30.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`),
-    event_type: z30.enum(["joined", "left", "removed", "all"]).optional().describe("Filter by event type. Default 'all'."),
-    since: z30.string().optional().describe("ISO timestamp lower bound for event_time. Default: 3 days ago."),
-    until: z30.string().optional().describe("ISO timestamp upper bound for event_time."),
-    limit: z30.number().int().min(1).max(500).optional().describe("Max events to return. Default 100.")
+    group_jid: z32.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`),
+    event_type: z32.enum(["joined", "left", "removed", "all"]).optional().describe("Filter by event type. Default 'all'."),
+    since: z32.string().optional().describe("ISO timestamp lower bound for event_time. Default: 3 days ago."),
+    until: z32.string().optional().describe("ISO timestamp upper bound for event_time."),
+    limit: z32.number().int().min(1).max(500).optional().describe("Max events to return. Default 100.")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ group_jid, event_type, since, until, limit }, ctx) => {
@@ -1801,18 +1949,18 @@ var list_group_membership_events_default = defineTool34({
 });
 
 // src/lib/mcp/tools/list-group-messages.ts
-import { defineTool as defineTool35 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z31 } from "npm:zod@^3.25.76";
-var list_group_messages_default = defineTool35({
+import { defineTool as defineTool37 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z33 } from "npm:zod@^3.25.76";
+var list_group_messages_default = defineTool37({
   name: "list_group_messages",
   title: "List WhatsApp group messages",
   description: "Reads real message content from a WhatsApp group (who said what, when) for investigating specific group activity. Use this when you need actual chat content rather than just headcounts, membership events, or dispatch logs.",
   inputSchema: {
-    group_jid: z31.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`),
-    since: z31.string().datetime().optional().describe("ISO timestamp. Defaults to 24 hours ago."),
-    until: z31.string().datetime().optional().describe("ISO timestamp upper bound."),
-    sender_phone: z31.string().optional().describe("Filter to a specific sender in +E.164 format."),
-    limit: z31.number().int().min(1).max(500).optional().describe("Max messages (default 100, cap 500).")
+    group_jid: z33.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`),
+    since: z33.string().datetime().optional().describe("ISO timestamp. Defaults to 24 hours ago."),
+    until: z33.string().datetime().optional().describe("ISO timestamp upper bound."),
+    sender_phone: z33.string().optional().describe("Filter to a specific sender in +E.164 format."),
+    limit: z33.number().int().min(1).max(500).optional().describe("Max messages (default 100, cap 500).")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ group_jid, since, until, sender_phone, limit }, ctx) => {
@@ -1863,8 +2011,8 @@ var list_group_messages_default = defineTool35({
 });
 
 // src/lib/mcp/tools/get-lead-call-report.ts
-import { defineTool as defineTool36 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z32 } from "npm:zod@^3.25.76";
+import { defineTool as defineTool38 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z34 } from "npm:zod@^3.25.76";
 
 // src/lib/mcp/tools/lead-call-report-data.ts
 var DISTRIBUTOR_PATTERNS = [
@@ -2028,21 +2176,21 @@ async function loadLeadCallRows(supabase) {
 }
 
 // src/lib/mcp/tools/get-lead-call-report.ts
-var dateStr = z32.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
-var get_lead_call_report_default = defineTool36({
+var dateStr = z34.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
+var get_lead_call_report_default = defineTool38({
   name: "get_lead_call_report",
   title: "Get the Lead Call Report",
   description: "Read the Lead Call Report: contacts who have at least one Twilio message, with computed first inquiry date, last message date, message count, distributor-interest flag, and any cached AI summary. Mirrors the in-app Lead Call Report (src/components/vanto/reports/LeadCallReport.tsx), including its First Inquiry / Last Msg date-range filters, and is sortable newest-first or oldest-first.",
   inputSchema: {
-    sort_by: z32.enum(["last_message", "first_inquiry", "msgs"]).optional().describe("Sort field (default last_message)."),
-    sort_dir: z32.enum(["asc", "desc"]).optional().describe("Sort direction (default desc = newest first)."),
-    only_distributors: z32.boolean().optional().describe("Only contacts flagged with distributor interest."),
-    search: z32.string().optional().describe("Free-text match on name or phone."),
+    sort_by: z34.enum(["last_message", "first_inquiry", "msgs"]).optional().describe("Sort field (default last_message)."),
+    sort_dir: z34.enum(["asc", "desc"]).optional().describe("Sort direction (default desc = newest first)."),
+    only_distributors: z34.boolean().optional().describe("Only contacts flagged with distributor interest."),
+    search: z34.string().optional().describe("Free-text match on name or phone."),
     first_inquiry_from: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose first inquiry is on/after this date."),
     first_inquiry_to: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose first inquiry is on/before this date."),
     last_message_from: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose last message is on/after this date."),
     last_message_to: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose last message is on/before this date."),
-    limit: z32.number().int().min(1).max(100).optional().describe("Max rows (default 50, cap 100).")
+    limit: z34.number().int().min(1).max(100).optional().describe("Max rows (default 50, cap 100).")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ sort_by, sort_dir, only_distributors, search, first_inquiry_from, first_inquiry_to, last_message_from, last_message_to, limit }, ctx) => {
@@ -2095,16 +2243,16 @@ var get_lead_call_report_default = defineTool36({
 });
 
 // src/lib/mcp/tools/generate-lead-call-summaries.ts
-import { defineTool as defineTool37 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z33 } from "npm:zod@^3.25.76";
-var generate_lead_call_summaries_default = defineTool37({
+import { defineTool as defineTool39 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z35 } from "npm:zod@^3.25.76";
+var generate_lead_call_summaries_default = defineTool39({
   name: "generate_lead_call_summaries",
   title: "Generate Lead Call Report summaries",
   description: "Generate (or regenerate) AI summaries for Lead Call Report contacts by invoking the same summarize-lead-conversation edge function the in-app 'Generate summaries' button uses. Pass specific contact_ids, or omit to auto-target contacts from get_lead_call_report that don't have a cached summary yet.",
   inputSchema: {
-    contact_ids: z33.array(z33.string().uuid()).optional().describe("Specific contacts to summarize."),
-    missing_only: z33.boolean().optional().describe("When contact_ids omitted, only contacts without a cached summary (default true)."),
-    force: z33.boolean().optional().describe("Force regeneration even if cached (default false).")
+    contact_ids: z35.array(z35.string().uuid()).optional().describe("Specific contacts to summarize."),
+    missing_only: z35.boolean().optional().describe("When contact_ids omitted, only contacts without a cached summary (default true)."),
+    force: z35.boolean().optional().describe("Force regeneration even if cached (default false).")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   handler: async ({ contact_ids, missing_only, force }, ctx) => {
@@ -2161,8 +2309,8 @@ var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
   name: "get-well-hub",
   title: "Get Well Hub",
-  version: "1.6.0",
-  instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement). For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for actual group chat content (who said what, when) use list_group_messages; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual'). For the Lead Call Report, use get_lead_call_report (sorted newest-first by default) and generate_lead_call_summaries to fill in missing AI summaries; edit a lead's type/notes/pipeline stage via update_contact.`,
+  version: "1.7.0",
+  instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement). For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for actual group chat content (who said what, when) use list_group_messages; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual'). For the Lead Call Report, use get_lead_call_report (sorted newest-first by default) and generate_lead_call_summaries to fill in missing AI summaries; edit a lead's type/notes/pipeline stage via update_contact. To post TO a Facebook Page, use create_fb_post \u2014 it refuses to do anything unless you pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true; never pass publish_now: true unless the user has clearly asked to publish immediately. Use list_fb_posts to see what is already published, scheduled, or failed before adding more.`,
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
     acceptedAudiences: "authenticated"
@@ -2198,6 +2346,8 @@ var mcp_default = defineMcp({
     reply_to_conversation_default,
     list_fb_comments_default,
     reply_to_fb_comment_default,
+    create_fb_post_default,
+    list_fb_posts_default,
     get_group_overview_default,
     get_group_welcome_status_default,
     list_group_dm_candidates_default,

@@ -12,7 +12,7 @@
   "mcp": {
     "server": {
       "name": "get-well-hub",
-      "version": "1.6.0",
+      "version": "1.7.0",
       "title": "Get Well Hub"
     },
     "tools": [
@@ -987,6 +987,97 @@
             "fb_comment_id",
             "reply_text"
           ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "create_fb_post",
+        "title": "Create a Facebook Page post",
+        "description": "Publish or natively schedule a post on a connected Facebook Page, via the fb-create-post function (Page access token resolved server-side). SAFETY: this never posts on a bare call — you must pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true for an immediate publish. Passing both is an error. If image_url is set the post goes to the Page's /photos endpoint with the message as the caption. Posting requires pages_manage_posts on that Page's stored access; the function pre-checks this and returns a clear reconnect message instead of a raw Graph error.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": true
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "page_id": {
+              "type": "string",
+              "description": "Facebook Page id to post to, e.g. 102068582816960 (Get Well Africa). Must be an active connected Page."
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 5000,
+              "description": "The post text (used as the photo caption when image_url is set)."
+            },
+            "scheduled_publish_time": {
+              "type": "string",
+              "description": "ISO 8601 timestamp, 10 minutes to 75 days in the future. Uses Facebook's native scheduling. Omit for an immediate publish."
+            },
+            "image_url": {
+              "type": "string",
+              "description": "Public https image URL. When set, the post is created as a photo post with message as the caption."
+            },
+            "publish_now": {
+              "type": "boolean",
+              "description": "Must be explicitly true to publish immediately when scheduled_publish_time is omitted. Guards against accidental instant posting."
+            }
+          },
+          "required": [
+            "page_id",
+            "message"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_fb_posts",
+        "title": "List Facebook Page posts",
+        "description": "Read-only. Lists Facebook Page posts created through create_fb_post (status published / scheduled / failed, including ones still queued on Facebook's scheduler) merged with organic Page posts already ingested into fb_source_posts. Newest first by scheduled or published time. Use this to answer 'what's scheduled for the next few days' without a raw database query.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "page_id": {
+              "type": "string",
+              "description": "Filter to one Facebook Page id."
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "published",
+                "scheduled",
+                "failed",
+                "organic"
+              ],
+              "description": "Filter by status. 'organic' returns only Page posts ingested from Facebook rather than created here."
+            },
+            "since": {
+              "type": "string",
+              "description": "ISO 8601 lower bound on the post's scheduled/published time."
+            },
+            "until": {
+              "type": "string",
+              "description": "ISO 8601 upper bound on the post's scheduled/published time."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "description": "Max rows returned (default 25)."
+            }
+          },
           "additionalProperties": false,
           "$schema": "http://json-schema.org/draft-07/schema#"
         },
