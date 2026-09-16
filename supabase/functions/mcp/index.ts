@@ -2086,7 +2086,7 @@ var get_lead_call_report_default = defineTool36({
       msg_count: r.msg_count,
       summary: r.summary
     }));
-    const result = { count: contacts.length, contacts, _debug: loaded.debug };
+    const result = { count: contacts.length, contacts };
     return {
       content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
       structuredContent: result
