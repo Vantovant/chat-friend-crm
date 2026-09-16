@@ -1,54 +1,45 @@
-# fb_campaign_response_v1 — diagnosis report (no changes made)
+# Facebook Page posting tools for Claude (MCP)
 
-## 1. The exact bug (confirmed)
+## (a) Token scope check — done, live against Facebook
 
-`supabase/functions/fb-cadence-tick/index.ts`:
+Both stored Page tokens are valid, non-expiring Page tokens on app 949132717953322.
 
-- line 393: `const channel: "maytapi" = "maytapi";`
-- line 411: `channel = "maytapi";`  ← reassigning a `const`
+| Page | pages_manage_posts | Can post? |
+|---|---|---|
+| Get Well Africa (102068582816960) | Yes (granular, scoped to this page) | Yes |
+| Matilda Wellness & APLGO (1012653741928888) | **No** | No — will fail with a permissions error |
 
-This throws `TypeError: Assignment to constant variable.` **after** the `fetch` to `maytapi-send-direct` has already returned. So:
+Get Well Africa also carries business_management, pages_manage_engagement, pages_read_engagement, pages_read_user_content, pages_manage_metadata, pages_messaging, pages_show_list. Matilda's token has the same set **minus** pages_manage_posts and business_management.
 
-1. The WhatsApp message **is actually sent**.
-2. The throw is swallowed by the surrounding `try/catch`, which sets `sendError = "Assignment to constant variable."` and leaves `sendOk = false`.
-3. Because `sendOk` is false, the code takes the failure branch: it releases the rate-limit slot, writes a `cadence_log` row with `status='failed'`, and **does not advance `current_step`** — it only sets `next_send_at = now + 2h` and `pause_reason = 'send_failed:...'`.
+## (b) Blockers
 
-Result: the same step-1 message re-fires every ~2 hours, indefinitely, while the CRM believes nothing was ever delivered. This matches the WhatsApp screenshots exactly (yesterday 10:31, today 08:45, next 10:45).
+1. **Matilda's Page cannot post until reconnected.** The connect flow (`facebook-oauth-start`) never requests `pages_manage_posts` — Get Well Africa has it only because that token came from a different/earlier grant. Fix: add `pages_manage_posts` to the requested scopes (and to the Meta Business Login configuration, since `META_LOGIN_CONFIG_ID` overrides the code-side scope list), then have Matilda reconnect her Page from Settings.
+2. **Page tokens are server-only.** The `page_access_token` column is not readable by `authenticated`, so the MCP tool cannot call Graph directly — it must go through an edge function using the service role, exactly like `reply_to_fb_comment` → `fb-reply-comment`.
+3. **Scheduling window.** Facebook requires `scheduled_publish_time` to be 10 minutes–75 days ahead; validate before calling Graph so Claude gets a clear error rather than a Graph rejection.
+4. **Image posts.** `image_url` must go to `/{page_id}/photos` (with `url` + `caption`), not `/feed`. Scheduled photo posts use the same `published=false` + `scheduled_publish_time` pattern.
 
-Scope: this is **not** contact-specific. Every send through this function hits the same line. Live counts:
+## (c) Proposed approach
 
-- 24 rows `status='active'` in `fb_campaign_response_v1`
-- 10 currently carrying `pause_reason = 'send_failed:Assignment to constant variable.'`
-- 24 `cadence_log` rows with `error like 'Assignment%'` — i.e. 24 messages that were delivered but recorded as failed
-- The rows that show `current_step=1` with a clean `pause_reason` advanced before the regression; the ones stuck at step 0/1 with the error are looping.
+**New table `fb_outbound_posts`** — our record of every post attempted through the tool: `id`, `user_id`, `page_id`, `message`, `image_url`, `fb_post_id`, `status` (`scheduled` | `published` | `failed`), `scheduled_publish_time`, `published_at`, `graph_error` (jsonb), `created_at`. RLS: owner can read their own rows; admins read all; only the service role writes. Explicit GRANTs for `authenticated` (select) and `service_role` (all).
 
-## 2. Human-contact / registration gating — definitive answer
+**New edge function `fb-create-post`** (service role, JWT validated in code):
+- Verify the caller is authenticated, and that the target `page_id` is an active connection the caller owns (admins may use any active Page).
+- Resolve the Page token via the existing `_shared/fb-page-token.ts` `resolvePageToken()`.
+- Pre-flight the token's granular scopes via `debug_token`; if `pages_manage_posts` is absent, return a clear "reconnect this Page with posting permission" error **before** calling Graph.
+- Post to `/{page_id}/feed` (or `/photos` when `image_url` is set), then write the result row.
 
-**There is no gate for prior human contact, and none for registration.**
+**Tool 1 — `create_fb_post`** (`src/lib/mcp/tools/create-fb-post.ts`)
+- Inputs: `page_id`, `message`, optional `scheduled_publish_time` (ISO 8601), optional `image_url`, optional `publish_now` (boolean).
+- Safety gate, matching the `create_broadcast` draft pattern: if `scheduled_publish_time` is omitted **and** `publish_now` is not literally `true`, the tool refuses and returns an explanatory error — it never publishes by accident. The two paths are mutually exclusive; supplying both is an error.
+- Returns `{ post_id, page_id, page_name, status, scheduled_publish_time }`.
+- Annotations: `readOnlyHint: false`, `destructiveHint: false`, `openWorldHint: true`.
 
-- `contacts` has **no `registration_status` column** (verified against `information_schema`).
-- The only promotion gate is `lead_type in (registered, buyer, vip)` — in `fb-cadence-tick` and in `_shared/should-send-followup.ts`. Vuyisile registered in the backoffice but his `lead_type` is still `prospect`, so nothing stopped him.
-- `contacts.notes` and `contact_activity` are **never read** by the cadence engine. Manual calls/notes logged via MCP have zero effect on sending.
-- The `shouldSendFollowup` guard does check a 6h outbound cooldown and a 12h inbound quiet window — but it reads `contacts.last_outbound_at`, which is **NULL** for every affected contact (manual WhatsApp sends from the owner's own phone never stamp it). So the cooldown never fires.
+**Tool 2 — `list_fb_posts`** (`src/lib/mcp/tools/list-fb-posts.ts`)
+- Read-only, `supabaseForUser(ctx)` under RLS. Filters: `page_id`, `status`, `since`, `until`, `limit` (1–100, default 25).
+- Reads `fb_outbound_posts` and merges organic posts from `fb_source_posts` (tagged `origin: "organic"` vs `"mcp"`), sorted newest-first by scheduled/published time, so "what's scheduled for the next few days" is one call.
 
-13 of the 24 active contacts have manual notes in their record (calls, personal replies, orders raised) and are still being auto-messaged as if untouched — including Vuyisile Nashwa, Mr W Matthew's Masilela (ready to order), Dorcas (existing customer, retention call), Johannes (skeptical, trust message already sent), Mnotho, Kgosi!, Nathan, Siboniso, Bee, Lady V.
+**Registration:** both tools added to `src/lib/mcp/index.ts`, server version bumped, instructions extended with the `publish_now` rule and the per-Page posting-permission caveat. Legacy `mcp-bridge` and the Railway proxy are not touched.
 
-## 3. Affected contacts (all 24 active)
+## Open question
 
-Stuck with the bug error (looping): Johannes (+27645395208), MARIA4LIVE (+27603581888), Mr W Matthew's Masilela (+27827041386), NkatekoAkani (+27797560375), Kgosi! (+27649676389), Nathan Somerset West (+27605649341), Siboniso Manzi (+27767373579), Vuyisile Nashwa (+27739474228), plus 2 further rows in the same state.
-
-Active, no error yet (will hit it on next send): Andries Mphane, BABA, Bee, Dorcas, Elias, Ephraim, Lady V, maiezo, Mnotho, Moitoi, nonkosi, Nonku, Vee Mo Foundation and the remaining step-0 enrollments — all due 09:45–12:45 today.
-
-## Recommended fix (awaiting your go-ahead — nothing changed yet)
-
-1. **Immediate stop-the-bleeding:** set `integration_settings.fb_cadence_enabled = false` so no further duplicate sends go out today.
-2. **Fix the bug:** change `const channel` to a plain literal (drop the reassignment at line 411).
-3. **Repair state:** for the 10 rows whose `cadence_log` shows a delivered-but-"failed" send, advance `current_step` and clear `pause_reason` so they don't re-fire; re-mark those `cadence_log` rows as `sent`.
-4. **Add a human-contact gate** (new, requires your sign-off on the rule): skip/complete a cadence row when the contact has a manual note or `contact_activity` entry newer than the cadence enrolment, or when a human outbound has been logged — and stamp `last_outbound_at` on manual sends so the existing 6h cooldown actually works.
-5. **Registration gate:** since there is no `registration_status` field, either add one or agree that registering flips `lead_type` to `registered` (which the existing gate already respects).
-
-## Technical notes
-
-- File: `supabase/functions/fb-cadence-tick/index.ts` lines 390–471.
-- Guard: `supabase/functions/_shared/should-send-followup.ts`.
-- Same `try/catch`-swallows-throw pattern should be audited in the sibling ticks (`cadence-tick`, `recovery-tick`, `phase3-tick`) — a delivered-then-throw path there would produce the same duplicate-send loop.
+Do you want me to also add `pages_manage_posts` to the connect flow and ask Matilda to reconnect in this same change, or ship the tools first with Get Well Africa working and handle Matilda separately?
