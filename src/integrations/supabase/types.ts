@@ -1310,6 +1310,60 @@ export type Database = {
           },
         ]
       }
+      fb_outbound_posts: {
+        Row: {
+          created_at: string
+          fb_post_id: string | null
+          graph_error: Json | null
+          id: string
+          image_url: string | null
+          message: string
+          page_id: string
+          page_name: string | null
+          permalink_url: string | null
+          published_at: string | null
+          scheduled_publish_time: string | null
+          source: string
+          status: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          fb_post_id?: string | null
+          graph_error?: Json | null
+          id?: string
+          image_url?: string | null
+          message: string
+          page_id: string
+          page_name?: string | null
+          permalink_url?: string | null
+          published_at?: string | null
+          scheduled_publish_time?: string | null
+          source?: string
+          status?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          fb_post_id?: string | null
+          graph_error?: Json | null
+          id?: string
+          image_url?: string | null
+          message?: string
+          page_id?: string
+          page_name?: string | null
+          permalink_url?: string | null
+          published_at?: string | null
+          scheduled_publish_time?: string | null
+          source?: string
+          status?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       fb_source_posts: {
         Row: {
           attachments: Json | null
