@@ -27,6 +27,8 @@ import getConversationThread from "./tools/get-conversation-thread";
 import replyToConversation from "./tools/reply-to-conversation";
 import listFbComments from "./tools/list-fb-comments";
 import replyToFbComment from "./tools/reply-to-fb-comment";
+import createFbPost from "./tools/create-fb-post";
+import listFbPosts from "./tools/list-fb-posts";
 import getGroupOverview from "./tools/get-group-overview";
 import getGroupWelcomeStatus from "./tools/get-group-welcome-status";
 import listGroupDmCandidates from "./tools/list-group-dm-candidates";
