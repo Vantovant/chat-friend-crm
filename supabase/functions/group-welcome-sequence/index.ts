@@ -622,14 +622,18 @@ Deno.serve(async (req) => {
         results.push({ id: r.id, step: nextStep, phone_masked: mask(r.phone_normalized), status: STEP_STATUS[nextStep] });
       }
 
+      const nurture = await processNurtureSteps(svc, cap, false);
+
       return json({
         success: true,
         due: due.length,
         sent: results.filter((x) => String(x.status).endsWith("_sent") || x.status === "completed").length,
-        cap_used: cap.used,
-        cap: cap.cap,
+        cap_used: nurture.cap.used,
+        cap: nurture.cap.cap,
         results,
+        nurture,
       });
+
     }
 
     // ── record_capture (utility, no sending) ────────────────────────────────
