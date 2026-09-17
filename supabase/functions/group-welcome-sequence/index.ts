@@ -46,6 +46,77 @@ const STEP_STATUS: Record<1 | 2 | 3, string> = {
   3: "completed",
 };
 
+// ── Option B: long-tail nurture check-ins, scheduled off joined_at ──────────
+// Steps 4-7 continue the SAME group_welcome_sequences row after the 3-step
+// welcome completes. Copy is verbatim from the approved brief.
+type NurtureStep = 4 | 5 | 6 | 7;
+const NURTURE_STEPS: Array<{
+  step: NurtureStep;
+  day: number;
+  setting: string;
+  status: string;
+  body: (name: string | null) => string;
+}> = [
+  {
+    step: 4,
+    day: 3,
+    setting: "zazi_option_b_day3_enabled",
+    status: "nurture_day3_sent",
+    body: (n) =>
+      `Hi ${n ? n + " " : ""}👋 It's Vanto — just checking in a few days after you joined our Get Well Africa community. Settling in okay? Any questions about the products or how things work here, I'm happy to help 🙏`,
+  },
+  {
+    step: 5,
+    day: 7,
+    setting: "zazi_option_b_day7_enabled",
+    status: "nurture_day7_sent",
+    body: (n) =>
+      `Hi ${n ? n + " " : ""}👋 One week in! If you haven't had a chance yet, our written guide walks through everything step by step: https://getwellafrica.com/blog/how-to-register-and-order-aplgo-in-9-steps — and our WhatsApp community is always open if you want to chat with others too: https://chat.whatsapp.com/Efmbxxh5Wrz7ulfzRWVHPL`,
+  },
+  {
+    step: 6,
+    day: 14,
+    setting: "zazi_option_b_day14_enabled",
+    status: "nurture_day14_sent",
+    body: (n) =>
+      `Hi ${n ? n + " " : ""}👋 Two weeks in — how's it going so far? Whether you're here for wellness, the products, or thinking about the business side, I'm around if anything's unclear. No pressure at all 🙏`,
+  },
+  {
+    step: 7,
+    day: 30,
+    setting: "zazi_option_b_day30_enabled",
+    status: "nurture_completed",
+    body: (n) =>
+      `Hi ${n ? n + " " : ""}👋 It's been a month since you joined — just wanted to check you're still finding value here. If something didn't click or you have questions I haven't answered, tell me and I'll sort it out.`,
+  },
+];
+
+// Sources written by our own automations. Anything else on an outbound
+// maytapi_message row is treated as a genuine personal 1:1 from Vanto.
+const AUTOMATED_SOURCES = new Set([
+  "group_welcome_sequence",
+  "group_welcome_nurture",
+  "group_dm_pilot",
+  "group_dm_pilot_auto_daily",
+  "reactivation_campaign",
+  "sign_and_win_outreach",
+  "fb_cadence",
+  "cadence_tick",
+  "client_nurture",
+  "demographics_recovery",
+]);
+
+// A usable first name: never a phone number / blank placeholder.
+function firstNameOf(raw?: string | null): string | null {
+  const v = String(raw ?? "").trim();
+  if (!v) return null;
+  if (/^\+?\d[\d\s()-]{5,}$/.test(v)) return null;
+  const first = v.split(/\s+/)[0].replace(/[^\p{L}'’-]/gu, "");
+  if (first.length < 2) return null;
+  return first.charAt(0).toUpperCase() + first.slice(1);
+}
+
+
 async function getSettings(svc: Svc, keys: string[]) {
   const { data } = await svc.from("integration_settings").select("key,value").in("key", keys);
   const out: Record<string, string> = {};
