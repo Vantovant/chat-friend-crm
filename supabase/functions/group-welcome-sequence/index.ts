@@ -640,7 +640,19 @@ Deno.serve(async (req) => {
 
     }
 
+    // ── process_nurture_steps (Option B only; supports dry_run) ─────────────
+    if (action === "process_nurture_steps") {
+      const dryRun = body?.dry_run === true;
+      const fz = await freezeActive(svc);
+      if (fz.frozen && !dryRun) {
+        return json({ success: true, skipped: true, reason: "maytapi outbound frozen", freeze_until: fz.until, sent: 0 });
+      }
+      const out = await processNurtureSteps(svc, await dailyCapState(svc), dryRun);
+      return json({ success: true, dry_run: dryRun, ...out, cap_used: out.cap.used, cap: out.cap.cap });
+    }
+
     // ── record_capture (utility, no sending) ────────────────────────────────
+
     if (action === "record_capture") {
       const memberId = body?.member_id ? String(body.member_id) : null;
       const phone = body?.phone_normalized ? String(body.phone_normalized) : null;
