@@ -143,7 +143,7 @@ Deno.serve(async (req) => {
       results.push({ batch_id: draft.batch_id, kind: "generic", ...sent });
     } else {
       // Drop the mixed draft, then re-draft cleanly: one generic batch + 1-person personalised batches.
-      await svc.from("group_dm_pilot_batches").update({ status: "cancelled" }).eq("id", draft.batch_id);
+      await svc.from("group_dm_pilot_batches").update({ status: "paused" }).eq("id", draft.batch_id);
 
       if (genericIds.length) {
         const gDraft = await callPilot(svc, {
