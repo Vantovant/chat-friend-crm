@@ -148,6 +148,222 @@ async function dailyCapState(svc: Svc) {
   return { cap, used: count ?? 0 };
 }
 
+// ── Option B nurture processor ─────────────────────────────────────────────
+// Runs off the SAME rows/table/send path as the welcome steps. Fully
+// autonomous, no approval gate, everything logged to contact_activity.
+async function processNurtureSteps(
+  svc: Svc,
+  capState: { cap: number; used: number },
+  dryRun: boolean,
+) {
+  const keys = ["zazi_option_b_paused", ...NURTURE_STEPS.map((s) => s.setting)];
+  const s = await getSettings(svc, keys);
+  if ((s.zazi_option_b_paused || "true").toLowerCase() === "true") {
+    return { skipped: true, reason: "zazi_option_b_paused is true", results: [] as any[], cap: capState };
+  }
+  const stepEnabled = (key: string) => (s[key] || "false").toLowerCase() === "true";
+  if (!NURTURE_STEPS.some((n) => stepEnabled(n.setting))) {
+    return { skipped: true, reason: "no zazi_option_b_day*_enabled flags are true", results: [] as any[], cap: capState };
+  }
+
+  const { data: rowsRaw } = await svc
+    .from("group_welcome_sequences")
+    .select("id, member_id, contact_id, phone_normalized, step, status, joined_at, name_captured, last_step_sent_at")
+    .in("status", ["completed", "nurture_day3_sent", "nurture_day7_sent", "nurture_day14_sent"])
+    .gte("step", 3)
+    .lte("step", 6)
+    .order("joined_at", { ascending: true })
+    .limit(200);
+
+  const rows = (rowsRaw ?? []) as any[];
+  const now = Date.now();
+
+  // Which step is due for each row, based on joined_at (not send gaps).
+  const candidates: Array<{ row: any; def: typeof NURTURE_STEPS[number]; dueAt: number }> = [];
+  for (const r of rows) {
+    const joined = r.joined_at ? Date.parse(r.joined_at) : NaN;
+    if (!Number.isFinite(joined)) continue;
+    const def = NURTURE_STEPS.find((n) => n.step === (Number(r.step) + 1));
+    if (!def) continue;
+    const dueAt = joined + def.day * DAY_MS;
+    if (now < dueAt) continue;
+    if (!stepEnabled(def.setting)) continue;
+    candidates.push({ row: r, def, dueAt });
+  }
+  if (!candidates.length) return { skipped: false, due: 0, results: [] as any[], cap: capState };
+
+  const memberIds = [...new Set(candidates.map((c) => c.row.member_id).filter(Boolean))];
+  const contactIds = [...new Set(candidates.map((c) => c.row.contact_id).filter(Boolean))];
+
+  // Left the group?
+  const leftMembers = new Set<string>();
+  if (memberIds.length) {
+    const { data: mem } = await svc
+      .from("whatsapp_group_members")
+      .select("id, last_seen_in_group_status")
+      .in("id", memberIds);
+    for (const m of ((mem ?? []) as any[])) {
+      if (m.last_seen_in_group_status !== "in_group") leftMembers.add(m.id);
+    }
+  }
+
+  // do_not_contact / deleted + name fallback.
+  const blocked = new Set<string>();
+  const contactName = new Map<string, string | null>();
+  if (contactIds.length) {
+    const { data: cs } = await svc
+      .from("contacts")
+      .select("id, name, do_not_contact, is_deleted")
+      .in("id", contactIds);
+    for (const c of ((cs ?? []) as any[])) {
+      if (c.do_not_contact === true || c.is_deleted === true) blocked.add(c.id);
+      contactName.set(c.id, firstNameOf(c.name));
+    }
+  }
+
+  // Genuine personal 1:1 from Vanto since the step became due.
+  const personalSince = new Map<string, string>();
+  if (contactIds.length) {
+    const oldestDue = Math.min(...candidates.map((c) => c.dueAt));
+    const { data: acts } = await svc
+      .from("contact_activity")
+      .select("contact_id, created_at, metadata")
+      .eq("type", "maytapi_message")
+      .filter("metadata->>direction", "eq", "outbound")
+      .in("contact_id", contactIds)
+      .gte("created_at", new Date(oldestDue).toISOString())
+      .order("created_at", { ascending: false })
+      .limit(500);
+    for (const a of ((acts ?? []) as any[])) {
+      const src = String(a?.metadata?.source ?? "");
+      if (AUTOMATED_SOURCES.has(src)) continue;
+      if (!personalSince.has(a.contact_id)) personalSince.set(a.contact_id, a.created_at);
+    }
+  }
+
+  let cap = capState;
+  const results: any[] = [];
+  let first = true;
+
+  for (const { row: r, def, dueAt } of candidates) {
+    const base = { id: r.id, step: def.step, day: def.day, phone_masked: mask(r.phone_normalized) };
+
+    if (r.member_id && leftMembers.has(r.member_id)) {
+      if (!dryRun) {
+        await svc.from("group_welcome_sequences")
+          .update({ status: "nurture_stopped", error_detail: "member left the group" })
+          .eq("id", r.id);
+      }
+      results.push({ ...base, status: "stopped_left_group" });
+      continue;
+    }
+    if (r.contact_id && blocked.has(r.contact_id)) {
+      if (!dryRun) {
+        await svc.from("group_welcome_sequences")
+          .update({ status: "nurture_stopped", error_detail: "contact do_not_contact / deleted" })
+          .eq("id", r.id);
+      }
+      results.push({ ...base, status: "stopped_do_not_contact" });
+      continue;
+    }
+    const personal = r.contact_id ? personalSince.get(r.contact_id) : null;
+    if (personal && Date.parse(personal) >= dueAt) {
+      // Vanto already spoke to them personally — skip this step, keep the sequence moving.
+      if (!dryRun) {
+        await svc.from("group_welcome_sequences")
+          .update({ step: def.step, status: def.status, error_detail: `skipped: personal 1:1 at ${personal}` })
+          .eq("id", r.id);
+      }
+      results.push({ ...base, status: "skipped_personal_reply", personal_at: personal });
+      continue;
+    }
+    if (!r.phone_normalized) {
+      results.push({ ...base, status: "skipped_no_phone" });
+      continue;
+    }
+    if (Number.isFinite(cap.cap) && cap.used >= cap.cap) {
+      results.push({ ...base, status: "deferred", reason: `daily cap reached (${cap.used}/${cap.cap})` });
+      continue;
+    }
+
+    const name = firstNameOf(r.name_captured) ?? (r.contact_id ? contactName.get(r.contact_id) ?? null : null);
+    const message = def.body(name);
+
+    if (dryRun) {
+      results.push({ ...base, status: "would_send", name: name ?? null, preview: message.slice(0, 120) });
+      cap = { ...cap, used: cap.used + 1 };
+      continue;
+    }
+
+    if (!first) await sleep(INTER_SEND_FLOOR_MS);
+    first = false;
+
+    let ok = false;
+    let providerMessageId: string | null = null;
+    let errorDetail: string | null = null;
+    try {
+      const { data: sendResult, error: fnErr } = await svc.functions.invoke("maytapi-send-direct", {
+        body: {
+          to_number: r.phone_normalized,
+          message,
+          contact_id: r.contact_id ?? undefined,
+          source: "group_welcome_nurture",
+        },
+      });
+      if (fnErr) errorDetail = fnErr.message;
+      else if (!(sendResult as any)?.success) errorDetail = (sendResult as any)?.error ?? (sendResult as any)?.reason ?? "unknown provider error";
+      else {
+        ok = true;
+        providerMessageId = (sendResult as any)?.message_id ?? null;
+      }
+    } catch (e) {
+      errorDetail = e instanceof Error ? e.message : "send_exception";
+    }
+
+    const nowIso = new Date().toISOString();
+    if (!ok) {
+      // Leave step untouched so it can retry next tick; record why.
+      await svc.from("group_welcome_sequences").update({ error_detail: errorDetail }).eq("id", r.id);
+      results.push({ ...base, status: "failed", error: errorDetail });
+      continue;
+    }
+
+    await svc.from("group_welcome_sequences")
+      .update({ step: def.step, status: def.status, last_step_sent_at: nowIso, error_detail: null })
+      .eq("id", r.id);
+
+    if (r.contact_id) {
+      const { error: actErr } = await svc.from("contact_activity").insert({
+        contact_id: r.contact_id,
+        type: "maytapi_message",
+        performed_by: "00000000-0000-0000-0000-000000000000",
+        metadata: {
+          direction: "outbound",
+          maytapi_message_id: providerMessageId,
+          phone_last4: String(r.phone_normalized).slice(-4),
+          msg_type: "text",
+          body_preview: message.slice(0, 140),
+          body: message,
+          source: "group_welcome_nurture",
+          nurture_step: def.step,
+          nurture_day: def.day,
+          sent_at: nowIso,
+        },
+      });
+      if (actErr) console.error("[group-welcome-sequence] nurture contact_activity insert failed:", actErr.message);
+      await svc.from("contacts")
+        .update({ last_outbound_at: nowIso, last_outbound_provider: "maytapi" })
+        .eq("id", r.contact_id);
+    }
+
+    cap = { ...cap, used: cap.used + 1 };
+    results.push({ ...base, status: def.status, name: name ?? null });
+  }
+
+  return { skipped: false, due: candidates.length, results, cap };
+}
+
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
