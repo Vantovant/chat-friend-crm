@@ -64,3 +64,6 @@ verify_jwt = false
 
 [functions.group-membership-poll]
 verify_jwt = false
+
+[functions.group-dm-pilot-auto-daily]
+verify_jwt = false
