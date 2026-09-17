@@ -25,7 +25,8 @@ const ENROLL_WINDOW_MS = 26 * 60 * 60 * 1000;
 const INTER_SEND_FLOOR_MS = 6000;
 const STEP_GAP_MS = DAY_MS;
 
-type Svc = ReturnType<typeof createClient>;
+// deno-lint-ignore no-explicit-any
+type Svc = any;
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
