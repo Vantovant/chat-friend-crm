@@ -180,8 +180,9 @@ Deno.serve(async (req) => {
     await svc.from("system_logs").insert({
       level: totalSent > 0 ? "info" : "warn",
       source: "group-dm-pilot-auto-daily",
+      event: "auto_daily_run",
       message: `auto daily pilot run: ${totalSent} sent`,
-      metadata: { started_at: startedAt, candidates: selected.length, results },
+      context: { started_at: startedAt, candidates: selected.length, results },
     });
 
     return json({ success: true, started_at: startedAt, sent: totalSent, results });
@@ -190,9 +191,10 @@ Deno.serve(async (req) => {
     await svc.from("system_logs").insert({
       level: "error",
       source: "group-dm-pilot-auto-daily",
+      event: "auto_daily_error",
       message: msg,
-      metadata: { started_at: startedAt },
-    }).catch?.(() => {});
+      context: { started_at: startedAt },
+    });
     return json({ success: false, error: msg }, 500);
   }
 });
