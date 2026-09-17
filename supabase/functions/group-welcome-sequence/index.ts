@@ -512,7 +512,11 @@ Deno.serve(async (req) => {
         return now - last > STEP_GAP_MS;
       });
 
-      if (!due.length) return json({ success: true, due: 0, sent: 0, results: [] });
+      if (!due.length) {
+        const nurtureOnly = await processNurtureSteps(svc, await dailyCapState(svc), false);
+        return json({ success: true, due: 0, sent: 0, results: [], nurture: nurtureOnly });
+      }
+
 
       // do_not_contact gate for linked contacts.
       const contactIds = [...new Set(due.map((r) => r.contact_id).filter(Boolean))];
