@@ -1,45 +1,27 @@
-# Facebook Page posting tools for Claude (MCP)
+# Own-AI-key fallback + credit protection
 
-## (a) Token scope check — done, live against Facebook
+## What's really happening (plain language)
+- The yearly payment covers the **Pro plan** (features, monthly credit allowance). It does not cover unlimited usage.
+- Your app runs lots of automations 24/7 (10-minute new-joiner runs, daily check-ins, auto-replies, summaries, digests). Each one uses **Cloud hosting** and, in 21 places, **built-in AI**. Both draw from the same credit balance.
+- Before, the app was smaller, so usage fit inside the free allowance. It has grown a lot since, so it now burns through credits.
+- This period: 226 credits used, all on this account. When the balance hit zero, the backend was paused.
 
-Both stored Page tokens are valid, non-expiring Page tokens on app 949132717953322.
+## Important limit
+Switching AI to your own OpenAI/Gemini/Claude key stops **AI** from eating credits. It does **not** cover the hosting itself (database, logins, scheduled jobs) — that always runs on Lovable Cloud. So a small top-up or a monthly budget will still be needed, but a much smaller one.
 
-| Page | pages_manage_posts | Can post? |
-|---|---|---|
-| Get Well Africa (102068582816960) | Yes (granular, scoped to this page) | Yes |
-| Matilda Wellness & APLGO (1012653741928888) | **No** | No — will fail with a permissions error |
+## What I'll build
+1. **Settings > Integrations: "My AI keys"** — save your own OpenAI, Gemini and/or Claude key (stored as hidden secrets, admin-only, never shown back).
+2. **Choose the order** — e.g. "Use my Gemini first, then built-in AI" or "Built-in first, fall back to my key when out of credits".
+3. **Automatic fallback** — if built-in AI says "out of credits" or "too busy", the same request is retried on your own key, so auto-replies and summaries keep working.
+4. **Usage note per request** — which provider answered, so you can see savings.
+5. **Cut hosting waste** — review the 10-minute jobs and slow them where safe (e.g. new-joiner check every 30 min instead of 10) — only with your approval per job.
 
-Get Well Africa also carries business_management, pages_manage_engagement, pages_read_engagement, pages_read_user_content, pages_manage_metadata, pages_messaging, pages_show_list. Matilda's token has the same set **minus** pages_manage_posts and business_management.
+## Technical details
+- New shared helper `supabase/functions/_shared/ai.ts`: `chat({messages, model, json})` → tries providers in configured order; on 402/429/5xx moves to next. Maps models (gemini-flash ↔ gpt-4o-mini ↔ claude-haiku).
+- Keys as secrets `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`; order stored in `integration_settings.ai_provider_order` (no new table, existing RLS).
+- Replace the direct gateway `fetch` in the 21 functions with the helper (behaviour unchanged when no key set).
+- Rollback: set order to `lovable` only; helper then behaves exactly like today.
 
-## (b) Blockers
-
-1. **Matilda's Page cannot post until reconnected.** The connect flow (`facebook-oauth-start`) never requests `pages_manage_posts` — Get Well Africa has it only because that token came from a different/earlier grant. Fix: add `pages_manage_posts` to the requested scopes (and to the Meta Business Login configuration, since `META_LOGIN_CONFIG_ID` overrides the code-side scope list), then have Matilda reconnect her Page from Settings.
-2. **Page tokens are server-only.** The `page_access_token` column is not readable by `authenticated`, so the MCP tool cannot call Graph directly — it must go through an edge function using the service role, exactly like `reply_to_fb_comment` → `fb-reply-comment`.
-3. **Scheduling window.** Facebook requires `scheduled_publish_time` to be 10 minutes–75 days ahead; validate before calling Graph so Claude gets a clear error rather than a Graph rejection.
-4. **Image posts.** `image_url` must go to `/{page_id}/photos` (with `url` + `caption`), not `/feed`. Scheduled photo posts use the same `published=false` + `scheduled_publish_time` pattern.
-
-## (c) Proposed approach
-
-**New table `fb_outbound_posts`** — our record of every post attempted through the tool: `id`, `user_id`, `page_id`, `message`, `image_url`, `fb_post_id`, `status` (`scheduled` | `published` | `failed`), `scheduled_publish_time`, `published_at`, `graph_error` (jsonb), `created_at`. RLS: owner can read their own rows; admins read all; only the service role writes. Explicit GRANTs for `authenticated` (select) and `service_role` (all).
-
-**New edge function `fb-create-post`** (service role, JWT validated in code):
-- Verify the caller is authenticated, and that the target `page_id` is an active connection the caller owns (admins may use any active Page).
-- Resolve the Page token via the existing `_shared/fb-page-token.ts` `resolvePageToken()`.
-- Pre-flight the token's granular scopes via `debug_token`; if `pages_manage_posts` is absent, return a clear "reconnect this Page with posting permission" error **before** calling Graph.
-- Post to `/{page_id}/feed` (or `/photos` when `image_url` is set), then write the result row.
-
-**Tool 1 — `create_fb_post`** (`src/lib/mcp/tools/create-fb-post.ts`)
-- Inputs: `page_id`, `message`, optional `scheduled_publish_time` (ISO 8601), optional `image_url`, optional `publish_now` (boolean).
-- Safety gate, matching the `create_broadcast` draft pattern: if `scheduled_publish_time` is omitted **and** `publish_now` is not literally `true`, the tool refuses and returns an explanatory error — it never publishes by accident. The two paths are mutually exclusive; supplying both is an error.
-- Returns `{ post_id, page_id, page_name, status, scheduled_publish_time }`.
-- Annotations: `readOnlyHint: false`, `destructiveHint: false`, `openWorldHint: true`.
-
-**Tool 2 — `list_fb_posts`** (`src/lib/mcp/tools/list-fb-posts.ts`)
-- Read-only, `supabaseForUser(ctx)` under RLS. Filters: `page_id`, `status`, `since`, `until`, `limit` (1–100, default 25).
-- Reads `fb_outbound_posts` and merges organic posts from `fb_source_posts` (tagged `origin: "organic"` vs `"mcp"`), sorted newest-first by scheduled/published time, so "what's scheduled for the next few days" is one call.
-
-**Registration:** both tools added to `src/lib/mcp/index.ts`, server version bumped, instructions extended with the `publish_now` rule and the per-Page posting-permission caveat. Legacy `mcp-bridge` and the Railway proxy are not touched.
-
-## Open question
-
-Do you want me to also add `pages_manage_posts` to the connect flow and ask Matilda to reconnect in this same change, or ship the tools first with Get Well Africa working and handle Matilda separately?
+## Needs from you
+- The backend must be resumed (top-up) before any of this can be deployed.
+- Which key(s) you have: OpenAI, Gemini, Claude.
