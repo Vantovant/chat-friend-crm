@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 /**
  * Vanto CRM — group-engagement-digest
  * Once a day, summarises the last 24h of activity in the APLGO | Health and Biz
@@ -164,7 +165,7 @@ Members classified active/warm who did NOT post in this window (${quietEngaged.l
 Messages (chronological):
 ${lines.join('\n').slice(0, 20000)}`;
 
-      const r = await fetch(AI_GATEWAY_URL, {
+      const r = await aiFetch(AI_GATEWAY_URL, {
         method: 'POST',
         headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({

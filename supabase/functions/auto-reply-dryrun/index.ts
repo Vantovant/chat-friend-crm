@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 // auto-reply-dryrun — captures EXACT AI replies using the live trainer rules,
 // live knowledge chunks, and live Lovable AI gateway.
 // NO DB writes, NO WhatsApp dispatch. Safe for production.
@@ -82,7 +83,7 @@ NEVER recommend "PWR" alone.
 KNOWLEDGE CONTEXT:
 ${ctx}`;
 
-  const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+  const r = await aiFetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({ model: "google/gemini-2.5-pro", messages: [{role:"system",content:sys},{role:"user",content:question}], temperature: 0.6, stream: false }),

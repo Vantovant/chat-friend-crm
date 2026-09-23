@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { digitsOnly } from '@/lib/phone-utils';
 import { TwilioHealthPanel } from '@/components/vanto/TwilioHealthPanel';
 import { useCurrentUser } from '@/hooks/use-current-user';
+import { AIFallbackCard } from '@/components/vanto/AIFallbackCard';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type SyncResult = { synced: number; skipped: number; total: number; message?: string; errors?: string[] };
@@ -287,6 +288,7 @@ export function IntegrationsModule({ userId = '' }: { userId?: string }) {
       {isAdmin && (
         <div className="px-6 py-4 border-b border-border shrink-0">
           <TwilioHealthPanel />
+          <AIFallbackCard />
         </div>
       )}
 

@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 // Cron-driven: process due missed_inquiries, draft via Lovable AI, send via Maytapi, advance step.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { maybeAppendGroupInvite, markGroupInvited } from "../_shared/group-invite.ts";
@@ -45,7 +46,7 @@ async function draftMessage(name: string, snippet: string, step: number): Promis
   ][step];
 
   try {
-    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const resp = await aiFetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({

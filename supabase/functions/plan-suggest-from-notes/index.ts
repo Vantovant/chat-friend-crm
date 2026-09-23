@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 // plan-suggest-from-notes — reads the caller's recent lead_call_summaries and
 // contact_activity notes, returns suggested tasks for the PLAN module.
 // Auth: requires bearer; suggestions are scoped to the calling user.
@@ -66,7 +67,7 @@ Rules:
 - JSON only. No prose.`;
 
   try {
-    const r = await fetch(AI_URL, {
+    const r = await aiFetch(AI_URL, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({

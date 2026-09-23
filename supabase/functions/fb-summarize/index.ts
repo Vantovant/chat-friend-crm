@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 // Phase 3: AI variant generator. Reads fb_source_posts row, calls Lovable AI Gateway,
 // runs safety + dedupe, inserts 4 rows into fb_generated_posts.
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
@@ -108,7 +109,7 @@ Deno.serve(async (req) => {
     console.log('[fb-summarize] trainer_rules_loaded=', trainerCount);
 
     // Call Lovable AI Gateway
-    const aiRes = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    const aiRes = await aiFetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${LOVABLE_API_KEY}`,

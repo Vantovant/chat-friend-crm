@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 /**
  * Vanto CRM — page-help Edge Function
  * Returns contextual help for a given page, grounded in Knowledge Vault "general" collection.
@@ -171,7 +172,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const aiRes = await fetch(AI_GATEWAY_URL, {
+    const aiRes = await aiFetch(AI_GATEWAY_URL, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${lovableKey}`,

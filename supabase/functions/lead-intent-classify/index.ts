@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 // Intent Classifier v2 — Week 1 of Conversion Uplift roadmap.
 // Hybrid deterministic + LLM intent classification with a 0-100 temperature score.
 // READ-ONLY: never sends a message. Persists every run to ai_suggestions for audit,
@@ -129,7 +130,7 @@ Return strict JSON only: {"intent": one of [buy_now,join_business,registration_h
 Heuristic: explicit purchase/payment language = buy_now ≥80. "Join business / how to register as distributor" = join_business ≥75. Mere curiosity without action = ≤60.`;
 
   try {
-    const res = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    const res = await aiFetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
