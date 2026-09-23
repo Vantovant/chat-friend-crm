@@ -212,7 +212,7 @@ Deno.serve(async (req) => {
             },
             daily_cap: Number(get('maytapi_daily_cap', '56')),
             outbound_frozen: get('maytapi_outbound_frozen', 'false').toLowerCase() === 'true',
-            freeze_until: get('maytapi_freeze_until_at', null),
+            freeze_until: get('maytapi_freeze_until_at', '') || null,
             approved_groups: ALLOWED_GROUPS,
             standing_rules: [
               'Dispatcher runs every 5 minutes (cron job: maytapi-send-group-poll).',

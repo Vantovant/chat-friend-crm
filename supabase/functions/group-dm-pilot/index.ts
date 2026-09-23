@@ -28,7 +28,8 @@ const THIRTY_DAYS_MS = 30 * DAY_MS;
 const INTER_SEND_FLOOR_MS = 6000; // anti-burst floor, same spirit as the group dispatcher
 const DELIVERY_GRACE_MS = 10 * 60 * 1000;
 
-type Svc = ReturnType<typeof createClient>;
+// deno-lint-ignore no-explicit-any
+type Svc = any;
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {

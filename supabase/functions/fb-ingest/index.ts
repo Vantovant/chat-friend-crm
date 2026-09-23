@@ -72,7 +72,8 @@ function extractImageUrl(graphPost: any): string | null {
 
 /** Store a Page comment event. Never throws — logs and returns false on failure. */
 async function upsertComment(
-  supabase: ReturnType<typeof createClient>,
+  // deno-lint-ignore no-explicit-any
+  supabase: any,
   v: any,
   pageId: string,
   ownerUserId: string | null,

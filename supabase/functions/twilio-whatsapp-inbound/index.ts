@@ -265,7 +265,7 @@ Deno.serve(async (req) => {
     svc.from('contacts').update({
       last_inbound_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-    }).eq('id', contactId).then(() => {}).catch(() => {});
+    }).eq('id', contactId).then(() => {}, () => {});
     fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/lead-stage-detect`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}` },
