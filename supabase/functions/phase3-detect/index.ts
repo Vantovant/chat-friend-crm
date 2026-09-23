@@ -205,6 +205,39 @@ async function processOne(supabase: any, args: {
     return { action: "refreshed_new_inbound", state: intent.state, topic: intent.topic };
   }
 
+  // ── Repeat-after-exhausted guard (fix, 2026-09-22) ──
+  // No active/paused row was found above, so the code below would normally INSERT a
+  // brand-new one-shot row and auto-send the same canned template again. But if this
+  // exact contact+intent+topic already completed its one-shot message ("exhausted"),
+  // sending the identical line again helps no one — it already didn't answer them the
+  // first time. Flag it for a human reply instead of repeating the same message.
+  const { data: alreadyExhausted } = await supabase
+    .from("missed_inquiries")
+    .select("id, current_step")
+    .eq("contact_id", contact_id)
+    .eq("cadence", "phase3_2_24_72")
+    .eq("intent_state", intent.state)
+    .eq("topic", intent.topic)
+    .eq("status", "exhausted")
+    .gt("current_step", 0)
+    .limit(1)
+    .maybeSingle();
+
+  if (alreadyExhausted) {
+    await supabase.from("followup_logs").insert({
+      contact_id,
+      conversation_id,
+      intent_state: intent.state,
+      topic: intent.topic,
+      step_number: 0,
+      message_text: message_text.slice(0, 280),
+      send_mode: "suggest",
+      delivery: "skipped_repeat_already_sent",
+      error: `Contact re-triggered ${intent.state}/${intent.topic} after the one-shot message was already sent (missed_inquiry ${alreadyExhausted.id}). Needs a real reply from Vanto, not a repeat of the same template.`,
+    });
+    return { action: "skipped_repeat_flagged_for_human", state: intent.state, topic: intent.topic };
+  }
+
   const { error: insErr } = await supabase.from("missed_inquiries").insert({
     contact_id,
     conversation_id,
@@ -281,7 +314,7 @@ Deno.serve(async (req) => {
 
     let flagged = 0, refreshed_new_inbound = 0, skipped_same_inbound = 0,
         skipped_after_attempt_no_new_reply = 0, capped = 0, stopped = 0,
-        no_intent = 0, skipped_dnc = 0;
+        no_intent = 0, skipped_dnc = 0, skipped_repeat_flagged_for_human = 0;
 
     for (const m of unique) {
       const { data: convo } = await supabase
@@ -305,13 +338,14 @@ Deno.serve(async (req) => {
       else if (result.action === "stopped") stopped++;
       else if (result.action === "no_intent") no_intent++;
       else if (result.action === "skipped_dnc") skipped_dnc++;
+      else if (result.action === "skipped_repeat_flagged_for_human") skipped_repeat_flagged_for_human++;
     }
 
     return new Response(JSON.stringify({
       success: true, mode: "cron_sweep",
       scanned: unique.length, flagged, refreshed_new_inbound,
       skipped_same_inbound, skipped_after_attempt_no_new_reply,
-      capped, stopped, no_intent, skipped_dnc,
+      capped, stopped, no_intent, skipped_dnc, skipped_repeat_flagged_for_human,
     }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     console.error("phase3-detect error:", err);
