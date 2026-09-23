@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 /**
  * Vanto CRM — crm-ai-partner Edge Function
  * "PhD Partner" mode: WhatsApp-aware retrieval (Twilio inbox + Maytapi groups)
@@ -494,7 +495,7 @@ Deno.serve(async (req) => {
 
   // ---- Streaming ----
   if (stream) {
-    const upstream = await fetch(AI_URL, {
+    const upstream = await aiFetch(AI_URL, {
       method: 'POST',
       headers: { Authorization: `Bearer ${lovableKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: CHAT_MODEL, messages: aiMessages, temperature: 0.6, stream: true, max_tokens: 1400 }),
@@ -566,7 +567,7 @@ Deno.serve(async (req) => {
   }
 
   // ---- Non-streaming ----
-  const r = await fetch(AI_URL, {
+  const r = await aiFetch(AI_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${lovableKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ model: CHAT_MODEL, messages: aiMessages, temperature: 0.6, max_tokens: 1400 }),

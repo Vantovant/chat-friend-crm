@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 // Phase 3: Detects buying/joining intent on inbound messages and creates/refreshes
 // missed_inquiries rows with cadence='phase3_2_24_72'. Hybrid detection: keywords first,
 // AI fallback for ambiguous cases. Honors contacts.do_not_contact.
@@ -64,7 +65,7 @@ async function detectByAI(text: string): Promise<{ state: IntentState; topic: st
   if (!LOVABLE_API_KEY) return null;
 
   try {
-    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const resp = await aiFetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({

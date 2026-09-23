@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 // AI Polish for dictated WhatsApp drafts.
 // Draft-only. Never sends, never stores. Returns polished text.
 const corsHeaders = {
@@ -55,7 +56,7 @@ Deno.serve(async (req) => {
 
     const user = `STYLE: ${STYLE_INSTRUCTIONS[styleKey]}\n\nDICTATED TEXT:\n"""${text.trim()}"""\n\nReturn polished draft only.`;
 
-    const resp = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    const resp = await aiFetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({

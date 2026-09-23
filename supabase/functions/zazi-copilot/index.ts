@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 /**
  * Vanto CRM — zazi-copilot Edge Function
  * Generates Next Best Action + Draft Reply for a conversation.
@@ -172,7 +173,7 @@ If no knowledge source covers the claim, set confidence below 0.3 and add a note
   }
 
   try {
-    const response = await fetch(AI_GATEWAY_URL, {
+    const response = await aiFetch(AI_GATEWAY_URL, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${aiKey}`,

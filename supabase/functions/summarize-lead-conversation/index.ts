@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 // Summarize a lead's WhatsApp conversation (Twilio + Maytapi) into a concise
 // call-ready brief. Uses Lovable AI Gateway. Caches result in lead_call_summaries.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
@@ -86,7 +87,7 @@ async function callAI(name: string, msgs: IncomingMsg[]): Promise<SummaryJSON> {
     `  "summary_text": "<3-5 sentence plain English brief the agent can read before calling>"\n` +
     `}`;
 
-  const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+  const res = await aiFetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

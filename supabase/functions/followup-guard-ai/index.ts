@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 // AI-powered pre-send guard for scheduled follow-ups.
 // Given the draft message + recent conversation, returns:
 //   { send: bool, reason: string, suggested_variant?: string }
@@ -85,7 +86,7 @@ ${draft_text}
 
 Decide.`;
 
-    const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const resp = await aiFetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${LOVABLE_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({

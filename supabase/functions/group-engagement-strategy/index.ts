@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 /**
  * Vanto CRM — group-engagement-strategy
  * Weekly, bigger-picture counterpart to group-engagement-digest.
@@ -232,7 +233,7 @@ ${(digestRows || []).map((d: any) => `--- ${d.digest_date} ---\n${d.digest_text}
 Representative historical messages (chronological sample):
 ${sample.join('\n').slice(0, 20000)}`;
 
-      const r = await fetch(AI_GATEWAY_URL, {
+      const r = await aiFetch(AI_GATEWAY_URL, {
         method: 'POST',
         headers: { Authorization: `Bearer ${aiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({

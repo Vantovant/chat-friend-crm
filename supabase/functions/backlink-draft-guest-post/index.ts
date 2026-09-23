@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 // Plan D — Guest Post Draft Assistant.
 // Generates a ~900-word draft tailored to the target site, using Lovable AI Gateway
 // and (optionally) top Knowledge Vault matches for facts/tone. Auth is enforced via
@@ -72,7 +73,7 @@ ${ktx || "(no additional context)"}
 
 Return only the JSON object.`;
 
-  const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+  const aiRes = await aiFetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${LOVABLE_API_KEY}` },
     body: JSON.stringify({

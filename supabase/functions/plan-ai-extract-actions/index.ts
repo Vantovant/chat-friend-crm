@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 // plan-ai-extract-actions — turn free text (notes / dictation / report summary)
 // into structured plan items: tasks, reminders, meetings.
 // POPIA: strip phone numbers and emails before sending to the model.
@@ -44,7 +45,7 @@ Rules:
   const userMsg = `${context ? `Context: ${context}\n\n` : ''}Note:\n${safe}`;
 
   try {
-    const r = await fetch(AI_URL, {
+    const r = await aiFetch(AI_URL, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({

@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 /**
  * Maytapi inbound webhook v2 — handles BOTH:
  *  1. Delivery ack callbacks (existing — for Group Campaigns scheduled posts)
@@ -731,7 +732,7 @@ Deno.serve(async (req) => {
 
             const aiKey = Deno.env.get("LOVABLE_API_KEY") || "";
             if (aiKey) {
-              const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+              const aiRes = await aiFetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
                 method: "POST",
                 headers: { Authorization: `Bearer ${aiKey}`, "Content-Type": "application/json" },
                 body: JSON.stringify({

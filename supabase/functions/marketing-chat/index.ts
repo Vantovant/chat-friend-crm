@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 // Public marketing chat endpoint for getwellhub.dev visitors (investors + prospects).
 // Streams answers via Lovable AI Gateway. Isolated from internal /ai-chat (no CRM data exposure).
 
@@ -85,7 +86,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const upstream = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const upstream = await aiFetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${LOVABLE_API_KEY}`,

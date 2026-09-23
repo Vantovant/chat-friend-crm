@@ -1,3 +1,4 @@
+import { aiFetch } from "../_shared/ai-fallback.ts";
 /**
  * Vanto CRM — whatsapp-auto-reply Edge Function v6.1
  * Two-Layer System: TRUTH LAYER (hybrid retrieval) + SALES INTELLIGENCE LAYER
@@ -790,7 +791,7 @@ KNOWLEDGE CONTEXT:
 ${contextSnippets}`;
 
   try {
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const response = await aiFetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${LOVABLE_API_KEY}`,
