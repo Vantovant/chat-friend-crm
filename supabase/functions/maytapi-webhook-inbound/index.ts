@@ -848,7 +848,7 @@ Deno.serve(async (req) => {
             interest: "medium",
             temperature: "warm",
           })
-          .select("id, assigned_to, created_by")
+          .select("id, name, assigned_to, created_by")
           .single();
         if (ce) {
           console.error("[maytapi-inbound] contact insert failed:", ce.message);
