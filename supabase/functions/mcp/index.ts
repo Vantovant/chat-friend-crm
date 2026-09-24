@@ -2304,13 +2304,243 @@ var generate_lead_call_summaries_default = defineTool39({
   }
 });
 
+// src/lib/mcp/tools/list-trainer-rules.ts
+import { defineTool as defineTool40 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z36 } from "npm:zod@^3.25.76";
+var list_trainer_rules_default = defineTool40({
+  name: "list_trainer_rules",
+  title: "List AI trainer rules",
+  description: "Read the AI Trainer rules (ai_trainer_rules) that shape how the auto-reply bot answers. Filter by channel (twilio / maytapi / groups), product code (e.g. NRM), enabled state, or a text search across title, instruction and correct answer. Returns a short preview of each rule; use get_trainer_rule for the full text. Read-only.",
+  inputSchema: {
+    channel: z36.enum(["twilio", "maytapi", "groups"]).optional().describe("Only rules for this channel."),
+    product: z36.string().optional().describe("Product code, e.g. NRM, SLD, PWR."),
+    enabled: z36.boolean().optional().describe("true = only active rules, false = only switched-off rules."),
+    search: z36.string().optional().describe("Case-insensitive text search in title, instruction and correct_answer."),
+    limit: z36.number().int().min(1).max(100).optional().describe("Max rows (default 100).")
+  },
+  annotations: { readOnlyHint: true, openWorldHint: false },
+  handler: async (input, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    let query = supabase.from("ai_trainer_rules").select("id, title, channel, product, priority, enabled, triggers, instruction, correct_answer, updated_at").order("updated_at", { ascending: false }).limit(input.limit ?? 100);
+    if (input.channel) query = query.eq("channel", input.channel);
+    if (input.product) query = query.ilike("product", input.product);
+    if (input.enabled !== void 0) query = query.eq("enabled", input.enabled);
+    if (input.search) {
+      const s = input.search.replace(/[%,()]/g, " ").trim();
+      if (s) query = query.or(`title.ilike.%${s}%,instruction.ilike.%${s}%,correct_answer.ilike.%${s}%`);
+    }
+    const { data, error } = await query;
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const rules = (data ?? []).map((r) => ({
+      id: r.id,
+      title: r.title,
+      channel: r.channel,
+      product: r.product,
+      priority: r.priority,
+      enabled: r.enabled,
+      triggers: r.triggers,
+      preview: String(r.correct_answer || r.instruction || "").slice(0, 200),
+      updated_at: r.updated_at
+    }));
+    const result = { count: rules.length, rules };
+    return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
+  }
+});
+
+// src/lib/mcp/tools/get-trainer-rule.ts
+import { defineTool as defineTool41 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z37 } from "npm:zod@^3.25.76";
+var get_trainer_rule_default = defineTool41({
+  name: "get_trainer_rule",
+  title: "Get one AI trainer rule",
+  description: "Full detail of one AI Trainer rule by id: title, triggers, instruction, correct answer, priority, channel, product, enabled state and notes (which include the edit history written by update_trainer_rule). Read-only.",
+  inputSchema: {
+    rule_id: z37.string().uuid().describe("Trainer rule UUID (from list_trainer_rules).")
+  },
+  annotations: { readOnlyHint: true, openWorldHint: false },
+  handler: async (input, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const { data, error } = await supabase.from("ai_trainer_rules").select("*").eq("id", input.rule_id).maybeSingle();
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    if (!data) return { content: [{ type: "text", text: "Trainer rule not found" }], isError: true };
+    return { content: [{ type: "text", text: JSON.stringify({ rule: data }) }], structuredContent: { rule: data } };
+  }
+});
+
+// src/lib/mcp/tools/create-trainer-rule.ts
+import { defineTool as defineTool42 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z38 } from "npm:zod@^3.25.76";
+var create_trainer_rule_default = defineTool42({
+  name: "create_trainer_rule",
+  title: "Create an AI trainer rule",
+  description: "Add a new AI Trainer rule that the auto-reply bot will follow. Always show the operator the exact rule text and get approval before calling. Dedup: if an enabled rule with the same title already exists on the same channel, it is returned instead of creating a duplicate. The rule is stamped as created via Claude MCP in its notes. Priority: advisory < strong (default) < override.",
+  inputSchema: {
+    title: z38.string().min(3).max(200).describe("Short rule name, e.g. 'FIRST TOUCH \u2014 CTA footer'."),
+    instruction: z38.string().min(10).describe("What the bot must do or say."),
+    channel: z38.enum(["twilio", "maytapi", "groups"]).describe("Which channel's bot this rule applies to."),
+    triggers: z38.array(z38.string()).optional().describe("Keywords/phrases that make this rule apply."),
+    product: z38.string().nullable().optional().describe("Product code if product-specific, e.g. NRM."),
+    priority: z38.enum(["advisory", "strong", "override"]).optional().describe("Default 'strong'."),
+    correct_answer: z38.string().nullable().optional().describe("Exact model answer the bot should give, if any."),
+    notes: z38.string().optional().describe("Why this rule exists."),
+    enabled: z38.boolean().optional().describe("Default true.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  handler: async (input, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const { data: existing, error: dupErr } = await supabase.from("ai_trainer_rules").select("id, title, channel, enabled, updated_at").eq("channel", input.channel).eq("enabled", true).ilike("title", input.title).limit(1);
+    if (dupErr) return { content: [{ type: "text", text: dupErr.message }], isError: true };
+    if (existing && existing.length > 0) {
+      const result2 = { created: false, reason: "duplicate_title_on_channel", rule: existing[0] };
+      return { content: [{ type: "text", text: JSON.stringify(result2) }], structuredContent: result2 };
+    }
+    const stamp = `[${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}] Created via Claude MCP.`;
+    const row = {
+      title: input.title,
+      instruction: input.instruction,
+      channel: input.channel,
+      triggers: input.triggers ?? [],
+      product: input.product ?? null,
+      priority: input.priority ?? "strong",
+      correct_answer: input.correct_answer ?? null,
+      enabled: input.enabled ?? true,
+      notes: input.notes ? `${input.notes}
+${stamp}` : stamp,
+      created_by: ctx.getUserId() ?? null
+    };
+    const { data, error } = await supabase.from("ai_trainer_rules").insert(row).select("id, title, channel, product, priority, enabled, triggers, created_at").single();
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const result = { created: true, rule: data };
+    return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
+  }
+});
+
+// src/lib/mcp/tools/update-trainer-rule.ts
+import { defineTool as defineTool43 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z39 } from "npm:zod@^3.25.76";
+var AUDIT_SNIPPET = 400;
+var update_trainer_rule_default = defineTool43({
+  name: "update_trainer_rule",
+  title: "Update an AI trainer rule",
+  description: "Edit an existing AI Trainer rule, or switch it on/off with `enabled`. Only the fields you pass are changed; nothing is blanked by omission. There is no delete \u2014 switch a rule off instead. Before changing wording, the previous title/instruction/correct_answer are copied into the rule's notes as an audit line, so every edit can be traced and undone. Always show the operator the exact new text and get approval before calling.",
+  inputSchema: {
+    rule_id: z39.string().uuid().describe("Trainer rule UUID."),
+    title: z39.string().min(3).max(200).optional(),
+    instruction: z39.string().min(10).optional(),
+    triggers: z39.array(z39.string()).optional().describe("Replaces the full trigger list."),
+    product: z39.string().nullable().optional(),
+    priority: z39.enum(["advisory", "strong", "override"]).optional(),
+    correct_answer: z39.string().nullable().optional(),
+    enabled: z39.boolean().optional().describe("false switches the rule off (soft delete)."),
+    change_reason: z39.string().optional().describe("Why this edit is being made; recorded in notes.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  handler: async (input, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const { rule_id, change_reason, ...fields } = input;
+    const changes = {};
+    for (const [key, value] of Object.entries(fields)) {
+      if (value !== void 0) changes[key] = value;
+    }
+    if (Object.keys(changes).length === 0) {
+      return { content: [{ type: "text", text: "No updatable fields provided" }], isError: true };
+    }
+    const supabase = supabaseForUser(ctx);
+    const { data: current, error: readErr } = await supabase.from("ai_trainer_rules").select("id, title, instruction, correct_answer, triggers, product, priority, enabled, notes").eq("id", rule_id).maybeSingle();
+    if (readErr) return { content: [{ type: "text", text: readErr.message }], isError: true };
+    if (!current) return { content: [{ type: "text", text: "Trainer rule not found" }], isError: true };
+    const previous = {};
+    for (const key of Object.keys(changes)) previous[key] = current[key];
+    const snip = (v) => String(v ?? "").slice(0, AUDIT_SNIPPET);
+    const auditParts = [`[${(/* @__PURE__ */ new Date()).toISOString().slice(0, 16)}Z] Edited via Claude MCP`];
+    if (change_reason) auditParts.push(`reason: ${change_reason}`);
+    auditParts.push(`fields: ${Object.keys(changes).join(", ")}`);
+    if ("title" in changes) auditParts.push(`prev title: ${snip(current.title)}`);
+    if ("instruction" in changes) auditParts.push(`prev instruction: ${snip(current.instruction)}`);
+    if ("correct_answer" in changes) auditParts.push(`prev correct_answer: ${snip(current.correct_answer)}`);
+    const auditLine = auditParts.join(" | ");
+    const notes = current.notes ? `${current.notes}
+${auditLine}` : auditLine;
+    const { data, error } = await supabase.from("ai_trainer_rules").update({ ...changes, notes, updated_at: (/* @__PURE__ */ new Date()).toISOString() }).eq("id", rule_id).select("id, title, channel, product, priority, enabled, triggers, instruction, correct_answer, updated_at").single();
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const result = { updated: true, previous, rule: data };
+    return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
+  }
+});
+
+// src/lib/mcp/tools/list-reply-corrections.ts
+import { defineTool as defineTool44 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z40 } from "npm:zod@^3.25.76";
+var list_reply_corrections_default = defineTool44({
+  name: "list_reply_corrections",
+  title: "List auto-reply corrections",
+  description: "Read the auto-reply corrections log (auto_reply_corrections): cases where the bot's reply was corrected, with the original inbound message, the bot's original reply, the corrected reply, the reason and any linked trainer rule. Newest first. Read-only.",
+  inputSchema: {
+    channel: z40.enum(["twilio", "maytapi", "groups"]).optional(),
+    limit: z40.number().int().min(1).max(100).optional().describe("Max rows (default 50).")
+  },
+  annotations: { readOnlyHint: true, openWorldHint: false },
+  handler: async (input, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    let query = supabase.from("auto_reply_corrections").select("id, channel, contact_id, message_id, original_message, original_reply, corrected_reply, reason, trainer_rule_id, created_at").order("created_at", { ascending: false }).limit(input.limit ?? 50);
+    if (input.channel) query = query.eq("channel", input.channel);
+    const { data, error } = await query;
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const result = { count: data?.length ?? 0, corrections: data ?? [] };
+    return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
+  }
+});
+
+// src/lib/mcp/tools/add-reply-correction.ts
+import { defineTool as defineTool45 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z41 } from "npm:zod@^3.25.76";
+var add_reply_correction_default = defineTool45({
+  name: "add_reply_correction",
+  title: "Log an auto-reply correction",
+  description: "Record a correction to the bot: the inbound message, what the bot said (optional), and what it should have said. Strictly additive \u2014 never edits or removes existing corrections. Optionally link it to a trainer rule (trainer_rule_id) that the correction relates to. Always show the operator the corrected reply and get approval before calling.",
+  inputSchema: {
+    channel: z41.enum(["twilio", "maytapi", "groups"]),
+    original_message: z41.string().min(1).describe("The lead's inbound message."),
+    corrected_reply: z41.string().min(1).describe("What the bot should have replied."),
+    original_reply: z41.string().nullable().optional().describe("What the bot actually replied."),
+    reason: z41.string().optional(),
+    contact_id: z41.string().uuid().nullable().optional(),
+    message_id: z41.string().uuid().nullable().optional(),
+    trainer_rule_id: z41.string().uuid().nullable().optional()
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  handler: async (input, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const reason = input.reason ? `${input.reason} [via Claude MCP]` : "[via Claude MCP]";
+    const { data, error } = await supabase.from("auto_reply_corrections").insert({
+      channel: input.channel,
+      original_message: input.original_message,
+      corrected_reply: input.corrected_reply,
+      original_reply: input.original_reply ?? null,
+      reason,
+      contact_id: input.contact_id ?? null,
+      message_id: input.message_id ?? null,
+      trainer_rule_id: input.trainer_rule_id ?? null,
+      created_by: ctx.getUserId() ?? null
+    }).select("id, channel, trainer_rule_id, created_at").single();
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const result = { logged: true, correction: data };
+    return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
+  }
+});
+
 // src/lib/mcp/index.ts
 var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
   name: "get-well-hub",
   title: "Get Well Hub",
-  version: "1.7.0",
-  instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement). For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for actual group chat content (who said what, when) use list_group_messages; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual'). For the Lead Call Report, use get_lead_call_report (sorted newest-first by default) and generate_lead_call_summaries to fill in missing AI summaries; edit a lead's type/notes/pipeline stage via update_contact. To post TO a Facebook Page, use create_fb_post \u2014 it refuses to do anything unless you pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true; never pass publish_now: true unless the user has clearly asked to publish immediately. Use list_fb_posts to see what is already published, scheduled, or failed before adding more.`,
+  version: "1.8.0",
+  instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement). For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for actual group chat content (who said what, when) use list_group_messages; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual'). For the Lead Call Report, use get_lead_call_report (sorted newest-first by default) and generate_lead_call_summaries to fill in missing AI summaries; edit a lead's type/notes/pipeline stage via update_contact. To post TO a Facebook Page, use create_fb_post \u2014 it refuses to do anything unless you pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true; never pass publish_now: true unless the user has clearly asked to publish immediately. Use list_fb_posts to see what is already published, scheduled, or failed before adding more. For the AI Trainer (how the auto-reply bot answers), use list_trainer_rules / get_trainer_rule to read, create_trainer_rule / update_trainer_rule to change (no delete \u2014 switch off with enabled: false; every edit is audited in the rule's notes), and list_reply_corrections / add_reply_correction for the corrections log. Show the operator the exact rule text and get approval before any trainer write.`,
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
     acceptedAudiences: "authenticated"
@@ -2354,7 +2584,13 @@ var mcp_default = defineMcp({
     create_group_dm_batch_default,
     approve_group_dm_batch_default,
     list_group_membership_events_default,
-    list_group_messages_default
+    list_group_messages_default,
+    list_trainer_rules_default,
+    get_trainer_rule_default,
+    create_trainer_rule_default,
+    update_trainer_rule_default,
+    list_reply_corrections_default,
+    add_reply_correction_default
   ]
 });
 

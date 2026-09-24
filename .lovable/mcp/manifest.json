@@ -12,7 +12,7 @@
   "mcp": {
     "server": {
       "name": "get-well-hub",
-      "version": "1.7.0",
+      "version": "1.8.0",
       "title": "Get Well Hub"
     },
     "tools": [
@@ -1305,6 +1305,342 @@
               "description": "Max messages (default 100, cap 500)."
             }
           },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_trainer_rules",
+        "title": "List AI trainer rules",
+        "description": "Read the AI Trainer rules (ai_trainer_rules) that shape how the auto-reply bot answers. Filter by channel (twilio / maytapi / groups), product code (e.g. NRM), enabled state, or a text search across title, instruction and correct answer. Returns a short preview of each rule; use get_trainer_rule for the full text. Read-only.",
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "channel": {
+              "type": "string",
+              "enum": [
+                "twilio",
+                "maytapi",
+                "groups"
+              ],
+              "description": "Only rules for this channel."
+            },
+            "product": {
+              "type": "string",
+              "description": "Product code, e.g. NRM, SLD, PWR."
+            },
+            "enabled": {
+              "type": "boolean",
+              "description": "true = only active rules, false = only switched-off rules."
+            },
+            "search": {
+              "type": "string",
+              "description": "Case-insensitive text search in title, instruction and correct_answer."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "description": "Max rows (default 100)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_trainer_rule",
+        "title": "Get one AI trainer rule",
+        "description": "Full detail of one AI Trainer rule by id: title, triggers, instruction, correct answer, priority, channel, product, enabled state and notes (which include the edit history written by update_trainer_rule). Read-only.",
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "rule_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Trainer rule UUID (from list_trainer_rules)."
+            }
+          },
+          "required": [
+            "rule_id"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "create_trainer_rule",
+        "title": "Create an AI trainer rule",
+        "description": "Add a new AI Trainer rule that the auto-reply bot will follow. Always show the operator the exact rule text and get approval before calling. Dedup: if an enabled rule with the same title already exists on the same channel, it is returned instead of creating a duplicate. The rule is stamped as created via Claude MCP in its notes. Priority: advisory < strong (default) < override.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 200,
+              "description": "Short rule name, e.g. 'FIRST TOUCH — CTA footer'."
+            },
+            "instruction": {
+              "type": "string",
+              "minLength": 10,
+              "description": "What the bot must do or say."
+            },
+            "channel": {
+              "type": "string",
+              "enum": [
+                "twilio",
+                "maytapi",
+                "groups"
+              ],
+              "description": "Which channel's bot this rule applies to."
+            },
+            "triggers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Keywords/phrases that make this rule apply."
+            },
+            "product": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Product code if product-specific, e.g. NRM."
+            },
+            "priority": {
+              "type": "string",
+              "enum": [
+                "advisory",
+                "strong",
+                "override"
+              ],
+              "description": "Default 'strong'."
+            },
+            "correct_answer": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Exact model answer the bot should give, if any."
+            },
+            "notes": {
+              "type": "string",
+              "description": "Why this rule exists."
+            },
+            "enabled": {
+              "type": "boolean",
+              "description": "Default true."
+            }
+          },
+          "required": [
+            "title",
+            "instruction",
+            "channel"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "update_trainer_rule",
+        "title": "Update an AI trainer rule",
+        "description": "Edit an existing AI Trainer rule, or switch it on/off with `enabled`. Only the fields you pass are changed; nothing is blanked by omission. There is no delete — switch a rule off instead. Before changing wording, the previous title/instruction/correct_answer are copied into the rule's notes as an audit line, so every edit can be traced and undone. Always show the operator the exact new text and get approval before calling.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "rule_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Trainer rule UUID."
+            },
+            "title": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 200
+            },
+            "instruction": {
+              "type": "string",
+              "minLength": 10
+            },
+            "triggers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Replaces the full trigger list."
+            },
+            "product": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "priority": {
+              "type": "string",
+              "enum": [
+                "advisory",
+                "strong",
+                "override"
+              ]
+            },
+            "correct_answer": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "enabled": {
+              "type": "boolean",
+              "description": "false switches the rule off (soft delete)."
+            },
+            "change_reason": {
+              "type": "string",
+              "description": "Why this edit is being made; recorded in notes."
+            }
+          },
+          "required": [
+            "rule_id"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_reply_corrections",
+        "title": "List auto-reply corrections",
+        "description": "Read the auto-reply corrections log (auto_reply_corrections): cases where the bot's reply was corrected, with the original inbound message, the bot's original reply, the corrected reply, the reason and any linked trainer rule. Newest first. Read-only.",
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "channel": {
+              "type": "string",
+              "enum": [
+                "twilio",
+                "maytapi",
+                "groups"
+              ]
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "description": "Max rows (default 50)."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "add_reply_correction",
+        "title": "Log an auto-reply correction",
+        "description": "Record a correction to the bot: the inbound message, what the bot said (optional), and what it should have said. Strictly additive — never edits or removes existing corrections. Optionally link it to a trainer rule (trainer_rule_id) that the correction relates to. Always show the operator the corrected reply and get approval before calling.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "channel": {
+              "type": "string",
+              "enum": [
+                "twilio",
+                "maytapi",
+                "groups"
+              ]
+            },
+            "original_message": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The lead's inbound message."
+            },
+            "corrected_reply": {
+              "type": "string",
+              "minLength": 1,
+              "description": "What the bot should have replied."
+            },
+            "original_reply": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "What the bot actually replied."
+            },
+            "reason": {
+              "type": "string"
+            },
+            "contact_id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "message_id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "trainer_rule_id": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "channel",
+            "original_message",
+            "corrected_reply"
+          ],
           "additionalProperties": false,
           "$schema": "http://json-schema.org/draft-07/schema#"
         },
