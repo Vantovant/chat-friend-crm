@@ -3,6 +3,12 @@
 // same pattern as send-message being shared by the chat UI and reply_to_conversation.
 // Requires pages_manage_engagement on the Page token — returns Meta's rejection
 // verbatim until that permission is granted via App Review.
+//
+// mode: "public" (default) — public reply under the comment (unchanged behaviour).
+// mode: "private" — Meta "Private Replies": sends ONE private Messenger message to the
+//   commenter via POST /{page-id}/messages with recipient.comment_id. Meta allows one
+//   private reply per comment, within 7 days of the comment. Used by the
+//   send_private_reply_to_comment MCP tool. Does not touch the public replied flags.
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { resolvePageToken } from '../_shared/fb-page-token.ts';
@@ -15,6 +21,7 @@ const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 const PAGE_TOKEN = Deno.env.get('META_PAGE_ACCESS_TOKEN') || Deno.env.get('META_PAGE_ACCESS_TOKEN_NEW') || '';
 const PAGE_ID = Deno.env.get('META_PAGE_ID') || '102068582816960';
 const GRAPH = 'https://graph.facebook.com/v19.0';
+const PRIVATE_REPLY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -32,16 +39,32 @@ Deno.serve(async (req) => {
       if (cErr || !claims?.claims) return json({ ok: false, error: 'unauthorized' }, 401);
     }
 
-    const { fb_comment_id, reply_text } = await req.json();
+    const { fb_comment_id, reply_text, mode } = await req.json();
     if (!fb_comment_id || !reply_text) {
       return json({ ok: false, error: 'fb_comment_id and reply_text required' }, 400);
     }
+    const isPrivate = mode === 'private';
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
 
     // Multi-tenant: use the token of the Page that owns this comment. Falls back to
     // the env/admin Page token when the comment's Page has no user connection row.
     const { data: commentRow } = await admin
-      .from('fb_comments').select('page_id').eq('fb_comment_id', fb_comment_id).maybeSingle();
+      .from('fb_comments').select('page_id, created_time, commenter_name').eq('fb_comment_id', fb_comment_id).maybeSingle();
+
+    if (isPrivate) {
+      if (!commentRow) {
+        return json({ ok: false, stage: 'lookup', error: 'Comment not found in fb_comments' }, 200);
+      }
+      const created = commentRow.created_time ? new Date(commentRow.created_time as string).getTime() : 0;
+      if (!created || Date.now() - created > PRIVATE_REPLY_WINDOW_MS) {
+        return json({
+          ok: false,
+          stage: 'window',
+          error: 'Private reply window closed: Meta only allows a private reply within 7 days of the comment.',
+          comment_created_time: commentRow.created_time,
+        }, 200);
+      }
+    }
 
     const resolved = await resolvePageToken(admin, commentRow?.page_id ?? PAGE_ID);
     if (!resolved.ok || !resolved.token) {
@@ -52,6 +75,31 @@ Deno.serve(async (req) => {
         page_id: resolved.page_id,
         graph_error: resolved.error,
         error: 'No usable Page access token for this Page. Connect the Page in Settings → Facebook Page.',
+      }, 200);
+    }
+
+    if (isPrivate) {
+      const pageId = resolved.page_id || commentRow?.page_id || PAGE_ID;
+      const r = await fetch(`${GRAPH}/${encodeURIComponent(String(pageId))}/messages?access_token=${encodeURIComponent(resolved.token)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient: { comment_id: fb_comment_id },
+          message: { text: reply_text },
+        }),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        console.error('[fb-reply-comment] private reply rejected', body);
+        return json({ ok: false, mode: 'private', status: r.status, graph_error: body }, 200);
+      }
+      console.log('[fb-reply-comment] private reply sent', fb_comment_id, body?.message_id);
+      return json({
+        ok: true,
+        mode: 'private',
+        recipient_id: body?.recipient_id ?? null,
+        message_id: body?.message_id ?? null,
+        commenter_name: commentRow?.commenter_name ?? null,
       }, 200);
     }
 
