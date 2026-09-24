@@ -2534,13 +2534,156 @@ var add_reply_correction_default = defineTool45({
   }
 });
 
+// src/lib/mcp/tools/get-twilio-status.ts
+import { defineTool as defineTool46 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z42 } from "npm:zod@^3.25.76";
+function env(name) {
+  const r = globalThis;
+  return (r.Deno?.env?.get?.(name) ?? r.process?.env?.[name])?.trim() || void 0;
+}
+async function twilioGet(url, auth2) {
+  try {
+    const res = await fetch(url, { headers: { Authorization: auth2 } });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  } catch (e) {
+    return { ok: false, status: 0, data: { message: e?.message ?? "network error" } };
+  }
+}
+function errOf(r) {
+  return { error: true, http_status: r.status, message: r.data?.message ?? "request failed", code: r.data?.code ?? null };
+}
+function maskPhone(v) {
+  const s = String(v ?? "").replace(/^whatsapp:/i, "");
+  return s.length > 6 ? `${s.slice(0, 5)}***${s.slice(-3)}` : s;
+}
+var get_twilio_status_default = defineTool46({
+  name: "get_twilio_status",
+  title: "Twilio status (read-only)",
+  description: "READ-ONLY health check straight from Twilio's own records (not Get Well Hub's copy): account status and balance, the WhatsApp Messaging Service and its inbound webhook, WhatsApp sender status, recent Twilio error alerts, the most recent messages Twilio sent/received (bodies trimmed, phones masked), and a per-day count of inbound messages on Twilio vs inbound Twilio messages stored in Get Well Hub over the last N days \u2014 the gap between the two shows where the inbound pipeline breaks. Makes GET requests only; never sends or changes anything. Admin only.",
+  inputSchema: {
+    since_days: z42.number().int().min(1).max(30).optional().describe("Window for the inbound comparison (default 14)."),
+    recent_limit: z42.number().int().min(1).max(50).optional().describe("How many recent Twilio messages to list (default 20).")
+  },
+  annotations: { readOnlyHint: true, openWorldHint: true },
+  handler: async (input, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const { data: isAdmin, error: adminErr } = await supabase.rpc("is_admin_or_super_admin");
+    if (adminErr || isAdmin !== true) {
+      return { content: [{ type: "text", text: "Admin only: get_twilio_status requires an admin or super_admin account." }], isError: true };
+    }
+    const sid = env("TWILIO_ACCOUNT_SID");
+    const token = env("TWILIO_AUTH_TOKEN");
+    const mgSid = env("TWILIO_MESSAGING_SERVICE_SID");
+    if (!sid || !token) {
+      return { content: [{ type: "text", text: "Missing TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN in backend secrets." }], isError: true };
+    }
+    const auth2 = "Basic " + btoa(`${sid}:${token}`);
+    const sinceDays = input.since_days ?? 14;
+    const recentLimit = input.recent_limit ?? 20;
+    const sinceDate = new Date(Date.now() - sinceDays * 864e5).toISOString().slice(0, 10);
+    const api = `https://api.twilio.com/2010-04-01/Accounts/${sid}`;
+    const [acct, bal, svc, senders, alerts, recent] = await Promise.all([
+      twilioGet(`${api}.json`, auth2),
+      twilioGet(`${api}/Balance.json`, auth2),
+      mgSid ? twilioGet(`https://messaging.twilio.com/v1/Services/${mgSid}`, auth2) : Promise.resolve(null),
+      twilioGet(`https://messaging.twilio.com/v2/Channels/Senders?Channel=whatsapp&PageSize=20`, auth2),
+      twilioGet(`https://monitor.twilio.com/v1/Alerts?PageSize=20`, auth2),
+      twilioGet(`${api}/Messages.json?PageSize=${recentLimit}`, auth2)
+    ]);
+    const twilioInboundByDay = {};
+    let twilioScanned = 0;
+    let twilioScanTruncated = false;
+    let twilioScanError = null;
+    let nextUrl = `${api}/Messages.json?PageSize=200&${encodeURIComponent("DateSent>")}=${sinceDate}`;
+    for (let page = 0; nextUrl && page < 5; page++) {
+      const r = await twilioGet(nextUrl, auth2);
+      if (!r.ok) {
+        twilioScanError = errOf(r);
+        break;
+      }
+      for (const m of r.data?.messages ?? []) {
+        twilioScanned++;
+        if (m.direction === "inbound") {
+          const day = new Date(m.date_sent || m.date_created).toISOString().slice(0, 10);
+          twilioInboundByDay[day] = (twilioInboundByDay[day] ?? 0) + 1;
+        }
+      }
+      nextUrl = r.data?.next_page_uri ? `https://api.twilio.com${r.data.next_page_uri}` : null;
+      if (page === 4 && nextUrl) twilioScanTruncated = true;
+    }
+    const hubInboundByDay = {};
+    let hubError = null;
+    const { data: hubRows, error: hubErr } = await supabase.from("messages").select("created_at").eq("provider", "twilio").eq("is_outbound", false).gte("created_at", `${sinceDate}T00:00:00Z`).limit(5e3);
+    if (hubErr) hubError = hubErr.message;
+    for (const row of hubRows ?? []) {
+      const day = String(row.created_at).slice(0, 10);
+      hubInboundByDay[day] = (hubInboundByDay[day] ?? 0) + 1;
+    }
+    const days = Array.from(/* @__PURE__ */ new Set([...Object.keys(twilioInboundByDay), ...Object.keys(hubInboundByDay)])).sort().reverse();
+    const inbound_comparison = days.map((d) => ({
+      day: d,
+      twilio_inbound: twilioInboundByDay[d] ?? 0,
+      hub_inbound: hubInboundByDay[d] ?? 0,
+      gap: (twilioInboundByDay[d] ?? 0) - (hubInboundByDay[d] ?? 0)
+    }));
+    const lastTwilioInbound = (recent.data?.messages ?? []).find((m) => m.direction === "inbound");
+    const result = {
+      checked_at: (/* @__PURE__ */ new Date()).toISOString(),
+      account: acct.ok ? { status: acct.data.status, type: acct.data.type, friendly_name: acct.data.friendly_name } : errOf(acct),
+      balance: bal.ok ? { balance: bal.data.balance, currency: bal.data.currency } : errOf(bal),
+      messaging_service: !svc ? { error: true, message: "TWILIO_MESSAGING_SERVICE_SID not set" } : svc.ok ? {
+        sid: svc.data.sid,
+        friendly_name: svc.data.friendly_name,
+        inbound_request_url: svc.data.inbound_request_url,
+        use_inbound_webhook_on_number: svc.data.use_inbound_webhook_on_number,
+        status_callback: svc.data.status_callback
+      } : errOf(svc),
+      whatsapp_senders: senders.ok ? (senders.data?.senders ?? []).map((s) => ({
+        sender_id: maskPhone(s.sender_id),
+        status: s.status,
+        webhook_callback_url: s.webhook?.callback_url ?? null,
+        offline_reasons: s.offline_reasons ?? null
+      })) : errOf(senders),
+      recent_alerts: alerts.ok ? (alerts.data?.alerts ?? []).map((a) => ({
+        date: a.date_created,
+        error_code: a.error_code,
+        log_level: a.log_level,
+        request_url: a.request_url,
+        text: decodeURIComponent(String(a.alert_text ?? "")).slice(0, 200)
+      })) : errOf(alerts),
+      last_inbound_on_twilio: lastTwilioInbound ? { date: lastTwilioInbound.date_sent || lastTwilioInbound.date_created, from: maskPhone(lastTwilioInbound.from) } : null,
+      recent_messages: recent.ok ? (recent.data?.messages ?? []).map((m) => ({
+        date: m.date_sent || m.date_created,
+        direction: m.direction,
+        from: maskPhone(m.from),
+        to: maskPhone(m.to),
+        status: m.status,
+        error_code: m.error_code,
+        error_message: m.error_message,
+        body: String(m.body ?? "").slice(0, 120)
+      })) : errOf(recent),
+      inbound_comparison: {
+        since: sinceDate,
+        twilio_messages_scanned: twilioScanned,
+        twilio_scan_truncated: twilioScanTruncated,
+        twilio_scan_error: twilioScanError,
+        hub_error: hubError,
+        by_day: inbound_comparison
+      }
+    };
+    return { content: [{ type: "text", text: JSON.stringify(result) }], structuredContent: result };
+  }
+});
+
 // src/lib/mcp/index.ts
 var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
   name: "get-well-hub",
   title: "Get Well Hub",
-  version: "1.8.0",
-  instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement). For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for actual group chat content (who said what, when) use list_group_messages; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual'). For the Lead Call Report, use get_lead_call_report (sorted newest-first by default) and generate_lead_call_summaries to fill in missing AI summaries; edit a lead's type/notes/pipeline stage via update_contact. To post TO a Facebook Page, use create_fb_post \u2014 it refuses to do anything unless you pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true; never pass publish_now: true unless the user has clearly asked to publish immediately. Use list_fb_posts to see what is already published, scheduled, or failed before adding more. For the AI Trainer (how the auto-reply bot answers), use list_trainer_rules / get_trainer_rule to read, create_trainer_rule / update_trainer_rule to change (no delete \u2014 switch off with enabled: false; every edit is audited in the rule's notes), and list_reply_corrections / add_reply_correction for the corrections log. Show the operator the exact rule text and get approval before any trainer write.`,
+  version: "1.9.0",
+  instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement). For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for actual group chat content (who said what, when) use list_group_messages; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual'). For the Lead Call Report, use get_lead_call_report (sorted newest-first by default) and generate_lead_call_summaries to fill in missing AI summaries; edit a lead's type/notes/pipeline stage via update_contact. To post TO a Facebook Page, use create_fb_post \u2014 it refuses to do anything unless you pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true; never pass publish_now: true unless the user has clearly asked to publish immediately. Use list_fb_posts to see what is already published, scheduled, or failed before adding more. For the AI Trainer (how the auto-reply bot answers), use list_trainer_rules / get_trainer_rule to read, create_trainer_rule / update_trainer_rule to change (no delete \u2014 switch off with enabled: false; every edit is audited in the rule's notes), and list_reply_corrections / add_reply_correction for the corrections log. Show the operator the exact rule text and get approval before any trainer write. To check the Twilio pipeline against Twilio's own records (account, balance, webhook, sender status, alerts, and Twilio-vs-Hub inbound counts per day), use get_twilio_status \u2014 read-only, admin only.`,
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
     acceptedAudiences: "authenticated"
@@ -2590,7 +2733,8 @@ var mcp_default = defineMcp({
     create_trainer_rule_default,
     update_trainer_rule_default,
     list_reply_corrections_default,
-    add_reply_correction_default
+    add_reply_correction_default,
+    get_twilio_status_default
   ]
 });
 

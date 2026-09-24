@@ -12,7 +12,7 @@
   "mcp": {
     "server": {
       "name": "get-well-hub",
-      "version": "1.8.0",
+      "version": "1.9.0",
       "title": "Get Well Hub"
     },
     "tools": [
@@ -1641,6 +1641,35 @@
             "original_message",
             "corrected_reply"
           ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_twilio_status",
+        "title": "Twilio status (read-only)",
+        "description": "READ-ONLY health check straight from Twilio's own records (not Get Well Hub's copy): account status and balance, the WhatsApp Messaging Service and its inbound webhook, WhatsApp sender status, recent Twilio error alerts, the most recent messages Twilio sent/received (bodies trimmed, phones masked), and a per-day count of inbound messages on Twilio vs inbound Twilio messages stored in Get Well Hub over the last N days — the gap between the two shows where the inbound pipeline breaks. Makes GET requests only; never sends or changes anything. Admin only.",
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": true
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "since_days": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 30,
+              "description": "Window for the inbound comparison (default 14)."
+            },
+            "recent_limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "description": "How many recent Twilio messages to list (default 20)."
+            }
+          },
           "additionalProperties": false,
           "$schema": "http://json-schema.org/draft-07/schema#"
         },
