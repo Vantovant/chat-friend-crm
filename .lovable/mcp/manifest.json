@@ -12,7 +12,7 @@
   "mcp": {
     "server": {
       "name": "get-well-hub",
-      "version": "1.9.0",
+      "version": "1.10.0",
       "title": "Get Well Hub"
     },
     "tools": [
@@ -986,6 +986,39 @@
           "required": [
             "fb_comment_id",
             "reply_text"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "send_private_reply_to_comment",
+        "title": "Privately message a Facebook commenter",
+        "description": "Send ONE private Messenger message to the person who left a Facebook Page comment (Meta 'Private Replies'), via the same fb-reply-comment function as reply_to_fb_comment with mode 'private'. Meta allows only one private reply per comment and only within 7 days of the comment — older comments are refused before anything is sent. The reply lands in the person's Messenger inbox and any answer arrives in the Messenger inbox. Always show the operator the exact text and get approval before calling. DMs use member pricing only.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": true
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "fb_comment_id": {
+              "type": "string",
+              "description": "fb_comments.fb_comment_id of the person's own comment — get this from list_fb_comments."
+            },
+            "message_text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000,
+              "description": "The private message text."
+            }
+          },
+          "required": [
+            "fb_comment_id",
+            "message_text"
           ],
           "additionalProperties": false,
           "$schema": "http://json-schema.org/draft-07/schema#"
