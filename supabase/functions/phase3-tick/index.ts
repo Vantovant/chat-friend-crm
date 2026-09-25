@@ -2,6 +2,8 @@
 // Step 0 (2h) → auto-send via Maytapi.
 // Steps 1+2 (24h, 72h) → create as send_mode='suggest' (admin sends from RecoveryPanel).
 // Auto-stops on user reply. Honors contacts.do_not_contact and auto_followup_enabled.
+// Stops permanently for Messenger-only contacts ("psid:" placeholders — Maytapi can't
+// reach them) and for any contact a human has ever messaged (owner rule, 2026-09-25).
 // Does NOT touch legacy 5-step rows.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
@@ -149,6 +151,45 @@ Deno.serve(async (req) => {
       if (!phone) {
         await supabase.from("missed_inquiries").update({ status: "exhausted", last_error: "no phone" }).eq("id", row.id);
         failed++; continue;
+      }
+
+      // ── Channel guard (added 2026-09-25) ──
+      // This tick can only send WhatsApp via Maytapi. Messenger-only contacts carry a
+      // placeholder "psid:<id>" instead of a phone number; sending those to Maytapi
+      // produced "sent" logs that never reached anyone. Stop them permanently.
+      const digitsOnly = String(phone).replace(/[^\d]/g, "");
+      if (String(phone).toLowerCase().startsWith("psid:") || digitsOnly.length < 9 || digitsOnly.length > 15) {
+        await supabase.from("missed_inquiries").update({
+          status: "stopped", next_send_at: null, last_error: "guard:not_whatsapp_contact",
+        }).eq("id", row.id);
+        skipped++; continue;
+      }
+
+      // ── Permanent human-contact guard (added 2026-09-25, owner rule) ──
+      // Automated follow-ups only go to contacts with ZERO prior human contact.
+      // Once Vanto (or any human, sent_by IS NOT NULL) has messaged this contact in
+      // ANY conversation, the contact is out of automation for good — not just 4h.
+      {
+        const { data: convRows } = await supabase
+          .from("conversations").select("id").eq("contact_id", contact.id).limit(50);
+        const convIds = (convRows || []).map((c: any) => c.id);
+        if (row.conversation_id && !convIds.includes(row.conversation_id)) convIds.push(row.conversation_id);
+        if (convIds.length > 0) {
+          const { data: everHuman } = await supabase
+            .from("messages")
+            .select("id")
+            .in("conversation_id", convIds)
+            .eq("is_outbound", true)
+            .not("sent_by", "is", null)
+            .limit(1)
+            .maybeSingle();
+          if (everHuman) {
+            await supabase.from("missed_inquiries").update({
+              status: "stopped", next_send_at: null, last_error: "guard:human_contact_ever",
+            }).eq("id", row.id);
+            skipped++; continue;
+          }
+        }
       }
 
       // ── Per-phone cooldown guard (duplicate-blast prevention) ──
