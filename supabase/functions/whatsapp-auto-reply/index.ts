@@ -1,4 +1,5 @@
 import { aiFetch } from "../_shared/ai-fallback.ts";
+import { buildTrainerReply } from "../_shared/trainer-replies.ts";
 /**
  * Vanto CRM — whatsapp-auto-reply Edge Function v6.1
  * Two-Layer System: TRUTH LAYER (hybrid retrieval) + SALES INTELLIGENCE LAYER
@@ -1182,6 +1183,9 @@ Deno.serve(async (req) => {
   let replyContent: string;
   let shouldAssignHuman = false;
   let actionTaken: string;
+  // Set when the reply is an owner-approved AI Trainer rule answer (first touch or
+  // greeting-menu reply). Locks the footer: nothing may be appended after it.
+  let trainerRuleApplied = false;
   let knowledgeFound = false;
   let chunksCount = 0;
   let topicsLinksUsed = false;
@@ -1517,6 +1521,40 @@ Deno.serve(async (req) => {
     (globalThis as any).__welcomeBundleMark = welcomeBundle.mark;
     diag.welcome_bundle_applied = welcomeBundle.applied;
 
+    // ── TRAINER-DRIVEN REPLIES (2026-09-25, owner-approved) ──
+    // Twilio first touch uses the approved "FB AD" AI Trainer rules (greeting, price,
+    // order, join, saw-ad, health) instead of the fixed trust block, and bare "1/2/3"
+    // answers to the greeting menu get the approved menu follow-up. Any failure falls
+    // back to the legacy behaviour below.
+    let trainerReply: { text: string; rule: string } | null = null;
+    if (isTwilio) {
+      try {
+        let prevOutbound = "";
+        if (!isFirstReply) {
+          const { data: lastOut } = await svc
+            .from("messages").select("content")
+            .eq("conversation_id", conversation_id).eq("is_outbound", true)
+            .order("created_at", { ascending: false }).limit(1).maybeSingle();
+          prevOutbound = lastOut?.content || "";
+        }
+        trainerReply = await buildTrainerReply(svc, {
+          isFirstReply, lastIn, recentBlob, prevOutbound,
+        });
+      } catch (e: any) {
+        console.warn("[auto-reply] trainer reply failed (non-fatal, using legacy):", e?.message);
+        trainerReply = null;
+      }
+    }
+
+    if (trainerReply) {
+      replyContent = trainerReply.text;
+      trainerRuleApplied = true;
+      (globalThis as any).__welcomeBundleMark = null; // bundle not appended, so don't mark it
+      diag.welcome_bundle_applied = false;
+      diag.first_touch_template = `trainer_rule:${trainerReply.rule}`;
+      diag.identity_intro_first_line = false;
+      actionTaken = isFirstReply ? "first_touch_trust_message" : "trainer_menu_reply";
+    } else
     // 2026-07-16: If the very first inbound is a SPECIFIC factual question
     // (e.g. "What is NRM?" / "How much is RLX?"), do NOT override with the
     // generic first-touch link dump. Let the AI's knowledge-grounded answer
@@ -2293,7 +2331,7 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
   let _intentDetected: "distributor" | "opportunity" | "training" | null = null;
   try {
     const { detectInboundIntent, maybeAppendIntentInvite } = await import("../_shared/intent-links.ts");
-    _intentDetected = detectInboundIntent(inbound_content || "");
+    _intentDetected = trainerRuleApplied ? null : detectInboundIntent(inbound_content || "");
     if (_intentDetected && contact_id) {
       const { data: cRow } = await svc
         .from("contacts")
@@ -2329,7 +2367,7 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
       intent.intent === "menu_1" ||
       intent.intent === "menu_2" ||
       intent.intent === "menu_3";
-    if (interestSignaled && contact_id) {
+    if (interestSignaled && contact_id && !trainerRuleApplied) {
       const { maybeAppendDemographicAsk } = await import("../_shared/demographics.ts");
       const demoRes = await maybeAppendDemographicAsk(svc, contact_id, replyContent);
       if (demoRes.appended) {
