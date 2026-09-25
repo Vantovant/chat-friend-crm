@@ -2,13 +2,19 @@
 // Step 0 (2h) → auto-send via Maytapi.
 // Steps 1+2 (24h, 72h) → create as send_mode='suggest' (admin sends from RecoveryPanel).
 // Auto-stops on user reply. Honors contacts.do_not_contact and auto_followup_enabled.
-// Stops permanently for Messenger-only contacts ("psid:" placeholders — Maytapi can't
-// reach them) and for any contact a human has ever messaged (owner rule, 2026-09-25).
+// Messenger-only contacts ("psid:" placeholder instead of a phone) are sent on
+// Messenger via the Graph Send API — only inside Meta's 24h window, otherwise stopped.
+// Stops permanently for any contact a human has ever messaged (owner rule, 2026-09-25).
 // Does NOT touch legacy 5-step rows.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { maybeAppendGroupInvite, markGroupInvited } from "../_shared/group-invite.ts";
 import { maybeAppendSponsorCta, markSponsorCtaSent } from "../_shared/intent-links.ts";
+import { resolvePageToken } from "../_shared/fb-page-token.ts";
+
+// Messenger follow-ups must land inside Meta's 24h standard messaging window.
+// Keep a 1h safety margin so a slow tick never sends at the edge.
+const MESSENGER_WINDOW_MS = 23 * 3600000;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -119,7 +125,7 @@ Deno.serve(async (req) => {
 
       const { data: contact } = await supabase
         .from("contacts")
-        .select("id, name, phone, phone_normalized, do_not_contact, is_deleted, auto_reply_enabled, lead_type, last_group_invite_at, last_sponsor_invite_at, last_outbound_at, last_inbound_at")
+        .select("id, name, phone, phone_normalized, messenger_psid, do_not_contact, is_deleted, auto_reply_enabled, lead_type, last_group_invite_at, last_sponsor_invite_at, last_outbound_at, last_inbound_at")
         .eq("id", row.contact_id)
         .maybeSingle();
 
@@ -153,16 +159,41 @@ Deno.serve(async (req) => {
         failed++; continue;
       }
 
-      // ── Channel guard (added 2026-09-25) ──
-      // This tick can only send WhatsApp via Maytapi. Messenger-only contacts carry a
-      // placeholder "psid:<id>" instead of a phone number; sending those to Maytapi
-      // produced "sent" logs that never reached anyone. Stop them permanently.
+      // ── Channel routing (added 2026-09-25) ──
+      // Messenger-only contacts carry a placeholder "psid:<id>" instead of a phone.
+      // They are sent on Messenger (Graph Send API), never via Maytapi. Anything that
+      // is neither a real phone nor a Messenger contact is stopped.
+      const isMessenger = String(phone).toLowerCase().startsWith("psid:");
+      const messengerPsid: string | null = isMessenger
+        ? ((contact as any).messenger_psid || String(phone).slice(5) || null)
+        : null;
       const digitsOnly = String(phone).replace(/[^\d]/g, "");
-      if (String(phone).toLowerCase().startsWith("psid:") || digitsOnly.length < 9 || digitsOnly.length > 15) {
+      if (isMessenger ? !messengerPsid : (digitsOnly.length < 9 || digitsOnly.length > 15)) {
         await supabase.from("missed_inquiries").update({
-          status: "stopped", next_send_at: null, last_error: "guard:not_whatsapp_contact",
+          status: "stopped", next_send_at: null, last_error: "guard:no_reachable_channel",
         }).eq("id", row.id);
         skipped++; continue;
+      }
+
+      // Messenger 24h window: Meta only allows a standard (non-tagged) message within
+      // 24h of the person's last message. Outside it, stop — never send tagged/promo.
+      let messengerPageId: string | null = null;
+      if (isMessenger) {
+        let lastInboundAt: string | null = null;
+        if (row.conversation_id) {
+          const { data: convRow } = await supabase
+            .from("conversations").select("last_inbound_at, page_id").eq("id", row.conversation_id).maybeSingle();
+          lastInboundAt = convRow?.last_inbound_at ?? null;
+          messengerPageId = convRow?.page_id ?? null;
+        }
+        lastInboundAt = lastInboundAt || (contact as any).last_inbound_at || null;
+        const age = lastInboundAt ? Date.now() - new Date(lastInboundAt).getTime() : Infinity;
+        if (!(age >= 0 && age < MESSENGER_WINDOW_MS)) {
+          await supabase.from("missed_inquiries").update({
+            status: "stopped", next_send_at: null, last_error: "guard:messenger_window_closed",
+          }).eq("id", row.id);
+          skipped++; continue;
+        }
       }
 
       // ── Permanent human-contact guard (added 2026-09-25, owner rule) ──
@@ -365,13 +396,47 @@ Deno.serve(async (req) => {
           skipped++; continue;
         }
 
-        // Auto-send via Maytapi (skip_rate_limit: already reserved above)
-        const sendResp = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
-          body: JSON.stringify({ to_number: phone, message, contact_id: contact.id, skip_rate_limit: true }),
-        });
-        const sendData = await sendResp.json().catch(() => ({}));
+        // Auto-send: Messenger contacts via Graph Send API (standard RESPONSE message,
+        // inside the 24h window checked above); everyone else via Maytapi.
+        let sendResp: { ok: boolean; status: number };
+        let sendData: any = {};
+        if (isMessenger) {
+          const resolvedPage = await resolvePageToken(supabase, messengerPageId);
+          if (!resolvedPage.ok || !resolvedPage.token) {
+            sendResp = { ok: false, status: 500 };
+            sendData = { error: "No usable Facebook Page token" };
+          } else {
+            try {
+              const mRes = await fetch(`https://graph.facebook.com/v19.0/me/messages?access_token=${encodeURIComponent(resolvedPage.token)}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  recipient: { id: messengerPsid },
+                  message: { text: message },
+                  messaging_type: "RESPONSE",
+                }),
+              });
+              const mData = await mRes.json().catch(() => ({}));
+              sendResp = { ok: mRes.ok, status: mRes.status };
+              sendData = mRes.ok
+                ? { message_id: mData?.message_id ?? null }
+                : { error: `[FB_MESSENGER_SEND_FAILED] ${mData?.error?.message || "Unknown"}` };
+            } catch (e) {
+              sendResp = { ok: false, status: 503 };
+              sendData = { error: (e as Error)?.message || "Network error reaching Messenger Send API" };
+            }
+          }
+        } else {
+          // Maytapi (skip_rate_limit: already reserved above)
+          const mt = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
+            body: JSON.stringify({ to_number: phone, message, contact_id: contact.id, skip_rate_limit: true }),
+          });
+          sendResp = { ok: mt.ok, status: mt.status };
+          sendData = await mt.json().catch(() => ({}));
+        }
+        const sendChannel = isMessenger ? "facebook_messenger" : "maytapi";
 
         const newAttempt = {
           step: stepIdx + 1,
@@ -405,7 +470,7 @@ Deno.serve(async (req) => {
           conversation_id: row.conversation_id,
           phone_normalized: phone,
           trigger_type: `follow_up_${stepIdx + 1}`,
-          channel: "maytapi",
+          channel: sendChannel,
           template_id: tpl.id,
           template_label: `${row.intent_state}_step_${stepIdx + 1}`,
           message_text: message,
@@ -435,7 +500,7 @@ Deno.serve(async (req) => {
             is_outbound: true,
             message_type: "text",
             status: "sent",
-            provider: "maytapi",
+            provider: sendChannel,
             provider_message_id: sendData?.message_id || null,
           });
           await supabase.from("conversations")
