@@ -348,13 +348,18 @@ Deno.serve(async (req) => {
     //      Most reliable preview because no scraping is required.
     //   2) leading URL detected     → type:link (WhatsApp/Maytapi try to fetch OG card).
     //   3) otherwise                → type:text.
-    const leadingUrlMatch = finalMessage.trim().match(/^(https?:\/\/[^\s]+)/i);
+    // FIX 2026-09-25: previously only a URL at the very START of the message triggered
+    // type:link. Because the trust wrap prepends an intro line, the URL was never leading,
+    // so every wrapped send went out as plain type:text → no preview card, ever.
+    // Now: the first non-shop URL anywhere in the message drives the preview.
+    const allUrls = [...finalMessage.matchAll(/https?:\/\/[^\s)>\]*_]+/gi)].map((m) => m[0].replace(/[.,!?;:]+$/, ""));
+    const previewUrl = allUrls.find((u) => !u.startsWith(SHOP_URL)) ?? null;
     const useMedia = typeof attach_image_url === "string" && /^https?:\/\//i.test(attach_image_url);
-    const usePreview = !useMedia && !!leadingUrlMatch;
+    const usePreview = !useMedia && !!previewUrl;
     const payload: Record<string, unknown> = useMedia
       ? { to_number: cleanNumber, type: "media", message: attach_image_url, text: finalMessage }
       : usePreview
-        ? { to_number: cleanNumber, type: "link", message: leadingUrlMatch![1], text: finalMessage }
+        ? { to_number: cleanNumber, type: "link", message: previewUrl, text: finalMessage }
         : { to_number: cleanNumber, type: "text", message: finalMessage };
 
 
