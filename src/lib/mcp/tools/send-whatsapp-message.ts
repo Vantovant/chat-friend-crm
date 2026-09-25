@@ -174,6 +174,8 @@ export default defineTool({
         message: message_body,
         contact_id: contact.id,
         source: "mcp_send_whatsapp_message",
+        // Tool contract: "exact final text, no templating" — don't add intro/footer.
+        skip_trust_header: true,
       },
     });
     if (fnErr) {
