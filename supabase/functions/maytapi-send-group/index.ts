@@ -524,32 +524,18 @@ Deno.serve(async (req) => {
             body = { to_number: targetJid, type: "text", message: post.message_content };
             previewStatus = "no_url";
           } else {
-            const preview = await checkLinkPreview(post.message_content);
-            if (preview.ok && preview.imageUrl) {
-              // Attach the page's og:image directly as media. This always renders
-              // the visual card at the top — no reliance on Maytapi/WhatsApp's
-              // phone-side scraper (which silently fails on Cloudflare-protected
-              // or slow pages, causing the URL to be appended as plain text,
-              // making the same URL appear TWICE in the group).
-              body = {
-                to_number: targetJid,
-                type: "media",
-                message: preview.imageUrl,
-                text: post.message_content,
-              };
-              previewStatus = "ok";
-              previewImageUrl = preview.imageUrl;
-            } else {
-              // No preview → fall back to per-post fallback or graceful default
-              const fallback = (post.fallback_message && post.fallback_message.trim())
-                ? post.fallback_message.trim()
-                : post.message_content; // safest default: still send the original as plain text
-              messageToSend = fallback;
-              body = { to_number: targetJid, type: "text", message: fallback };
-              previewStatus = "fallback_used";
-              console.log(`[preview] post=${post.id} url=${preview.url} reason=${preview.reason || "no_og_image"} → fallback`);
-            }
-
+            // FIX 2026-09-25: send as Maytapi "link" type (same fix as the 1:1
+            // sender). The link itself goes in `message`, full text in `text`,
+            // so the link's position in the body no longer matters.
+            const linkUrl = String(urls[0]).replace(/[)\].,;!?]+$/g, "");
+            body = {
+              to_number: targetJid,
+              type: "link",
+              message: linkUrl,
+              text: post.message_content,
+            };
+            previewStatus = "ok";
+            console.log(`[preview] post=${post.id} url=${linkUrl} → type=link`);
           }
         }
 
