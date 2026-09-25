@@ -1527,7 +1527,7 @@ Deno.serve(async (req) => {
     // answers to the greeting menu get the approved menu follow-up. Any failure falls
     // back to the legacy behaviour below.
     let trainerReply: { text: string; rule: string } | null = null;
-    if (isTwilio) {
+    if (isTwilio || channel === "facebook_messenger") {
       try {
         let prevOutbound = "";
         if (!isFirstReply) {
@@ -2093,6 +2093,9 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     // No reply is downgraded to Prospector Drafts by default.
     const isTwilioChannel = channel === "twilio";
     const isMaytapiChannel = channel === "maytapi";
+    // Messenger (2026-09-25, owner-approved): replies to people who messaged the Page,
+    // always inside Meta's 24h window (send-message enforces it). Same trained rules.
+    const isMessengerChannel = channel === "facebook_messenger";
     const bypassQuietHoursForPaidLead = isTwilioChannel || emergencyLane;
 
     // ── Quiet-hours exception (inbound-only): allow up to 3 auto-replies per
@@ -2196,7 +2199,7 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
       )
       // Path B — Legacy KV auto-reply for non-first-touch on either channel
       || (
-        (isTwilioChannel || isMaytapiChannel) &&
+        (isTwilioChannel || isMaytapiChannel || isMessengerChannel) &&
         !isFirstTouch &&
         !dnc &&
         !quietHoursBlocked
@@ -2215,7 +2218,7 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     diag.l2_quiet_allowance = QUIET_REPLY_ALLOWANCE;
     diag.l2_hourly_exceeded = hourlyExceeded;
     diag.l2_auto_allowed = autoAllowed;
-    diag.l2_legacy_kv_path = (isTwilioChannel || isMaytapiChannel) && !isFirstTouch && !dnc && !quietHoursBlocked;
+    diag.l2_legacy_kv_path = (isTwilioChannel || isMaytapiChannel || isMessengerChannel) && !isFirstTouch && !dnc && !quietHoursBlocked;
 
     if (!autoAllowed) {
       // ── Downgrade to DRAFT (ai_suggestions) ──
