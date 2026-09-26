@@ -191,6 +191,10 @@ Deno.serve(async (req) => {
             body: JSON.stringify({
               conversation_id: convId,
               contact_id: contactId,
+              // whatsapp-auto-reply requires phone_e164; Messenger contacts use the
+              // "psid:<id>" placeholder (2026-09-26 fix — without it every Messenger
+              // auto-reply was rejected with 400 before running).
+              phone_e164: `psid:${psid}`,
               inbound_content: text,
               inbound_message_id: inboundMsg?.id ?? null,
               channel: 'facebook_messenger',
