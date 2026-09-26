@@ -1,6 +1,8 @@
 // AI Trainer rule replies for whatsapp-auto-reply (2026-09-25, owner-approved).
 // Twilio first touch uses the approved "FB AD" rules; bare 1/2/3 answers to the
-// greeting menu get the approved menu follow-up. Returns null to fall back to legacy.
+// greeting menu get the approved menu follow-up. Answers to the greeting / saw-ad menu
+// given in words ("I have blood pressure", "how much", "I want to join") are classified
+// the same way (2026-09-26). Returns null to fall back to legacy.
 
 const TRAINER_RULE_IDS: Record<string, string> = {
   greeting: "61bf03b5-9fba-4126-9604-63a07c7c3cb1",
@@ -22,15 +24,27 @@ export async function buildTrainerReply(
   const msg = (ctx.lastIn || "").trim().toLowerCase();
   let key: string | null = null;
 
+  const classify = (blob: string): string | null => {
+    const isHealth = /\b(diabet\w*|sugar diabetes|blood pressure|high blood|bp|cholesterol|arthritis|pregnan\w*|cancer|hiv|kidney|heart|asthma|stroke|ulcer|infection|sick|illness|disease|medication|medicine|doctor|clinic|pain)\b/i.test(blob);
+    const isJoin = /\b(join|joining|register|registration|become (a|an) (member|associate|distributor)|sign up|business|opportunity|earn|income|distributor)\b/i.test(blob);
+    const isBuy = /\b(buy|order|purchase|shop|how (can|do) i get|where (can|do) i get|i want (it|the product|this|them)|i need (it|the product|this))\b/i.test(blob);
+    const isPrice = /\b(price|prices|pricing|cost|costs|how much|amount)\b/i.test(blob);
+    if (isHealth) return "menu1_health";
+    if (isJoin) return "join";
+    if (isBuy) return "order";
+    if (isPrice) return "price";
+    return null;
+  };
+
   if (!ctx.isFirstReply) {
-    // Greeting-menu follow-up: only when the whole message is the choice AND the
-    // previous outbound was the greeting menu.
-    const wasMenu = /reply 1, 2 or 3/i.test(ctx.prevOutbound || "");
+    // Greeting / saw-ad menu follow-up: only when the previous outbound was that menu.
+    const wasMenu = /reply 1, 2 or 3/i.test(ctx.prevOutbound || "") || /just tell me which fits/i.test(ctx.prevOutbound || "");
     if (!wasMenu) return null;
     if (/^(1|1\uFE0F?\u20E3|one|option 1|number 1)[.!]?$/.test(msg)) key = "menu1_health";
     else if (/^(2|2\uFE0F?\u20E3|two|option 2|number 2)[.!]?$/.test(msg)) key = "menu2_prices";
     else if (/^(3|3\uFE0F?\u20E3|three|option 3|number 3)[.!]?$/.test(msg)) key = "menu3_join";
-    else return null;
+    else key = classify(msg); // answered in words — classify only the reply itself
+    if (!key) return null;
   } else {
     const blob = `${msg} ${ctx.recentBlob || ""}`;
     const isHealth = /\b(diabet\w*|sugar diabetes|blood pressure|high blood|bp|cholesterol|arthritis|pregnan\w*|cancer|hiv|kidney|heart|asthma|stroke|ulcer|infection|sick|illness|disease|medication|medicine|doctor|clinic|pain)\b/i.test(blob);
