@@ -71,15 +71,21 @@ async function assertMaytapiReady(productId: string, phoneId: string, token: str
 // NOTE (2026-06-20): Proof-URL preview card has been SUSPENDED — the link preview was
 // not rendering reliably. Identity is now carried by an explicit intro line so the
 // recipient still knows who is messaging them (and that a Twilio number may call).
+// 2026-09-27 (owner-approved): leads who first messaged the international (Twilio)
+// WhatsApp line are told plainly that this is Vanto following up from his own number,
+// so the second number doesn't look like spam. Everyone else gets a neutral intro.
 function buildTrustWrap(
   message: string,
   _proofUrl: string,
   _tocUrl: string,
   localNumber: string,
+  intlNumber: string | null = null,
 ): string {
-  const intro =
-    `Hi, this is *Vanto from GetWellAfrica* — an accredited APLGO distributor.\n` +
-    `You may also receive a call or WhatsApp from our Twilio number on our behalf.\n\n`;
+  const intro = intlNumber
+    ? `Hi, this is *Vanto from Get Well Africa*, an accredited APLGO distributor 👋\n` +
+      `You messaged our international WhatsApp line (*${intlNumber}*) about our products, and I'm following up personally from my own WhatsApp: *${localNumber}*. Please save this number so we can stay in touch 🙏\n\n`
+    : `Hi, this is *Vanto from Get Well Africa*, an accredited APLGO distributor 👋\n` +
+      `This is my personal WhatsApp. Please save it so we can stay in touch 🙏\n\n`;
   const footerParts: string[] = [`Shop: ${SHOP_URL}`];
   if (localNumber) footerParts.push(`Local support: ${localNumber}`);
   const footer = `\n\n${footerParts.join("\n")}`;
@@ -313,22 +319,49 @@ Deno.serve(async (req) => {
           const { data: settingRows } = await svc
             .from("integration_settings")
             .select("key,value")
-            .in("key", ["distributor_proof_url", "table_of_contents_url", "local_support_number"]);
+            .in("key", ["distributor_proof_url", "table_of_contents_url", "local_support_number", "twilio_international_number"]);
           const s: Record<string, string> = {};
           for (const r of (settingRows || []) as any[]) s[r.key] = (r.value || "").trim();
           const PROOF_URL = s.distributor_proof_url || DEFAULT_PROOF_URL;
           const TOC_URL = s.table_of_contents_url || SHOP_URL;
           const LOCAL_NUMBER = s.local_support_number || "+27 79 083 1530";
+          const INTL_NUMBER = s.twilio_international_number || "+1 555 768 9054";
 
           // If the message already contains the identity intro AND the shop URL, it has
           // been wrapped upstream — don't double-stamp.
           const INTRO_SIG = "Vanto from GetWellAfrica";
-          if (finalMessage.includes(INTRO_SIG) && finalMessage.includes(SHOP_URL)) {
+          const INTRO_SIG_2 = "Vanto from Get Well Africa*, an accredited";
+          if ((finalMessage.includes(INTRO_SIG) || finalMessage.includes(INTRO_SIG_2)) && finalMessage.includes(SHOP_URL)) {
             trust_skip_reason = "message_already_contains_trust_intro";
           } else {
             // Lean wrap on every send (identity intro on top, Shop + Local support at bottom).
             // Proof-URL preview SUSPENDED 2026-06-20 — identity carried by intro line.
-            finalMessage = buildTrustWrap(finalMessage, PROOF_URL, TOC_URL, LOCAL_NUMBER);
+            // Did this person first reach us on the international (Twilio) line, and is
+            // this the first message from Vanto's own WhatsApp? Then explain the switch.
+            let intlForIntro: string | null = null;
+            try {
+              const digits = String(to_number || "").replace(/\D/g, "");
+              let cid: string | null = bodyContactId || null;
+              if (!cid && digits) {
+                const { data: ct } = await svc.from("contacts").select("id")
+                  .eq("phone_normalized", `+${digits}`).eq("is_deleted", false).limit(1).maybeSingle();
+                cid = ct?.id ?? null;
+              }
+              if (cid) {
+                const { data: convs } = await svc.from("conversations").select("id").eq("contact_id", cid).limit(20);
+                const convIds = (convs || []).map((c: any) => c.id);
+                if (convIds.length > 0) {
+                  const { data: twIn } = await svc.from("messages").select("id")
+                    .in("conversation_id", convIds).eq("provider", "twilio").eq("is_outbound", false)
+                    .limit(1).maybeSingle();
+                  const { data: mtOut } = await svc.from("messages").select("id")
+                    .in("conversation_id", convIds).eq("provider", "maytapi").eq("is_outbound", true)
+                    .limit(1).maybeSingle();
+                  if (twIn && !mtOut) intlForIntro = INTL_NUMBER;
+                }
+              }
+            } catch (_e) { intlForIntro = null; }
+            finalMessage = buildTrustWrap(finalMessage, PROOF_URL, TOC_URL, LOCAL_NUMBER, intlForIntro);
             trust_header_applied = true;
           }
         } else {
