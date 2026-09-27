@@ -26,7 +26,10 @@ const GENERIC_MESSAGE =
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 
-type Svc = ReturnType<typeof createClient>;
+// Loosened to any (2026-09-27): the strict ReturnType<typeof createClient> overload
+// resolves to SupabaseClient<unknown, never, GenericSchema>, which rejects the
+// concretely-inferred client — same fix already applied in fb-ingest / group-dm-pilot.
+type Svc = any;
 
 /** member ids belonging to Vanto's own number — never message ourselves. */
 async function ownMemberIds(svc: Svc): Promise<Set<string>> {
