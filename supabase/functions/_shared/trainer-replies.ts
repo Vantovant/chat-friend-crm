@@ -6,6 +6,8 @@
 // and clear intents (buy, price, join, membership benefits) now use the trained rule on
 // ANY message, not only the first one — the legacy knowledge path was pasting raw
 // document text. A rule is never sent twice in a row. Returns null to fall back.
+// 2026-09-28 (training round 2): pregnancy, handover to Vanto, scam/trust, too
+// expensive, results timeframe, delivery/location and "what is NRM" routed too.
 
 const TRAINER_RULE_IDS: Record<string, string> = {
   greeting: "61bf03b5-9fba-4126-9604-63a07c7c3cb1",
@@ -20,27 +22,42 @@ const TRAINER_RULE_IDS: Record<string, string> = {
   health_bp: "a815cb98-cd50-4e5e-a715-d0f3744358d4",
   health_stroke: "25c5a4eb-b094-47f9-a4ba-1185f7e97404",
   health_joints: "a3dd9b61-c0e5-441b-88bf-785aa9a58994",
+  health_pregnancy: "6a5478fb-820d-4c27-a20b-1679da228cad",
+  membership: "34bdc075-ca2f-4db8-aedc-222ee870662b",
+  handover: "5416a4da-ff2b-4dd3-98a6-aa731109b061",
+  results: "2f683743-7ec5-4806-bdb0-1caa93c7669c",
+  expensive: "2d39e681-0a28-48d5-aa06-b637d1733cd4",
+  scam: "101596e7-2790-4610-9064-edff047785f2",
+  delivery: "3c6b4bbc-26d4-4f41-a829-7807487fedb1",
+  product_nrm: "ac17e696-4728-46f1-a9dc-01e9000a6f23",
 };
-// Rules looked up by title prefix (created later, id not fixed here).
-const TRAINER_RULE_TITLES: Record<string, string> = {
-  membership: "MEMBERSHIP — R375 benefits",
-};
+// Rules looked up by title prefix (none at present; kept for future rules).
+const TRAINER_RULE_TITLES: Record<string, string> = {};
 
 const PRODUCT_CODES = ["ice","nrm","rlx","pwr","grw","sld","dox","gts","brn","chm","stp","hpr","mnd","skn","pft","lft","alt","mls","hrt","air","hpy","bty"];
 
 function healthKey(blob: string): string | null {
+  if (/\b(pregnan\w*|expecting a baby|i'?m expecting|breastfeed\w*)\b/i.test(blob)) return "health_pregnancy";
   if (/\b(stroke|paraly[sz]ed)\b/i.test(blob)) return "health_stroke";
   if (/\b(diabet\w*|sugar|glucose)\b/i.test(blob)) return "health_sugar";
   if (/\b(blood pressure|high blood|bp|hypertension|cholesterol)\b/i.test(blob)) return "health_bp";
   if (/\b(joints?|arthritis|knee|knees|back pain|stiff\w*)\b/i.test(blob)) return "health_joints";
-  if (/\b(pregnan\w*|cancer|hiv|kidney|heart|asthma|ulcer|infection|sick|illness|disease|medication|medicine|pain)\b/i.test(blob)) return "menu1_health";
+  if (/\b(cancer|hiv|kidney|heart|asthma|ulcer|infection|sick|illness|disease|medication|medicine|pain)\b/i.test(blob)) return "menu1_health";
   return null;
 }
 
 function intentKey(blob: string): string | null {
+  const t = blob.trim();
+  if (/^(directly|direct|speak to vanto|talk to vanto)[.!]?$/i.test(t) ||
+      /\b(speak|talk|chat) (to|with) (vanto|someone|a person|a human|a real person)\b|\breal person\b/i.test(t)) return "handover";
   const h = healthKey(blob);
   if (h) return h;
+  if (/\b(scam|fraud|fake|legit\w*|genuine|is (this|it) real|are (the|your) products real)\b/i.test(blob)) return "scam";
+  if (/\b(too expensive|expensive|can'?t afford|cannot afford|too pricey|too much money)\b/i.test(blob)) return "expensive";
+  if (/\b(deliver\w*|shipping|courier|where are you( located| based)?|your location|located)\b/i.test(blob)) return "delivery";
+  if (/\b(results?|how (long|quickly|fast)|when will i (see|feel))\b/i.test(blob)) return "results";
   if (/\b(benefits?|advantages?)\b.*\b(membership|member|r ?375|register\w*)\b|\bwhat (is|are|does) (the )?r ?375\b|\br ?375 membership\b/i.test(blob)) return "membership";
+  if (/\b(what is|what'?s|tell me about|explain)\b.*\bnrm\b|\bnrm supplement\b/i.test(blob)) return "product_nrm";
   if (/\b(join|joining|become (a|an) (member|associate|distributor)|sign up|business opportunity|opportunity|earn|income|distributor)\b/i.test(blob)) return "join";
   if (/\b(buy|order|purchase|how (can|do) i get|where (can|do) i get|i want (it|the product|this|them)|i need (it|the product|this))\b/i.test(blob)) return "order";
   if (/\b(price|prices|pricing|cost|costs|how much)\b/i.test(blob)) return "price";
