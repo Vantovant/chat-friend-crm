@@ -1,4 +1,5 @@
 import { aiFetch } from "../_shared/ai-fallback.ts";
+import { guardOnJoin, guardOnMessage } from "../_shared/group-guard.ts";
 /**
  * Maytapi inbound webhook v2 — handles BOTH:
  *  1. Delivery ack callbacks (existing — for Group Campaigns scheduled posts)
@@ -115,41 +116,67 @@ Deno.serve(async (req) => {
       ).toLowerCase();
       const notifType = String(gMsg.type || payload.type || "").toLowerCase();
       const groupJid = String(payload.conversation || gMsg.chatId || gMsg.from || "");
+      // GROUP GUARD 2026-09-29: real Maytapi shape is message.type="info",
+      // message.subtype="group/add"|"group/remove"|"group/leave", message.participant="<num>@c.us"|"<id>@lid".
+      const subtype = String(gMsg.subtype || "").toLowerCase();
+      const infoMap: Record<string, string> = { "group/add": "joined", "group/remove": "removed", "group/leave": "left" };
+      const infoEvent = notifType === "info" && groupJid.includes("@g.us") ? infoMap[subtype] : undefined;
       const isParticipantEvent =
         groupJid.includes("@g.us") &&
-        (["add", "remove", "leave", "join", "invite"].includes(notif) ||
+        (!!infoEvent ||
+          ["add", "remove", "leave", "join", "invite"].includes(notif) ||
           ["group_participants", "participants", "group_notification"].includes(notifType));
 
       if (isParticipantEvent) {
-        const eventType =
-          notif === "add" || notif === "join" || notif === "invite"
+        const eventType = infoEvent ||
+          (notif === "add" || notif === "join" || notif === "invite"
             ? "joined"
             : notif === "leave"
               ? "left"
-              : "removed";
+              : "removed");
 
         const rawParticipants: any[] =
           gMsg.participants || payload.participants || gMsg.participant || payload.participant || [];
         const list = Array.isArray(rawParticipants) ? rawParticipants : [rawParticipants];
+        const eventTimeIso = new Date(
+          payload.timestamp ? Number(payload.timestamp) * 1000 : Date.now(),
+        ).toISOString();
 
-        const rows = list
-          .map((p: any) => {
-            const phoneRaw = typeof p === "string" ? p : (p?.id || p?.phone || p?.number || "");
-            const phone = normalizePhoneToE164(String(phoneRaw));
-            if (!phone) return null;
-            return {
+        const rows: any[] = [];
+        for (const p of list) {
+          const phoneRaw = String(typeof p === "string" ? p : (p?.id || p?.phone || p?.number || ""));
+          // @lid ids carry no phone number: log the raw id, skip phone-based checks.
+          if (/@lid$/i.test(phoneRaw)) {
+            rows.push({
               group_jid: groupJid,
-              member_phone: phone,
-              member_name: (typeof p === "object" ? (p?.name || p?.pushname || null) : null) ||
-                payload?.user?.name || null,
+              member_phone: phoneRaw,
+              member_name: payload?.user?.name || null,
               event_type: eventType,
-              event_time: new Date(
-                payload.timestamp ? Number(payload.timestamp) * 1000 : Date.now(),
-              ).toISOString(),
-              raw_payload: payload,
-            };
-          })
-          .filter(Boolean);
+              event_time: eventTimeIso,
+              raw_payload: { ...payload, lid_participant: phoneRaw, phone_unknown: true },
+            });
+            continue;
+          }
+          const phone = normalizePhoneToE164(phoneRaw);
+          if (!phone) continue;
+          // Dedup with the 15-min poller: same group + phone + event within 30 min → skip.
+          const { data: dupRows } = await supabase
+            .from("whatsapp_group_membership_events")
+            .select("id")
+            .eq("group_jid", groupJid).eq("member_phone", phone).eq("event_type", eventType)
+            .gte("event_time", new Date(Date.now() - 30 * 60 * 1000).toISOString())
+            .limit(1);
+          if ((dupRows || []).length) continue;
+          rows.push({
+            group_jid: groupJid,
+            member_phone: phone,
+            member_name: (typeof p === "object" ? (p?.name || p?.pushname || null) : null) ||
+              payload?.user?.name || null,
+            event_type: eventType,
+            event_time: eventTimeIso,
+            raw_payload: payload,
+          });
+        }
 
         if (rows.length) {
           const { error: memErr } = await supabase
@@ -157,6 +184,12 @@ Deno.serve(async (req) => {
             .insert(rows as any[]);
           if (memErr) console.warn("[maytapi-inbound] membership event insert warn:", memErr.message);
           else console.log(`[maytapi-inbound] logged ${rows.length} ${eventType} event(s) for ${groupJid}`);
+        }
+        // GROUP GUARD: country gate / blocklisted re-join on joins (phone-based only).
+        if (eventType === "joined") {
+          for (const r of rows) {
+            if (String(r.member_phone).startsWith("+")) await guardOnJoin(supabase, groupJid, r.member_phone, payload);
+          }
         }
       }
     } catch (memCatch: any) {
