@@ -1793,6 +1793,48 @@ export type Database = {
         }
         Relationships: []
       }
+      group_guard_actions: {
+        Row: {
+          action: string
+          created_at: string
+          deleted_count: number
+          group_jid: string
+          id: string
+          incident_bucket: number
+          mode: string
+          phone: string
+          raw: Json | null
+          reason: string
+          removed_ok: boolean | null
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          deleted_count?: number
+          group_jid: string
+          id?: string
+          incident_bucket?: number
+          mode: string
+          phone: string
+          raw?: Json | null
+          reason: string
+          removed_ok?: boolean | null
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          deleted_count?: number
+          group_jid?: string
+          id?: string
+          incident_bucket?: number
+          mode?: string
+          phone?: string
+          raw?: Json | null
+          reason?: string
+          removed_ok?: boolean | null
+        }
+        Relationships: []
+      }
       group_health_reports: {
         Row: {
           created_at: string
