@@ -8,6 +8,8 @@
 // document text. A rule is never sent twice in a row. Returns null to fall back.
 // 2026-09-28 (training round 2): pregnancy, handover to Vanto, scam/trust, too
 // expensive, results timeframe, delivery/location and "what is NRM" routed too.
+// 2026-09-29: a bare 1/2/3 is recognised as a menu choice when the greeting menu was
+// sent in the last few bot messages (not only the very last one) — needs conversationId.
 
 const TRAINER_RULE_IDS: Record<string, string> = {
   greeting: "61bf03b5-9fba-4126-9604-63a07c7c3cb1",
@@ -80,13 +82,24 @@ async function loadRule(svc: any, key: string): Promise<string | null> {
 
 export async function buildTrainerReply(
   svc: any,
-  ctx: { isFirstReply: boolean; lastIn: string; recentBlob: string; prevOutbound: string },
+  ctx: { isFirstReply: boolean; lastIn: string; recentBlob: string; prevOutbound: string; conversationId?: string | null },
 ): Promise<{ text: string; rule: string } | null> {
   const msg = (ctx.lastIn || "").trim().toLowerCase();
   let key: string | null = null;
 
   if (!ctx.isFirstReply) {
-    const wasMenu = /reply 1, 2 or 3/i.test(ctx.prevOutbound || "") || /just tell me which fits/i.test(ctx.prevOutbound || "");
+    const MENU_RE = /reply 1, 2 or 3|just tell me which fits/i;
+    let wasMenu = MENU_RE.test(ctx.prevOutbound || "");
+    const isBareChoice = /^([123]|[123]\uFE0F?\u20E3|one|two|three|option [123]|number [123])[.!]?$/.test(msg);
+    if (!wasMenu && isBareChoice && ctx.conversationId) {
+      try {
+        const since = new Date(Date.now() - 48 * 3600000).toISOString();
+        const { data: recentOut } = await svc.from("messages").select("content")
+          .eq("conversation_id", ctx.conversationId).eq("is_outbound", true)
+          .gte("created_at", since).order("created_at", { ascending: false }).limit(5);
+        wasMenu = (recentOut || []).some((r: any) => MENU_RE.test(String(r?.content || "")));
+      } catch (_e) { /* non-fatal */ }
+    }
     if (wasMenu && /^(1|1\uFE0F?\u20E3|one|option 1|number 1)[.!]?$/.test(msg)) key = "menu1_health";
     else if (wasMenu && /^(2|2\uFE0F?\u20E3|two|option 2|number 2)[.!]?$/.test(msg)) key = "menu2_prices";
     else if (wasMenu && /^(3|3\uFE0F?\u20E3|three|option 3|number 3)[.!]?$/.test(msg)) key = "menu3_join";
