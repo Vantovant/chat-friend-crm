@@ -39,7 +39,8 @@ Deno.serve(async (req) => {
       settings: {
         mode: s.mode, country_block_enabled: s.countryBlock, blocked_prefixes: s.blockedPrefixes,
         allowlist_count: s.allowlist.length, flood_max_msgs: s.floodMax, flood_window_sec: s.floodWindowSec,
-        dup_max: s.dupMax, owner_phone_configured: !!s.ownerPhone, alert_phone_configured: !!s.adminPhone,
+        dup_max: s.dupMax, owner_phone_configured: !!s.ownerPhone, alert_phone_configured: !!s.alertPhone,
+        alert_phone: s.alertPhone ? s.alertPhone.slice(-4) : null,
       },
       preflight,
       last_actions: actions || [],

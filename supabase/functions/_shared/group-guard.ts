@@ -18,6 +18,8 @@ export type GuardSettings = {
   floodMode: "log_only" | "enforce";
   ownerPhone: string;
   adminPhone: string;
+  // Owner request 2026-09-30: where guard alerts go. Falls back to adminPhone when empty.
+  alertPhone: string;
   excluded: string[];
   targetGroups: string[];
 };
@@ -33,6 +35,7 @@ const KEYS = [
   "group_guard_flood_mode",
   "maytapi_owner_phone",
   "zazi_group_admin_phone",
+  "group_guard_alert_phone",
   "zazi_group_admin_excluded_phones",
   "group_guard_target_groups",
 ];
@@ -56,6 +59,7 @@ export async function loadGuardSettings(svc: Svc): Promise<GuardSettings> {
     floodMode: m.group_guard_flood_mode === "enforce" ? "enforce" : "log_only",
     ownerPhone: digits(m.maytapi_owner_phone),
     adminPhone: digits(m.zazi_group_admin_phone),
+    alertPhone: digits(m.group_guard_alert_phone),
     excluded: csv(m.zazi_group_admin_excluded_phones).map(digits),
     // Owner request 2026-09-30: if set, the guard acts ONLY in these group JIDs.
     targetGroups: csv(m.group_guard_target_groups),
@@ -108,6 +112,7 @@ export async function getGroupAdmins(svc: Svc, jid: string): Promise<string[] | 
 async function isExempt(svc: Svc, s: GuardSettings, jid: string, phoneDigits: string): Promise<boolean> {
   if (!phoneDigits) return true;
   if (phoneDigits === s.ownerPhone || phoneDigits === s.adminPhone) return true;
+  if (phoneDigits === s.alertPhone) return true; // owner request 2026-09-30: owner's second phone is exempt too
   if (s.excluded.includes(phoneDigits) || s.allowlist.includes(phoneDigits)) return true;
   const admins = await getGroupAdmins(svc, jid);
   if (admins && admins.includes(phoneDigits)) return true;
@@ -150,12 +155,14 @@ async function maytapiDeleteRecent(svc: Svc, jid: string, phoneE164: string): Pr
 }
 
 async function sendAlert(s: GuardSettings, text: string) {
-  if (!s.adminPhone) return;
+  // Owner request 2026-09-30: alert goes to group_guard_alert_phone, falling back to zazi_group_admin_phone.
+  const to = s.alertPhone || s.adminPhone;
+  if (!to) return;
   try {
     await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/maytapi-send-direct`, {
       method: "POST",
       headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ to_number: "+" + s.adminPhone, message: text, skip_trust_header: true, source: "group_guard_alert" }),
+      body: JSON.stringify({ to_number: "+" + to, message: text, skip_trust_header: true, source: "group_guard_alert" }),
     });
   } catch (e) { console.warn("[group-guard] alert failed:", (e as Error)?.message); }
 }
