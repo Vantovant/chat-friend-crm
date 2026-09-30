@@ -12,7 +12,7 @@
   "mcp": {
     "server": {
       "name": "get-well-hub",
-      "version": "1.10.0",
+      "version": "1.11.0",
       "title": "Get Well Hub"
     },
     "tools": [
@@ -1703,6 +1703,52 @@
               "description": "How many recent Twilio messages to list (default 20)."
             }
           },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_group_guard_status",
+        "title": "Get Group Guard status",
+        "description": "Read-only. Group Guard settings (mode off/log_only/enforce, country block, flood limits), whether the linked WhatsApp number is admin in each active group (remove/delete only works where it is), and the last 20 guard actions.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": true
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "set_group_guard_mode",
+        "title": "Set Group Guard mode",
+        "description": "Set Group Guard mode: 'off' (does nothing), 'log_only' (records who would be removed, removes nobody), or 'enforce' (removes spammers/blocked-country joiners from active groups). Requires an admin account.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "off",
+                "log_only",
+                "enforce"
+              ],
+              "description": "New guard mode."
+            }
+          },
+          "required": [
+            "mode"
+          ],
           "additionalProperties": false,
           "$schema": "http://json-schema.org/draft-07/schema#"
         },
