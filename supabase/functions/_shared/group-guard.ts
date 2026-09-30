@@ -15,6 +15,7 @@ export type GuardSettings = {
   floodMax: number;
   floodWindowSec: number;
   dupMax: number;
+  floodMode: "log_only" | "enforce";
   ownerPhone: string;
   adminPhone: string;
   excluded: string[];
@@ -28,6 +29,7 @@ const KEYS = [
   "group_guard_flood_max_msgs",
   "group_guard_flood_window_sec",
   "group_guard_dup_max",
+  "group_guard_flood_mode",
   "maytapi_owner_phone",
   "zazi_group_admin_phone",
   "zazi_group_admin_excluded_phones",
@@ -49,6 +51,7 @@ export async function loadGuardSettings(svc: Svc): Promise<GuardSettings> {
     floodMax: Number(m.group_guard_flood_max_msgs) || 5,
     floodWindowSec: Number(m.group_guard_flood_window_sec) || 60,
     dupMax: Number(m.group_guard_dup_max) || 3,
+    floodMode: m.group_guard_flood_mode === "enforce" ? "enforce" : "log_only",
     ownerPhone: digits(m.maytapi_owner_phone),
     adminPhone: digits(m.zazi_group_admin_phone),
     excluded: csv(m.zazi_group_admin_excluded_phones).map(digits),
@@ -202,6 +205,8 @@ export async function guardOnMessage(svc: Svc, jid: string, phoneE164: string, b
     if (!phoneE164) return;
     const s = await loadGuardSettings(svc);
     if (s.mode === "off") return;
+    // Owner request 2026-09-30: country block may enforce while flood guard stays log_only.
+    if (s.mode === "enforce" && s.floodMode === "log_only") s.mode = "log_only";
     const g = await isActiveGroup(svc, jid);
     if (!g.active) return;
     if (await isExempt(svc, s, jid, digits(phoneE164))) return;

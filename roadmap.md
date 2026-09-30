@@ -6,3 +6,6 @@
 - [x] Extract MCP manifest and deploy `mcp` edge function
 - [x] Publish app so Claude connector picks up the new tool
 - [x] Facebook Page write tools: `fb_outbound_posts` table, `fb-create-post` edge function, `create_fb_post` + `list_fb_posts` MCP tools (Get Well Africa page only)
+
+## Group Guard (2026-09-30)
+- [x] URGENT: enforce +234 country block now (spam flood #2); flood guard stays log_only
