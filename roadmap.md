@@ -8,4 +8,4 @@
 - [x] Facebook Page write tools: `fb_outbound_posts` table, `fb-create-post` edge function, `create_fb_post` + `list_fb_posts` MCP tools (Get Well Africa page only)
 
 ## Group Guard (2026-09-30)
-- [ ] URGENT: enforce +234 country block now (spam flood #2); flood guard stays log_only
+- [x] URGENT: enforce +234 country block now (spam flood #2); flood guard stays log_only
