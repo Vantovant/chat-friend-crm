@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS missed_inquiries_one_active_per_contact ON public.missed_inquiries (contact_id) WHERE status = 'active';

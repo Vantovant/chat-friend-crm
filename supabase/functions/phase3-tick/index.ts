@@ -383,6 +383,68 @@ Deno.serve(async (req) => {
         }
       }
       if (isAuto) {
+        // ── FINAL PRE-SEND GATE (2026-10-02, owner rules) — checked right before every send ──
+        // 1) Twilio origin only (Messenger "psid:" contacts unchanged)
+        // 2) One case per person (other active cases for this contact → merged)
+        // 3) Per-person cooldown (any 'sent' follow-up, any topic, last N hours)
+        // 4) Never-follow-up list + blocked prefixes
+        {
+          const { data: gRows } = await supabase.from("integration_settings").select("key, value")
+            .in("key", ["followup_per_contact_cooldown_hours", "followup_excluded_phones", "group_guard_blocked_prefixes"]);
+          const g: Record<string, string> = {};
+          (gRows || []).forEach((r: any) => { g[r.key] = r.value || ""; });
+          const dg = (s: string) => s.replace(/[^\d]/g, "");
+          const excluded = (g.followup_excluded_phones || "").split(",").map(dg).filter(Boolean);
+          const prefixes = (g.group_guard_blocked_prefixes || "").split(",").map(dg).filter(Boolean);
+          const coolH = Math.max(parseInt(g.followup_per_contact_cooldown_hours || "72") || 72, 0);
+          const logSkip = async (outcome: string, err: string) => {
+            await supabase.from("followup_logs").insert({
+              missed_inquiry_id: row.id, contact_id: row.contact_id, conversation_id: row.conversation_id,
+              phone, intent_state: row.intent_state, topic: row.topic, step_number: stepIdx + 1,
+              template_id: tpl.id, message_text: message, send_mode: "auto",
+              delivery: outcome, outcome, error: err,
+            });
+          };
+          let skip: { outcome: string; err: string; stop: boolean; resched?: string } | null = null;
+
+          if (!isMessenger && (excluded.includes(digitsOnly) || prefixes.some((p) => digitsOnly.startsWith(p)))) {
+            skip = { outcome: "skipped_excluded", err: "excluded_phone_or_prefix", stop: true };
+          }
+          if (!skip && !isMessenger) {
+            const { data: cv } = await supabase.from("conversations").select("id").eq("contact_id", contact.id).limit(100);
+            const ids = (cv || []).map((c: any) => c.id);
+            let tw: any = null;
+            if (ids.length) {
+              const r = await supabase.from("messages").select("id").in("conversation_id", ids)
+                .eq("is_outbound", false).eq("provider", "twilio").limit(1).maybeSingle();
+              tw = r.data;
+            }
+            if (!tw) skip = { outcome: "skipped_not_twilio", err: "not_twilio_origin", stop: true };
+          }
+          if (!skip && coolH > 0) {
+            const since = new Date(Date.now() - coolH * 3600000).toISOString();
+            const { data: lastSent } = await supabase.from("followup_logs").select("created_at")
+              .eq("delivery", "sent").gte("created_at", since)
+              .or(`contact_id.eq.${contact.id},phone.eq.${phone}`)
+              .order("created_at", { ascending: false }).limit(1).maybeSingle();
+            if (lastSent) {
+              const resched = new Date(new Date(lastSent.created_at).getTime() + coolH * 3600000 + 60000).toISOString();
+              skip = { outcome: "skipped_cooldown", err: `cooldown_per_contact_${coolH}h`, stop: false, resched };
+            }
+          }
+          if (skip) {
+            await logSkip(skip.outcome, skip.err);
+            await supabase.from("missed_inquiries").update(skip.stop
+              ? { status: "stopped", next_send_at: null, last_error: skip.err }
+              : { next_send_at: skip.resched, last_error: skip.err }).eq("id", row.id);
+            skipped++; continue;
+          }
+          // One case per person: close any other active case for this contact before sending.
+          await supabase.from("missed_inquiries")
+            .update({ status: "stopped", next_send_at: null, last_error: "merged_duplicate" })
+            .eq("contact_id", contact.id).eq("status", "active").neq("id", row.id);
+        }
+
         // ── Atomic rate-limit reserve (per-contact 30/5min + 100/24h) ──
         const { reserveMessageSlot, logRateLimited } = await import("../_shared/rate-limit.ts");
         const rl = await reserveMessageSlot(supabase, contact.id);

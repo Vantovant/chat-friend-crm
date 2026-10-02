@@ -158,16 +158,32 @@ async function processOne(supabase: any, args: {
 
   if ((existingCount ?? 0) >= 3) return { action: "topic_capped", state: intent.state };
 
-  // Find existing active phase3 row for same state+topic — refresh ONLY if newer inbound
-  const { data: existing } = await supabase
+  // ONE CASE PER PERSON (2026-10-02): if the contact already has ANY active case
+  // (any topic), update that case instead of opening a new one. Enforced in the DB
+  // by the partial unique index missed_inquiries(contact_id) WHERE status='active'.
+  let { data: existing } = await supabase
     .from("missed_inquiries")
     .select("id, status, current_step, last_inbound_at, attempts")
     .eq("contact_id", contact_id)
-    .eq("cadence", "phase3_2_24_72")
-    .eq("intent_state", intent.state)
-    .eq("topic", intent.topic)
-    .in("status", ["active", "paused"])
+    .eq("status", "active")
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
+  if (!existing) {
+    // Otherwise a paused phase3 row for same state+topic — refresh ONLY if newer inbound
+    const { data: paused } = await supabase
+      .from("missed_inquiries")
+      .select("id, status, current_step, last_inbound_at, attempts")
+      .eq("contact_id", contact_id)
+      .eq("cadence", "phase3_2_24_72")
+      .eq("intent_state", intent.state)
+      .eq("topic", intent.topic)
+      .eq("status", "paused")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    existing = paused;
+  }
 
   const nextSendAt = new Date(Date.now() + delayHoursForStep0(intent.state) * 3600000).toISOString();
   const incomingMs = new Date(inbound_at).getTime();
@@ -195,6 +211,8 @@ async function processOne(supabase: any, args: {
     await supabase.from("missed_inquiries").update({
       flagged_at: new Date().toISOString(),
       flagged_reason: `phase3:${intent.state.toLowerCase()}`,
+      intent_state: intent.state,
+      topic: intent.topic,
       last_inbound_snippet: message_text.slice(0, 280),
       last_inbound_at: inbound_at,
       current_step: 0,
