@@ -15,6 +15,7 @@
 // conversation, follow-ups go out as-is. Twilio path enforces the same protocol in
 // whatsapp-auto-reply (EMERGENCY FIRST-TOUCH TRUST PATCH).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { tagSiteLinks } from "../_shared/utm.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -385,7 +386,8 @@ Deno.serve(async (req) => {
     // type:link. Because the trust wrap prepends an intro line, the URL was never leading,
     // so every wrapped send went out as plain type:text → no preview card, ever.
     // Now: the first non-shop URL anywhere in the message drives the preview.
-    const allUrls = [...finalMessage.matchAll(/https?:\/\/[^\s)>\]*_]+/gi)].map((m) => m[0].replace(/[.,!?;:]+$/, ""));
+    finalMessage = tagSiteLinks(finalMessage, { source: "whatsapp", medium: "dm", campaign: source ? String(source) : "crm_dm" });
+    const allUrls = [...finalMessage.matchAll(/https?:\/\/[^\s)>\]*]+/gi)].map((m) => m[0].replace(/[.,!?;:_]+$/, ""));
     const previewUrl = allUrls.find((u) => !u.startsWith(SHOP_URL)) ?? null;
     const useMedia = typeof attach_image_url === "string" && /^https?:\/\//i.test(attach_image_url);
     const usePreview = !useMedia && !!previewUrl;

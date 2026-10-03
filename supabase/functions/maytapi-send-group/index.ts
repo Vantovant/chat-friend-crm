@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { tagSiteLinks } from "../_shared/utm.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -276,7 +277,7 @@ Deno.serve(async (req) => {
       }
 
       const targetJid = String(directBody.group_jid).trim();
-      const message = String(directBody.message).trim();
+      const message = tagSiteLinks(String(directBody.message).trim(), { source: "whatsapp", medium: "group", campaign: "group_auto_reply" });
       const source = String(directBody.source || "direct_group_send");
 
       const { data: settings } = await supabase
@@ -506,6 +507,8 @@ Deno.serve(async (req) => {
       let previewStatus = "n/a";       // 'ok' | 'fallback_used' | 'no_url'
       let previewImageUrl: string | null = null;
       let messageToSend = post.message_content;
+      const taggedContent = tagSiteLinks(post.message_content, { source: "whatsapp", medium: "group", campaign: "group_post" });
+      messageToSend = taggedContent;
 
       try {
         if (post.image_url) {
@@ -514,25 +517,25 @@ Deno.serve(async (req) => {
             to_number: targetJid,
             type: "media",
             message: post.image_url,
-            text: post.message_content,
+            text: taggedContent,
           };
           previewStatus = "ok";
         } else {
-          const urls = post.message_content.match(URL_REGEX);
+          const urls = taggedContent.match(URL_REGEX);
           if (!urls) {
             // Plain text, no URL → straight text
-            body = { to_number: targetJid, type: "text", message: post.message_content };
+            body = { to_number: targetJid, type: "text", message: taggedContent };
             previewStatus = "no_url";
           } else {
             // FIX 2026-09-25: send as Maytapi "link" type (same fix as the 1:1
             // sender). The link itself goes in `message`, full text in `text`,
             // so the link's position in the body no longer matters.
-            const linkUrl = String(urls[0]).replace(/[)\].,;!?]+$/g, "");
+            const linkUrl = String(urls[0]).replace(/[)\].,;!?*_]+$/g, "");
             body = {
               to_number: targetJid,
               type: "link",
               message: linkUrl,
-              text: post.message_content,
+              text: taggedContent,
             };
             previewStatus = "ok";
             console.log(`[preview] post=${post.id} url=${linkUrl} → type=link`);
