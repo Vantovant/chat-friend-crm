@@ -11,6 +11,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolvePageToken } from "../_shared/fb-page-token.ts";
+import { tagSiteLinks } from "../_shared/utm.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -260,6 +261,16 @@ Deno.serve(async (req) => {
     if (linksReplaced > 0) {
       console.log("[send-message] sanitised", linksReplaced, "myaplworld link(s)");
     }
+  }
+  {
+    const utm = preferredProvider === "facebook_messenger"
+      ? { source: "facebook", medium: "messenger", campaign: "messenger_reply" }
+      : preferredProvider === "maytapi"
+        ? { source: "whatsapp", medium: "dm", campaign: "crm_reply" }
+        : { source: "whatsapp", medium: "dm", campaign: "ad_lead_reply" };
+    const tagged = tagSiteLinks(trimmed, utm);
+    // Twilio WhatsApp body limit is 1600 characters; never let tagging push a message over it.
+    if (preferredProvider !== "twilio" || tagged.length <= 1600) trimmed = tagged;
   }
 
   // ── Insert message (queued) ──
