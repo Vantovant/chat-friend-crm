@@ -521,22 +521,22 @@ Deno.serve(async (req) => {
           };
           previewStatus = "ok";
         } else {
-            const urls = taggedContent.match(URL_REGEX);
-            if (!urls) {
-              // Plain text, no URL → straight text
-              body = { to_number: targetJid, type: "text", message: taggedContent };
-              previewStatus = "no_url";
-            } else {
-              // FIX 2026-09-25: send as Maytapi "link" type (same fix as the 1:1
-              // sender). The link itself goes in `message`, full text in `text`,
-              // so the link's position in the body no longer matters.
-              const linkUrl = String(urls[0]).replace(/[)\].,;!?*_]+$/g, "");
-              body = {
-                to_number: targetJid,
-                type: "link",
-                message: linkUrl,
-                text: taggedContent,
-              };
+          const urls = taggedContent.match(URL_REGEX);
+          if (!urls) {
+            // Plain text, no URL → straight text
+            body = { to_number: targetJid, type: "text", message: taggedContent };
+            previewStatus = "no_url";
+          } else {
+            // FIX 2026-09-25: send as Maytapi "link" type (same fix as the 1:1
+            // sender). The link itself goes in `message`, full text in `text`,
+            // so the link's position in the body no longer matters.
+            const linkUrl = String(urls[0]).replace(/[)\].,;!?*_]+$/g, "");
+            body = {
+              to_number: targetJid,
+              type: "link",
+              message: linkUrl,
+              text: taggedContent,
+            };
             previewStatus = "ok";
             console.log(`[preview] post=${post.id} url=${linkUrl} → type=link`);
           }
