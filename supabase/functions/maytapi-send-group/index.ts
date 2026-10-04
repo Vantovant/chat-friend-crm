@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { tagSiteLinks } from "../_shared/utm.ts";
+import { refetchFbImage, saveSourceImage } from "../_shared/fb-image.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -509,6 +510,39 @@ Deno.serve(async (req) => {
       let messageToSend = post.message_content;
       const taggedContent = tagSiteLinks(post.message_content, { source: "whatsapp", medium: "group", campaign: "group_post" });
       messageToSend = taggedContent;
+
+      // FB-instant image recovery: re-fetch from Graph once, then fallback image.
+      // Never send a facebook_instant post as bare text while a fallback exists.
+      if (post.source === "facebook_instant" && !post.image_url) {
+        try {
+          let srcRowId: string | null = null;
+          let fbPostId: string | null = null;
+          if (post.fb_generated_post_id) {
+            const { data: gp } = await supabase.from("fb_generated_posts")
+              .select("fb_source_post_id").eq("id", post.fb_generated_post_id).maybeSingle();
+            srcRowId = gp?.fb_source_post_id ?? null;
+            if (srcRowId) {
+              const { data: sp } = await supabase.from("fb_source_posts")
+                .select("fb_post_id").eq("id", srcRowId).maybeSingle();
+              fbPostId = sp?.fb_post_id ?? null;
+            }
+          }
+          const found = fbPostId ? await refetchFbImage(supabase, fbPostId) : null;
+          if (found) {
+            post.image_url = found;
+            await supabase.from("scheduled_group_posts").update({ image_url: found }).eq("id", post.id);
+            if (srcRowId) await saveSourceImage(supabase, srcRowId, found);
+          }
+        } catch (e) {
+          console.warn("[maytapi-send-group] fb image refetch error (continuing):", e);
+        }
+        if (!post.image_url) {
+          const { data: fb } = await supabase.from("integration_settings")
+            .select("value").eq("key", "fb_fallback_image_url").maybeSingle();
+          const fallback = String(fb?.value ?? "").trim();
+          if (fallback) post.image_url = fallback;
+        }
+      }
 
       try {
         if (post.image_url) {

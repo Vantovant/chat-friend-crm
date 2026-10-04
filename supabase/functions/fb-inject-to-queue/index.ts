@@ -3,6 +3,7 @@
 // Does NOT touch maytapi-send-group or maytapi-schedule-content — drainer picks rows up.
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { refetchFbImage, saveSourceImage } from '../_shared/fb-image.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -76,10 +77,15 @@ Deno.serve(async (req) => {
     let imageUrl: string | null = null;
     if (variant.fb_source_post_id) {
       const { data: src } = await admin
-        .from('fb_source_posts').select('attachments').eq('id', variant.fb_source_post_id).maybeSingle();
+        .from('fb_source_posts').select('attachments, fb_post_id').eq('id', variant.fb_source_post_id).maybeSingle();
       const att = src?.attachments as any;
       if (att && typeof att === 'object' && !Array.isArray(att) && att.image_url) {
         imageUrl = att.image_url;
+      }
+      // No stored image (e.g. photo still processing at ingest) → re-fetch once from Graph.
+      if (!imageUrl && src?.fb_post_id) {
+        const found = await refetchFbImage(admin, src.fb_post_id);
+        if (found) { imageUrl = found; await saveSourceImage(admin, variant.fb_source_post_id, found); }
       }
     }
 

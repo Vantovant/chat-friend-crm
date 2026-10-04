@@ -11,6 +11,7 @@
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { pageOwner, resolvePageToken } from '../_shared/fb-page-token.ts';
+import { extractFbImage } from '../_shared/fb-image.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -55,20 +56,8 @@ async function sha256Hex(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-function extractImageUrl(graphPost: any): string | null {
-  if (!graphPost) return null;
-  if (graphPost.full_picture) return graphPost.full_picture;
-  const atts = graphPost.attachments?.data ?? [];
-  for (const a of atts) {
-    const src = a?.media?.image?.src;
-    if (src) return src;
-    for (const sub of (a?.subattachments?.data ?? [])) {
-      const s = sub?.media?.image?.src;
-      if (s) return s;
-    }
-  }
-  return null;
-}
+// full_picture → video/reel/share thumbnails (media.image.src) → first album subattachment.
+const extractImageUrl = extractFbImage;
 
 /** Store a Page comment event. Never throws — logs and returns false on failure. */
 async function upsertComment(
