@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { tagSiteLinks } from "../_shared/utm.ts";
-import { refetchFbImage, saveSourceImage } from "../_shared/fb-image.ts";
+import { recoverFbImage, saveSourceImage } from "../_shared/fb-image.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -523,15 +523,17 @@ Deno.serve(async (req) => {
             srcRowId = gp?.fb_source_post_id ?? null;
             if (srcRowId) {
               const { data: sp } = await supabase.from("fb_source_posts")
-                .select("fb_post_id").eq("id", srcRowId).maybeSingle();
+                .select("fb_post_id, posted_at").eq("id", srcRowId).maybeSingle();
               fbPostId = sp?.fb_post_id ?? null;
+              if (fbPostId) {
+                const found = await recoverFbImage(supabase, fbPostId, sp?.posted_at ?? null);
+                if (found) {
+                  post.image_url = found;
+                  await supabase.from("scheduled_group_posts").update({ image_url: found }).eq("id", post.id);
+                  await saveSourceImage(supabase, srcRowId, found);
+                }
+              }
             }
-          }
-          const found = fbPostId ? await refetchFbImage(supabase, fbPostId) : null;
-          if (found) {
-            post.image_url = found;
-            await supabase.from("scheduled_group_posts").update({ image_url: found }).eq("id", post.id);
-            if (srcRowId) await saveSourceImage(supabase, srcRowId, found);
           }
         } catch (e) {
           console.warn("[maytapi-send-group] fb image refetch error (continuing):", e);
