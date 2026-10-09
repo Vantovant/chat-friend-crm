@@ -10,7 +10,7 @@ const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
 
 const SPACING_SECONDS = 15 * 60;
-const DAILY_LIMIT_PER_GROUP = 1;
+const DAILY_LIMIT_PER_GROUP = 1; // one FB-sourced post per group per 24h (enforced via GAP_MS below)
 const MIN_LEAD_TIME_MS = 10 * 60 * 1000;
 
 Deno.serve(async (req) => {
@@ -126,26 +126,35 @@ Deno.serve(async (req) => {
     groups = groups.filter(g => set.has(g.group_name));
     if (groups.length === 0) return json({ ok: false, error: 'no_target_groups' }, 200);
 
-    // Daily-limit guard per group (24h rolling, FB instant only)
-    const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-    const { data: recentCounts } = await admin
+    // Per-group 24h guard (FB instant only).
+    // Each group gets its own planned slot (base + i*15min, same order every day), and a group is
+    // skipped only if it already has a live facebook_instant post (pending/sent) within 24h of that
+    // slot, in either direction. Measured per group, so a Page post at the same time every day
+    // reaches every group, while two posts on the same day still cannot.
+    const GAP_MS = 24 * 3600 * 1000 - 5 * 60 * 1000; // 24h, minus 5 min for Facebook/cron jitter
+    const planned = groups.map((g, i) => ({ g, at: baseTs + i * SPACING_SECONDS * 1000 }));
+    const windowStart = new Date(baseTs - GAP_MS).toISOString();
+    const windowEnd = new Date(baseTs + groups.length * SPACING_SECONDS * 1000 + GAP_MS).toISOString();
+    const { data: nearby } = await admin
       .from('scheduled_group_posts')
-      .select('target_group_name')
+      .select('target_group_name, scheduled_at')
       .eq('source', 'facebook_instant')
-      .gte('scheduled_at', since);
-    const counts = new Map<string, number>();
-    for (const r of recentCounts ?? []) {
-      counts.set(r.target_group_name, (counts.get(r.target_group_name) ?? 0) + 1);
+      .in('status', ['pending', 'sending', 'sent'])
+      .gte('scheduled_at', windowStart)
+      .lte('scheduled_at', windowEnd);
+    const existing = new Map<string, number[]>();
+    for (const r of nearby ?? []) {
+      const list = existing.get(r.target_group_name) ?? [];
+      list.push(new Date(r.scheduled_at).getTime());
+      existing.set(r.target_group_name, list);
     }
     const blocked: string[] = [];
-    groups = groups.filter(g => {
-      if ((counts.get(g.group_name) ?? 0) >= DAILY_LIMIT_PER_GROUP) {
-        blocked.push(g.group_name);
-        return false;
-      }
+    const allowed = planned.filter(({ g, at }) => {
+      const clash = (existing.get(g.group_name) ?? []).some(t => Math.abs(t - at) < GAP_MS);
+      if (clash) { blocked.push(g.group_name); return false; }
       return true;
     });
-    if (groups.length === 0) {
+    if (allowed.length === 0) {
       return json({ ok: false, error: 'daily_limit_reached_all_groups', blocked }, 200);
     }
 
@@ -153,9 +162,8 @@ Deno.serve(async (req) => {
     const logRows: any[] = [];
     const queuedAts: string[] = [];
 
-    for (let i = 0; i < groups.length; i++) {
-      const g = groups[i];
-      const at = new Date(baseTs + i * SPACING_SECONDS * 1000).toISOString();
+    for (const { g, at: atMs } of allowed) {
+      const at = new Date(atMs).toISOString();
       queuedAts.push(at);
       rows.push({
         user_id: actingUserId,
