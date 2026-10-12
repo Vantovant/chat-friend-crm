@@ -199,9 +199,11 @@ export function SettingsModule() {
     if (!roles) return;
     const { data: profiles } = await supabase
       .from('profiles')
-      .select('id, full_name, email, is_active, twilio_routing_mode, twilio_phone_number, maytapi_routing_mode, maytapi_phone_number');
+      .select('id, full_name, email, is_active, twilio_routing_mode, twilio_phone_number, maytapi_routing_mode, maytapi_phone_number, removed_from_team_at');
     if (!profiles) return;
-    const members: TeamMember[] = roles.map(r => {
+    // Separate accounts (removed from the team) are never listed here.
+    const removed = new Set(profiles.filter((p: any) => p.removed_from_team_at).map((p: any) => p.id));
+    const members: TeamMember[] = roles.filter(r => !removed.has(r.user_id)).map(r => {
       const p: any = profiles.find((p: any) => p.id === r.user_id);
       return {
         user_id: r.user_id,

@@ -1,0 +1,2 @@
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS removed_from_team_at timestamptz;
+COMMENT ON COLUMN public.profiles.removed_from_team_at IS 'When set, the user is a separate account: hidden from the owner Team list and never on shared inboxes.';

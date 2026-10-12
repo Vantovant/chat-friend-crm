@@ -3009,6 +3009,7 @@ export type Database = {
           maytapi_phone_number: string | null
           maytapi_routing_mode: string
           phone: string | null
+          removed_from_team_at: string | null
           twilio_phone_number: string | null
           twilio_routing_mode: string
           updated_at: string
@@ -3025,6 +3026,7 @@ export type Database = {
           maytapi_phone_number?: string | null
           maytapi_routing_mode?: string
           phone?: string | null
+          removed_from_team_at?: string | null
           twilio_phone_number?: string | null
           twilio_routing_mode?: string
           updated_at?: string
@@ -3041,6 +3043,7 @@ export type Database = {
           maytapi_phone_number?: string | null
           maytapi_routing_mode?: string
           phone?: string | null
+          removed_from_team_at?: string | null
           twilio_phone_number?: string | null
           twilio_routing_mode?: string
           updated_at?: string
