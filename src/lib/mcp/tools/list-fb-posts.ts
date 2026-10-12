@@ -39,6 +39,10 @@ export default defineTool({
     const supabase = supabaseForUser(ctx);
     const max = limit ?? 25;
     const rows: Row[] = [];
+    // Account isolation: only the caller's own posts, even for admins.
+    const { data: me } = await supabase.auth.getUser();
+    const myId = me?.user?.id;
+    if (!myId) return notAuthenticated;
 
     if (status !== "organic") {
       let q = supabase
@@ -47,6 +51,7 @@ export default defineTool({
           "id, page_id, page_name, fb_post_id, message, image_url, permalink_url, status, scheduled_publish_time, published_at, created_at, graph_error",
         )
         .order("created_at", { ascending: false })
+        .eq("user_id", myId)
         .limit(max * 2);
       if (page_id) q = q.eq("page_id", page_id);
       if (status) q = q.eq("status", status);
@@ -82,6 +87,7 @@ export default defineTool({
       const { data, error } = await supabase
         .from("fb_source_posts")
         .select("id, fb_post_id, raw_message, permalink_url, posted_at")
+        .eq("owner_user_id", myId)
         .order("posted_at", { ascending: false, nullsFirst: false })
         .limit(max * 2);
       if (error) return { content: [{ type: "text", text: error.message }], isError: true };

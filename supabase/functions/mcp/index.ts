@@ -1215,9 +1215,11 @@ var list_fb_comments_default = defineTool27({
   handler: async ({ unreplied_only, fb_post_id, limit }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
+    const { data: me } = await supabase.auth.getUser();
+    if (!me?.user?.id) return notAuthenticated;
     let query = supabase.from("fb_comments").select(
       "id, fb_comment_id, fb_post_id, parent_comment_id, commenter_name, commenter_psid, comment_text, verb, replied, reply_text, replied_at, created_time"
-    ).neq("verb", "remove").order("created_time", { ascending: false, nullsFirst: false }).limit(limit ?? 25);
+    ).eq("owner_user_id", me.user.id).neq("verb", "remove").order("created_time", { ascending: false, nullsFirst: false }).limit(limit ?? 25);
     if (unreplied_only) query = query.eq("replied", false);
     if (fb_post_id) query = query.eq("fb_post_id", fb_post_id);
     const { data, error } = await query;
@@ -1398,10 +1400,13 @@ var list_fb_posts_default = defineTool31({
     const supabase = supabaseForUser(ctx);
     const max = limit ?? 25;
     const rows = [];
+    const { data: me } = await supabase.auth.getUser();
+    const myId = me?.user?.id;
+    if (!myId) return notAuthenticated;
     if (status !== "organic") {
       let q = supabase.from("fb_outbound_posts").select(
         "id, page_id, page_name, fb_post_id, message, image_url, permalink_url, status, scheduled_publish_time, published_at, created_at, graph_error"
-      ).order("created_at", { ascending: false }).limit(max * 2);
+      ).order("created_at", { ascending: false }).eq("user_id", myId).limit(max * 2);
       if (page_id) q = q.eq("page_id", page_id);
       if (status) q = q.eq("status", status);
       const { data, error } = await q;
@@ -1425,7 +1430,7 @@ var list_fb_posts_default = defineTool31({
       }
     }
     if (!status || status === "organic" || status === "published") {
-      const { data, error } = await supabase.from("fb_source_posts").select("id, fb_post_id, raw_message, permalink_url, posted_at").order("posted_at", { ascending: false, nullsFirst: false }).limit(max * 2);
+      const { data, error } = await supabase.from("fb_source_posts").select("id, fb_post_id, raw_message, permalink_url, posted_at").eq("owner_user_id", myId).order("posted_at", { ascending: false, nullsFirst: false }).limit(max * 2);
       if (error) return { content: [{ type: "text", text: error.message }], isError: true };
       for (const r of data ?? []) {
         rows.push({
