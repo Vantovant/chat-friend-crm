@@ -1232,10 +1232,40 @@ var list_fb_comments_default = defineTool27({
   }
 });
 
-// src/lib/mcp/tools/reply-to-fb-comment.ts
+// src/lib/mcp/tools/get-my-brand-links.ts
 import { defineTool as defineTool28 } from "npm:@lovable.dev/mcp-js@0.26.1";
+var get_my_brand_links_default = defineTool28({
+  name: "get_my_brand_links",
+  title: "Get my brand links",
+  description: "Read-only. Returns the calling user's OWN website, shop link, Facebook Page link and connected Facebook Pages. Always use these for the user's links \u2014 never another account's. Empty values mean the user has not set them yet: ask them to fill in Settings \u2192 Facebook & Website instead of guessing.",
+  inputSchema: {},
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async (_args, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const { data: me } = await supabase.auth.getUser();
+    const uid = me?.user?.id;
+    if (!uid) return notAuthenticated;
+    const [{ data: brand }, { data: pages }] = await Promise.all([
+      supabase.from("user_brand_settings").select("brand_name,website_url,shop_url,facebook_page_url").eq("user_id", uid).maybeSingle(),
+      supabase.from("facebook_page_connections").select("page_id,page_name").eq("user_id", uid).eq("status", "active")
+    ]);
+    const result = {
+      brand_name: brand?.brand_name ?? null,
+      website_url: brand?.website_url ?? null,
+      shop_url: brand?.shop_url ?? null,
+      facebook_page_url: brand?.facebook_page_url ?? null,
+      connected_pages: pages ?? [],
+      not_set: ["website_url", "shop_url", "facebook_page_url"].filter((k) => !brand?.[k])
+    };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+  }
+});
+
+// src/lib/mcp/tools/reply-to-fb-comment.ts
+import { defineTool as defineTool29 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z24 } from "npm:zod@^3.25.76";
-var reply_to_fb_comment_default = defineTool28({
+var reply_to_fb_comment_default = defineTool29({
   name: "reply_to_fb_comment",
   title: "Reply to a Facebook Page comment",
   description: "Post a public reply to a comment on the Facebook Page, via the same fb-reply-comment function the in-app Facebook Inbox panel uses. Requires pages_manage_engagement on the Page token \u2014 until that's granted in Meta App Review, this returns Meta's rejection error rather than sending anything.",
@@ -1275,9 +1305,9 @@ var reply_to_fb_comment_default = defineTool28({
 });
 
 // src/lib/mcp/tools/send-private-reply-to-comment.ts
-import { defineTool as defineTool29 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool30 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z25 } from "npm:zod@^3.25.76";
-var send_private_reply_to_comment_default = defineTool29({
+var send_private_reply_to_comment_default = defineTool30({
   name: "send_private_reply_to_comment",
   title: "Privately message a Facebook commenter",
   description: "Send ONE private Messenger message to the person who left a Facebook Page comment (Meta 'Private Replies'), via the same fb-reply-comment function as reply_to_fb_comment with mode 'private'. Meta allows only one private reply per comment and only within 7 days of the comment \u2014 older comments are refused before anything is sent. The reply lands in the person's Messenger inbox and any answer arrives in the Messenger inbox. Always show the operator the exact text and get approval before calling. DMs use member pricing only.",
@@ -1317,9 +1347,9 @@ var send_private_reply_to_comment_default = defineTool29({
 });
 
 // src/lib/mcp/tools/create-fb-post.ts
-import { defineTool as defineTool30 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool31 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z26 } from "npm:zod@^3.25.76";
-var create_fb_post_default = defineTool30({
+var create_fb_post_default = defineTool31({
   name: "create_fb_post",
   title: "Create a Facebook Page post",
   description: "Publish or natively schedule a post on a connected Facebook Page, via the fb-create-post function (Page access token resolved server-side). SAFETY: this never posts on a bare call \u2014 you must pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true for an immediate publish. Passing both is an error. If image_url is set the post goes to the Page's /photos endpoint with the message as the caption. Posting requires pages_manage_posts on that Page's stored access; the function pre-checks this and returns a clear reconnect message instead of a raw Graph error.",
@@ -1381,9 +1411,9 @@ var create_fb_post_default = defineTool30({
 });
 
 // src/lib/mcp/tools/list-fb-posts.ts
-import { defineTool as defineTool31 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool32 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z27 } from "npm:zod@^3.25.76";
-var list_fb_posts_default = defineTool31({
+var list_fb_posts_default = defineTool32({
   name: "list_fb_posts",
   title: "List Facebook Page posts",
   description: "Read-only. Lists Facebook Page posts created through create_fb_post (status published / scheduled / failed, including ones still queued on Facebook's scheduler) merged with organic Page posts already ingested into fb_source_posts. Newest first by scheduled or published time. Use this to answer 'what's scheduled for the next few days' without a raw database query.",
@@ -1468,7 +1498,7 @@ var list_fb_posts_default = defineTool31({
 });
 
 // src/lib/mcp/tools/get-group-overview.ts
-import { defineTool as defineTool32 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool33 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z28 } from "npm:zod@^3.25.76";
 
 // src/lib/mcp/tools/group-eligibility.ts
@@ -1544,7 +1574,7 @@ async function eligibleMembers(supabase, opts = {}) {
 }
 
 // src/lib/mcp/tools/get-group-overview.ts
-var get_group_overview_default = defineTool32({
+var get_group_overview_default = defineTool33({
   name: "get_group_overview",
   title: "Get WhatsApp group overview",
   description: `Answers "how many people are in the WhatsApp group" questions. Returns the live in-group member count for the APLGO | Health and Biz group broken down by engagement classification (active / warm / dormant / ghost), the timestamp of the most recent group health scan, today's engagement digest (if generated) and this week's engagement strategy (if generated). Members who have left the group are excluded.`,
@@ -1590,9 +1620,9 @@ var get_group_overview_default = defineTool32({
 });
 
 // src/lib/mcp/tools/get-group-welcome-status.ts
-import { defineTool as defineTool33 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool34 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z29 } from "npm:zod@^3.25.76";
-var get_group_welcome_status_default = defineTool33({
+var get_group_welcome_status_default = defineTool34({
   name: "get_group_welcome_status",
   title: "Get group welcome sequence status",
   description: "Read the state of the automated new-joiner welcome sequence for the WhatsApp group: how many people are enrolled at each stage (pending / step1_sent / step2_sent / completed / failed / paused) and how many were enrolled in the last 7 days.",
@@ -1636,9 +1666,9 @@ var get_group_welcome_status_default = defineTool33({
 });
 
 // src/lib/mcp/tools/list-group-dm-candidates.ts
-import { defineTool as defineTool34 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool35 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z30 } from "npm:zod@^3.25.76";
-var list_group_dm_candidates_default = defineTool34({
+var list_group_dm_candidates_default = defineTool35({
   name: "list_group_dm_candidates",
   title: "List group DM pilot candidates",
   description: "List WhatsApp group members eligible for a scoped 1-on-1 pilot DM. Eligibility (identical to the group-dm-pilot backend): matched to a CRM contact, classification active or warm, still in the group, contact not deleted and not do_not_contact, not currently in an active welcome sequence, and not already messaged by this pilot in the last 30 days. Returns at most zazi_pilot_batch_size candidates. Read-only \u2014 sends nothing.",
@@ -1672,10 +1702,10 @@ var list_group_dm_candidates_default = defineTool34({
 });
 
 // src/lib/mcp/tools/create-group-dm-batch.ts
-import { defineTool as defineTool35 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool36 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z31 } from "npm:zod@^3.25.76";
 var FB_NOTE = "Facebook comments cannot be automatically matched to this contact \u2014 fb_comments has no contact_id link, only a Facebook-internal commenter ID with no phone number. If this person has commented on Facebook, that history is not visible here.";
-var create_group_dm_batch_default = defineTool35({
+var create_group_dm_batch_default = defineTool36({
   name: "create_group_dm_batch",
   title: "Draft a group DM pilot batch",
   description: "Draft (does NOT send) a scoped 1-on-1 pilot DM batch for WhatsApp group members. Every member_id is re-validated against the full eligibility rules server-side. Returns the draft batch id plus rich per-recipient review context (contact name/email/lead_type/temperature/tags, full notes, and the last 5 contact activity rows) so a human can review before calling approve_group_dm_batch.",
@@ -1764,9 +1794,9 @@ var create_group_dm_batch_default = defineTool35({
 });
 
 // src/lib/mcp/tools/approve-group-dm-batch.ts
-import { defineTool as defineTool36 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool37 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z32 } from "npm:zod@^3.25.76";
-var approve_group_dm_batch_default = defineTool36({
+var approve_group_dm_batch_default = defineTool37({
   name: "approve_group_dm_batch",
   title: "Approve and send a group DM pilot batch",
   description: "DESTRUCTIVE: actually sends the real 1-on-1 WhatsApp messages of a drafted pilot batch. Hard-refuses unless zazi_group_dm_mode is exactly 'pilot_manual', outbound is not frozen, the batch exists with status 'draft', the batch is within zazi_pilot_batch_size, and the 1-on-1 daily cap would not be exceeded. Every recipient is re-checked for do_not_contact and the 30-day no-repeat rule immediately before sending. Sends go through the same maytapi-send-direct pipeline used by send_whatsapp_message, spaced at least 6 seconds apart, and are logged to group_dm_pilot_sends and the contact activity timeline.",
@@ -1899,12 +1929,12 @@ var approve_group_dm_batch_default = defineTool36({
 });
 
 // src/lib/mcp/tools/list-group-membership-events.ts
-import { defineTool as defineTool37 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool38 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z33 } from "npm:zod@^3.25.76";
 function digits(v) {
   return (v || "").replace(/\D/g, "");
 }
-var list_group_membership_events_default = defineTool37({
+var list_group_membership_events_default = defineTool38({
   name: "list_group_membership_events",
   title: "List WhatsApp group membership events",
   description: "Historical log of who joined, left, or was removed from a WhatsApp group. Unlike get_group_overview (a live snapshot that excludes people who have left), this returns membership change events over a time window, enriched with CRM contact data (id, classification, notes, last engagement) when the phone matches an existing contact \u2014 so you can review communication history for people who left.",
@@ -1998,9 +2028,9 @@ var list_group_membership_events_default = defineTool37({
 });
 
 // src/lib/mcp/tools/list-group-messages.ts
-import { defineTool as defineTool38 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool39 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z34 } from "npm:zod@^3.25.76";
-var list_group_messages_default = defineTool38({
+var list_group_messages_default = defineTool39({
   name: "list_group_messages",
   title: "List WhatsApp group messages",
   description: "Reads real message content from a WhatsApp group (who said what, when) for investigating specific group activity. Use this when you need actual chat content rather than just headcounts, membership events, or dispatch logs.",
@@ -2060,7 +2090,7 @@ var list_group_messages_default = defineTool38({
 });
 
 // src/lib/mcp/tools/get-lead-call-report.ts
-import { defineTool as defineTool39 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool40 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z35 } from "npm:zod@^3.25.76";
 
 // src/lib/mcp/tools/lead-call-report-data.ts
@@ -2226,7 +2256,7 @@ async function loadLeadCallRows(supabase) {
 
 // src/lib/mcp/tools/get-lead-call-report.ts
 var dateStr = z35.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
-var get_lead_call_report_default = defineTool39({
+var get_lead_call_report_default = defineTool40({
   name: "get_lead_call_report",
   title: "Get the Lead Call Report",
   description: "Read the Lead Call Report: contacts who have at least one Twilio message, with computed first inquiry date, last message date, message count, distributor-interest flag, and any cached AI summary. Mirrors the in-app Lead Call Report (src/components/vanto/reports/LeadCallReport.tsx), including its First Inquiry / Last Msg date-range filters, and is sortable newest-first or oldest-first.",
@@ -2292,9 +2322,9 @@ var get_lead_call_report_default = defineTool39({
 });
 
 // src/lib/mcp/tools/generate-lead-call-summaries.ts
-import { defineTool as defineTool40 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool41 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z36 } from "npm:zod@^3.25.76";
-var generate_lead_call_summaries_default = defineTool40({
+var generate_lead_call_summaries_default = defineTool41({
   name: "generate_lead_call_summaries",
   title: "Generate Lead Call Report summaries",
   description: "Generate (or regenerate) AI summaries for Lead Call Report contacts by invoking the same summarize-lead-conversation edge function the in-app 'Generate summaries' button uses. Pass specific contact_ids, or omit to auto-target contacts from get_lead_call_report that don't have a cached summary yet.",
@@ -2354,9 +2384,9 @@ var generate_lead_call_summaries_default = defineTool40({
 });
 
 // src/lib/mcp/tools/list-trainer-rules.ts
-import { defineTool as defineTool41 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool42 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z37 } from "npm:zod@^3.25.76";
-var list_trainer_rules_default = defineTool41({
+var list_trainer_rules_default = defineTool42({
   name: "list_trainer_rules",
   title: "List AI trainer rules",
   description: "Read the AI Trainer rules (ai_trainer_rules) that shape how the auto-reply bot answers. Filter by channel (twilio / maytapi / groups), product code (e.g. NRM), enabled state, or a text search across title, instruction and correct answer. Returns a short preview of each rule; use get_trainer_rule for the full text. Read-only.",
@@ -2398,9 +2428,9 @@ var list_trainer_rules_default = defineTool41({
 });
 
 // src/lib/mcp/tools/get-trainer-rule.ts
-import { defineTool as defineTool42 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool43 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z38 } from "npm:zod@^3.25.76";
-var get_trainer_rule_default = defineTool42({
+var get_trainer_rule_default = defineTool43({
   name: "get_trainer_rule",
   title: "Get one AI trainer rule",
   description: "Full detail of one AI Trainer rule by id: title, triggers, instruction, correct answer, priority, channel, product, enabled state and notes (which include the edit history written by update_trainer_rule). Read-only.",
@@ -2419,9 +2449,9 @@ var get_trainer_rule_default = defineTool42({
 });
 
 // src/lib/mcp/tools/create-trainer-rule.ts
-import { defineTool as defineTool43 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool44 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z39 } from "npm:zod@^3.25.76";
-var create_trainer_rule_default = defineTool43({
+var create_trainer_rule_default = defineTool44({
   name: "create_trainer_rule",
   title: "Create an AI trainer rule",
   description: "Add a new AI Trainer rule that the auto-reply bot will follow. Always show the operator the exact rule text and get approval before calling. Dedup: if an enabled rule with the same title already exists on the same channel, it is returned instead of creating a duplicate. The rule is stamped as created via Claude MCP in its notes. Priority: advisory < strong (default) < override.",
@@ -2468,10 +2498,10 @@ ${stamp}` : stamp,
 });
 
 // src/lib/mcp/tools/update-trainer-rule.ts
-import { defineTool as defineTool44 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool45 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z40 } from "npm:zod@^3.25.76";
 var AUDIT_SNIPPET = 400;
-var update_trainer_rule_default = defineTool44({
+var update_trainer_rule_default = defineTool45({
   name: "update_trainer_rule",
   title: "Update an AI trainer rule",
   description: "Edit an existing AI Trainer rule, or switch it on/off with `enabled`. Only the fields you pass are changed; nothing is blanked by omission. There is no delete \u2014 switch a rule off instead. Before changing wording, the previous title/instruction/correct_answer are copied into the rule's notes as an audit line, so every edit can be traced and undone. Always show the operator the exact new text and get approval before calling.",
@@ -2521,9 +2551,9 @@ ${auditLine}` : auditLine;
 });
 
 // src/lib/mcp/tools/list-reply-corrections.ts
-import { defineTool as defineTool45 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool46 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z41 } from "npm:zod@^3.25.76";
-var list_reply_corrections_default = defineTool45({
+var list_reply_corrections_default = defineTool46({
   name: "list_reply_corrections",
   title: "List auto-reply corrections",
   description: "Read the auto-reply corrections log (auto_reply_corrections): cases where the bot's reply was corrected, with the original inbound message, the bot's original reply, the corrected reply, the reason and any linked trainer rule. Newest first. Read-only.",
@@ -2545,9 +2575,9 @@ var list_reply_corrections_default = defineTool45({
 });
 
 // src/lib/mcp/tools/add-reply-correction.ts
-import { defineTool as defineTool46 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool47 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z42 } from "npm:zod@^3.25.76";
-var add_reply_correction_default = defineTool46({
+var add_reply_correction_default = defineTool47({
   name: "add_reply_correction",
   title: "Log an auto-reply correction",
   description: "Record a correction to the bot: the inbound message, what the bot said (optional), and what it should have said. Strictly additive \u2014 never edits or removes existing corrections. Optionally link it to a trainer rule (trainer_rule_id) that the correction relates to. Always show the operator the corrected reply and get approval before calling.",
@@ -2584,7 +2614,7 @@ var add_reply_correction_default = defineTool46({
 });
 
 // src/lib/mcp/tools/get-twilio-status.ts
-import { defineTool as defineTool47 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool48 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z43 } from "npm:zod@^3.25.76";
 function env(name) {
   const r = globalThis;
@@ -2606,7 +2636,7 @@ function maskPhone(v) {
   const s = String(v ?? "").replace(/^whatsapp:/i, "");
   return s.length > 6 ? `${s.slice(0, 5)}***${s.slice(-3)}` : s;
 }
-var get_twilio_status_default = defineTool47({
+var get_twilio_status_default = defineTool48({
   name: "get_twilio_status",
   title: "Twilio status (read-only)",
   description: "READ-ONLY health check straight from Twilio's own records (not Get Well Hub's copy): account status and balance, the WhatsApp Messaging Service and its inbound webhook, WhatsApp sender status, recent Twilio error alerts, the most recent messages Twilio sent/received (bodies trimmed, phones masked), and a per-day count of inbound messages on Twilio vs inbound Twilio messages stored in Get Well Hub over the last N days \u2014 the gap between the two shows where the inbound pipeline breaks. Makes GET requests only; never sends or changes anything. Admin only.",
@@ -2727,8 +2757,8 @@ var get_twilio_status_default = defineTool47({
 });
 
 // src/lib/mcp/tools/get-group-guard-status.ts
-import { defineTool as defineTool48 } from "npm:@lovable.dev/mcp-js@0.26.1";
-var get_group_guard_status_default = defineTool48({
+import { defineTool as defineTool49 } from "npm:@lovable.dev/mcp-js@0.26.1";
+var get_group_guard_status_default = defineTool49({
   name: "get_group_guard_status",
   title: "Get Group Guard status",
   description: "Read-only. Group Guard settings (mode off/log_only/enforce, country block, flood limits), whether the linked WhatsApp number is admin in each active group (remove/delete only works where it is), and the last 20 guard actions.",
@@ -2747,9 +2777,9 @@ var get_group_guard_status_default = defineTool48({
 });
 
 // src/lib/mcp/tools/set-group-guard-mode.ts
-import { defineTool as defineTool49 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { defineTool as defineTool50 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z44 } from "npm:zod@^3.25.76";
-var set_group_guard_mode_default = defineTool49({
+var set_group_guard_mode_default = defineTool50({
   name: "set_group_guard_mode",
   title: "Set Group Guard mode",
   description: "Set Group Guard mode: 'off' (does nothing), 'log_only' (records who would be removed, removes nobody), or 'enforce' (removes spammers/blocked-country joiners from active groups). Requires an admin account.",
@@ -2772,7 +2802,7 @@ var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
   name: "get-well-hub",
   title: "Get Well Hub",
-  version: "1.11.0",
+  version: "1.12.0",
   instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement); to privately message a commenter (one private Messenger message per comment, within 7 days of the comment) use send_private_reply_to_comment. For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for actual group chat content (who said what, when) use list_group_messages; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual'). For the Lead Call Report, use get_lead_call_report (sorted newest-first by default) and generate_lead_call_summaries to fill in missing AI summaries; edit a lead's type/notes/pipeline stage via update_contact. To post TO a Facebook Page, use create_fb_post \u2014 it refuses to do anything unless you pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true; never pass publish_now: true unless the user has clearly asked to publish immediately. Use list_fb_posts to see what is already published, scheduled, or failed before adding more. For the AI Trainer (how the auto-reply bot answers), use list_trainer_rules / get_trainer_rule to read, create_trainer_rule / update_trainer_rule to change (no delete \u2014 switch off with enabled: false; every edit is audited in the rule's notes), and list_reply_corrections / add_reply_correction for the corrections log. Show the operator the exact rule text and get approval before any trainer write. To check the Twilio pipeline against Twilio's own records (account, balance, webhook, sender status, alerts, and Twilio-vs-Hub inbound counts per day), use get_twilio_status \u2014 read-only, admin only. For Group Guard (anti-spam in WhatsApp groups) use get_group_guard_status to read and set_group_guard_mode to change mode.`,
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
@@ -2808,6 +2838,7 @@ var mcp_default = defineMcp({
     get_conversation_thread_default,
     reply_to_conversation_default,
     list_fb_comments_default,
+    get_my_brand_links_default,
     reply_to_fb_comment_default,
     send_private_reply_to_comment_default,
     create_fb_post_default,
