@@ -72,7 +72,17 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json().catch(() => ({}));
-    const pageId = String(body?.page_id ?? DEFAULT_PAGE_ID).trim();
+    // Account isolation: with no page_id, use the caller's own active Page — never the owner's.
+    let pageId = String(body?.page_id ?? '').trim();
+    if (!pageId && userId) {
+      const { data: own } = await createClient(SUPABASE_URL, SERVICE_ROLE)
+        .from('facebook_page_connections').select('page_id')
+        .eq('user_id', userId).eq('status', 'active')
+        .order('connected_at', { ascending: false }).limit(1).maybeSingle();
+      pageId = own?.page_id ?? '';
+    }
+    if (!pageId && isService) pageId = DEFAULT_PAGE_ID;
+    if (!pageId) return json({ ok: false, error: 'page_not_connected: connect your own Facebook Page in Settings first.' }, 400);
     const message = typeof body?.message === 'string' ? body.message.trim() : '';
     const imageUrl = typeof body?.image_url === 'string' && body.image_url.trim() ? body.image_url.trim() : null;
     const scheduledRaw = typeof body?.scheduled_publish_time === 'string' && body.scheduled_publish_time.trim()

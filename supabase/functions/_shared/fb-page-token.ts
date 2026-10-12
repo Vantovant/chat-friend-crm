@@ -55,11 +55,16 @@ export async function resolvePageToken(
     }
   }
 
+  // Account isolation: the legacy env token belongs to the owner's Get Well Africa
+  // Page only. Never use it for any other user's Page.
+  if (targetPage !== ENV_PAGE_ID) {
+    return { ok: false, page_id: targetPage, source: 'none', error: 'page_not_connected' };
+  }
   if (!ENV_PAGE_TOKEN) {
     return { ok: false, page_id: targetPage, source: 'none', error: 'No connected Page and META_PAGE_ACCESS_TOKEN not configured' };
   }
 
-  const derived = await derivePageToken(ENV_PAGE_TOKEN, targetPage || ENV_PAGE_ID);
+  const derived = await derivePageToken(ENV_PAGE_TOKEN, ENV_PAGE_ID);
   if (derived.ok) {
     return { ok: true, token: derived.token, page_id: targetPage, source: 'env_derived', owner_user_id: null };
   }

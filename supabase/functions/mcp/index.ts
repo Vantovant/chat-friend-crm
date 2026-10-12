@@ -1322,7 +1322,7 @@ var create_fb_post_default = defineTool30({
   title: "Create a Facebook Page post",
   description: "Publish or natively schedule a post on a connected Facebook Page, via the fb-create-post function (Page access token resolved server-side). SAFETY: this never posts on a bare call \u2014 you must pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true for an immediate publish. Passing both is an error. If image_url is set the post goes to the Page's /photos endpoint with the message as the caption. Posting requires pages_manage_posts on that Page's stored access; the function pre-checks this and returns a clear reconnect message instead of a raw Graph error.",
   inputSchema: {
-    page_id: z26.string().describe("Facebook Page id to post to, e.g. 102068582816960 (Get Well Africa). Must be an active connected Page."),
+    page_id: z26.string().optional().describe("Facebook Page id to post to. Omit to use the calling user's own connected Page. You can only post to a Page you connected yourself."),
     message: z26.string().min(1).max(5e3).describe("The post text (used as the photo caption when image_url is set)."),
     scheduled_publish_time: z26.string().optional().describe("ISO 8601 timestamp, 10 minutes to 75 days in the future. Uses Facebook's native scheduling. Omit for an immediate publish."),
     image_url: z26.string().optional().describe("Public https image URL. When set, the post is created as a photo post with message as the caption."),
