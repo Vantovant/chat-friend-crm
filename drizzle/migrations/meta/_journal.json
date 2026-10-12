@@ -29,6 +29,13 @@
       "when": 1790935115268,
       "tag": "0003_missed_inquiries_one_active_per_contact",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791806429049,
+      "tag": "0004_user_brand_settings_and_fb_source_owner",
+      "breakpoints": true
     }
   ]
 }
