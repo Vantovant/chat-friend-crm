@@ -12,7 +12,7 @@
   "mcp": {
     "server": {
       "name": "get-well-hub",
-      "version": "1.11.0",
+      "version": "1.12.0",
       "title": "Get Well Hub"
     },
     "tools": [
@@ -960,6 +960,22 @@
         "outputSchema": null
       },
       {
+        "name": "get_my_brand_links",
+        "title": "Get my brand links",
+        "description": "Read-only. Returns the calling user's OWN website, shop link, Facebook Page link and connected Facebook Pages. Always use these for the user's links — never another account's. Empty values mean the user has not set them yet: ask them to fill in Settings → Facebook & Website instead of guessing.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null
+      },
+      {
         "name": "reply_to_fb_comment",
         "title": "Reply to a Facebook Page comment",
         "description": "Post a public reply to a comment on the Facebook Page, via the same fb-reply-comment function the in-app Facebook Inbox panel uses. Requires pages_manage_engagement on the Page token — until that's granted in Meta App Review, this returns Meta's rejection error rather than sending anything.",
@@ -1040,7 +1056,7 @@
           "properties": {
             "page_id": {
               "type": "string",
-              "description": "Facebook Page id to post to, e.g. 102068582816960 (Get Well Africa). Must be an active connected Page."
+              "description": "Facebook Page id to post to. Omit to use the calling user's own connected Page. You can only post to a Page you connected yourself."
             },
             "message": {
               "type": "string",
@@ -1062,7 +1078,6 @@
             }
           },
           "required": [
-            "page_id",
             "message"
           ],
           "additionalProperties": false,

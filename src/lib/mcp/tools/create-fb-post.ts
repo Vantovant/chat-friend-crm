@@ -10,7 +10,8 @@ export default defineTool({
   inputSchema: {
     page_id: z
       .string()
-      .describe("Facebook Page id to post to, e.g. 102068582816960 (Get Well Africa). Must be an active connected Page."),
+      .optional()
+      .describe("Facebook Page id to post to. Omit to use the calling user's own connected Page. You can only post to a Page you connected yourself."),
     message: z.string().min(1).max(5000).describe("The post text (used as the photo caption when image_url is set)."),
     scheduled_publish_time: z
       .string()

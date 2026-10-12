@@ -1370,6 +1370,7 @@ export type Database = {
           fb_post_id: string
           fetched_at: string
           id: string
+          owner_user_id: string | null
           permalink_url: string | null
           posted_at: string | null
           raw_message: string | null
@@ -1381,6 +1382,7 @@ export type Database = {
           fb_post_id: string
           fetched_at?: string
           id?: string
+          owner_user_id?: string | null
           permalink_url?: string | null
           posted_at?: string | null
           raw_message?: string | null
@@ -1392,6 +1394,7 @@ export type Database = {
           fb_post_id?: string
           fetched_at?: string
           id?: string
+          owner_user_id?: string | null
           permalink_url?: string | null
           posted_at?: string | null
           raw_message?: string | null
@@ -3713,6 +3716,36 @@ export type Database = {
           provider?: string
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      user_brand_settings: {
+        Row: {
+          brand_name: string | null
+          created_at: string
+          facebook_page_url: string | null
+          shop_url: string | null
+          updated_at: string
+          user_id: string
+          website_url: string | null
+        }
+        Insert: {
+          brand_name?: string | null
+          created_at?: string
+          facebook_page_url?: string | null
+          shop_url?: string | null
+          updated_at?: string
+          user_id: string
+          website_url?: string | null
+        }
+        Update: {
+          brand_name?: string | null
+          created_at?: string
+          facebook_page_url?: string | null
+          shop_url?: string | null
+          updated_at?: string
+          user_id?: string
+          website_url?: string | null
         }
         Relationships: []
       }

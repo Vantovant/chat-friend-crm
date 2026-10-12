@@ -17,11 +17,14 @@ export default defineTool({
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
 
+    const { data: me } = await supabase.auth.getUser();
+    if (!me?.user?.id) return notAuthenticated;
     let query = supabase
       .from("fb_comments")
       .select(
         "id, fb_comment_id, fb_post_id, parent_comment_id, commenter_name, commenter_psid, comment_text, verb, replied, reply_text, replied_at, created_time",
       )
+      .eq("owner_user_id", me.user.id)
       .neq("verb", "remove")
       .order("created_time", { ascending: false, nullsFirst: false })
       .limit(limit ?? 25);

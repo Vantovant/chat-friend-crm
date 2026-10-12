@@ -333,7 +333,12 @@ Deno.serve(async (req) => {
 
 
       const finalKey = postId ?? `manual_${crypto.randomUUID()}`;
-      const sourceRef = PAGE_ID || null;
+      // Account isolation: tag each post with the Page's owner. Only the owner's
+      // Get Well Africa Page feeds the WhatsApp group pipeline (summarize/inject).
+      const postPageId = (c.pageId && String(c.pageId)) || PAGE_ID;
+      const isOwnerPage = postPageId === PAGE_ID;
+      const postOwnerId = (await pageOwner(supabase, postPageId)) ?? (isOwnerPage ? VANTO_USER_ID : null);
+      const sourceRef = isOwnerPage ? (PAGE_ID || null) : postPageId;
       const { data: upserted, error } = await supabase
         .from('fb_source_posts')
         .upsert({
@@ -344,6 +349,7 @@ Deno.serve(async (req) => {
           permalink_url: permalink,
           attachments: { image_url: imageUrl, items: rawAttachments },
           posted_at,
+          owner_user_id: postOwnerId,
         }, { onConflict: 'fb_post_id' })
         .select('id')
         .maybeSingle();
@@ -355,7 +361,7 @@ Deno.serve(async (req) => {
       ingested++;
 
       // Default to auto-approve ON for this source (Phase 5 policy)
-      if (sourceRef) {
+      if (sourceRef && isOwnerPage) {
         const autoKey = `fb_auto_approve_${sourceRef}`;
         const { data: existing } = await supabase
           .from('integration_settings').select('id').eq('key', autoKey).maybeSingle();
@@ -364,7 +370,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      if (upserted?.id) {
+      if (upserted?.id && isOwnerPage) {
         const summarizeUrl = `${SUPABASE_URL}/functions/v1/fb-summarize`;
         const p = fetch(summarizeUrl, {
           method: 'POST',
