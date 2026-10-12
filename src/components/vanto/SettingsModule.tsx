@@ -5,6 +5,7 @@ import { MyMaytapiAccount } from './MyMaytapiAccount';
 import { GoogleContactsSync } from './GoogleContactsSync';
 // FacebookPageConnection (redirect flow) kept in repo as a rollback safety net.
 import { FacebookPageConnect } from './FacebookPageConnect';
+import { BrandLinksCard } from './BrandLinksCard';
 import ProspectorControls from './ProspectorControls';
 import AITrainerPanel from './AITrainerPanel';
 import { cn } from '@/lib/utils';
@@ -18,7 +19,7 @@ const settingSections = [
   { id: 'auto-reply', icon: MessageSquare, label: 'Auto-Reply', description: 'WhatsApp auto-reply settings' },
   { id: 'my-maytapi', icon: Phone, label: 'My Maytapi Account', description: 'Connect your personal WhatsApp' },
   { id: 'google-contacts', icon: Cloud, label: 'Google Contacts', description: 'Two-way sync with Google' },
-  { id: 'facebook-page', icon: Facebook, label: 'Facebook Page', description: 'Connect your own Page' },
+  { id: 'facebook-page', icon: Facebook, label: 'Facebook & Website', description: 'Your own Page and links' },
   { id: 'ai-trainer', icon: Sparkles, label: 'AI Trainer', description: 'Teach & correct the AI' },
   { id: 'prospector', icon: ShieldAlert, label: 'Prospector Controls', description: 'Kill switches & emergency mode' },
   { id: 'notifications', icon: Bell, label: 'Notifications', description: 'Alert preferences' },
@@ -595,7 +596,7 @@ export function SettingsModule() {
 
         {activeSection === 'my-maytapi' && <MyMaytapiAccount />}
         {activeSection === 'google-contacts' && <GoogleContactsSync />}
-        {activeSection === 'facebook-page' && <FacebookPageConnect />}
+        {activeSection === 'facebook-page' && (<><FacebookPageConnect /><BrandLinksCard /></>)}
 
         {activeSection === 'ai-trainer' && <AITrainerPanel />}
 
