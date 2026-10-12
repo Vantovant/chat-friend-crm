@@ -36,6 +36,13 @@
       "when": 1791806429049,
       "tag": "0004_user_brand_settings_and_fb_source_owner",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791806935820,
+      "tag": "0005_profiles_removed_from_team",
+      "breakpoints": true
     }
   ]
 }
