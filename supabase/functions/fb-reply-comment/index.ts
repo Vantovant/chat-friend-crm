@@ -31,12 +31,15 @@ Deno.serve(async (req) => {
     const token = authHeader.replace(/^Bearer\s+/i, '').trim();
     const isService = token === SERVICE_ROLE;
 
+    let callerId: string | null = null;
     if (!isService) {
       const userClient = createClient(SUPABASE_URL, ANON_KEY, {
         global: { headers: { Authorization: `Bearer ${token}` } },
       });
       const { data: claims, error: cErr } = await userClient.auth.getClaims(token);
       if (cErr || !claims?.claims) return json({ ok: false, error: 'unauthorized' }, 401);
+      callerId = (claims.claims.sub as string) || null;
+      if (!callerId) return json({ ok: false, error: 'unauthorized' }, 401);
     }
 
     const { fb_comment_id, reply_text, mode } = await req.json();
