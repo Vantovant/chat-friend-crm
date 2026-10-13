@@ -1104,11 +1104,17 @@ Deno.serve(async (req) => {
   }
 
   // ── 24h window check ──
-  const { data: conv } = await svc.from("conversations").select("id, last_inbound_at, created_at").eq("id", conversation_id).maybeSingle();
+  const { data: conv } = await svc.from("conversations").select("id, last_inbound_at, created_at, owner_user_id").eq("id", conversation_id).maybeSingle();
   if (!conv) {
     diag.result = "conv_not_found";
     console.log("[auto-reply] DIAG:", JSON.stringify(diag));
     return jsonRes({ ok: false, message: "Conversation not found" }, 404);
+  }
+  // Account isolation (2026-10-13): never auto-reply as Vanto inside another account's chats.
+  if ((conv as any).owner_user_id && (conv as any).owner_user_id !== "e336f0a0-ccf5-4992-9607-25c5bf590b11") {
+    diag.result = "skipped_foreign_page";
+    console.log("[auto-reply] DIAG:", JSON.stringify(diag));
+    return jsonRes({ ok: true, auto_reply: false, action: "skipped_foreign_page" });
   }
 
   const lastInboundAt = conv.last_inbound_at ? new Date(conv.last_inbound_at).getTime() : Date.now();
