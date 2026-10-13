@@ -122,6 +122,34 @@ Deno.serve(async (req) => {
     return jsonRes({ ok: false, code: "foreign_owner", message: "This conversation belongs to another account and can only be answered by its owner." }, 403);
   }
 
+  // ── User-token callers (2026-10-13): conversation must be visible under the caller's RLS,
+  // and unowned conversations require admin/super_admin or the contact's assigned agent.
+  if (!internalAllowed && token && userId) {
+    const callerClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+    const { data: visible } = await callerClient
+      .from("conversations").select("id").eq("id", conversation_id).maybeSingle();
+    if (!visible) {
+      return jsonRes({ ok: false, code: "not_visible", message: "Conversation not visible to this user." }, 403);
+    }
+    if (!(conv as any).owner_user_id) {
+      const [{ data: isAdm }, { data: isSup }] = await Promise.all([
+        serviceClient.rpc("has_role", { _user_id: userId, _role: "admin" }),
+        serviceClient.rpc("has_role", { _user_id: userId, _role: "super_admin" }),
+      ]);
+      let allowed = isAdm === true || isSup === true;
+      if (!allowed && conv.contact_id) {
+        const { data: ct } = await serviceClient
+          .from("contacts").select("assigned_to").eq("id", conv.contact_id).maybeSingle();
+        allowed = !!ct && ct.assigned_to === userId;
+      }
+      if (!allowed) {
+        return jsonRes({ ok: false, code: "unowned_conversation_agent_denied", message: "Only admins or the assigned agent can reply to unowned conversations." }, 403);
+      }
+    }
+  }
+
 
   // ── Load contact ──
   const { data: contact, error: contactErr } = await serviceClient

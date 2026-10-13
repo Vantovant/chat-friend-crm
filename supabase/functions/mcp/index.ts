@@ -73,17 +73,6 @@ var ALLOWED_GROUPS = [
   "Botswana APLGO Presentations",
   "New Day New Life"
 ];
-async function resolveOwnerId(supabase, ctx) {
-  const { data: owners, error } = await supabase.from("profiles").select("id").eq("role", "super_admin");
-  if (error) {
-    const fallback = ctx.getUserId();
-    if (fallback) return { ownerId: fallback };
-    return { error: error.message };
-  }
-  if (!owners || owners.length === 0) return { error: "no_super_admin_found" };
-  if (owners.length > 1) return { error: `multiple_super_admins_found (${owners.length})` };
-  return { ownerId: owners[0].id };
-}
 
 // src/lib/mcp/tools/get-dispatch-policy.ts
 var POLICY_KEYS = [
@@ -341,6 +330,15 @@ var queue_group_post_default = defineTool6({
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   handler: async ({ group_name, message_content, scheduled_at, image_url }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
+    {
+      const { data: isAdmin } = await supabaseForUser(ctx).rpc("is_admin_or_super_admin");
+      if (isAdmin !== true) {
+        return {
+          content: [{ type: "text", text: "Group posting uses the workspace WhatsApp number and is admin-only." }],
+          isError: true
+        };
+      }
+    }
     if (!ALLOWED_GROUPS.includes(group_name)) {
       return {
         content: [{ type: "text", text: `"${group_name}" is not an approved group. Allowed: ${ALLOWED_GROUPS.join(", ")}` }],
@@ -586,8 +584,9 @@ var create_plan_task_default = defineTool12({
   handler: async ({ title, priority }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
-    const owner = await resolveOwnerId(supabase, ctx);
-    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const userId = ctx.getUserId();
+    if (!userId) return notAuthenticated;
+    const owner = { ownerId: userId };
     const { data: existing, error: dupErr } = await supabase.from("plan_tasks").select("id, title, priority, status").eq("user_id", owner.ownerId).eq("title", title).neq("status", "done").limit(1);
     if (dupErr) return { content: [{ type: "text", text: dupErr.message }], isError: true };
     if (existing && existing.length > 0) {
@@ -624,8 +623,9 @@ var create_plan_meeting_default = defineTool13({
       return { content: [{ type: "text", text: "start_time must be an ISO 8601 datetime" }], isError: true };
     }
     const supabase = supabaseForUser(ctx);
-    const owner = await resolveOwnerId(supabase, ctx);
-    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const userId = ctx.getUserId();
+    if (!userId) return notAuthenticated;
+    const owner = { ownerId: userId };
     const { data, error } = await supabase.from("plan_meetings").insert({
       title,
       start_time: new Date(start_time).toISOString(),
@@ -658,8 +658,9 @@ var create_plan_reminder_default = defineTool14({
       return { content: [{ type: "text", text: "reminder_time must be an ISO 8601 datetime" }], isError: true };
     }
     const supabase = supabaseForUser(ctx);
-    const owner = await resolveOwnerId(supabase, ctx);
-    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const userId = ctx.getUserId();
+    if (!userId) return notAuthenticated;
+    const owner = { ownerId: userId };
     const { data, error } = await supabase.from("plan_reminders").insert({
       title,
       reminder_time: new Date(reminder_time).toISOString(),
@@ -850,8 +851,9 @@ var list_plan_tasks_default = defineTool16({
   handler: async ({ status, date, limit }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
-    const owner = await resolveOwnerId(supabase, ctx);
-    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const userId = ctx.getUserId();
+    if (!userId) return notAuthenticated;
+    const owner = { ownerId: userId };
     let query = supabase.from("plan_tasks").select("id, title, description, status, priority, due_date, start_date, completed_at, source, created_at").eq("user_id", owner.ownerId).order("due_date", { ascending: true, nullsFirst: false }).limit(limit ?? 50);
     if (status) query = query.eq("status", status);
     if (date) {
@@ -884,8 +886,9 @@ var complete_plan_task_default = defineTool17({
   handler: async ({ id }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
-    const owner = await resolveOwnerId(supabase, ctx);
-    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const userId = ctx.getUserId();
+    if (!userId) return notAuthenticated;
+    const owner = { ownerId: userId };
     const { data: existing, error: fetchErr } = await supabase.from("plan_tasks").select("id").eq("id", id).eq("user_id", owner.ownerId).maybeSingle();
     if (fetchErr) return { content: [{ type: "text", text: fetchErr.message }], isError: true };
     if (!existing) return { content: [{ type: "text", text: "Task not found" }], isError: true };
@@ -912,8 +915,9 @@ var delete_plan_task_default = defineTool18({
   handler: async ({ id }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
-    const owner = await resolveOwnerId(supabase, ctx);
-    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const userId = ctx.getUserId();
+    if (!userId) return notAuthenticated;
+    const owner = { ownerId: userId };
     const { data: existing, error: fetchErr } = await supabase.from("plan_tasks").select("id").eq("id", id).eq("user_id", owner.ownerId).maybeSingle();
     if (fetchErr) return { content: [{ type: "text", text: fetchErr.message }], isError: true };
     if (!existing) return { content: [{ type: "text", text: "Task not found" }], isError: true };
@@ -942,8 +946,9 @@ var list_plan_reminders_default = defineTool19({
   handler: async ({ is_done, date, limit }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
-    const owner = await resolveOwnerId(supabase, ctx);
-    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const userId = ctx.getUserId();
+    if (!userId) return notAuthenticated;
+    const owner = { ownerId: userId };
     let query = supabase.from("plan_reminders").select("id, title, description, reminder_time, is_done, created_at").eq("user_id", owner.ownerId).order("reminder_time", { ascending: true }).limit(limit ?? 50);
     if (typeof is_done === "boolean") query = query.eq("is_done", is_done);
     if (date) {
@@ -976,8 +981,9 @@ var complete_plan_reminder_default = defineTool20({
   handler: async ({ id }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
-    const owner = await resolveOwnerId(supabase, ctx);
-    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const userId = ctx.getUserId();
+    if (!userId) return notAuthenticated;
+    const owner = { ownerId: userId };
     const { data: existing, error: fetchErr } = await supabase.from("plan_reminders").select("id").eq("id", id).eq("user_id", owner.ownerId).maybeSingle();
     if (fetchErr) return { content: [{ type: "text", text: fetchErr.message }], isError: true };
     if (!existing) return { content: [{ type: "text", text: "Reminder not found" }], isError: true };
@@ -1004,8 +1010,9 @@ var delete_plan_reminder_default = defineTool21({
   handler: async ({ id }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
-    const owner = await resolveOwnerId(supabase, ctx);
-    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const userId = ctx.getUserId();
+    if (!userId) return notAuthenticated;
+    const owner = { ownerId: userId };
     const { data: existing, error: fetchErr } = await supabase.from("plan_reminders").select("id").eq("id", id).eq("user_id", owner.ownerId).maybeSingle();
     if (fetchErr) return { content: [{ type: "text", text: fetchErr.message }], isError: true };
     if (!existing) return { content: [{ type: "text", text: "Reminder not found" }], isError: true };
@@ -1033,8 +1040,9 @@ var list_plan_meetings_default = defineTool22({
   handler: async ({ date, limit }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
-    const owner = await resolveOwnerId(supabase, ctx);
-    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const userId = ctx.getUserId();
+    if (!userId) return notAuthenticated;
+    const owner = { ownerId: userId };
     let query = supabase.from("plan_meetings").select("id, title, start_time, location, created_at").eq("user_id", owner.ownerId).order("start_time", { ascending: true }).limit(limit ?? 50);
     if (date) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -1066,8 +1074,9 @@ var delete_plan_meeting_default = defineTool23({
   handler: async ({ id }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
-    const owner = await resolveOwnerId(supabase, ctx);
-    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const userId = ctx.getUserId();
+    if (!userId) return notAuthenticated;
+    const owner = { ownerId: userId };
     const { data: existing, error: fetchErr } = await supabase.from("plan_meetings").select("id").eq("id", id).eq("user_id", owner.ownerId).maybeSingle();
     if (fetchErr) return { content: [{ type: "text", text: fetchErr.message }], isError: true };
     if (!existing) return { content: [{ type: "text", text: "Meeting not found" }], isError: true };

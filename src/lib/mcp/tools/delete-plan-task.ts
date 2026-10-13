@@ -1,6 +1,6 @@
 import { defineTool } from "@lovable.dev/mcp-js";
 import { z } from "zod";
-import { notAuthenticated, resolveOwnerId, supabaseForUser } from "../supabase";
+import { notAuthenticated, supabaseForUser } from "../supabase";
 
 export default defineTool({
   name: "delete_task",
@@ -14,8 +14,9 @@ export default defineTool({
   handler: async ({ id }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
-    const owner = await resolveOwnerId(supabase, ctx);
-    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const userId = ctx.getUserId();
+    if (!userId) return notAuthenticated;
+    const owner = { ownerId: userId };
 
     const { data: existing, error: fetchErr } = await supabase
       .from("plan_tasks")

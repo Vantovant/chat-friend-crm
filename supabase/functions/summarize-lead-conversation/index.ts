@@ -157,6 +157,26 @@ Deno.serve(async (req) => {
     }
 
     const admin = createClient(SUPABASE_URL, SERVICE_KEY);
+
+    // ── Auth gate (2026-10-13): service role, admin/super_admin, or assigned agent ──
+    const authHeader = req.headers.get("Authorization") || "";
+    const bearer = authHeader.replace(/^Bearer\s+/i, "").trim();
+    const deny = (status: number, error: string) =>
+      new Response(JSON.stringify({ error }), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    if (!bearer) return deny(401, "unauthorized");
+    if (bearer !== SERVICE_KEY) {
+      const { data: u, error: uErr } = await admin.auth.getUser(bearer);
+      if (uErr || !u?.user) return deny(401, "unauthorized");
+      const uid = u.user.id;
+      const [{ data: isAdm }, { data: isSup }] = await Promise.all([
+        admin.rpc("has_role", { _user_id: uid, _role: "admin" }),
+        admin.rpc("has_role", { _user_id: uid, _role: "super_admin" }),
+      ]);
+      if (isAdm !== true && isSup !== true) {
+        const { data: c } = await admin.from("contacts").select("assigned_to").eq("id", contact_id).maybeSingle();
+        if (!c || c.assigned_to !== uid) return deny(403, "forbidden");
+      }
+    }
     const cleaned = dedupeAndStrip(messages);
     const lastTs = cleaned.length ? cleaned[cleaned.length - 1].ts : null;
     const msgCount = cleaned.length;

@@ -1,6 +1,6 @@
 import { defineTool } from "@lovable.dev/mcp-js";
 import { z } from "zod";
-import { notAuthenticated, resolveOwnerId, supabaseForUser } from "../supabase";
+import { notAuthenticated, supabaseForUser } from "../supabase";
 
 export default defineTool({
   name: "create_plan_reminder",
@@ -17,8 +17,9 @@ export default defineTool({
       return { content: [{ type: "text", text: "reminder_time must be an ISO 8601 datetime" }], isError: true };
     }
     const supabase = supabaseForUser(ctx);
-    const owner = await resolveOwnerId(supabase, ctx);
-    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const userId = ctx.getUserId();
+    if (!userId) return notAuthenticated;
+    const owner = { ownerId: userId };
 
     const { data, error } = await supabase
       .from("plan_reminders")
