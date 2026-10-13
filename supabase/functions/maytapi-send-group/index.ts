@@ -409,6 +409,22 @@ Deno.serve(async (req) => {
     }
 
     for (const post of duePosts) {
+      // Owner-role guard: the shared workspace WhatsApp number is admin-only.
+      const { data: ownerRole } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", post.user_id)
+        .maybeSingle();
+      if (!post.user_id || (ownerRole?.role !== "admin" && ownerRole?.role !== "super_admin")) {
+        await supabase.from("scheduled_group_posts").update({
+          status: "failed",
+          failure_reason: "BLOCKED: post owner is not an admin — the shared workspace WhatsApp number is admin-only.",
+          last_attempt_at: new Date().toISOString(),
+        }).eq("id", post.id);
+        results.push({ id: post.id, status: "blocked_owner_not_admin" });
+        continue;
+      }
+
       if (!groupAllowlist || !groupAllowlist.has(post.target_group_name)) {
         await supabase.from("scheduled_group_posts").update({
           status: "failed",
