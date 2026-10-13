@@ -43,6 +43,13 @@
       "when": 1791806935820,
       "tag": "0005_profiles_removed_from_team",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791886518367,
+      "tag": "0006_isolate_foreign_owned_conversations",
+      "breakpoints": true
     }
   ]
 }

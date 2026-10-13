@@ -4439,6 +4439,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      can_admin_conversation: {
+        Args: { _conversation_id: string }
+        Returns: boolean
+      }
       claim_ai_suggestion_for_send: {
         Args: { _id: string; _user: string }
         Returns: {
@@ -4459,6 +4463,10 @@ export type Database = {
         Returns: boolean
       }
       is_admin_or_super_admin: { Args: never; Returns: boolean }
+      is_foreign_owned_contact: {
+        Args: { _contact_id: string }
+        Returns: boolean
+      }
       is_private_agent_contact: {
         Args: { _assigned_to: string; _contact_id: string; _created_by: string }
         Returns: boolean
