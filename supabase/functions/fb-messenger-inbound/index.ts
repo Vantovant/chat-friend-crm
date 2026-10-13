@@ -183,6 +183,12 @@ Deno.serve(async (req) => {
         // 5) Trigger auto-reply (fire-and-forget) — same bot, new channel tag.
         // whatsapp-auto-reply's safety guards (price validator, emergency hard-block,
         // rate limits, draft-first governance) apply identically regardless of channel string.
+        // Account isolation (2026-10-13): the bot speaks as Vanto / Get Well Africa, so it
+        // only runs on Vanto's own Page. Other accounts' Pages are logged to their inbox only.
+        if (ownerUserId !== VANTO_USER_ID) {
+          console.log('[fb-messenger-inbound] foreign page owner — auto-reply skipped', eventPageId);
+          continue;
+        }
         try {
           const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
           const p = fetch(`${SUPABASE_URL}/functions/v1/whatsapp-auto-reply`, {

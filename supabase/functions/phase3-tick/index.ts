@@ -407,6 +407,14 @@ Deno.serve(async (req) => {
           };
           let skip: { outcome: string; err: string; stop: boolean; resched?: string } | null = null;
 
+          // 0) Account isolation (2026-10-13): never follow up inside another account's chats.
+          if (row.conversation_id) {
+            const { data: own } = await supabase.from("conversations").select("owner_user_id").eq("id", row.conversation_id).maybeSingle();
+            if (own?.owner_user_id && own.owner_user_id !== "e336f0a0-ccf5-4992-9607-25c5bf590b11") {
+              skip = { outcome: "skipped_foreign_owner", err: "foreign_page_owner", stop: true };
+            }
+          }
+
           if (!isMessenger && (excluded.includes(digitsOnly) || prefixes.some((p) => digitsOnly.startsWith(p)))) {
             skip = { outcome: "skipped_excluded", err: "excluded_phone_or_prefix", stop: true };
           }
