@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { ContactIntentTags } from './ContactIntentTags';
 import { cn } from '@/lib/utils';
 import { temperatureBg, type LeadTemperature } from '@/lib/vanto-data';
 import { normalizePhone, digitsOnly } from '@/lib/phone-utils';
