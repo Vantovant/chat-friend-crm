@@ -57,6 +57,13 @@
       "when": 1791909280471,
       "tag": "0007_intent_tagger_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791909298172,
+      "tag": "0008_contacts_default_unclassified",
+      "breakpoints": true
     }
   ]
 }
