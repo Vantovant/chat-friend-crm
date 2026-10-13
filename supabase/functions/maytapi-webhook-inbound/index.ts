@@ -916,6 +916,7 @@ Deno.serve(async (req) => {
           });
         }
         contact = newContact;
+        if (newContact?.id) await setSourceTag(supabase, newContact.id, "source:google_ad_whatsapp");
       }
 
       // Find or create conversation
@@ -949,6 +950,9 @@ Deno.serve(async (req) => {
         })
         .select("id")
         .single();
+
+      // Intent tagger (1:1 only; read-and-tag, non-fatal).
+      if (contact?.id) triggerIntentTag(contact.id, inboundMsg?.id ?? null, "maytapi");
 
       // Fix 3: fire-and-forget lead stage promotion + stamp inbound timestamp.
       if (contact?.id) {

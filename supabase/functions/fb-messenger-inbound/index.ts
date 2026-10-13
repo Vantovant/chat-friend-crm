@@ -8,6 +8,7 @@
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { resolvePageToken, pageOwner } from '../_shared/fb-page-token.ts';
+import { triggerIntentTag } from '../_shared/contact-tags.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -185,6 +186,10 @@ Deno.serve(async (req) => {
         // rate limits, draft-first governance) apply identically regardless of channel string.
         // Account isolation (2026-10-13): the bot speaks as Vanto / Get Well Africa, so it
         // only runs on Vanto's own Page. Other accounts' Pages are logged to their inbox only.
+        if (ownerUserId === VANTO_USER_ID) {
+          // Intent tagger — Vanto's own Page only (read-and-tag, non-fatal).
+          triggerIntentTag(contactId, inboundMsg?.id ?? null, 'facebook_messenger');
+        }
         if (ownerUserId !== VANTO_USER_ID) {
           console.log('[fb-messenger-inbound] foreign page owner — auto-reply skipped', eventPageId);
           continue;
