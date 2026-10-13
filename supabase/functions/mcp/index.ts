@@ -330,6 +330,15 @@ var queue_group_post_default = defineTool6({
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   handler: async ({ group_name, message_content, scheduled_at, image_url }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
+    {
+      const { data: isAdmin } = await supabaseForUser(ctx).rpc("is_admin_or_super_admin");
+      if (isAdmin !== true) {
+        return {
+          content: [{ type: "text", text: "Group posting uses the workspace WhatsApp number and is admin-only." }],
+          isError: true
+        };
+      }
+    }
     if (!ALLOWED_GROUPS.includes(group_name)) {
       return {
         content: [{ type: "text", text: `"${group_name}" is not an approved group. Allowed: ${ALLOWED_GROUPS.join(", ")}` }],
