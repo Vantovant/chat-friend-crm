@@ -7,8 +7,6 @@
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { setSourceTag, triggerIntentTag } from '../_shared/contact-tags.ts';
-let createdNewContact = false;
-let createdNewContactTags: string[] = [];
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -150,6 +148,8 @@ Deno.serve(async (req) => {
 
   // 1) Find or create contact
   let contactId: string;
+  let createdNewContact = false;
+  let createdNewContactTags: string[] = [];
   const { data: existing } = await svc
     .from('contacts')
     .select('id, name')
