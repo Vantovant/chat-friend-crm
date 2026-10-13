@@ -8,6 +8,7 @@ import { guardOnJoin, guardOnMessage } from "../_shared/group-guard.ts";
  * SURGICAL ADDITION: inbound message branch only. Group Campaign ack flow untouched.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { setSourceTag, triggerIntentTag } from "../_shared/contact-tags.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -902,7 +903,7 @@ Deno.serve(async (req) => {
             phone_normalized: phoneE164,
             phone_raw: rawPhone,
             whatsapp_id: phoneE164,
-            lead_type: "prospect",
+            lead_type: "unclassified",
             interest: "medium",
             temperature: "warm",
           })
@@ -915,6 +916,7 @@ Deno.serve(async (req) => {
           });
         }
         contact = newContact;
+        if (newContact?.id) await setSourceTag(supabase, newContact.id, "source:google_ad_whatsapp");
       }
 
       // Find or create conversation
@@ -948,6 +950,9 @@ Deno.serve(async (req) => {
         })
         .select("id")
         .single();
+
+      // Intent tagger (1:1 only; read-and-tag, non-fatal).
+      if (contact?.id) triggerIntentTag(contact.id, inboundMsg?.id ?? null, "maytapi");
 
       // Fix 3: fire-and-forget lead stage promotion + stamp inbound timestamp.
       if (contact?.id) {

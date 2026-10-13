@@ -2138,7 +2138,7 @@ function displayName(c) {
 }
 async function loadLeadCallRows(supabase) {
   const { data: contacts, error: cErr } = await supabase.from("contacts").select(
-    "id, name, first_name, last_name, phone, phone_normalized, email, lead_type, temperature, interest, tags, notes, stage_id, created_at, updated_at"
+    "id, name, first_name, last_name, phone, phone_normalized, email, lead_type, temperature, interest, tags, notes, stage_id, created_at, updated_at, prospect_verified, source_tag, primary_intent, intent_reason"
   ).eq("is_deleted", false).order("updated_at", { ascending: false }).limit(500);
   if (cErr) return { error: cErr.message };
   const all = contacts ?? [];
@@ -2241,9 +2241,13 @@ async function loadLeadCallRows(supabase) {
       msg_count: thread.length,
       thread,
       summary: null,
+      prospect_verified: !!c.prospect_verified,
+      source_tag: c.source_tag ?? null,
+      primary_intent: c.primary_intent ?? null,
+      intent_reason: c.intent_reason ?? null,
       _hasTwilio: twilio.length > 0
     };
-  }).filter((r) => r._hasTwilio);
+  }).filter((r) => r._hasTwilio || r.prospect_verified || r.source_tag === "source:google_ad_whatsapp" && r.thread.length > 0);
   debug.contacts_with_twilio = composed.length;
   debug.composed_before_cap = composed.length;
   const distributors = composed.filter((r) => r.is_distributor);
@@ -2268,7 +2272,7 @@ var dateStr = z35.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
 var get_lead_call_report_default = defineTool40({
   name: "get_lead_call_report",
   title: "Get the Lead Call Report",
-  description: "Read the Lead Call Report: contacts who have at least one Twilio message, with computed first inquiry date, last message date, message count, distributor-interest flag, and any cached AI summary. Mirrors the in-app Lead Call Report (src/components/vanto/reports/LeadCallReport.tsx), including its First Inquiry / Last Msg date-range filters, and is sortable newest-first or oldest-first.",
+  description: "Read the Lead Call Report: contacts who have at least one Twilio message, with computed first inquiry date, last message date, message count, distributor-interest flag, and any cached AI summary. Mirrors the in-app Lead Call Report (src/components/vanto/reports/LeadCallReport.tsx), including its First Inquiry / Last Msg date-range filters, and is sortable newest-first or oldest-first. Defaults to AI-verified prospects only (prospects_only=true); filter by source_tag / intent_tag.",
   inputSchema: {
     sort_by: z35.enum(["last_message", "first_inquiry", "msgs"]).optional().describe("Sort field (default last_message)."),
     sort_dir: z35.enum(["asc", "desc"]).optional().describe("Sort direction (default desc = newest first)."),
@@ -2278,16 +2282,22 @@ var get_lead_call_report_default = defineTool40({
     first_inquiry_to: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose first inquiry is on/before this date."),
     last_message_from: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose last message is on/after this date."),
     last_message_to: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose last message is on/before this date."),
+    prospects_only: z35.boolean().optional().describe("Only AI-verified prospects (prospect:verified). Default true, matching the in-app toggle."),
+    source_tag: z35.string().optional().describe("e.g. source:facebook_ad, source:google_ad_whatsapp, source:twilio_inbound."),
+    intent_tag: z35.string().optional().describe("e.g. intent:distributor, intent:buyer, intent:info, intent:health_inquiry, personal, unclear, needs_review."),
     limit: z35.number().int().min(1).max(100).optional().describe("Max rows (default 50, cap 100).")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-  handler: async ({ sort_by, sort_dir, only_distributors, search, first_inquiry_from, first_inquiry_to, last_message_from, last_message_to, limit }, ctx) => {
+  handler: async ({ sort_by, sort_dir, only_distributors, prospects_only, source_tag, intent_tag, search, first_inquiry_from, first_inquiry_to, last_message_from, last_message_to, limit }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
     const loaded = await loadLeadCallRows(supabase);
     if ("error" in loaded) return { content: [{ type: "text", text: loaded.error }], isError: true };
     let rows = loaded.rows;
     if (only_distributors) rows = rows.filter((r) => r.is_distributor);
+    if (prospects_only ?? true) rows = rows.filter((r) => r.prospect_verified);
+    if (source_tag) rows = rows.filter((r) => r.source_tag === source_tag || (r.tags ?? []).includes(source_tag));
+    if (intent_tag) rows = rows.filter((r) => r.primary_intent === intent_tag);
     if (first_inquiry_from) rows = rows.filter((r) => r.first_inquiry && r.first_inquiry.slice(0, 10) >= first_inquiry_from);
     if (first_inquiry_to) rows = rows.filter((r) => r.first_inquiry && r.first_inquiry.slice(0, 10) <= first_inquiry_to);
     if (last_message_from) rows = rows.filter((r) => r.last_message && r.last_message.slice(0, 10) >= last_message_from);
@@ -2320,7 +2330,12 @@ var get_lead_call_report_default = defineTool40({
       first_inquiry: r.first_inquiry,
       last_message: r.last_message,
       msg_count: r.msg_count,
-      summary: r.summary
+      summary: r.summary,
+      prospect_verified: r.prospect_verified,
+      source: r.source_tag,
+      intent: r.primary_intent,
+      intent_reason: r.intent_reason,
+      tags: r.tags
     }));
     const result = { count: contacts.length, contacts };
     return {
@@ -2811,7 +2826,7 @@ var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
   name: "get-well-hub",
   title: "Get Well Hub",
-  version: "1.12.0",
+  version: "1.13.0",
   instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement); to privately message a commenter (one private Messenger message per comment, within 7 days of the comment) use send_private_reply_to_comment. For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for actual group chat content (who said what, when) use list_group_messages; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual'). For the Lead Call Report, use get_lead_call_report (sorted newest-first by default) and generate_lead_call_summaries to fill in missing AI summaries; edit a lead's type/notes/pipeline stage via update_contact. To post TO a Facebook Page, use create_fb_post \u2014 it refuses to do anything unless you pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true; never pass publish_now: true unless the user has clearly asked to publish immediately. Use list_fb_posts to see what is already published, scheduled, or failed before adding more. For the AI Trainer (how the auto-reply bot answers), use list_trainer_rules / get_trainer_rule to read, create_trainer_rule / update_trainer_rule to change (no delete \u2014 switch off with enabled: false; every edit is audited in the rule's notes), and list_reply_corrections / add_reply_correction for the corrections log. Show the operator the exact rule text and get approval before any trainer write. To check the Twilio pipeline against Twilio's own records (account, balance, webhook, sender status, alerts, and Twilio-vs-Hub inbound counts per day), use get_twilio_status \u2014 read-only, admin only. For Group Guard (anti-spam in WhatsApp groups) use get_group_guard_status to read and set_group_guard_mode to change mode.`,
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,

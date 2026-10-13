@@ -9,7 +9,7 @@ export default defineTool({
   name: "get_lead_call_report",
   title: "Get the Lead Call Report",
   description:
-    "Read the Lead Call Report: contacts who have at least one Twilio message, with computed first inquiry date, last message date, message count, distributor-interest flag, and any cached AI summary. Mirrors the in-app Lead Call Report (src/components/vanto/reports/LeadCallReport.tsx), including its First Inquiry / Last Msg date-range filters, and is sortable newest-first or oldest-first.",
+    "Read the Lead Call Report: contacts who have at least one Twilio message, with computed first inquiry date, last message date, message count, distributor-interest flag, and any cached AI summary. Mirrors the in-app Lead Call Report (src/components/vanto/reports/LeadCallReport.tsx), including its First Inquiry / Last Msg date-range filters, and is sortable newest-first or oldest-first. Defaults to AI-verified prospects only (prospects_only=true); filter by source_tag / intent_tag.",
   inputSchema: {
     sort_by: z.enum(["last_message", "first_inquiry", "msgs"]).optional().describe("Sort field (default last_message)."),
     sort_dir: z.enum(["asc", "desc"]).optional().describe("Sort direction (default desc = newest first)."),
@@ -19,11 +19,14 @@ export default defineTool({
     first_inquiry_to: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose first inquiry is on/before this date."),
     last_message_from: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose last message is on/after this date."),
     last_message_to: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose last message is on/before this date."),
+    prospects_only: z.boolean().optional().describe("Only AI-verified prospects (prospect:verified). Default true, matching the in-app toggle."),
+    source_tag: z.string().optional().describe("e.g. source:facebook_ad, source:google_ad_whatsapp, source:twilio_inbound."),
+    intent_tag: z.string().optional().describe("e.g. intent:distributor, intent:buyer, intent:info, intent:health_inquiry, personal, unclear, needs_review."),
     limit: z.number().int().min(1).max(100).optional().describe("Max rows (default 50, cap 100)."),
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async (
-    { sort_by, sort_dir, only_distributors, search, first_inquiry_from, first_inquiry_to, last_message_from, last_message_to, limit },
+    { sort_by, sort_dir, only_distributors, prospects_only, source_tag, intent_tag, search, first_inquiry_from, first_inquiry_to, last_message_from, last_message_to, limit },
     ctx,
   ) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
@@ -34,6 +37,9 @@ export default defineTool({
 
     let rows = loaded.rows;
     if (only_distributors) rows = rows.filter((r) => r.is_distributor);
+    if (prospects_only ?? true) rows = rows.filter((r) => r.prospect_verified);
+    if (source_tag) rows = rows.filter((r) => r.source_tag === source_tag || (r.tags ?? []).includes(source_tag));
+    if (intent_tag) rows = rows.filter((r) => r.primary_intent === intent_tag);
 
     // Same YYYY-MM-DD string-slice comparison as LeadCallReport.tsx's `filtered` memo.
     if (first_inquiry_from) rows = rows.filter((r) => r.first_inquiry && r.first_inquiry.slice(0, 10) >= first_inquiry_from);
@@ -72,6 +78,11 @@ export default defineTool({
       last_message: r.last_message,
       msg_count: r.msg_count,
       summary: r.summary,
+      prospect_verified: r.prospect_verified,
+      source: r.source_tag,
+      intent: r.primary_intent,
+      intent_reason: r.intent_reason,
+      tags: r.tags,
     }));
 
     const result = { count: contacts.length, contacts };

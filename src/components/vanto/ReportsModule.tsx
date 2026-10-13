@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { FileText, Phone, BarChart3, Users, ArrowLeft, Link2 } from 'lucide-react';
 import { LeadCallReport } from './reports/LeadCallReport';
+import { IntentBackfillReview } from './reports/IntentBackfillReview';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 
-type ReportKey = 'lead-call' | null;
+type ReportKey = 'lead-call' | 'intent-backfill' | null;
 
 const reports = [
   {
@@ -12,6 +13,13 @@ const reports = [
     title: 'Lead Call Report',
     description: 'Printable list of prospects + full WhatsApp conversation history. Distributors at the top, then longest-waiting first. Up to 100 contacts.',
     icon: Phone,
+    available: true,
+  },
+  {
+    key: 'intent-backfill' as const,
+    title: 'AI Intent Tagging Review',
+    description: 'Preview AI tags for existing contacts and approve them. Also lists duplicate phone numbers for review.',
+    icon: Users,
     available: true,
   },
   {
@@ -40,6 +48,17 @@ export function ReportsModule() {
           <ArrowLeft className="h-4 w-4 mr-1" /> Back to Reports
         </Button>
         <LeadCallReport />
+      </div>
+    );
+  }
+
+  if (active === 'intent-backfill') {
+    return (
+      <div className="h-full overflow-y-auto p-4 md:p-6">
+        <Button variant="ghost" size="sm" onClick={() => setActive(null)} className="mb-3">
+          <ArrowLeft className="h-4 w-4 mr-1" /> Back to Reports
+        </Button>
+        <IntentBackfillReview />
       </div>
     );
   }

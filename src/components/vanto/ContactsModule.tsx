@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { ContactIntentTags } from './ContactIntentTags';
 import { cn } from '@/lib/utils';
 import { temperatureBg, type LeadTemperature } from '@/lib/vanto-data';
 import { normalizePhone, digitsOnly } from '@/lib/phone-utils';
@@ -676,6 +677,7 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
             <label className="block text-xs font-medium text-muted-foreground mb-1">Tags (comma separated)</label>
             <input type="text" value={form.tags} onChange={e => set('tags', e.target.value)} placeholder="e.g. mlm, vip" className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 transition-colors" />
           </div>
+          <ContactIntentTags contactId={contact.id} userId={userId} />
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs font-medium text-muted-foreground">Notes</label>

@@ -63,6 +63,10 @@ export type LeadRow = {
   msg_count: number;
   thread: ThreadMsg[];
   summary: unknown | null;
+  prospect_verified: boolean;
+  source_tag: string | null;
+  primary_intent: string | null;
+  intent_reason: string | null;
 };
 
 export type LeadCallDebug = {
@@ -98,7 +102,7 @@ export async function loadLeadCallRows(supabase: Client): Promise<{ rows: LeadRo
   const { data: contacts, error: cErr } = await supabase
     .from("contacts")
     .select(
-      "id, name, first_name, last_name, phone, phone_normalized, email, lead_type, temperature, interest, tags, notes, stage_id, created_at, updated_at",
+      "id, name, first_name, last_name, phone, phone_normalized, email, lead_type, temperature, interest, tags, notes, stage_id, created_at, updated_at, prospect_verified, source_tag, primary_intent, intent_reason",
     )
     .eq("is_deleted", false)
     .order("updated_at", { ascending: false })
@@ -235,10 +239,15 @@ export async function loadLeadCallRows(supabase: Client): Promise<{ rows: LeadRo
         msg_count: thread.length,
         thread,
         summary: null,
+        prospect_verified: !!c.prospect_verified,
+        source_tag: c.source_tag ?? null,
+        primary_intent: c.primary_intent ?? null,
+        intent_reason: c.intent_reason ?? null,
         _hasTwilio: twilio.length > 0,
       } as LeadRow & { _hasTwilio: boolean };
     })
-    .filter((r) => (r as LeadRow & { _hasTwilio: boolean })._hasTwilio);
+    // Same inclusion as LeadCallReport.tsx: Twilio, AI-verified prospects, WhatsApp Business leads.
+    .filter((r) => (r as LeadRow & { _hasTwilio: boolean })._hasTwilio || r.prospect_verified || (r.source_tag === "source:google_ad_whatsapp" && r.thread.length > 0));
 
   debug.contacts_with_twilio = composed.length;
   debug.composed_before_cap = composed.length;

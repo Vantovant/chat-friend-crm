@@ -9,3 +9,12 @@
 
 ## Group Guard (2026-09-30)
 - [x] URGENT: enforce +234 country block now (spam flood #2); flood guard stays log_only
+
+## AI Intent Auto-Tagger (2026-10-13)
+- [x] contact_tags + proposals tables, unclassified default, kill switch / 0.75 threshold
+- [x] contact-intent-tag function + hooks in Twilio, Maytapi 1:1, Messenger (Vanto Page)
+- [x] Lead Call Report Prospects-only + Source/Why columns; MCP get_lead_call_report filters (1.13.0)
+- [x] Contact protected-tag buttons; backfill preview + duplicates review screen
+- [ ] Run backfill — waiting on Vanto (count + cost review)
+- [ ] Website form source — waiting on which form feeds contacts
+- [ ] Grow existing:team/customer lookup — no reachable synced record

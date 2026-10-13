@@ -52,6 +52,10 @@ type Contact = {
   stage_id: string | null;
   created_at: string;
   updated_at: string;
+  prospect_verified?: boolean | null;
+  source_tag?: string | null;
+  primary_intent?: string | null;
+  intent_reason?: string | null;
 };
 
 type ThreadMsg = {
@@ -131,6 +135,7 @@ export function LeadCallReport() {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<Row[]>([]);
   const [onlyDistributors, setOnlyDistributors] = useState(false);
+  const [prospectsOnly, setProspectsOnly] = useState(true);
   const [sortKey, setSortKey] = useState<SortKey>('msgs');
   const [sortDir, setSortDir] = useState<SortDir>('none');
   const [fiFrom, setFiFrom] = useState('');
@@ -312,7 +317,7 @@ export function LeadCallReport() {
     try {
       const { data: contacts, error: cErr } = await supabase
         .from('contacts')
-        .select('id, name, first_name, last_name, phone, phone_normalized, email, lead_type, temperature, interest, tags, notes, stage_id, created_at, updated_at')
+        .select('id, name, first_name, last_name, phone, phone_normalized, email, lead_type, temperature, interest, tags, notes, stage_id, created_at, updated_at, prospect_verified, source_tag, primary_intent, intent_reason')
         .eq('is_deleted', false)
         .order('updated_at', { ascending: false })
         .limit(500);
@@ -386,7 +391,8 @@ export function LeadCallReport() {
             summary: null,
           };
         })
-        .filter((r) => r._hasTwilio);
+        // Twilio contacts, plus AI-verified prospects and WhatsApp Business (Maytapi) leads.
+        .filter((r) => r._hasTwilio || !!r.prospect_verified || (r.source_tag === 'source:google_ad_whatsapp' && r.thread.length > 0));
 
       const distributors = composed.filter((r) => r.isDistributor);
       const rest = composed
@@ -426,6 +432,7 @@ export function LeadCallReport() {
 
   const filtered = useMemo(() => {
     let out = onlyDistributors ? rows.filter((r) => r.isDistributor) : rows;
+    if (prospectsOnly) out = out.filter((r) => !!r.prospect_verified);
     out = out.filter((r) => !hiddenIds.has(r.id));
     if (fiFrom) out = out.filter((r) => r.firstInquiry && r.firstInquiry.slice(0, 10) >= fiFrom);
     if (fiTo) out = out.filter((r) => r.firstInquiry && r.firstInquiry.slice(0, 10) <= fiTo);
@@ -443,7 +450,7 @@ export function LeadCallReport() {
       });
     }
     return out;
-  }, [rows, onlyDistributors, fiFrom, fiTo, lmFrom, lmTo, search, hiddenIds]);
+  }, [rows, onlyDistributors, prospectsOnly, fiFrom, fiTo, lmFrom, lmTo, search, hiddenIds]);
 
   const sortedFiltered = useMemo(() => {
     if (sortDir === 'none') return filtered;
@@ -683,6 +690,10 @@ export function LeadCallReport() {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Switch checked={prospectsOnly} onCheckedChange={setProspectsOnly} />
+            Prospects only
+          </label>
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
             <Switch checked={onlyDistributors} onCheckedChange={setOnlyDistributors} />
             Only distributors
           </label>
@@ -771,6 +782,8 @@ export function LeadCallReport() {
               <TableHead>Name</TableHead>
               <TableHead>Phone</TableHead>
               <TableHead>Type</TableHead>
+              <TableHead>Source</TableHead>
+              <TableHead className="min-w-[180px]">Why a prospect</TableHead>
               <TableHead>
                 <SortButton label="First Inquiry" active={sortKey === 'firstInquiry'} dir={sortDir} onClick={() => toggleSort('firstInquiry')} />
               </TableHead>
@@ -788,7 +801,7 @@ export function LeadCallReport() {
           <TableBody>
             {sortedFiltered.length === 0 && !loading && (
               <TableRow>
-                <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
+                <TableCell colSpan={13} className="text-center text-muted-foreground py-8">
                   No contacts match the current filter.
                 </TableCell>
               </TableRow>
@@ -802,6 +815,8 @@ export function LeadCallReport() {
                 <TableCell className="py-2 font-medium align-top">{displayName(r)}</TableCell>
                 <TableCell className="py-2 text-xs align-top">{r.phone || r.phone_normalized || '—'}</TableCell>
                 <TableCell className="py-2 text-xs align-top">{r.lead_type || '—'}</TableCell>
+                <TableCell className="py-2 text-xs align-top">{r.source_tag ? r.source_tag.replace('source:', '') : '—'}</TableCell>
+                <TableCell className="py-2 text-xs align-top">{r.primary_intent ? <><span className="font-medium">{r.primary_intent}</span>{r.intent_reason && <div className="text-muted-foreground">{r.intent_reason}</div>}</> : '—'}</TableCell>
                 <TableCell className="py-2 text-xs align-top">{fmtDate(r.firstInquiry)}</TableCell>
                 <TableCell className="py-2 text-xs align-top">{fmtDate(r.lastMessage)}</TableCell>
                 <TableCell className="py-2 text-xs align-top">

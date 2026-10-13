@@ -1,0 +1,1 @@
+ALTER TABLE public.contacts ALTER COLUMN lead_type SET DEFAULT 'unclassified';

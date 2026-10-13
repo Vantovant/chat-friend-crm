@@ -6,6 +6,7 @@
  * Now passes inbound_message_id to auto-reply for full traceability.
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { setSourceTag, triggerIntentTag } from '../_shared/contact-tags.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -147,6 +148,8 @@ Deno.serve(async (req) => {
 
   // 1) Find or create contact
   let contactId: string;
+  let createdNewContact = false;
+  let createdNewContactTags: string[] = [];
   const { data: existing } = await svc
     .from('contacts')
     .select('id, name')
@@ -213,6 +216,8 @@ Deno.serve(async (req) => {
       return jsonRes({ error: 'Failed to create contact' }, 500);
     }
     contactId = created.id;
+    createdNewContact = true;
+    createdNewContactTags = initialTags;
     console.log('[twilio-inbound] Created contact:', contactId, 'tags:', initialTags);
   }
 
@@ -259,6 +264,14 @@ Deno.serve(async (req) => {
   }
 
   const inboundMessageId = inboundMsg?.id || null;
+
+  // Intent tagger (read-and-tag only, non-fatal). Source tag only on newly created contacts.
+  if (contactId) {
+    if (createdNewContact) {
+      await setSourceTag(svc, contactId, createdNewContactTags.includes('source:facebook_ad') ? 'source:facebook_ad' : 'source:twilio_inbound');
+    }
+    triggerIntentTag(contactId, inboundMessageId, 'twilio');
+  }
 
   // Fix 3: fire-and-forget lead stage promotion + stamp inbound timestamp.
   if (contactId) {
