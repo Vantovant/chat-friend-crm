@@ -54,6 +54,29 @@ Deno.serve(async (req) => {
     const { data: commentRow } = await admin
       .from('fb_comments').select('page_id, created_time, commenter_name').eq('fb_comment_id', fb_comment_id).maybeSingle();
 
+    // ── Page ownership gate (2026-10-13) for non-service callers ──
+    if (!isService && callerId) {
+      const [{ data: isAdm }, { data: isSup }] = await Promise.all([
+        admin.rpc('has_role', { _user_id: callerId, _role: 'admin' }),
+        admin.rpc('has_role', { _user_id: callerId, _role: 'super_admin' }),
+      ]);
+      const callerIsAdmin = isAdm === true || isSup === true;
+      let conn: { user_id: string } | null = null;
+      if (commentRow?.page_id) {
+        const { data } = await admin
+          .from('facebook_page_connections').select('user_id')
+          .eq('page_id', commentRow.page_id).eq('status', 'active')
+          .order('connected_at', { ascending: false }).limit(1).maybeSingle();
+        conn = data as { user_id: string } | null;
+      }
+      if (!callerIsAdmin) {
+        // Non-admins never fall back to the environment Page token.
+        if (!commentRow || !conn || conn.user_id !== callerId) {
+          return json({ ok: false, error: 'not_page_owner' }, 403);
+        }
+      }
+    }
+
     if (isPrivate) {
       if (!commentRow) {
         return json({ ok: false, stage: 'lookup', error: 'Comment not found in fb_comments' }, 200);

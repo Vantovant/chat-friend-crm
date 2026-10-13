@@ -1,6 +1,6 @@
 import { defineTool } from "@lovable.dev/mcp-js";
 import { z } from "zod";
-import { notAuthenticated, resolveOwnerId, supabaseForUser } from "../supabase";
+import { notAuthenticated, supabaseForUser } from "../supabase";
 
 export default defineTool({
   name: "list_meetings",
@@ -15,8 +15,9 @@ export default defineTool({
   handler: async ({ date, limit }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
-    const owner = await resolveOwnerId(supabase, ctx);
-    if ("error" in owner) return { content: [{ type: "text", text: owner.error }], isError: true };
+    const userId = ctx.getUserId();
+    if (!userId) return notAuthenticated;
+    const owner = { ownerId: userId };
 
     let query = supabase
       .from("plan_meetings")
