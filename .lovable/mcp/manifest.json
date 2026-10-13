@@ -12,7 +12,7 @@
   "mcp": {
     "server": {
       "name": "get-well-hub",
-      "version": "1.12.0",
+      "version": "1.13.0",
       "title": "Get Well Hub"
     },
     "tools": [
@@ -218,7 +218,7 @@
       {
         "name": "get_lead_call_report",
         "title": "Get the Lead Call Report",
-        "description": "Read the Lead Call Report: contacts who have at least one Twilio message, with computed first inquiry date, last message date, message count, distributor-interest flag, and any cached AI summary. Mirrors the in-app Lead Call Report (src/components/vanto/reports/LeadCallReport.tsx), including its First Inquiry / Last Msg date-range filters, and is sortable newest-first or oldest-first.",
+        "description": "Read the Lead Call Report: contacts who have at least one Twilio message, with computed first inquiry date, last message date, message count, distributor-interest flag, and any cached AI summary. Mirrors the in-app Lead Call Report (src/components/vanto/reports/LeadCallReport.tsx), including its First Inquiry / Last Msg date-range filters, and is sortable newest-first or oldest-first. Defaults to AI-verified prospects only (prospects_only=true); filter by source_tag / intent_tag.",
         "annotations": {
           "readOnlyHint": true,
           "idempotentHint": true,
@@ -268,6 +268,18 @@
             "last_message_to": {
               "$ref": "#/properties/first_inquiry_from",
               "description": "YYYY-MM-DD. Only contacts whose last message is on/before this date."
+            },
+            "prospects_only": {
+              "type": "boolean",
+              "description": "Only AI-verified prospects (prospect:verified). Default true, matching the in-app toggle."
+            },
+            "source_tag": {
+              "type": "string",
+              "description": "e.g. source:facebook_ad, source:google_ad_whatsapp, source:twilio_inbound."
+            },
+            "intent_tag": {
+              "type": "string",
+              "description": "e.g. intent:distributor, intent:buyer, intent:info, intent:health_inquiry, personal, unclear, needs_review."
             },
             "limit": {
               "type": "integer",
