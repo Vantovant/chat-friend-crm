@@ -415,7 +415,7 @@ Deno.serve(async (req) => {
             }
           }
 
-          if (!isMessenger && (excluded.includes(digitsOnly) || prefixes.some((p) => digitsOnly.startsWith(p)))) {
+          if (!skip && !isMessenger && (excluded.includes(digitsOnly) || prefixes.some((p) => digitsOnly.startsWith(p)))) {
             skip = { outcome: "skipped_excluded", err: "excluded_phone_or_prefix", stop: true };
           }
           if (!skip && !isMessenger) {
