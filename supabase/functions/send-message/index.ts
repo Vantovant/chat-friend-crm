@@ -108,11 +108,19 @@ Deno.serve(async (req) => {
   // ── Load conversation ──
   const { data: conv, error: convErr } = await serviceClient
     .from("conversations")
-    .select("id, contact_id, last_inbound_at")
+    .select("id, contact_id, last_inbound_at, owner_user_id")
     .eq("id", conversation_id)
     .maybeSingle();
 
   if (convErr || !conv) return jsonRes({ ok: false, code: "NOT_FOUND", message: "Conversation not found" }, 404);
+
+  // ── Account isolation (2026-10-13): a conversation owned by another account
+  // (e.g. a different user's own Facebook Page) can only be replied to by that
+  // account. Internal/bot dispatch never sends into another account's chats.
+  if ((conv as any).owner_user_id && (conv as any).owner_user_id !== userId) {
+    return jsonRes({ ok: false, code: "foreign_owner", message: "This conversation belongs to another account and can only be answered by its owner." }, 403);
+  }
+
 
   // ── Load contact ──
   const { data: contact, error: contactErr } = await serviceClient
