@@ -744,11 +744,118 @@ export type Database = {
           },
         ]
       }
+      contact_tag_proposals: {
+        Row: {
+          based_on_message_id: string | null
+          confidence: number | null
+          contact_id: string
+          created_at: string
+          id: string
+          proposed_intent: string | null
+          proposed_source: string | null
+          reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          run_id: string
+          status: string
+          would_verify: boolean
+        }
+        Insert: {
+          based_on_message_id?: string | null
+          confidence?: number | null
+          contact_id: string
+          created_at?: string
+          id?: string
+          proposed_intent?: string | null
+          proposed_source?: string | null
+          reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          run_id: string
+          status?: string
+          would_verify?: boolean
+        }
+        Update: {
+          based_on_message_id?: string | null
+          confidence?: number | null
+          contact_id?: string
+          created_at?: string
+          id?: string
+          proposed_intent?: string | null
+          proposed_source?: string | null
+          reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          run_id?: string
+          status?: string
+          would_verify?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_tag_proposals_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      contact_tags: {
+        Row: {
+          based_on_message_id: string | null
+          confidence: number | null
+          contact_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          kind: string
+          origin: string
+          reason: string | null
+          tag: string
+          updated_at: string
+        }
+        Insert: {
+          based_on_message_id?: string | null
+          confidence?: number | null
+          contact_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind: string
+          origin: string
+          reason?: string | null
+          tag: string
+          updated_at?: string
+        }
+        Update: {
+          based_on_message_id?: string | null
+          confidence?: number | null
+          contact_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          origin?: string
+          reason?: string | null
+          tag?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contact_tags_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contacts: {
         Row: {
           assigned_to: string | null
           auto_reply_enabled: boolean
           avatar_url: string | null
+          careful_handling: boolean
           city: string | null
           contact_confidence: string
           contact_source: string
@@ -766,6 +873,9 @@ export type Database = {
           hub_last_synced_at: string | null
           hub_version: number
           id: string
+          intent_confidence: number | null
+          intent_reason: string | null
+          intent_tagged_at: string | null
           interest: Database["public"]["Enums"]["interest_level"]
           is_deleted: boolean
           last_conversation_summary: string | null
@@ -789,7 +899,10 @@ export type Database = {
           phone: string
           phone_normalized: string | null
           phone_raw: string | null
+          primary_intent: string | null
+          prospect_verified: boolean
           province: string | null
+          source_tag: string | null
           stage_id: string | null
           tags: string[] | null
           temperature: Database["public"]["Enums"]["lead_temperature"]
@@ -801,6 +914,7 @@ export type Database = {
           assigned_to?: string | null
           auto_reply_enabled?: boolean
           avatar_url?: string | null
+          careful_handling?: boolean
           city?: string | null
           contact_confidence?: string
           contact_source?: string
@@ -818,6 +932,9 @@ export type Database = {
           hub_last_synced_at?: string | null
           hub_version?: number
           id?: string
+          intent_confidence?: number | null
+          intent_reason?: string | null
+          intent_tagged_at?: string | null
           interest?: Database["public"]["Enums"]["interest_level"]
           is_deleted?: boolean
           last_conversation_summary?: string | null
@@ -841,7 +958,10 @@ export type Database = {
           phone: string
           phone_normalized?: string | null
           phone_raw?: string | null
+          primary_intent?: string | null
+          prospect_verified?: boolean
           province?: string | null
+          source_tag?: string | null
           stage_id?: string | null
           tags?: string[] | null
           temperature?: Database["public"]["Enums"]["lead_temperature"]
@@ -853,6 +973,7 @@ export type Database = {
           assigned_to?: string | null
           auto_reply_enabled?: boolean
           avatar_url?: string | null
+          careful_handling?: boolean
           city?: string | null
           contact_confidence?: string
           contact_source?: string
@@ -870,6 +991,9 @@ export type Database = {
           hub_last_synced_at?: string | null
           hub_version?: number
           id?: string
+          intent_confidence?: number | null
+          intent_reason?: string | null
+          intent_tagged_at?: string | null
           interest?: Database["public"]["Enums"]["interest_level"]
           is_deleted?: boolean
           last_conversation_summary?: string | null
@@ -893,7 +1017,10 @@ export type Database = {
           phone?: string
           phone_normalized?: string | null
           phone_raw?: string | null
+          primary_intent?: string | null
+          prospect_verified?: boolean
           province?: string | null
+          source_tag?: string | null
           stage_id?: string | null
           tags?: string[] | null
           temperature?: Database["public"]["Enums"]["lead_temperature"]
@@ -4507,7 +4634,13 @@ export type Database = {
       comm_status: "active" | "closed" | "pending"
       interest_level: "high" | "medium" | "low"
       lead_temperature: "hot" | "warm" | "cold"
-      lead_type: "prospect" | "registered" | "buyer" | "vip" | "expired"
+      lead_type:
+        | "prospect"
+        | "registered"
+        | "buyer"
+        | "vip"
+        | "expired"
+        | "unclassified"
       message_status: "sent" | "delivered" | "read" | "queued" | "failed"
       message_type: "text" | "image" | "ai"
       trainer_priority: "advisory" | "strong" | "override"
@@ -4642,7 +4775,14 @@ export const Constants = {
       comm_status: ["active", "closed", "pending"],
       interest_level: ["high", "medium", "low"],
       lead_temperature: ["hot", "warm", "cold"],
-      lead_type: ["prospect", "registered", "buyer", "vip", "expired"],
+      lead_type: [
+        "prospect",
+        "registered",
+        "buyer",
+        "vip",
+        "expired",
+        "unclassified",
+      ],
       message_status: ["sent", "delivered", "read", "queued", "failed"],
       message_type: ["text", "image", "ai"],
       trainer_priority: ["advisory", "strong", "override"],

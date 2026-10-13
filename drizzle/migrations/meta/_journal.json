@@ -50,6 +50,13 @@
       "when": 1791886518367,
       "tag": "0006_isolate_foreign_owned_conversations",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791909280471,
+      "tag": "0007_intent_tagger_schema",
+      "breakpoints": true
     }
   ]
 }
