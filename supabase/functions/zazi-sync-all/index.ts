@@ -82,7 +82,14 @@ Deno.serve(async (req) => {
         });
       }
 
-      const syncRecord = { ...record, last_synced_at: new Date().toISOString() };
+      // deno-lint-ignore no-explicit-any
+      const syncRecord: any = { ...record, last_synced_at: new Date().toISOString() };
+      if (table === 'contacts') {
+        // Intent tagger (2026-10-13): master has no 'unclassified' lead type → send 'prospect'.
+        if (syncRecord.lead_type === 'unclassified') syncRecord.lead_type = 'prospect';
+        // Hub-only intent columns are not part of the master schema.
+        for (const k of ['prospect_verified', 'source_tag', 'primary_intent', 'intent_reason', 'intent_confidence', 'careful_handling', 'intent_tagged_at']) delete syncRecord[k];
+      }
 
       // Try upsert, with progressive fallback for missing columns
       let { error } = await masterDb

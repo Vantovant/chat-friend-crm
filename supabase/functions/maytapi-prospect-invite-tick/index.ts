@@ -73,7 +73,8 @@ Deno.serve(async (req) => {
   const { data: candidates, error: cErr } = await svc
     .from("contacts")
     .select("id, name, first_name, phone_normalized, created_at, lead_type, do_not_contact, is_deleted, auto_reply_enabled, last_outbound_at, last_inbound_at")
-    .eq("lead_type", "prospect")
+    // 'unclassified' = new-contact default since 2026-10-13; included so behaviour is unchanged.
+    .in("lead_type", ["prospect", "unclassified"])
     .not("phone_normalized", "is", null)
     .neq("is_deleted", true)
     .neq("do_not_contact", true)
