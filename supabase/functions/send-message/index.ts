@@ -117,7 +117,8 @@ Deno.serve(async (req) => {
   // ── Account isolation (2026-10-13): a conversation owned by another account
   // (e.g. a different user's own Facebook Page) can only be replied to by that
   // account. Internal/bot dispatch never sends into another account's chats.
-  if ((conv as any).owner_user_id && (conv as any).owner_user_id !== userId) {
+  const OWNER_ACCOUNT_ID = "e336f0a0-ccf5-4992-9607-25c5bf590b11"; // Vanto — owner of the shared automations
+  if ((conv as any).owner_user_id && (conv as any).owner_user_id !== (userId ?? OWNER_ACCOUNT_ID)) {
     return jsonRes({ ok: false, code: "foreign_owner", message: "This conversation belongs to another account and can only be answered by its owner." }, 403);
   }
 
