@@ -76,6 +76,8 @@ Deno.serve(async (req) => {
     // 'unclassified' = new-contact default since 2026-10-13; included so behaviour is unchanged.
     .in("lead_type", ["prospect", "unclassified"])
     .not("phone_normalized", "is", null)
+    // General (business/service/personal) contacts are never prospected.
+    .or("contact_category.is.null,contact_category.eq.prospect")
     .neq("is_deleted", true)
     .neq("do_not_contact", true)
     .order("created_at", { ascending: true })

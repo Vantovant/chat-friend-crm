@@ -12,7 +12,7 @@
   "mcp": {
     "server": {
       "name": "get-well-hub",
-      "version": "1.13.0",
+      "version": "1.14.0",
       "title": "Get Well Hub"
     },
     "tools": [
@@ -349,6 +349,67 @@
               "description": "Phone in +E164 format."
             }
           },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "create_contact",
+        "title": "Create a contact",
+        "description": "Create a contact owned by the signed-in user, or return the existing one with the same phone (idempotent). Business/service/personal contacts get no marketing consent and are never enrolled in prospecting. Sends nothing.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "phone": {
+              "type": "string",
+              "minLength": 6,
+              "maxLength": 40,
+              "description": "Any format; normalized to +E164 (ZA default)."
+            },
+            "email": {
+              "type": "string",
+              "format": "email",
+              "maxLength": 255
+            },
+            "category": {
+              "type": "string",
+              "enum": [
+                "prospect",
+                "business",
+                "service",
+                "personal"
+              ],
+              "default": "prospect"
+            },
+            "notes": {
+              "type": "string",
+              "maxLength": 4000
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 60
+              },
+              "maxItems": 20
+            }
+          },
+          "required": [
+            "name",
+            "phone"
+          ],
           "additionalProperties": false,
           "$schema": "http://json-schema.org/draft-07/schema#"
         },

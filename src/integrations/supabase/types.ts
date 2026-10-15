@@ -857,6 +857,7 @@ export type Database = {
           avatar_url: string | null
           careful_handling: boolean
           city: string | null
+          contact_category: string | null
           contact_confidence: string
           contact_source: string
           created_at: string
@@ -891,6 +892,7 @@ export type Database = {
           last_synced_at: string | null
           last_training_invite_at: string | null
           lead_type: Database["public"]["Enums"]["lead_type"]
+          marketing_consent: boolean | null
           messenger_psid: string | null
           name: string
           name_needs_confirmation: boolean
@@ -916,6 +918,7 @@ export type Database = {
           avatar_url?: string | null
           careful_handling?: boolean
           city?: string | null
+          contact_category?: string | null
           contact_confidence?: string
           contact_source?: string
           created_at?: string
@@ -950,6 +953,7 @@ export type Database = {
           last_synced_at?: string | null
           last_training_invite_at?: string | null
           lead_type?: Database["public"]["Enums"]["lead_type"]
+          marketing_consent?: boolean | null
           messenger_psid?: string | null
           name: string
           name_needs_confirmation?: boolean
@@ -975,6 +979,7 @@ export type Database = {
           avatar_url?: string | null
           careful_handling?: boolean
           city?: string | null
+          contact_category?: string | null
           contact_confidence?: string
           contact_source?: string
           created_at?: string
@@ -1009,6 +1014,7 @@ export type Database = {
           last_synced_at?: string | null
           last_training_invite_at?: string | null
           lead_type?: Database["public"]["Enums"]["lead_type"]
+          marketing_consent?: boolean | null
           messenger_psid?: string | null
           name?: string
           name_needs_confirmation?: boolean

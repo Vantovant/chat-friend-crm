@@ -459,23 +459,112 @@ var get_contact_default = defineTool9({
   }
 });
 
-// src/lib/mcp/tools/update-contact.ts
+// src/lib/mcp/tools/create-contact.ts
 import { defineTool as defineTool10 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z6 } from "npm:zod@^3.25.76";
-var update_contact_default = defineTool10({
+
+// src/lib/phone-utils.ts
+function digitsOnly(raw) {
+  return (raw || "").replace(/\D/g, "");
+}
+function stripWhatsAppPrefix(raw) {
+  return (raw || "").replace(/^whatsapp:/i, "").trim();
+}
+function normalizePhone(raw) {
+  let cleaned = stripWhatsAppPrefix(raw);
+  cleaned = cleaned.replace(/[\s\-()]/g, "");
+  if (cleaned.startsWith("00")) cleaned = "+" + cleaned.slice(2);
+  const d = digitsOnly(cleaned);
+  if (!d) return "";
+  if (d.startsWith("0") && (d.length === 10 || d.length === 11)) {
+    return "+27" + d.slice(1);
+  }
+  if (d.startsWith("27") && (d.length === 11 || d.length === 12)) {
+    return "+" + d;
+  }
+  if (cleaned.startsWith("+")) return cleaned;
+  return "+" + d;
+}
+
+// src/lib/mcp/tools/create-contact.ts
+var FIELDS = "id, name, phone_normalized, email, lead_type, contact_category, marketing_consent, auto_reply_enabled, notes, tags, created_by, created_at";
+var create_contact_default = defineTool10({
+  name: "create_contact",
+  title: "Create a contact",
+  description: "Create a contact owned by the signed-in user, or return the existing one with the same phone (idempotent). Business/service/personal contacts get no marketing consent and are never enrolled in prospecting. Sends nothing.",
+  inputSchema: {
+    name: z6.string().trim().min(1).max(200),
+    phone: z6.string().trim().min(6).max(40).describe("Any format; normalized to +E164 (ZA default)."),
+    email: z6.string().trim().email().max(255).optional(),
+    category: z6.enum(["prospect", "business", "service", "personal"]).default("prospect"),
+    notes: z6.string().max(4e3).optional(),
+    tags: z6.array(z6.string().max(60)).max(20).optional()
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  handler: async ({ name, phone, email, category, notes, tags }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const userId = ctx.getUserId();
+    if (!userId) return notAuthenticated;
+    const phoneNorm = normalizePhone(phone);
+    if (!phoneNorm || phoneNorm.replace(/\D/g, "").length < 11) {
+      return { content: [{ type: "text", text: "Phone could not be normalized to +E164" }], isError: true };
+    }
+    const supabase = supabaseForUser(ctx);
+    const find = () => supabase.from("contacts").select(FIELDS).eq("created_by", userId).eq("phone_normalized", phoneNorm).eq("is_deleted", false).maybeSingle();
+    const existing = await find();
+    if (existing.data) {
+      const r2 = { created: false, contact: existing.data };
+      return { content: [{ type: "text", text: JSON.stringify(r2) }], structuredContent: r2 };
+    }
+    const general = category !== "prospect";
+    const { data, error } = await supabase.from("contacts").insert({
+      name,
+      phone: phoneNorm,
+      phone_raw: phone,
+      phone_normalized: phoneNorm,
+      email: email?.toLowerCase() ?? null,
+      notes: notes ?? null,
+      tags: tags ?? [],
+      created_by: userId,
+      assigned_to: userId,
+      owner_user_id: userId,
+      contact_category: category,
+      contact_source: "mcp_create_contact",
+      ...general ? { marketing_consent: false, auto_reply_enabled: false, lead_type: "unclassified" } : {}
+    }).select(FIELDS).single();
+    if (error) {
+      if (error.code === "23505") {
+        const again = await find();
+        if (again.data) {
+          const r2 = { created: false, contact: again.data };
+          return { content: [{ type: "text", text: JSON.stringify(r2) }], structuredContent: r2 };
+        }
+      }
+      return { content: [{ type: "text", text: error.message }], isError: true };
+    }
+    await supabase.from("contact_activity").insert({ contact_id: data.id, performed_by: userId, type: "created", metadata: { source: "mcp_create_contact", category } });
+    const r = { created: true, contact: data };
+    return { content: [{ type: "text", text: JSON.stringify(r) }], structuredContent: r };
+  }
+});
+
+// src/lib/mcp/tools/update-contact.ts
+import { defineTool as defineTool11 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z7 } from "npm:zod@^3.25.76";
+var update_contact_default = defineTool11({
   name: "update_contact",
   title: "Update a contact",
   description: "Update editable fields on a contact: name, email, lead type, temperature, tags, notes, pipeline stage, or the do-not-contact flag. Phone numbers are never changed here. A pipeline stage change is logged to contact_activity.",
   inputSchema: {
-    contact_id: z6.string().uuid().describe("Contact UUID."),
-    name: z6.string().optional(),
-    email: z6.string().email().nullable().optional(),
-    lead_type: z6.enum(["prospect", "registered", "buyer", "vip"]).optional(),
-    temperature: z6.enum(["hot", "warm", "cold"]).optional(),
-    tags: z6.array(z6.string()).optional(),
-    do_not_contact: z6.boolean().optional(),
-    notes: z6.string().nullable().optional(),
-    stage_id: z6.string().uuid().nullable().optional().describe("Pipeline stage UUID, or null to unassign.")
+    contact_id: z7.string().uuid().describe("Contact UUID."),
+    name: z7.string().optional(),
+    email: z7.string().email().nullable().optional(),
+    lead_type: z7.enum(["prospect", "registered", "buyer", "vip"]).optional(),
+    temperature: z7.enum(["hot", "warm", "cold"]).optional(),
+    tags: z7.array(z7.string()).optional(),
+    do_not_contact: z7.boolean().optional(),
+    notes: z7.string().nullable().optional(),
+    stage_id: z7.string().uuid().nullable().optional().describe("Pipeline stage UUID, or null to unassign.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   handler: async (input, ctx) => {
@@ -533,15 +622,15 @@ var update_contact_default = defineTool10({
 });
 
 // src/lib/mcp/tools/add-contact-note.ts
-import { defineTool as defineTool11 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z7 } from "npm:zod@^3.25.76";
-var add_contact_note_default = defineTool11({
+import { defineTool as defineTool12 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z8 } from "npm:zod@^3.25.76";
+var add_contact_note_default = defineTool12({
   name: "add_contact_note",
   title: "Add a note to a contact",
   description: "Append a timestamped note to a contact's notes field and record it on the contact activity trail.",
   inputSchema: {
-    contact_id: z7.string().uuid().describe("Contact UUID."),
-    note: z7.string().min(1).describe("Note text to append.")
+    contact_id: z8.string().uuid().describe("Contact UUID."),
+    note: z8.string().min(1).describe("Note text to append.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   handler: async ({ contact_id, note }, ctx) => {
@@ -570,15 +659,15 @@ var add_contact_note_default = defineTool11({
 });
 
 // src/lib/mcp/tools/create-plan-task.ts
-import { defineTool as defineTool12 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z8 } from "npm:zod@^3.25.76";
-var create_plan_task_default = defineTool12({
+import { defineTool as defineTool13 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z9 } from "npm:zod@^3.25.76";
+var create_plan_task_default = defineTool13({
   name: "create_plan_task",
   title: "Create a plan task",
   description: "Create a task on the Plan board. Skips creation and returns the existing row when an open task with the same title already exists.",
   inputSchema: {
-    title: z8.string().min(1).describe("Task title."),
-    priority: z8.enum(["low", "medium", "high", "urgent"]).optional().describe("Task priority (default 'medium').")
+    title: z9.string().min(1).describe("Task title."),
+    priority: z9.enum(["low", "medium", "high", "urgent"]).optional().describe("Task priority (default 'medium').")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   handler: async ({ title, priority }, ctx) => {
@@ -605,16 +694,16 @@ var create_plan_task_default = defineTool12({
 });
 
 // src/lib/mcp/tools/create-plan-meeting.ts
-import { defineTool as defineTool13 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z9 } from "npm:zod@^3.25.76";
-var create_plan_meeting_default = defineTool13({
+import { defineTool as defineTool14 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z10 } from "npm:zod@^3.25.76";
+var create_plan_meeting_default = defineTool14({
   name: "create_plan_meeting",
   title: "Create a plan meeting",
   description: "Schedule a meeting on the Plan calendar.",
   inputSchema: {
-    title: z9.string().min(1).describe("Meeting title."),
-    start_time: z9.string().min(1).describe("ISO 8601 start datetime."),
-    location: z9.string().nullish().describe("Optional location.")
+    title: z10.string().min(1).describe("Meeting title."),
+    start_time: z10.string().min(1).describe("ISO 8601 start datetime."),
+    location: z10.string().nullish().describe("Optional location.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   handler: async ({ title, start_time, location }, ctx) => {
@@ -641,15 +730,15 @@ var create_plan_meeting_default = defineTool13({
 });
 
 // src/lib/mcp/tools/create-plan-reminder.ts
-import { defineTool as defineTool14 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z10 } from "npm:zod@^3.25.76";
-var create_plan_reminder_default = defineTool14({
+import { defineTool as defineTool15 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z11 } from "npm:zod@^3.25.76";
+var create_plan_reminder_default = defineTool15({
   name: "create_plan_reminder",
   title: "Create a plan reminder",
   description: "Create a reminder on the Plan board (the 'Remind me to\u2026' text goes in title).",
   inputSchema: {
-    title: z10.string().min(1).describe("Reminder text."),
-    reminder_time: z10.string().min(1).describe("ISO 8601 datetime for the reminder.")
+    title: z11.string().min(1).describe("Reminder text."),
+    reminder_time: z11.string().min(1).describe("ISO 8601 datetime for the reminder.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   handler: async ({ title, reminder_time }, ctx) => {
@@ -675,8 +764,8 @@ var create_plan_reminder_default = defineTool14({
 });
 
 // src/lib/mcp/tools/send-whatsapp-message.ts
-import { defineTool as defineTool15 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z11 } from "npm:zod@^3.25.76";
+import { defineTool as defineTool16 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z12 } from "npm:zod@^3.25.76";
 var DAY_MS = 24 * 60 * 60 * 1e3;
 function err(text, extra) {
   return {
@@ -685,14 +774,14 @@ function err(text, extra) {
     isError: true
   };
 }
-var send_whatsapp_message_default = defineTool15({
+var send_whatsapp_message_default = defineTool16({
   name: "send_whatsapp_message",
   title: "Send a 1:1 WhatsApp message",
   description: "Send a real one-to-one WhatsApp message to a single contact via the existing Maytapi integration (NOT a group post). Refuses if the contact is marked do_not_contact, if outbound is frozen, if the shared daily send cap is reached, or if the contact's last inbound message is older than 24 hours (WhatsApp customer service window \u2014 a pre-approved template must be used instead). On success the send is logged to the contact activity timeline and the contact's last_outbound_at / last_outbound_provider are updated.",
   inputSchema: {
-    contact_id: z11.string().uuid().optional().describe("Contact UUID. Provide this or phone_normalized."),
-    phone_normalized: z11.string().optional().describe("Phone in +E164 format. Provide this or contact_id."),
-    message_body: z11.string().min(1).max(4e3).describe("The exact final text to send. No templating is applied.")
+    contact_id: z12.string().uuid().optional().describe("Contact UUID. Provide this or phone_normalized."),
+    phone_normalized: z12.string().optional().describe("Phone in +E164 format. Provide this or contact_id."),
+    message_body: z12.string().min(1).max(4e3).describe("The exact final text to send. No templating is applied.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   handler: async ({ contact_id, phone_normalized, message_body }, ctx) => {
@@ -836,16 +925,16 @@ var send_whatsapp_message_default = defineTool15({
 });
 
 // src/lib/mcp/tools/list-plan-tasks.ts
-import { defineTool as defineTool16 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z12 } from "npm:zod@^3.25.76";
-var list_plan_tasks_default = defineTool16({
+import { defineTool as defineTool17 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z13 } from "npm:zod@^3.25.76";
+var list_plan_tasks_default = defineTool17({
   name: "list_tasks",
   title: "List plan tasks",
   description: "Read tasks from the Plan board, optionally filtered by status ('pending'/'in_progress'/'done') and/or a single calendar day (matches due_date). Read-only.",
   inputSchema: {
-    status: z12.string().optional().describe("Filter by status, e.g. 'pending'."),
-    date: z12.string().optional().describe("YYYY-MM-DD \u2014 filters to tasks due on this day."),
-    limit: z12.number().int().min(1).max(100).optional().describe("Max rows (default 50).")
+    status: z13.string().optional().describe("Filter by status, e.g. 'pending'."),
+    date: z13.string().optional().describe("YYYY-MM-DD \u2014 filters to tasks due on this day."),
+    limit: z13.number().int().min(1).max(100).optional().describe("Max rows (default 50).")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ status, date, limit }, ctx) => {
@@ -873,14 +962,14 @@ var list_plan_tasks_default = defineTool16({
 });
 
 // src/lib/mcp/tools/complete-plan-task.ts
-import { defineTool as defineTool17 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z13 } from "npm:zod@^3.25.76";
-var complete_plan_task_default = defineTool17({
+import { defineTool as defineTool18 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z14 } from "npm:zod@^3.25.76";
+var complete_plan_task_default = defineTool18({
   name: "complete_task",
   title: "Mark a plan task done",
   description: "Mark a Plan board task as done (sets status to 'done' and stamps completed_at). Use list_tasks first to find the task id.",
   inputSchema: {
-    id: z13.string().uuid().describe("plan_tasks.id \u2014 required.")
+    id: z14.string().uuid().describe("plan_tasks.id \u2014 required.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   handler: async ({ id }, ctx) => {
@@ -902,14 +991,14 @@ var complete_plan_task_default = defineTool17({
 });
 
 // src/lib/mcp/tools/delete-plan-task.ts
-import { defineTool as defineTool18 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z14 } from "npm:zod@^3.25.76";
-var delete_plan_task_default = defineTool18({
+import { defineTool as defineTool19 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z15 } from "npm:zod@^3.25.76";
+var delete_plan_task_default = defineTool19({
   name: "delete_task",
   title: "Delete a plan task",
   description: "Permanently delete a task from the Plan board. This is a hard delete \u2014 there is no undo. Use list_tasks first to find the task id.",
   inputSchema: {
-    id: z14.string().uuid().describe("plan_tasks.id \u2014 required.")
+    id: z15.string().uuid().describe("plan_tasks.id \u2014 required.")
   },
   annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   handler: async ({ id }, ctx) => {
@@ -931,16 +1020,16 @@ var delete_plan_task_default = defineTool18({
 });
 
 // src/lib/mcp/tools/list-plan-reminders.ts
-import { defineTool as defineTool19 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z15 } from "npm:zod@^3.25.76";
-var list_plan_reminders_default = defineTool19({
+import { defineTool as defineTool20 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z16 } from "npm:zod@^3.25.76";
+var list_plan_reminders_default = defineTool20({
   name: "list_reminders",
   title: "List plan reminders",
   description: "Read reminders from the Plan board, optionally filtered by is_done and/or a single calendar day (matches reminder_time). Read-only.",
   inputSchema: {
-    is_done: z15.boolean().optional(),
-    date: z15.string().optional().describe("YYYY-MM-DD \u2014 filters to reminders on this day."),
-    limit: z15.number().int().min(1).max(100).optional().describe("Max rows (default 50).")
+    is_done: z16.boolean().optional(),
+    date: z16.string().optional().describe("YYYY-MM-DD \u2014 filters to reminders on this day."),
+    limit: z16.number().int().min(1).max(100).optional().describe("Max rows (default 50).")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ is_done, date, limit }, ctx) => {
@@ -968,14 +1057,14 @@ var list_plan_reminders_default = defineTool19({
 });
 
 // src/lib/mcp/tools/complete-plan-reminder.ts
-import { defineTool as defineTool20 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z16 } from "npm:zod@^3.25.76";
-var complete_plan_reminder_default = defineTool20({
+import { defineTool as defineTool21 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z17 } from "npm:zod@^3.25.76";
+var complete_plan_reminder_default = defineTool21({
   name: "complete_reminder",
   title: "Mark a plan reminder done",
   description: "Mark a Plan board reminder as done (sets is_done to true). Use list_reminders first to find the reminder id.",
   inputSchema: {
-    id: z16.string().uuid().describe("plan_reminders.id \u2014 required.")
+    id: z17.string().uuid().describe("plan_reminders.id \u2014 required.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   handler: async ({ id }, ctx) => {
@@ -997,14 +1086,14 @@ var complete_plan_reminder_default = defineTool20({
 });
 
 // src/lib/mcp/tools/delete-plan-reminder.ts
-import { defineTool as defineTool21 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z17 } from "npm:zod@^3.25.76";
-var delete_plan_reminder_default = defineTool21({
+import { defineTool as defineTool22 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z18 } from "npm:zod@^3.25.76";
+var delete_plan_reminder_default = defineTool22({
   name: "delete_reminder",
   title: "Delete a plan reminder",
   description: "Permanently delete a reminder from the Plan board. This is a hard delete \u2014 there is no undo. Use list_reminders first to find the reminder id.",
   inputSchema: {
-    id: z17.string().uuid().describe("plan_reminders.id \u2014 required.")
+    id: z18.string().uuid().describe("plan_reminders.id \u2014 required.")
   },
   annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   handler: async ({ id }, ctx) => {
@@ -1026,15 +1115,15 @@ var delete_plan_reminder_default = defineTool21({
 });
 
 // src/lib/mcp/tools/list-plan-meetings.ts
-import { defineTool as defineTool22 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z18 } from "npm:zod@^3.25.76";
-var list_plan_meetings_default = defineTool22({
+import { defineTool as defineTool23 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z19 } from "npm:zod@^3.25.76";
+var list_plan_meetings_default = defineTool23({
   name: "list_meetings",
   title: "List plan meetings",
   description: "Read meetings from the Plan calendar, optionally filtered to a single calendar day (matches start_time). Read-only.",
   inputSchema: {
-    date: z18.string().optional().describe("YYYY-MM-DD \u2014 filters to meetings on this day."),
-    limit: z18.number().int().min(1).max(100).optional().describe("Max rows (default 50).")
+    date: z19.string().optional().describe("YYYY-MM-DD \u2014 filters to meetings on this day."),
+    limit: z19.number().int().min(1).max(100).optional().describe("Max rows (default 50).")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ date, limit }, ctx) => {
@@ -1061,14 +1150,14 @@ var list_plan_meetings_default = defineTool22({
 });
 
 // src/lib/mcp/tools/delete-plan-meeting.ts
-import { defineTool as defineTool23 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z19 } from "npm:zod@^3.25.76";
-var delete_plan_meeting_default = defineTool23({
+import { defineTool as defineTool24 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z20 } from "npm:zod@^3.25.76";
+var delete_plan_meeting_default = defineTool24({
   name: "delete_meeting",
   title: "Delete a plan meeting",
   description: "Permanently delete a meeting from the Plan calendar. This is a hard delete \u2014 there is no undo. Use list_meetings first to find the meeting id.",
   inputSchema: {
-    id: z19.string().uuid().describe("plan_meetings.id \u2014 required.")
+    id: z20.string().uuid().describe("plan_meetings.id \u2014 required.")
   },
   annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   handler: async ({ id }, ctx) => {
@@ -1090,16 +1179,16 @@ var delete_plan_meeting_default = defineTool23({
 });
 
 // src/lib/mcp/tools/list-conversations.ts
-import { defineTool as defineTool24 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z20 } from "npm:zod@^3.25.76";
-var list_conversations_default = defineTool24({
+import { defineTool as defineTool25 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z21 } from "npm:zod@^3.25.76";
+var list_conversations_default = defineTool25({
   name: "list_conversations",
   title: "List inbox conversations",
   description: "List recent conversations from the unified inbox (Twilio SMS/WhatsApp + Maytapi WhatsApp + Facebook Messenger), newest first. Optionally filter to a single channel or to unread conversations only. Messenger contacts have no phone number \u2014 they're identified by messenger_psid instead.",
   inputSchema: {
-    provider: z20.enum(["twilio", "maytapi", "facebook_messenger", "all"]).optional().describe("Filter to conversations with at least one message on this channel (default 'all')."),
-    unread_only: z20.boolean().optional().describe("Only return conversations with unread_count > 0."),
-    limit: z20.number().int().min(1).max(100).optional().describe("Max rows (default 25).")
+    provider: z21.enum(["twilio", "maytapi", "facebook_messenger", "all"]).optional().describe("Filter to conversations with at least one message on this channel (default 'all')."),
+    unread_only: z21.boolean().optional().describe("Only return conversations with unread_count > 0."),
+    limit: z21.number().int().min(1).max(100).optional().describe("Max rows (default 25).")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ provider, unread_only, limit }, ctx) => {
@@ -1131,15 +1220,15 @@ var list_conversations_default = defineTool24({
 });
 
 // src/lib/mcp/tools/get-conversation-thread.ts
-import { defineTool as defineTool25 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z21 } from "npm:zod@^3.25.76";
-var get_conversation_thread_default = defineTool25({
+import { defineTool as defineTool26 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z22 } from "npm:zod@^3.25.76";
+var get_conversation_thread_default = defineTool26({
   name: "get_conversation_thread",
   title: "Get a conversation's full message thread",
   description: "Full message history for one conversation (oldest first), each message tagged with its channel (twilio/maytapi) and whether it was inbound or outbound. Also returns the most recent automated-reply events for this conversation, so you can see whether the whatsapp-auto-reply bot already answered before drafting a manual reply.",
   inputSchema: {
-    conversation_id: z21.string().uuid().describe("conversations.id \u2014 get this from list_conversations."),
-    limit: z21.number().int().min(1).max(200).optional().describe("Max messages (default 100).")
+    conversation_id: z22.string().uuid().describe("conversations.id \u2014 get this from list_conversations."),
+    limit: z22.number().int().min(1).max(200).optional().describe("Max messages (default 100).")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ conversation_id, limit }, ctx) => {
@@ -1164,15 +1253,15 @@ var get_conversation_thread_default = defineTool25({
 });
 
 // src/lib/mcp/tools/reply-to-conversation.ts
-import { defineTool as defineTool26 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z22 } from "npm:zod@^3.25.76";
-var reply_to_conversation_default = defineTool26({
+import { defineTool as defineTool27 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z23 } from "npm:zod@^3.25.76";
+var reply_to_conversation_default = defineTool27({
   name: "reply_to_conversation",
   title: "Reply in a conversation",
   description: "Send a reply into an existing conversation via the existing send-message function, which auto-routes to Twilio or Maytapi based on which channel the contact last messaged in. Enforces the same 24-hour customer-service-window check and price/link safety validator as manual replies sent from the app \u2014 refuses rather than sending unsafe or out-of-window content.",
   inputSchema: {
-    conversation_id: z22.string().uuid().describe("conversations.id \u2014 get this from list_conversations or get_conversation_thread."),
-    message_body: z22.string().min(1).max(4e3).describe("The exact final text to send. No templating is applied.")
+    conversation_id: z23.string().uuid().describe("conversations.id \u2014 get this from list_conversations or get_conversation_thread."),
+    message_body: z23.string().min(1).max(4e3).describe("The exact final text to send. No templating is applied.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   handler: async ({ conversation_id, message_body }, ctx) => {
@@ -1209,16 +1298,16 @@ var reply_to_conversation_default = defineTool26({
 });
 
 // src/lib/mcp/tools/list-fb-comments.ts
-import { defineTool as defineTool27 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z23 } from "npm:zod@^3.25.76";
-var list_fb_comments_default = defineTool27({
+import { defineTool as defineTool28 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z24 } from "npm:zod@^3.25.76";
+var list_fb_comments_default = defineTool28({
   name: "list_fb_comments",
   title: "List Facebook Page comments",
   description: "List comments left on the Facebook Page's posts/ads, newest first. Previously these were silently discarded by the ingest webhook \u2014 they're now stored and readable here. Read-only; reply support lands once Page comment-reply permissions are confirmed.",
   inputSchema: {
-    unreplied_only: z23.boolean().optional().describe("Only return comments where replied = false (default false \u2014 returns all)."),
-    fb_post_id: z23.string().optional().describe("Filter to comments on one specific Facebook post id."),
-    limit: z23.number().int().min(1).max(100).optional().describe("Max rows (default 25).")
+    unreplied_only: z24.boolean().optional().describe("Only return comments where replied = false (default false \u2014 returns all)."),
+    fb_post_id: z24.string().optional().describe("Filter to comments on one specific Facebook post id."),
+    limit: z24.number().int().min(1).max(100).optional().describe("Max rows (default 25).")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ unreplied_only, fb_post_id, limit }, ctx) => {
@@ -1242,8 +1331,8 @@ var list_fb_comments_default = defineTool27({
 });
 
 // src/lib/mcp/tools/get-my-brand-links.ts
-import { defineTool as defineTool28 } from "npm:@lovable.dev/mcp-js@0.26.1";
-var get_my_brand_links_default = defineTool28({
+import { defineTool as defineTool29 } from "npm:@lovable.dev/mcp-js@0.26.1";
+var get_my_brand_links_default = defineTool29({
   name: "get_my_brand_links",
   title: "Get my brand links",
   description: "Read-only. Returns the calling user's OWN website, shop link, Facebook Page link and connected Facebook Pages. Always use these for the user's links \u2014 never another account's. Empty values mean the user has not set them yet: ask them to fill in Settings \u2192 Facebook & Website instead of guessing.",
@@ -1272,15 +1361,15 @@ var get_my_brand_links_default = defineTool28({
 });
 
 // src/lib/mcp/tools/reply-to-fb-comment.ts
-import { defineTool as defineTool29 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z24 } from "npm:zod@^3.25.76";
-var reply_to_fb_comment_default = defineTool29({
+import { defineTool as defineTool30 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z25 } from "npm:zod@^3.25.76";
+var reply_to_fb_comment_default = defineTool30({
   name: "reply_to_fb_comment",
   title: "Reply to a Facebook Page comment",
   description: "Post a public reply to a comment on the Facebook Page, via the same fb-reply-comment function the in-app Facebook Inbox panel uses. Requires pages_manage_engagement on the Page token \u2014 until that's granted in Meta App Review, this returns Meta's rejection error rather than sending anything.",
   inputSchema: {
-    fb_comment_id: z24.string().describe("fb_comments.fb_comment_id \u2014 get this from list_fb_comments."),
-    reply_text: z24.string().min(1).max(2e3).describe("The reply text to post publicly under the comment.")
+    fb_comment_id: z25.string().describe("fb_comments.fb_comment_id \u2014 get this from list_fb_comments."),
+    reply_text: z25.string().min(1).max(2e3).describe("The reply text to post publicly under the comment.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   handler: async ({ fb_comment_id, reply_text }, ctx) => {
@@ -1314,15 +1403,15 @@ var reply_to_fb_comment_default = defineTool29({
 });
 
 // src/lib/mcp/tools/send-private-reply-to-comment.ts
-import { defineTool as defineTool30 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z25 } from "npm:zod@^3.25.76";
-var send_private_reply_to_comment_default = defineTool30({
+import { defineTool as defineTool31 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z26 } from "npm:zod@^3.25.76";
+var send_private_reply_to_comment_default = defineTool31({
   name: "send_private_reply_to_comment",
   title: "Privately message a Facebook commenter",
   description: "Send ONE private Messenger message to the person who left a Facebook Page comment (Meta 'Private Replies'), via the same fb-reply-comment function as reply_to_fb_comment with mode 'private'. Meta allows only one private reply per comment and only within 7 days of the comment \u2014 older comments are refused before anything is sent. The reply lands in the person's Messenger inbox and any answer arrives in the Messenger inbox. Always show the operator the exact text and get approval before calling. DMs use member pricing only.",
   inputSchema: {
-    fb_comment_id: z25.string().describe("fb_comments.fb_comment_id of the person's own comment \u2014 get this from list_fb_comments."),
-    message_text: z25.string().min(1).max(2e3).describe("The private message text.")
+    fb_comment_id: z26.string().describe("fb_comments.fb_comment_id of the person's own comment \u2014 get this from list_fb_comments."),
+    message_text: z26.string().min(1).max(2e3).describe("The private message text.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   handler: async ({ fb_comment_id, message_text }, ctx) => {
@@ -1356,18 +1445,18 @@ var send_private_reply_to_comment_default = defineTool30({
 });
 
 // src/lib/mcp/tools/create-fb-post.ts
-import { defineTool as defineTool31 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z26 } from "npm:zod@^3.25.76";
-var create_fb_post_default = defineTool31({
+import { defineTool as defineTool32 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z27 } from "npm:zod@^3.25.76";
+var create_fb_post_default = defineTool32({
   name: "create_fb_post",
   title: "Create a Facebook Page post",
   description: "Publish or natively schedule a post on a connected Facebook Page, via the fb-create-post function (Page access token resolved server-side). SAFETY: this never posts on a bare call \u2014 you must pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true for an immediate publish. Passing both is an error. If image_url is set the post goes to the Page's /photos endpoint with the message as the caption. Posting requires pages_manage_posts on that Page's stored access; the function pre-checks this and returns a clear reconnect message instead of a raw Graph error.",
   inputSchema: {
-    page_id: z26.string().optional().describe("Facebook Page id to post to. Omit to use the calling user's own connected Page. You can only post to a Page you connected yourself."),
-    message: z26.string().min(1).max(5e3).describe("The post text (used as the photo caption when image_url is set)."),
-    scheduled_publish_time: z26.string().optional().describe("ISO 8601 timestamp, 10 minutes to 75 days in the future. Uses Facebook's native scheduling. Omit for an immediate publish."),
-    image_url: z26.string().optional().describe("Public https image URL. When set, the post is created as a photo post with message as the caption."),
-    publish_now: z26.boolean().optional().describe("Must be explicitly true to publish immediately when scheduled_publish_time is omitted. Guards against accidental instant posting.")
+    page_id: z27.string().optional().describe("Facebook Page id to post to. Omit to use the calling user's own connected Page. You can only post to a Page you connected yourself."),
+    message: z27.string().min(1).max(5e3).describe("The post text (used as the photo caption when image_url is set)."),
+    scheduled_publish_time: z27.string().optional().describe("ISO 8601 timestamp, 10 minutes to 75 days in the future. Uses Facebook's native scheduling. Omit for an immediate publish."),
+    image_url: z27.string().optional().describe("Public https image URL. When set, the post is created as a photo post with message as the caption."),
+    publish_now: z27.boolean().optional().describe("Must be explicitly true to publish immediately when scheduled_publish_time is omitted. Guards against accidental instant posting.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   handler: async ({ page_id, message, scheduled_publish_time, image_url, publish_now }, ctx) => {
@@ -1420,18 +1509,18 @@ var create_fb_post_default = defineTool31({
 });
 
 // src/lib/mcp/tools/list-fb-posts.ts
-import { defineTool as defineTool32 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z27 } from "npm:zod@^3.25.76";
-var list_fb_posts_default = defineTool32({
+import { defineTool as defineTool33 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z28 } from "npm:zod@^3.25.76";
+var list_fb_posts_default = defineTool33({
   name: "list_fb_posts",
   title: "List Facebook Page posts",
   description: "Read-only. Lists Facebook Page posts created through create_fb_post (status published / scheduled / failed, including ones still queued on Facebook's scheduler) merged with organic Page posts already ingested into fb_source_posts. Newest first by scheduled or published time. Use this to answer 'what's scheduled for the next few days' without a raw database query.",
   inputSchema: {
-    page_id: z27.string().optional().describe("Filter to one Facebook Page id."),
-    status: z27.enum(["published", "scheduled", "failed", "organic"]).optional().describe("Filter by status. 'organic' returns only Page posts ingested from Facebook rather than created here."),
-    since: z27.string().optional().describe("ISO 8601 lower bound on the post's scheduled/published time."),
-    until: z27.string().optional().describe("ISO 8601 upper bound on the post's scheduled/published time."),
-    limit: z27.number().int().min(1).max(100).optional().describe("Max rows returned (default 25).")
+    page_id: z28.string().optional().describe("Filter to one Facebook Page id."),
+    status: z28.enum(["published", "scheduled", "failed", "organic"]).optional().describe("Filter by status. 'organic' returns only Page posts ingested from Facebook rather than created here."),
+    since: z28.string().optional().describe("ISO 8601 lower bound on the post's scheduled/published time."),
+    until: z28.string().optional().describe("ISO 8601 upper bound on the post's scheduled/published time."),
+    limit: z28.number().int().min(1).max(100).optional().describe("Max rows returned (default 25).")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ page_id, status, since, until, limit }, ctx) => {
@@ -1507,8 +1596,8 @@ var list_fb_posts_default = defineTool32({
 });
 
 // src/lib/mcp/tools/get-group-overview.ts
-import { defineTool as defineTool33 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z28 } from "npm:zod@^3.25.76";
+import { defineTool as defineTool34 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z29 } from "npm:zod@^3.25.76";
 
 // src/lib/mcp/tools/group-eligibility.ts
 var DEFAULT_GROUP_JID = "120363419298058298@g.us";
@@ -1583,12 +1672,12 @@ async function eligibleMembers(supabase, opts = {}) {
 }
 
 // src/lib/mcp/tools/get-group-overview.ts
-var get_group_overview_default = defineTool33({
+var get_group_overview_default = defineTool34({
   name: "get_group_overview",
   title: "Get WhatsApp group overview",
   description: `Answers "how many people are in the WhatsApp group" questions. Returns the live in-group member count for the APLGO | Health and Biz group broken down by engagement classification (active / warm / dormant / ghost), the timestamp of the most recent group health scan, today's engagement digest (if generated) and this week's engagement strategy (if generated). Members who have left the group are excluded.`,
   inputSchema: {
-    group_jid: z28.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`)
+    group_jid: z29.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`)
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ group_jid }, ctx) => {
@@ -1629,14 +1718,14 @@ var get_group_overview_default = defineTool33({
 });
 
 // src/lib/mcp/tools/get-group-welcome-status.ts
-import { defineTool as defineTool34 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z29 } from "npm:zod@^3.25.76";
-var get_group_welcome_status_default = defineTool34({
+import { defineTool as defineTool35 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z30 } from "npm:zod@^3.25.76";
+var get_group_welcome_status_default = defineTool35({
   name: "get_group_welcome_status",
   title: "Get group welcome sequence status",
   description: "Read the state of the automated new-joiner welcome sequence for the WhatsApp group: how many people are enrolled at each stage (pending / step1_sent / step2_sent / completed / failed / paused) and how many were enrolled in the last 7 days.",
   inputSchema: {
-    group_jid: z29.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`)
+    group_jid: z30.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`)
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ group_jid }, ctx) => {
@@ -1675,14 +1764,14 @@ var get_group_welcome_status_default = defineTool34({
 });
 
 // src/lib/mcp/tools/list-group-dm-candidates.ts
-import { defineTool as defineTool35 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z30 } from "npm:zod@^3.25.76";
-var list_group_dm_candidates_default = defineTool35({
+import { defineTool as defineTool36 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z31 } from "npm:zod@^3.25.76";
+var list_group_dm_candidates_default = defineTool36({
   name: "list_group_dm_candidates",
   title: "List group DM pilot candidates",
   description: "List WhatsApp group members eligible for a scoped 1-on-1 pilot DM. Eligibility (identical to the group-dm-pilot backend): matched to a CRM contact, classification active or warm, still in the group, contact not deleted and not do_not_contact, not currently in an active welcome sequence, and not already messaged by this pilot in the last 30 days. Returns at most zazi_pilot_batch_size candidates. Read-only \u2014 sends nothing.",
   inputSchema: {
-    group_jid: z30.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`)
+    group_jid: z31.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`)
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ group_jid }, ctx) => {
@@ -1711,18 +1800,18 @@ var list_group_dm_candidates_default = defineTool35({
 });
 
 // src/lib/mcp/tools/create-group-dm-batch.ts
-import { defineTool as defineTool36 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z31 } from "npm:zod@^3.25.76";
+import { defineTool as defineTool37 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z32 } from "npm:zod@^3.25.76";
 var FB_NOTE = "Facebook comments cannot be automatically matched to this contact \u2014 fb_comments has no contact_id link, only a Facebook-internal commenter ID with no phone number. If this person has commented on Facebook, that history is not visible here.";
-var create_group_dm_batch_default = defineTool36({
+var create_group_dm_batch_default = defineTool37({
   name: "create_group_dm_batch",
   title: "Draft a group DM pilot batch",
   description: "Draft (does NOT send) a scoped 1-on-1 pilot DM batch for WhatsApp group members. Every member_id is re-validated against the full eligibility rules server-side. Returns the draft batch id plus rich per-recipient review context (contact name/email/lead_type/temperature/tags, full notes, and the last 5 contact activity rows) so a human can review before calling approve_group_dm_batch.",
   inputSchema: {
-    member_ids: z31.array(z31.string().uuid()).min(1).describe("whatsapp_group_members.id values from list_group_dm_candidates."),
-    message_body: z31.string().min(1).max(4e3).describe("The exact final text to send to each recipient."),
-    group_jid: z31.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID}.`),
-    notes: z31.string().optional().describe("Optional internal note stored with the batch.")
+    member_ids: z32.array(z32.string().uuid()).min(1).describe("whatsapp_group_members.id values from list_group_dm_candidates."),
+    message_body: z32.string().min(1).max(4e3).describe("The exact final text to send to each recipient."),
+    group_jid: z32.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID}.`),
+    notes: z32.string().optional().describe("Optional internal note stored with the batch.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   handler: async ({ member_ids, message_body, group_jid, notes }, ctx) => {
@@ -1803,14 +1892,14 @@ var create_group_dm_batch_default = defineTool36({
 });
 
 // src/lib/mcp/tools/approve-group-dm-batch.ts
-import { defineTool as defineTool37 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z32 } from "npm:zod@^3.25.76";
-var approve_group_dm_batch_default = defineTool37({
+import { defineTool as defineTool38 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z33 } from "npm:zod@^3.25.76";
+var approve_group_dm_batch_default = defineTool38({
   name: "approve_group_dm_batch",
   title: "Approve and send a group DM pilot batch",
   description: "DESTRUCTIVE: actually sends the real 1-on-1 WhatsApp messages of a drafted pilot batch. Hard-refuses unless zazi_group_dm_mode is exactly 'pilot_manual', outbound is not frozen, the batch exists with status 'draft', the batch is within zazi_pilot_batch_size, and the 1-on-1 daily cap would not be exceeded. Every recipient is re-checked for do_not_contact and the 30-day no-repeat rule immediately before sending. Sends go through the same maytapi-send-direct pipeline used by send_whatsapp_message, spaced at least 6 seconds apart, and are logged to group_dm_pilot_sends and the contact activity timeline.",
   inputSchema: {
-    batch_id: z32.string().uuid().describe("The draft batch id returned by create_group_dm_batch.")
+    batch_id: z33.string().uuid().describe("The draft batch id returned by create_group_dm_batch.")
   },
   annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   handler: async ({ batch_id }, ctx) => {
@@ -1938,21 +2027,21 @@ var approve_group_dm_batch_default = defineTool37({
 });
 
 // src/lib/mcp/tools/list-group-membership-events.ts
-import { defineTool as defineTool38 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z33 } from "npm:zod@^3.25.76";
+import { defineTool as defineTool39 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z34 } from "npm:zod@^3.25.76";
 function digits(v) {
   return (v || "").replace(/\D/g, "");
 }
-var list_group_membership_events_default = defineTool38({
+var list_group_membership_events_default = defineTool39({
   name: "list_group_membership_events",
   title: "List WhatsApp group membership events",
   description: "Historical log of who joined, left, or was removed from a WhatsApp group. Unlike get_group_overview (a live snapshot that excludes people who have left), this returns membership change events over a time window, enriched with CRM contact data (id, classification, notes, last engagement) when the phone matches an existing contact \u2014 so you can review communication history for people who left.",
   inputSchema: {
-    group_jid: z33.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`),
-    event_type: z33.enum(["joined", "left", "removed", "all"]).optional().describe("Filter by event type. Default 'all'."),
-    since: z33.string().optional().describe("ISO timestamp lower bound for event_time. Default: 3 days ago."),
-    until: z33.string().optional().describe("ISO timestamp upper bound for event_time."),
-    limit: z33.number().int().min(1).max(500).optional().describe("Max events to return. Default 100.")
+    group_jid: z34.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`),
+    event_type: z34.enum(["joined", "left", "removed", "all"]).optional().describe("Filter by event type. Default 'all'."),
+    since: z34.string().optional().describe("ISO timestamp lower bound for event_time. Default: 3 days ago."),
+    until: z34.string().optional().describe("ISO timestamp upper bound for event_time."),
+    limit: z34.number().int().min(1).max(500).optional().describe("Max events to return. Default 100.")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ group_jid, event_type, since, until, limit }, ctx) => {
@@ -2037,18 +2126,18 @@ var list_group_membership_events_default = defineTool38({
 });
 
 // src/lib/mcp/tools/list-group-messages.ts
-import { defineTool as defineTool39 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z34 } from "npm:zod@^3.25.76";
-var list_group_messages_default = defineTool39({
+import { defineTool as defineTool40 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z35 } from "npm:zod@^3.25.76";
+var list_group_messages_default = defineTool40({
   name: "list_group_messages",
   title: "List WhatsApp group messages",
   description: "Reads real message content from a WhatsApp group (who said what, when) for investigating specific group activity. Use this when you need actual chat content rather than just headcounts, membership events, or dispatch logs.",
   inputSchema: {
-    group_jid: z34.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`),
-    since: z34.string().datetime().optional().describe("ISO timestamp. Defaults to 24 hours ago."),
-    until: z34.string().datetime().optional().describe("ISO timestamp upper bound."),
-    sender_phone: z34.string().optional().describe("Filter to a specific sender in +E.164 format."),
-    limit: z34.number().int().min(1).max(500).optional().describe("Max messages (default 100, cap 500).")
+    group_jid: z35.string().optional().describe(`WhatsApp group JID. Defaults to ${DEFAULT_GROUP_JID} (APLGO | Health and Biz).`),
+    since: z35.string().datetime().optional().describe("ISO timestamp. Defaults to 24 hours ago."),
+    until: z35.string().datetime().optional().describe("ISO timestamp upper bound."),
+    sender_phone: z35.string().optional().describe("Filter to a specific sender in +E.164 format."),
+    limit: z35.number().int().min(1).max(500).optional().describe("Max messages (default 100, cap 500).")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ group_jid, since, until, sender_phone, limit }, ctx) => {
@@ -2099,8 +2188,8 @@ var list_group_messages_default = defineTool39({
 });
 
 // src/lib/mcp/tools/get-lead-call-report.ts
-import { defineTool as defineTool40 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z35 } from "npm:zod@^3.25.76";
+import { defineTool as defineTool41 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z36 } from "npm:zod@^3.25.76";
 
 // src/lib/mcp/tools/lead-call-report-data.ts
 var DISTRIBUTOR_PATTERNS = [
@@ -2268,24 +2357,24 @@ async function loadLeadCallRows(supabase) {
 }
 
 // src/lib/mcp/tools/get-lead-call-report.ts
-var dateStr = z35.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
-var get_lead_call_report_default = defineTool40({
+var dateStr = z36.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
+var get_lead_call_report_default = defineTool41({
   name: "get_lead_call_report",
   title: "Get the Lead Call Report",
   description: "Read the Lead Call Report: contacts who have at least one Twilio message, with computed first inquiry date, last message date, message count, distributor-interest flag, and any cached AI summary. Mirrors the in-app Lead Call Report (src/components/vanto/reports/LeadCallReport.tsx), including its First Inquiry / Last Msg date-range filters, and is sortable newest-first or oldest-first. Defaults to AI-verified prospects only (prospects_only=true); filter by source_tag / intent_tag.",
   inputSchema: {
-    sort_by: z35.enum(["last_message", "first_inquiry", "msgs"]).optional().describe("Sort field (default last_message)."),
-    sort_dir: z35.enum(["asc", "desc"]).optional().describe("Sort direction (default desc = newest first)."),
-    only_distributors: z35.boolean().optional().describe("Only contacts flagged with distributor interest."),
-    search: z35.string().optional().describe("Free-text match on name or phone."),
+    sort_by: z36.enum(["last_message", "first_inquiry", "msgs"]).optional().describe("Sort field (default last_message)."),
+    sort_dir: z36.enum(["asc", "desc"]).optional().describe("Sort direction (default desc = newest first)."),
+    only_distributors: z36.boolean().optional().describe("Only contacts flagged with distributor interest."),
+    search: z36.string().optional().describe("Free-text match on name or phone."),
     first_inquiry_from: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose first inquiry is on/after this date."),
     first_inquiry_to: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose first inquiry is on/before this date."),
     last_message_from: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose last message is on/after this date."),
     last_message_to: dateStr.optional().describe("YYYY-MM-DD. Only contacts whose last message is on/before this date."),
-    prospects_only: z35.boolean().optional().describe("Only AI-verified prospects (prospect:verified). Default true, matching the in-app toggle."),
-    source_tag: z35.string().optional().describe("e.g. source:facebook_ad, source:google_ad_whatsapp, source:twilio_inbound."),
-    intent_tag: z35.string().optional().describe("e.g. intent:distributor, intent:buyer, intent:info, intent:health_inquiry, personal, unclear, needs_review."),
-    limit: z35.number().int().min(1).max(100).optional().describe("Max rows (default 50, cap 100).")
+    prospects_only: z36.boolean().optional().describe("Only AI-verified prospects (prospect:verified). Default true, matching the in-app toggle."),
+    source_tag: z36.string().optional().describe("e.g. source:facebook_ad, source:google_ad_whatsapp, source:twilio_inbound."),
+    intent_tag: z36.string().optional().describe("e.g. intent:distributor, intent:buyer, intent:info, intent:health_inquiry, personal, unclear, needs_review."),
+    limit: z36.number().int().min(1).max(100).optional().describe("Max rows (default 50, cap 100).")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   handler: async ({ sort_by, sort_dir, only_distributors, prospects_only, source_tag, intent_tag, search, first_inquiry_from, first_inquiry_to, last_message_from, last_message_to, limit }, ctx) => {
@@ -2346,16 +2435,16 @@ var get_lead_call_report_default = defineTool40({
 });
 
 // src/lib/mcp/tools/generate-lead-call-summaries.ts
-import { defineTool as defineTool41 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z36 } from "npm:zod@^3.25.76";
-var generate_lead_call_summaries_default = defineTool41({
+import { defineTool as defineTool42 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z37 } from "npm:zod@^3.25.76";
+var generate_lead_call_summaries_default = defineTool42({
   name: "generate_lead_call_summaries",
   title: "Generate Lead Call Report summaries",
   description: "Generate (or regenerate) AI summaries for Lead Call Report contacts by invoking the same summarize-lead-conversation edge function the in-app 'Generate summaries' button uses. Pass specific contact_ids, or omit to auto-target contacts from get_lead_call_report that don't have a cached summary yet.",
   inputSchema: {
-    contact_ids: z36.array(z36.string().uuid()).optional().describe("Specific contacts to summarize."),
-    missing_only: z36.boolean().optional().describe("When contact_ids omitted, only contacts without a cached summary (default true)."),
-    force: z36.boolean().optional().describe("Force regeneration even if cached (default false).")
+    contact_ids: z37.array(z37.string().uuid()).optional().describe("Specific contacts to summarize."),
+    missing_only: z37.boolean().optional().describe("When contact_ids omitted, only contacts without a cached summary (default true)."),
+    force: z37.boolean().optional().describe("Force regeneration even if cached (default false).")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   handler: async ({ contact_ids, missing_only, force }, ctx) => {
@@ -2408,18 +2497,18 @@ var generate_lead_call_summaries_default = defineTool41({
 });
 
 // src/lib/mcp/tools/list-trainer-rules.ts
-import { defineTool as defineTool42 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z37 } from "npm:zod@^3.25.76";
-var list_trainer_rules_default = defineTool42({
+import { defineTool as defineTool43 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z38 } from "npm:zod@^3.25.76";
+var list_trainer_rules_default = defineTool43({
   name: "list_trainer_rules",
   title: "List AI trainer rules",
   description: "Read the AI Trainer rules (ai_trainer_rules) that shape how the auto-reply bot answers. Filter by channel (twilio / maytapi / groups), product code (e.g. NRM), enabled state, or a text search across title, instruction and correct answer. Returns a short preview of each rule; use get_trainer_rule for the full text. Read-only.",
   inputSchema: {
-    channel: z37.enum(["twilio", "maytapi", "groups"]).optional().describe("Only rules for this channel."),
-    product: z37.string().optional().describe("Product code, e.g. NRM, SLD, PWR."),
-    enabled: z37.boolean().optional().describe("true = only active rules, false = only switched-off rules."),
-    search: z37.string().optional().describe("Case-insensitive text search in title, instruction and correct_answer."),
-    limit: z37.number().int().min(1).max(100).optional().describe("Max rows (default 100).")
+    channel: z38.enum(["twilio", "maytapi", "groups"]).optional().describe("Only rules for this channel."),
+    product: z38.string().optional().describe("Product code, e.g. NRM, SLD, PWR."),
+    enabled: z38.boolean().optional().describe("true = only active rules, false = only switched-off rules."),
+    search: z38.string().optional().describe("Case-insensitive text search in title, instruction and correct_answer."),
+    limit: z38.number().int().min(1).max(100).optional().describe("Max rows (default 100).")
   },
   annotations: { readOnlyHint: true, openWorldHint: false },
   handler: async (input, ctx) => {
@@ -2452,14 +2541,14 @@ var list_trainer_rules_default = defineTool42({
 });
 
 // src/lib/mcp/tools/get-trainer-rule.ts
-import { defineTool as defineTool43 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z38 } from "npm:zod@^3.25.76";
-var get_trainer_rule_default = defineTool43({
+import { defineTool as defineTool44 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z39 } from "npm:zod@^3.25.76";
+var get_trainer_rule_default = defineTool44({
   name: "get_trainer_rule",
   title: "Get one AI trainer rule",
   description: "Full detail of one AI Trainer rule by id: title, triggers, instruction, correct answer, priority, channel, product, enabled state and notes (which include the edit history written by update_trainer_rule). Read-only.",
   inputSchema: {
-    rule_id: z38.string().uuid().describe("Trainer rule UUID (from list_trainer_rules).")
+    rule_id: z39.string().uuid().describe("Trainer rule UUID (from list_trainer_rules).")
   },
   annotations: { readOnlyHint: true, openWorldHint: false },
   handler: async (input, ctx) => {
@@ -2473,22 +2562,22 @@ var get_trainer_rule_default = defineTool43({
 });
 
 // src/lib/mcp/tools/create-trainer-rule.ts
-import { defineTool as defineTool44 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z39 } from "npm:zod@^3.25.76";
-var create_trainer_rule_default = defineTool44({
+import { defineTool as defineTool45 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z40 } from "npm:zod@^3.25.76";
+var create_trainer_rule_default = defineTool45({
   name: "create_trainer_rule",
   title: "Create an AI trainer rule",
   description: "Add a new AI Trainer rule that the auto-reply bot will follow. Always show the operator the exact rule text and get approval before calling. Dedup: if an enabled rule with the same title already exists on the same channel, it is returned instead of creating a duplicate. The rule is stamped as created via Claude MCP in its notes. Priority: advisory < strong (default) < override.",
   inputSchema: {
-    title: z39.string().min(3).max(200).describe("Short rule name, e.g. 'FIRST TOUCH \u2014 CTA footer'."),
-    instruction: z39.string().min(10).describe("What the bot must do or say."),
-    channel: z39.enum(["twilio", "maytapi", "groups"]).describe("Which channel's bot this rule applies to."),
-    triggers: z39.array(z39.string()).optional().describe("Keywords/phrases that make this rule apply."),
-    product: z39.string().nullable().optional().describe("Product code if product-specific, e.g. NRM."),
-    priority: z39.enum(["advisory", "strong", "override"]).optional().describe("Default 'strong'."),
-    correct_answer: z39.string().nullable().optional().describe("Exact model answer the bot should give, if any."),
-    notes: z39.string().optional().describe("Why this rule exists."),
-    enabled: z39.boolean().optional().describe("Default true.")
+    title: z40.string().min(3).max(200).describe("Short rule name, e.g. 'FIRST TOUCH \u2014 CTA footer'."),
+    instruction: z40.string().min(10).describe("What the bot must do or say."),
+    channel: z40.enum(["twilio", "maytapi", "groups"]).describe("Which channel's bot this rule applies to."),
+    triggers: z40.array(z40.string()).optional().describe("Keywords/phrases that make this rule apply."),
+    product: z40.string().nullable().optional().describe("Product code if product-specific, e.g. NRM."),
+    priority: z40.enum(["advisory", "strong", "override"]).optional().describe("Default 'strong'."),
+    correct_answer: z40.string().nullable().optional().describe("Exact model answer the bot should give, if any."),
+    notes: z40.string().optional().describe("Why this rule exists."),
+    enabled: z40.boolean().optional().describe("Default true.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   handler: async (input, ctx) => {
@@ -2522,23 +2611,23 @@ ${stamp}` : stamp,
 });
 
 // src/lib/mcp/tools/update-trainer-rule.ts
-import { defineTool as defineTool45 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z40 } from "npm:zod@^3.25.76";
+import { defineTool as defineTool46 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z41 } from "npm:zod@^3.25.76";
 var AUDIT_SNIPPET = 400;
-var update_trainer_rule_default = defineTool45({
+var update_trainer_rule_default = defineTool46({
   name: "update_trainer_rule",
   title: "Update an AI trainer rule",
   description: "Edit an existing AI Trainer rule, or switch it on/off with `enabled`. Only the fields you pass are changed; nothing is blanked by omission. There is no delete \u2014 switch a rule off instead. Before changing wording, the previous title/instruction/correct_answer are copied into the rule's notes as an audit line, so every edit can be traced and undone. Always show the operator the exact new text and get approval before calling.",
   inputSchema: {
-    rule_id: z40.string().uuid().describe("Trainer rule UUID."),
-    title: z40.string().min(3).max(200).optional(),
-    instruction: z40.string().min(10).optional(),
-    triggers: z40.array(z40.string()).optional().describe("Replaces the full trigger list."),
-    product: z40.string().nullable().optional(),
-    priority: z40.enum(["advisory", "strong", "override"]).optional(),
-    correct_answer: z40.string().nullable().optional(),
-    enabled: z40.boolean().optional().describe("false switches the rule off (soft delete)."),
-    change_reason: z40.string().optional().describe("Why this edit is being made; recorded in notes.")
+    rule_id: z41.string().uuid().describe("Trainer rule UUID."),
+    title: z41.string().min(3).max(200).optional(),
+    instruction: z41.string().min(10).optional(),
+    triggers: z41.array(z41.string()).optional().describe("Replaces the full trigger list."),
+    product: z41.string().nullable().optional(),
+    priority: z41.enum(["advisory", "strong", "override"]).optional(),
+    correct_answer: z41.string().nullable().optional(),
+    enabled: z41.boolean().optional().describe("false switches the rule off (soft delete)."),
+    change_reason: z41.string().optional().describe("Why this edit is being made; recorded in notes.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   handler: async (input, ctx) => {
@@ -2575,15 +2664,15 @@ ${auditLine}` : auditLine;
 });
 
 // src/lib/mcp/tools/list-reply-corrections.ts
-import { defineTool as defineTool46 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z41 } from "npm:zod@^3.25.76";
-var list_reply_corrections_default = defineTool46({
+import { defineTool as defineTool47 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z42 } from "npm:zod@^3.25.76";
+var list_reply_corrections_default = defineTool47({
   name: "list_reply_corrections",
   title: "List auto-reply corrections",
   description: "Read the auto-reply corrections log (auto_reply_corrections): cases where the bot's reply was corrected, with the original inbound message, the bot's original reply, the corrected reply, the reason and any linked trainer rule. Newest first. Read-only.",
   inputSchema: {
-    channel: z41.enum(["twilio", "maytapi", "groups"]).optional(),
-    limit: z41.number().int().min(1).max(100).optional().describe("Max rows (default 50).")
+    channel: z42.enum(["twilio", "maytapi", "groups"]).optional(),
+    limit: z42.number().int().min(1).max(100).optional().describe("Max rows (default 50).")
   },
   annotations: { readOnlyHint: true, openWorldHint: false },
   handler: async (input, ctx) => {
@@ -2599,21 +2688,21 @@ var list_reply_corrections_default = defineTool46({
 });
 
 // src/lib/mcp/tools/add-reply-correction.ts
-import { defineTool as defineTool47 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z42 } from "npm:zod@^3.25.76";
-var add_reply_correction_default = defineTool47({
+import { defineTool as defineTool48 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z43 } from "npm:zod@^3.25.76";
+var add_reply_correction_default = defineTool48({
   name: "add_reply_correction",
   title: "Log an auto-reply correction",
   description: "Record a correction to the bot: the inbound message, what the bot said (optional), and what it should have said. Strictly additive \u2014 never edits or removes existing corrections. Optionally link it to a trainer rule (trainer_rule_id) that the correction relates to. Always show the operator the corrected reply and get approval before calling.",
   inputSchema: {
-    channel: z42.enum(["twilio", "maytapi", "groups"]),
-    original_message: z42.string().min(1).describe("The lead's inbound message."),
-    corrected_reply: z42.string().min(1).describe("What the bot should have replied."),
-    original_reply: z42.string().nullable().optional().describe("What the bot actually replied."),
-    reason: z42.string().optional(),
-    contact_id: z42.string().uuid().nullable().optional(),
-    message_id: z42.string().uuid().nullable().optional(),
-    trainer_rule_id: z42.string().uuid().nullable().optional()
+    channel: z43.enum(["twilio", "maytapi", "groups"]),
+    original_message: z43.string().min(1).describe("The lead's inbound message."),
+    corrected_reply: z43.string().min(1).describe("What the bot should have replied."),
+    original_reply: z43.string().nullable().optional().describe("What the bot actually replied."),
+    reason: z43.string().optional(),
+    contact_id: z43.string().uuid().nullable().optional(),
+    message_id: z43.string().uuid().nullable().optional(),
+    trainer_rule_id: z43.string().uuid().nullable().optional()
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   handler: async (input, ctx) => {
@@ -2638,8 +2727,8 @@ var add_reply_correction_default = defineTool47({
 });
 
 // src/lib/mcp/tools/get-twilio-status.ts
-import { defineTool as defineTool48 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z43 } from "npm:zod@^3.25.76";
+import { defineTool as defineTool49 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z44 } from "npm:zod@^3.25.76";
 function env(name) {
   const r = globalThis;
   return (r.Deno?.env?.get?.(name) ?? r.process?.env?.[name])?.trim() || void 0;
@@ -2660,13 +2749,13 @@ function maskPhone(v) {
   const s = String(v ?? "").replace(/^whatsapp:/i, "");
   return s.length > 6 ? `${s.slice(0, 5)}***${s.slice(-3)}` : s;
 }
-var get_twilio_status_default = defineTool48({
+var get_twilio_status_default = defineTool49({
   name: "get_twilio_status",
   title: "Twilio status (read-only)",
   description: "READ-ONLY health check straight from Twilio's own records (not Get Well Hub's copy): account status and balance, the WhatsApp Messaging Service and its inbound webhook, WhatsApp sender status, recent Twilio error alerts, the most recent messages Twilio sent/received (bodies trimmed, phones masked), and a per-day count of inbound messages on Twilio vs inbound Twilio messages stored in Get Well Hub over the last N days \u2014 the gap between the two shows where the inbound pipeline breaks. Makes GET requests only; never sends or changes anything. Admin only.",
   inputSchema: {
-    since_days: z43.number().int().min(1).max(30).optional().describe("Window for the inbound comparison (default 14)."),
-    recent_limit: z43.number().int().min(1).max(50).optional().describe("How many recent Twilio messages to list (default 20).")
+    since_days: z44.number().int().min(1).max(30).optional().describe("Window for the inbound comparison (default 14)."),
+    recent_limit: z44.number().int().min(1).max(50).optional().describe("How many recent Twilio messages to list (default 20).")
   },
   annotations: { readOnlyHint: true, openWorldHint: true },
   handler: async (input, ctx) => {
@@ -2781,8 +2870,8 @@ var get_twilio_status_default = defineTool48({
 });
 
 // src/lib/mcp/tools/get-group-guard-status.ts
-import { defineTool as defineTool49 } from "npm:@lovable.dev/mcp-js@0.26.1";
-var get_group_guard_status_default = defineTool49({
+import { defineTool as defineTool50 } from "npm:@lovable.dev/mcp-js@0.26.1";
+var get_group_guard_status_default = defineTool50({
   name: "get_group_guard_status",
   title: "Get Group Guard status",
   description: "Read-only. Group Guard settings (mode off/log_only/enforce, country block, flood limits), whether the linked WhatsApp number is admin in each active group (remove/delete only works where it is), and the last 20 guard actions.",
@@ -2801,13 +2890,13 @@ var get_group_guard_status_default = defineTool49({
 });
 
 // src/lib/mcp/tools/set-group-guard-mode.ts
-import { defineTool as defineTool50 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z44 } from "npm:zod@^3.25.76";
-var set_group_guard_mode_default = defineTool50({
+import { defineTool as defineTool51 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z45 } from "npm:zod@^3.25.76";
+var set_group_guard_mode_default = defineTool51({
   name: "set_group_guard_mode",
   title: "Set Group Guard mode",
   description: "Set Group Guard mode: 'off' (does nothing), 'log_only' (records who would be removed, removes nobody), or 'enforce' (removes spammers/blocked-country joiners from active groups). Requires an admin account.",
-  inputSchema: { mode: z44.enum(["off", "log_only", "enforce"]).describe("New guard mode.") },
+  inputSchema: { mode: z45.enum(["off", "log_only", "enforce"]).describe("New guard mode.") },
   annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
   handler: async ({ mode }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
@@ -2826,7 +2915,7 @@ var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
   name: "get-well-hub",
   title: "Get Well Hub",
-  version: "1.13.0",
+  version: "1.14.0",
   instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement); to privately message a commenter (one private Messenger message per comment, within 7 days of the comment) use send_private_reply_to_comment. For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for actual group chat content (who said what, when) use list_group_messages; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual'). For the Lead Call Report, use get_lead_call_report (sorted newest-first by default) and generate_lead_call_summaries to fill in missing AI summaries; edit a lead's type/notes/pipeline stage via update_contact. To post TO a Facebook Page, use create_fb_post \u2014 it refuses to do anything unless you pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true; never pass publish_now: true unless the user has clearly asked to publish immediately. Use list_fb_posts to see what is already published, scheduled, or failed before adding more. For the AI Trainer (how the auto-reply bot answers), use list_trainer_rules / get_trainer_rule to read, create_trainer_rule / update_trainer_rule to change (no delete \u2014 switch off with enabled: false; every edit is audited in the rule's notes), and list_reply_corrections / add_reply_correction for the corrections log. Show the operator the exact rule text and get approval before any trainer write. To check the Twilio pipeline against Twilio's own records (account, balance, webhook, sender status, alerts, and Twilio-vs-Hub inbound counts per day), use get_twilio_status \u2014 read-only, admin only. For Group Guard (anti-spam in WhatsApp groups) use get_group_guard_status to read and set_group_guard_mode to change mode.`,
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
@@ -2844,6 +2933,7 @@ var mcp_default = defineMcp({
     get_lead_call_report_default,
     generate_lead_call_summaries_default,
     get_contact_default,
+    create_contact_default,
     update_contact_default,
     add_contact_note_default,
     create_plan_task_default,
