@@ -85,6 +85,11 @@ Deno.serve(async (req) => {
       // deno-lint-ignore no-explicit-any
       const syncRecord: any = { ...record, last_synced_at: new Date().toISOString() };
       if (table === 'contacts') {
+        // General contacts (business/service/personal) are not pushed to master as prospects.
+        if (['business','service','personal'].includes(syncRecord.contact_category)) {
+          return new Response(JSON.stringify({ ok: true, skipped: 'general_contact' }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        delete syncRecord.contact_category; delete syncRecord.marketing_consent;
         // Intent tagger (2026-10-13): master has no 'unclassified' lead type → send 'prospect'.
         if (syncRecord.lead_type === 'unclassified') syncRecord.lead_type = 'prospect';
         // Hub-only intent columns are not part of the master schema.
