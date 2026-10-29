@@ -2910,13 +2910,432 @@ var set_group_guard_mode_default = defineTool51({
   }
 });
 
+// src/lib/mcp/tools/list-call-sheet.ts
+import { defineTool as defineTool52 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z46 } from "npm:zod@^3.25.76";
+
+// src/lib/call-sheet/threads.ts
+async function loadContactThreads(supabase, contacts, limit = 5e3) {
+  const ids = contacts.map((c) => c.id);
+  const phones = contacts.map((c) => c.phone_normalized).filter(Boolean);
+  const twilio = /* @__PURE__ */ new Map();
+  const maytapi = /* @__PURE__ */ new Map();
+  if (ids.length === 0) return { twilio, maytapi };
+  const { data: convs } = await supabase.from("conversations").select("id, contact_id").in("contact_id", ids);
+  const convIdToContact = /* @__PURE__ */ new Map();
+  const convIds = [];
+  (convs || []).forEach((c) => {
+    if (!c.contact_id) return;
+    convIdToContact.set(c.id, c.contact_id);
+    convIds.push(c.id);
+  });
+  if (convIds.length > 0) {
+    const { data: msgs } = await supabase.from("messages").select("conversation_id, content, is_outbound, created_at").in("conversation_id", convIds).order("created_at", { ascending: true }).limit(limit);
+    (msgs || []).forEach((m) => {
+      const cid = convIdToContact.get(m.conversation_id);
+      if (!cid) return;
+      const arr = twilio.get(cid) || [];
+      arr.push({ ts: m.created_at, direction: m.is_outbound ? "out" : "in", channel: "twilio", body: m.content || "" });
+      twilio.set(cid, arr);
+    });
+  }
+  const { data: mMsgs } = await supabase.from("maytapi_messages").select("contact_id, phone_e164, direction, body, received_at").or(`contact_id.in.(${ids.join(",")}),phone_e164.in.(${phones.map((p) => `"${p}"`).join(",") || '""'})`).order("received_at", { ascending: true }).limit(limit);
+  const phoneToContact = /* @__PURE__ */ new Map();
+  contacts.forEach((c) => {
+    if (c.phone_normalized) phoneToContact.set(c.phone_normalized, c.id);
+  });
+  (mMsgs || []).forEach((m) => {
+    const cid = m.contact_id || (m.phone_e164 ? phoneToContact.get(m.phone_e164) : null);
+    if (!cid) return;
+    const arr = maytapi.get(cid) || [];
+    arr.push({ ts: m.received_at, direction: m.direction === "outbound" ? "out" : "in", channel: "maytapi", body: m.body || "" });
+    maytapi.set(cid, arr);
+  });
+  return { twilio, maytapi };
+}
+function mergedThread(res, contactId) {
+  return [...res.twilio.get(contactId) || [], ...res.maytapi.get(contactId) || []].sort((a, b) => a.ts.localeCompare(b.ts));
+}
+
+// src/lib/mcp/tools/call-sheet-data.ts
+var CARD_COLS = "id,name,first_name,last_name,phone,phone_normalized,lead_type,temperature,interest,primary_intent,intent_reason,source_tag,prospect_verified,city,province,tier,tier_reason,tier_rank,first_inquiry,last_inbound_at,last_outbound_at,last_inbound_preview,msg_count,unanswered_inbound,last_call_at,last_call_outcome,called_today,follow_up_on,follow_up_due,has_summary,pinned,hidden,exclusion_reason";
+var BUYER_REASONS = ["Lead type: buyer", "Lead type: vip"];
+function cardToJson(c) {
+  const name = c.name?.trim() || [c.first_name, c.last_name].filter(Boolean).join(" ").trim() || c.phone || "Unnamed";
+  const digits2 = (c.phone_normalized || c.phone || "").replace(/\D/g, "");
+  return {
+    contact_id: c.id,
+    name,
+    phone: c.phone,
+    phone_normalized: c.phone_normalized,
+    whatsapp_link: digits2 ? `https://wa.me/${digits2}` : null,
+    lead_type: c.lead_type,
+    temperature: c.temperature,
+    interest: c.interest,
+    primary_intent: c.primary_intent,
+    intent_reason: c.intent_reason,
+    source_tag: c.source_tag,
+    prospect_verified: c.prospect_verified,
+    city: c.city,
+    province: c.province,
+    tier: c.tier,
+    tier_reason: c.tier_reason,
+    tier_rank: c.tier_rank,
+    first_inquiry: c.first_inquiry,
+    last_inbound_at: c.last_inbound_at,
+    last_outbound_at: c.last_outbound_at,
+    last_inbound_preview: c.last_inbound_preview ? c.last_inbound_preview.slice(0, 140) : null,
+    msg_count: c.msg_count,
+    unanswered_inbound: c.unanswered_inbound,
+    last_call_at: c.last_call_at,
+    last_call_outcome: c.last_call_outcome,
+    called_today: c.called_today,
+    follow_up_on: c.follow_up_on,
+    follow_up_due: c.follow_up_due,
+    pinned: c.pinned,
+    registered_not_activated: c.lead_type === "registered",
+    exclusion_reason: c.exclusion_reason
+  };
+}
+async function loadSummaries(supabase, ids) {
+  const map = /* @__PURE__ */ new Map();
+  for (let i = 0; i < ids.length; i += 80) {
+    const { data } = await supabase.from("lead_call_summaries").select("contact_id, summary").in("contact_id", ids.slice(i, i + 80));
+    for (const r of data ?? []) {
+      map.set(r.contact_id, { summary_text: r.summary?.summary_text ?? "", next: r.summary?.open_items?.[0] ?? null });
+    }
+  }
+  return map;
+}
+async function loadRecentMessages(supabase, cards, perContact) {
+  const out = /* @__PURE__ */ new Map();
+  for (let i = 0; i < cards.length; i += 40) {
+    const slice = cards.slice(i, i + 40);
+    const res = await loadContactThreads(supabase, slice.map((c) => ({ id: c.id, phone_normalized: c.phone_normalized })));
+    for (const c of slice) {
+      out.set(c.id, mergedThread(res, c.id).slice(-perContact).map((m) => ({ ts: m.ts, direction: m.direction, channel: m.channel, body: m.body.slice(0, 500) })));
+    }
+  }
+  return out;
+}
+
+// src/lib/mcp/tools/list-call-sheet.ts
+var list_call_sheet_default = defineTool52({
+  name: "list_call_sheet",
+  title: "List the Call Sheet",
+  description: "Read the live Call Sheet (Hot / Lukewarm / Cold = Tier A / B / C prospects), in calling order, computed in the database with no 500/100 contact cap. Each card has tier_reason, last inbound preview, last call outcome, follow-up date, the last 5 messages and the cached AI summary one-liner. Excludes do-not-contact, opted-out, expired and (unless include_buyers) buyer/VIP contacts. Never sends anything.",
+  inputSchema: {
+    tier: z46.enum(["hot", "lukewarm", "cold", "followups_due", "called_today"]).optional().describe("Tab to read (default hot)."),
+    unanswered_only: z46.boolean().optional().describe("Only people whose last message is unanswered."),
+    not_called_today: z46.boolean().optional().describe("Skip people already called today (SAST)."),
+    include_buyers: z46.boolean().optional().describe("Also include buyer/VIP contacts (default false)."),
+    search: z46.string().optional().describe("Match on name or phone."),
+    limit: z46.number().int().min(1).max(100).optional().describe("Max cards (default 25, max 100).")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ tier, unanswered_only, not_called_today, include_buyers, search, limit }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const t = tier ?? "hot";
+    let q = supabase.from("call_list_cards").select(CARD_COLS, { count: "exact" });
+    q = include_buyers ? q.or(`exclusion_reason.is.null,exclusion_reason.in.(${BUYER_REASONS.map((r) => `"${r}"`).join(",")})`) : q.is("exclusion_reason", null);
+    if (t === "followups_due") q = q.eq("follow_up_due", true).order("follow_up_on", { ascending: true });
+    else if (t === "called_today") q = q.eq("called_today", true).order("last_call_at", { ascending: false });
+    else q = q.eq("tier", t).order("tier_rank", { ascending: true });
+    if (unanswered_only) q = q.eq("unanswered_inbound", true);
+    if (not_called_today) q = q.eq("called_today", false);
+    const s = (search ?? "").trim().replace(/[,()"]/g, " ");
+    if (s) {
+      const d = s.replace(/\D/g, "");
+      q = q.or([`name.ilike.%${s}%`, `first_name.ilike.%${s}%`, `last_name.ilike.%${s}%`, d ? `phone_normalized.ilike.%${d}%` : null].filter(Boolean).join(","));
+    }
+    const { data, error, count } = await q.range(0, (limit ?? 25) - 1);
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const rows = data ?? [];
+    const [summaries, msgs] = await Promise.all([
+      loadSummaries(supabase, rows.filter((r) => r.has_summary).map((r) => r.id)),
+      loadRecentMessages(supabase, rows, 5)
+    ]);
+    const cards = rows.map((r) => ({
+      ...cardToJson(r),
+      summary: summaries.get(r.id) ?? null,
+      last_messages: msgs.get(r.id) ?? []
+    }));
+    const result = { tab: t, total_in_tab: count ?? cards.length, count: cards.length, cards };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+  }
+});
+
+// src/lib/mcp/tools/get-call-sheet-card.ts
+import { defineTool as defineTool53 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z47 } from "npm:zod@^3.25.76";
+var get_call_sheet_card_default = defineTool53({
+  name: "get_call_sheet_card",
+  title: "Get one Call Sheet card",
+  description: "Read one person's Call Sheet card by contact_id or phone: tier and reason, the last 30 messages across Twilio and WhatsApp Business, earlier logged calls, contact notes and the AI summary. Also reports exclusion_reason if the person is not on the sheet (do-not-contact, opt-out, lead type). Never sends anything.",
+  inputSchema: {
+    contact_id: z47.string().uuid().optional().describe("Contact id."),
+    phone: z47.string().optional().describe("Phone in any format; matched on digits.")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ contact_id, phone }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    if (!contact_id && !phone) return { content: [{ type: "text", text: "Pass contact_id or phone." }], isError: true };
+    const supabase = supabaseForUser(ctx);
+    let q = supabase.from("call_list_cards").select(CARD_COLS).limit(2);
+    if (contact_id) q = q.eq("id", contact_id);
+    else {
+      const d = (phone ?? "").replace(/\D/g, "");
+      const e164 = d.startsWith("0") ? `+27${d.slice(1)}` : `+${d}`;
+      q = q.eq("phone_normalized", e164);
+    }
+    const { data, error } = await q;
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const rows = data ?? [];
+    if (rows.length === 0) return { content: [{ type: "text", text: "Not on the Call Sheet (no qualifying engagement) or not visible to you." }], isError: true };
+    const card = rows[0];
+    const [summaries, msgs, callsRes, contactRes] = await Promise.all([
+      loadSummaries(supabase, [card.id]),
+      loadRecentMessages(supabase, [card], 30),
+      supabase.from("call_list_calls").select("id, called_at, outcome, channel, notes, next_action, follow_up_on, campaign_key, tier_at_call").eq("contact_id", card.id).order("called_at", { ascending: false }).limit(50),
+      supabase.from("contacts").select("notes").eq("id", card.id).maybeSingle()
+    ]);
+    const calls = (callsRes.data ?? []).map((k) => ({ ...k }));
+    const result = {
+      card: cardToJson(card),
+      summary: summaries.get(card.id) ?? null,
+      messages: msgs.get(card.id) ?? [],
+      calls,
+      notes: contactRes.data?.notes ?? null,
+      duplicate_phone_matches: rows.length > 1
+    };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+  }
+});
+
+// src/lib/mcp/tools/log-call.ts
+import { defineTool as defineTool54 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z48 } from "npm:zod@^3.25.76";
+
+// src/lib/call-sheet/core.ts
+var CALL_OUTCOMES = [
+  "Answered - interested",
+  "Answered - not now",
+  "Booked call/presentation",
+  "Registered",
+  "Call back",
+  "No answer",
+  "Wrong number",
+  "Not interested"
+];
+var CALL_CHANNELS = ["phone", "whatsapp_call", "whatsapp_voice_note", "whatsapp_text", "zoom"];
+function blockTime(date, hhmm) {
+  return (/* @__PURE__ */ new Date(`${date}T${hhmm}:00+02:00`)).getTime();
+}
+function currentBlocks(blocks, now = Date.now()) {
+  const sorted = [...blocks || []].sort((a, b) => blockTime(a.date, a.start) - blockTime(b.date, b.start));
+  let current = null;
+  let next = null;
+  for (let i = 0; i < sorted.length; i++) {
+    const b = sorted[i];
+    const s = blockTime(b.date, b.start);
+    const e = b.end ? blockTime(b.date, b.end) : sorted[i + 1] ? blockTime(sorted[i + 1].date, sorted[i + 1].start) : s + 36e5;
+    if (now >= s && now < e) current = b;
+    if (s > now && !next) next = b;
+  }
+  return { current, next };
+}
+function describeBlock(b) {
+  if (!b) return "";
+  return `${b.label}, ${b.start}${b.end ? `-${b.end}` : ""}`;
+}
+function paceLine(sc, now = Date.now()) {
+  if (!sc.campaign || !sc.targets || !sc.actuals) return { onPace: true, text: "", advice: null };
+  const share = sc.elapsed_share ?? 0;
+  const expected = Math.ceil(sc.targets.conversations * share);
+  const onPace = sc.actuals.conversations >= expected && sc.actuals.registrations >= Math.floor(sc.targets.registrations * share);
+  const text = share <= 0 ? "Campaign has not started yet." : onPace ? `On pace: ${sc.actuals.conversations} conversations vs ${expected} expected by now.` : `Behind pace: ${sc.actuals.conversations} conversations vs ${expected} expected by now.`;
+  const sast = new Date(now + 2 * 36e5);
+  const isFriEvening = sast.getUTCDay() === 5 && sast.getUTCHours() >= 17;
+  return { onPace, text, advice: !onPace && isFriEvening ? "Double the 1-on-1 calling on Saturday morning." : null };
+}
+
+// src/lib/mcp/tools/log-call.ts
+var log_call_default = defineTool54({
+  name: "log_call",
+  title: "Log a call on the Call Sheet",
+  description: "WRITES: logs one call attempt in a single transaction \u2014 inserts the call row, a 'call_logged' contact activity, appends a dated line to the contact's notes (never overwrites), creates a 'Call back <name>' reminder at 09:00 SAST if follow_up_on is set, and applies outcome rules (Wrong number hides from sheet; Not interested moves to Cold with no follow-up; Registered sets lead_type to registered only if currently prospect/unclassified). Never sends a message and never changes do-not-contact, opt-out or consent.",
+  inputSchema: {
+    contact_id: z48.string().uuid().describe("Contact id (from list_call_sheet / get_call_sheet_card)."),
+    outcome: z48.enum(CALL_OUTCOMES).describe("Call outcome."),
+    channel: z48.enum(CALL_CHANNELS).optional().describe("Default phone."),
+    notes: z48.string().max(4e3).optional().describe("What was said."),
+    next_action: z48.string().max(500).optional().describe("Agreed next step."),
+    follow_up_on: z48.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD").optional().describe("Follow-up date (SAST). Ignored for Not interested."),
+    confirmed_under_vanto: z48.boolean().optional().describe("For Registered: confirmed sponsored under Vanto's ID.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  handler: async ({ contact_id, outcome, channel, notes, next_action, follow_up_on, confirmed_under_vanto }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const { data, error } = await supabase.rpc("log_call_sheet_call", {
+      _contact_id: contact_id,
+      _outcome: outcome,
+      _channel: channel ?? "phone",
+      _notes: notes ?? null,
+      _next_action: next_action ?? null,
+      _follow_up_on: follow_up_on ?? null,
+      _campaign_key: null,
+      _confirmed_under_vanto: outcome === "Registered" ? confirmed_under_vanto ?? null : null,
+      _source: "mcp"
+    });
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const r = data ?? {};
+    const result = {
+      call_id: r.call_id ?? null,
+      activity_id: r.activity_id ?? null,
+      reminder_id: r.reminder_id ?? null,
+      campaign_key: r.campaign_key ?? null,
+      tier_at_call: r.tier_at_call ?? null,
+      note_line: r.note_line ?? null,
+      lead_type_changed: r.lead_type_changed ?? false
+    };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+  }
+});
+
+// src/lib/mcp/tools/list-calls.ts
+import { defineTool as defineTool55 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z49 } from "npm:zod@^3.25.76";
+var dateStr2 = z49.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD");
+var list_calls_default = defineTool55({
+  name: "list_calls",
+  title: "List logged calls",
+  description: "Read logged Call Sheet calls (your own only), newest first. Filter by SAST date range, tier at the time of the call, outcome and campaign.",
+  inputSchema: {
+    from: dateStr2.optional().describe("YYYY-MM-DD (SAST), inclusive."),
+    to: dateStr2.optional().describe("YYYY-MM-DD (SAST), inclusive."),
+    tier: z49.enum(["hot", "lukewarm", "cold"]).optional().describe("Tier when called."),
+    outcome: z49.enum(CALL_OUTCOMES).optional(),
+    campaign_key: z49.string().optional().describe("e.g. oct-close-2026."),
+    limit: z49.number().int().min(1).max(200).optional().describe("Default 50.")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ from, to, tier, outcome, campaign_key, limit }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    let q = supabase.from("call_list_calls").select("id, contact_id, called_at, channel, outcome, notes, next_action, follow_up_on, tier_at_call, campaign_key, confirmed_under_vanto, contacts(name, phone_normalized)").order("called_at", { ascending: false }).limit(limit ?? 50);
+    if (from) q = q.gte("called_at", `${from}T00:00:00+02:00`);
+    if (to) q = q.lte("called_at", `${to}T23:59:59.999+02:00`);
+    if (tier) q = q.eq("tier_at_call", tier);
+    if (outcome) q = q.eq("outcome", outcome);
+    if (campaign_key) q = q.eq("campaign_key", campaign_key);
+    const { data, error } = await q;
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const calls = (data ?? []).map((r) => ({
+      id: r.id,
+      contact_id: r.contact_id,
+      name: r.contacts?.name ?? null,
+      phone: r.contacts?.phone_normalized ?? null,
+      called_at: r.called_at,
+      channel: r.channel,
+      outcome: r.outcome,
+      notes: r.notes,
+      next_action: r.next_action,
+      follow_up_on: r.follow_up_on,
+      tier_at_call: r.tier_at_call,
+      campaign_key: r.campaign_key,
+      confirmed_under_vanto: r.confirmed_under_vanto
+    }));
+    const result = { count: calls.length, calls };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+  }
+});
+
+// src/lib/mcp/tools/list-followups-due.ts
+import { defineTool as defineTool56 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z50 } from "npm:zod@^3.25.76";
+function sastToday() {
+  return new Date(Date.now() + 2 * 36e5).toISOString().slice(0, 10);
+}
+var list_followups_due_default = defineTool56({
+  name: "list_followups_due",
+  title: "List Call Sheet follow-ups",
+  description: "Read Call Sheet follow-ups (from the latest logged call per person): overdue, due today, and optionally upcoming within the next N days (SAST). Excludes people no longer on the sheet.",
+  inputSchema: {
+    upcoming_days: z50.number().int().min(0).max(30).optional().describe("Also include follow-ups due in the next N days (default 0 = overdue and today only)."),
+    limit: z50.number().int().min(1).max(200).optional().describe("Default 50.")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ upcoming_days, limit }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const today = sastToday();
+    const until = new Date(Date.parse(`${today}T00:00:00Z`) + (upcoming_days ?? 0) * 864e5).toISOString().slice(0, 10);
+    const { data, error } = await supabase.from("call_list_cards").select(CARD_COLS).is("exclusion_reason", null).not("follow_up_on", "is", null).lte("follow_up_on", until).order("follow_up_on", { ascending: true }).limit(limit ?? 50);
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const rows = data ?? [];
+    const items = rows.map((r) => ({
+      ...cardToJson(r),
+      status: (r.follow_up_on ?? "") < today ? "overdue" : r.follow_up_on === today ? "due_today" : "upcoming"
+    }));
+    const result = {
+      today_sast: today,
+      overdue: items.filter((i) => i.status === "overdue").length,
+      due_today: items.filter((i) => i.status === "due_today").length,
+      upcoming: items.filter((i) => i.status === "upcoming").length,
+      items
+    };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+  }
+});
+
+// src/lib/mcp/tools/get-campaign-scorecard.ts
+import { defineTool as defineTool57 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z51 } from "npm:zod@^3.25.76";
+var get_campaign_scorecard_default = defineTool57({
+  name: "get_campaign_scorecard",
+  title: "Get the calling campaign scorecard",
+  description: "Read the active calling campaign scorecard (Africa/Johannesburg time): targets vs actuals for conversations, agreed (booked + registered) and registrations (plus confirmed under Vanto), on/behind pace, the current and next time block, time to cut-off (or a warning if unset) and uncalled counts per tier.",
+  inputSchema: {
+    campaign_key: z51.string().optional().describe("Default: the active campaign.")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ campaign_key }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const { data, error } = await supabase.rpc("call_campaign_scorecard", { _campaign_key: campaign_key ?? null });
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const sc = data ?? { campaign: null };
+    if (!sc.campaign) return { content: [{ type: "text", text: "No active calling campaign for your account." }], isError: true };
+    const now = Date.now();
+    const { current, next } = currentBlocks(sc.campaign.blocks, now);
+    const pace = paceLine(sc, now);
+    const cutoffMs = sc.campaign.cutoff_at ? Date.parse(sc.campaign.cutoff_at) - now : null;
+    const result = {
+      campaign: { key: sc.campaign.key, name: sc.campaign.name, starts_at: sc.campaign.starts_at, ends_at: sc.campaign.ends_at, cutoff_at: sc.campaign.cutoff_at, timezone: sc.campaign.timezone },
+      targets: sc.targets ?? null,
+      actuals: sc.actuals ?? null,
+      elapsed_share: sc.elapsed_share ?? 0,
+      on_pace: pace.onPace,
+      pace: pace.text,
+      advice: pace.advice,
+      current_block: current ? describeBlock(current) : null,
+      next_block: next ? `${describeBlock(next)} (${next.date})` : null,
+      cutoff: cutoffMs === null ? "Cut-off not set. APLGO may run on European time." : cutoffMs > 0 ? `${Math.floor(cutoffMs / 36e5)}h ${Math.floor(cutoffMs % 36e5 / 6e4)}m to cut-off` : "Cut-off passed",
+      uncalled_by_tier: { hot: sc.uncalled_by_tier?.hot ?? 0, lukewarm: sc.uncalled_by_tier?.lukewarm ?? 0, cold: sc.uncalled_by_tier?.cold ?? 0 }
+    };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+  }
+});
+
 // src/lib/mcp/index.ts
 var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
   name: "get-well-hub",
   title: "Get Well Hub",
-  version: "1.14.0",
-  instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement); to privately message a commenter (one private Messenger message per comment, within 7 days of the comment) use send_private_reply_to_comment. For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for actual group chat content (who said what, when) use list_group_messages; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual'). For the Lead Call Report, use get_lead_call_report (sorted newest-first by default) and generate_lead_call_summaries to fill in missing AI summaries; edit a lead's type/notes/pipeline stage via update_contact. To post TO a Facebook Page, use create_fb_post \u2014 it refuses to do anything unless you pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true; never pass publish_now: true unless the user has clearly asked to publish immediately. Use list_fb_posts to see what is already published, scheduled, or failed before adding more. For the AI Trainer (how the auto-reply bot answers), use list_trainer_rules / get_trainer_rule to read, create_trainer_rule / update_trainer_rule to change (no delete \u2014 switch off with enabled: false; every edit is audited in the rule's notes), and list_reply_corrections / add_reply_correction for the corrections log. Show the operator the exact rule text and get approval before any trainer write. To check the Twilio pipeline against Twilio's own records (account, balance, webhook, sender status, alerts, and Twilio-vs-Hub inbound counts per day), use get_twilio_status \u2014 read-only, admin only. For Group Guard (anti-spam in WhatsApp groups) use get_group_guard_status to read and set_group_guard_mode to change mode.`,
+  version: "1.15.0",
+  instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement); to privately message a commenter (one private Messenger message per comment, within 7 days of the comment) use send_private_reply_to_comment. For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for actual group chat content (who said what, when) use list_group_messages; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual'). For the Lead Call Report, use get_lead_call_report (sorted newest-first by default) and generate_lead_call_summaries to fill in missing AI summaries; edit a lead's type/notes/pipeline stage via update_contact. To post TO a Facebook Page, use create_fb_post \u2014 it refuses to do anything unless you pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true; never pass publish_now: true unless the user has clearly asked to publish immediately. Use list_fb_posts to see what is already published, scheduled, or failed before adding more. For the AI Trainer (how the auto-reply bot answers), use list_trainer_rules / get_trainer_rule to read, create_trainer_rule / update_trainer_rule to change (no delete \u2014 switch off with enabled: false; every edit is audited in the rule's notes), and list_reply_corrections / add_reply_correction for the corrections log. Show the operator the exact rule text and get approval before any trainer write. To check the Twilio pipeline against Twilio's own records (account, balance, webhook, sender status, alerts, and Twilio-vs-Hub inbound counts per day), use get_twilio_status \u2014 read-only, admin only. For Group Guard (anti-spam in WhatsApp groups) use get_group_guard_status to read and set_group_guard_mode to change mode. For the Call Sheet (live Hot / Lukewarm / Cold = Tier A / B / C calling list for the active calling campaign), use get_campaign_scorecard for targets, pace and the current time block, list_call_sheet for who to call next, get_call_sheet_card for one person's full context, log_call to record each call (one transaction: call row, activity, dated note line, optional 09:00 SAST reminder), list_calls for the call log and list_followups_due for callbacks. Call Sheet safety rules: the Call Sheet tools never send messages; send_whatsapp_message is the only sender, and before any send you must show Vanto the exact text and get a clear yes, and respect its refusals (do-not-contact, frozen outbound, daily cap, 24-hour window). Use supports-language only: no disease or cure claims and no income promises. Health details a prospect shared are for Vanto's call only; never repeat them in messages. Never change do_not_contact, opt-outs or consent from these tools.`,
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
     acceptedAudiences: "authenticated"
@@ -2972,7 +3391,13 @@ var mcp_default = defineMcp({
     add_reply_correction_default,
     get_twilio_status_default,
     get_group_guard_status_default,
-    set_group_guard_mode_default
+    set_group_guard_mode_default,
+    list_call_sheet_default,
+    get_call_sheet_card_default,
+    log_call_default,
+    list_calls_default,
+    list_followups_due_default,
+    get_campaign_scorecard_default
   ]
 });
 
