@@ -9,7 +9,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { toast } from 'sonner';
 import {
   ListChecks, Phone, MessageCircle, RefreshCw, Search, X, MoreVertical, Pin, EyeOff, Thermometer, Sparkles,
-  History, Mic, Square, AlertTriangle, ChevronDown, Clock, FileText,
+  History, Mic, Square, AlertTriangle, ChevronDown, Clock, FileText, Copy, Check, Download, UserPlus,
 } from 'lucide-react';
 import {
   CALL_CHANNELS, CALL_OUTCOMES, CHANNEL_LABELS, TIER_LABELS, TIER_TO_TEMPERATURE, currentBlocks, describeBlock, paceLine, waLink,
@@ -27,13 +27,15 @@ type Card = {
   tier: Tier; tier_reason: string | null; tier_rank: number; first_inquiry: string | null; last_inbound_at: string | null; last_outbound_at: string | null;
   last_inbound_preview: string | null; msg_count: number; unanswered_inbound: boolean; last_call_at: string | null; last_call_outcome: string | null;
   called_today: boolean; follow_up_on: string | null; follow_up_due: boolean; has_summary: boolean; pinned: boolean; hidden: boolean;
-  exclusion_reason: string | null;
+  exclusion_reason: string | null; membership_interest: boolean;
 };
+type Draft = { id: string; contact_id: string; body: string; status: 'draft' | 'approved' | 'rejected' | 'sent_by_vanto'; created_by: string; tier: string | null };
+const MEMBERSHIP_DEFAULT_KEY = 'callSheet.membershipDefaultHot';
 type Summary = { summary_text?: string; open_items?: string[]; key_questions?: string[] };
 type TabKey = Tier | 'followups' | 'today';
 type SourceFilter = 'all' | 'facebook_ad' | 'google_ad_whatsapp' | 'other';
 
-const CARD_COLS = 'id,name,first_name,last_name,phone,phone_normalized,lead_type,temperature,primary_intent,source_tag,prospect_verified,tier,tier_reason,tier_rank,first_inquiry,last_inbound_at,last_outbound_at,last_inbound_preview,msg_count,unanswered_inbound,last_call_at,last_call_outcome,called_today,follow_up_on,follow_up_due,has_summary,pinned,hidden,exclusion_reason';
+const CARD_COLS = 'id,name,first_name,last_name,phone,phone_normalized,lead_type,temperature,primary_intent,source_tag,prospect_verified,tier,tier_reason,tier_rank,first_inquiry,last_inbound_at,last_outbound_at,last_inbound_preview,msg_count,unanswered_inbound,last_call_at,last_call_outcome,called_today,follow_up_on,follow_up_due,has_summary,pinned,hidden,exclusion_reason,membership_interest';
 const PAGE = 150;
 const BUYER_REASONS = ['Lead type: buyer', 'Lead type: vip'];
 
@@ -185,6 +187,10 @@ export function CallSheet({ onOpenLeadCallReport }: { onOpenLeadCallReport?: () 
   const [notCalledToday, setNotCalledToday] = useState(false);
   const [includeBuyers, setIncludeBuyers] = useState(false);
   const [registeredOnly, setRegisteredOnly] = useState(false);
+  const [membershipDefault, setMembershipDefault] = useState<boolean>(() => { try { return localStorage.getItem(MEMBERSHIP_DEFAULT_KEY) === '1'; } catch { return false; } });
+  const [membershipOnly, setMembershipOnly] = useState<boolean>(() => { try { return localStorage.getItem(MEMBERSHIP_DEFAULT_KEY) === '1'; } catch { return false; } });
+  const [drafts, setDrafts] = useState<Map<string, Draft[]>>(new Map());
+  const [exporting, setExporting] = useState(false);
   const [openBox, setOpenBox] = useState<string | null>(null);
   const [excluded, setExcluded] = useState<Card[] | null>(null);
   const [history, setHistory] = useState<{ card: Card; thread: ThreadMsg[]; calls: any[]; summary: Summary | null } | null>(null);
@@ -216,7 +222,8 @@ export function CallSheet({ onOpenLeadCallReport }: { onOpenLeadCallReport?: () 
   }, [includeBuyers, unansweredOnly, notCalledToday, registeredOnly, source, search]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tabFilter = (q: any, k: TabKey) => (k === 'followups' ? q.eq('follow_up_due', true) : k === 'today' ? q.eq('called_today', true) : q.eq('tier', k));
+  const tabFilter = (q: any, k: TabKey) => (k === 'followups' ? q.eq('follow_up_due', true) : k === 'today' ? q.eq('called_today', true)
+    : k === 'hot' && membershipOnly ? q.eq('tier', k).eq('membership_interest', true) : q.eq('tier', k));
 
   const loadScore = useCallback(async () => {
     const { data, error } = await db.rpc('call_campaign_scorecard', { _campaign_key: null });
@@ -247,11 +254,19 @@ export function CallSheet({ onOpenLeadCallReport }: { onOpenLeadCallReport?: () 
         (s || []).forEach((r: { contact_id: string; summary: Summary }) => map.set(r.contact_id, r.summary));
       }
       setSummaries(map);
+      const dmap = new Map<string, Draft[]>();
+      const allIds = rows.map((r) => r.id);
+      for (let i = 0; i < allIds.length; i += 80) {
+        const { data: d } = await db.from('call_list_drafts').select('id, contact_id, body, status, created_by, tier')
+          .in('contact_id', allIds.slice(i, i + 80)).in('status', ['draft', 'approved']).order('created_at', { ascending: false });
+        (d || []).forEach((r: Draft) => dmap.set(r.contact_id, [...(dmap.get(r.contact_id) || []), r]));
+      }
+      setDrafts(dmap);
     } catch (e) {
       toast.error('Failed to load Call Sheet: ' + errMsg(e));
     } finally { setLoading(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [applyFilters, activeTab, limit]);
+  }, [applyFilters, activeTab, limit, membershipOnly]);
 
   const refreshAll = useCallback(() => { load(); loadScore(); if (excluded) loadExcluded(); }, [load, loadScore, excluded]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -317,8 +332,63 @@ export function CallSheet({ onOpenLeadCallReport }: { onOpenLeadCallReport?: () 
   async function saveCutoff() {
     if (!score?.campaign || !cutoffVal) return;
     const iso = new Date(`${cutoffVal}:00+02:00`).toISOString();
-    const { error } = await db.from('call_campaigns').update({ cutoff_at: iso }).eq('key', score.campaign.key);
-    if (error) toast.error(error.message); else { toast.success('Cut-off saved.'); setCutoffOpen(false); loadScore(); }
+    const { data, error } = await db.from('call_campaigns').update({ cutoff_at: iso }).eq('key', score.campaign.key).eq('is_active', true).select('cutoff_at');
+    if (error) { toast.error(error.message); return; }
+    if (!data || data.length === 0) { toast.error('Cut-off not saved: no active campaign found for your account.'); return; }
+    setScore((prev) => (prev && prev.campaign ? { ...prev, campaign: { ...prev.campaign, cutoff_at: data[0].cutoff_at } } : prev));
+    toast.success('Cut-off saved.'); setCutoffOpen(false); loadScore();
+  }
+
+  async function setDraft(d: Draft, status: 'approved' | 'rejected') {
+    const patch: Record<string, unknown> = { status };
+    if (status === 'approved') patch.approved_via = 'page';
+    const { error } = await db.from('call_list_drafts').update(patch).eq('id', d.id);
+    if (error) toast.error(error.message); else { toast.success(status === 'approved' ? 'Draft approved. Nothing was sent.' : 'Draft rejected.'); load(); }
+  }
+
+  async function copyDraft(d: Draft) {
+    try { await navigator.clipboard.writeText(d.body); toast.success('Draft copied.'); } catch { toast.error('Copy failed.'); }
+  }
+
+  function toggleMembershipDefault(v: boolean) {
+    setMembershipDefault(v);
+    try { localStorage.setItem(MEMBERSHIP_DEFAULT_KEY, v ? '1' : '0'); } catch { /* noop */ }
+    setMembershipOnly(v);
+  }
+
+  async function exportPdf() {
+    setExporting(true);
+    try {
+      const [{ jsPDF }, { default: autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
+      const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+      const M = 36;
+      const stamp = new Date().toLocaleString('en-ZA', { timeZone: 'Africa/Johannesburg' });
+      const tiers: Tier[] = ['hot', 'lukewarm', 'cold'];
+      for (let ti = 0; ti < tiers.length; ti++) {
+        const t = tiers[ti];
+        let q = applyFilters(db.from('call_list_cards').select('id,name,first_name,last_name,phone,phone_normalized,tier_reason')).eq('tier', t);
+        if (t === 'hot' && membershipOnly) q = q.eq('membership_interest', true);
+        const { data, error } = await q.order('tier_rank', { ascending: true }).range(0, 999);
+        if (error) throw error;
+        const rows = (data || []) as Card[];
+        if (ti > 0) doc.addPage();
+        doc.setFont('helvetica', 'bold').setFontSize(16).setTextColor(0);
+        doc.text(`Calling sheet — ${TIER_LABELS[t].label} (Tier ${TIER_LABELS[t].letter})`, M, 50);
+        doc.setFont('helvetica', 'normal').setFontSize(9).setTextColor(110);
+        doc.text(`${score?.campaign?.name || 'Call Sheet'} · ${rows.length} people · ${stamp} SAST${t === 'hot' && membershipOnly ? ' · Membership inquiries only' : ''}`, M, 66);
+        doc.setTextColor(0);
+        autoTable(doc, {
+          startY: 80,
+          head: [['#', 'Name', 'Phone', 'Reason', 'Notes']],
+          body: rows.map((r, i) => [String(i + 1), displayName(r).slice(0, 30), r.phone || r.phone_normalized || '—', (r.tier_reason || '').slice(0, 110), '']),
+          styles: { fontSize: 8, cellPadding: 3, valign: 'top', minCellHeight: 34 },
+          columnStyles: { 0: { cellWidth: 22 }, 1: { cellWidth: 100 }, 2: { cellWidth: 82 }, 3: { cellWidth: 170 }, 4: { cellWidth: 'auto' } },
+          headStyles: { fillColor: [30, 41, 59] },
+          margin: { left: M, right: M },
+        });
+      }
+      doc.save(`calling-sheet-${new Date().toISOString().slice(0, 10)}.pdf`);
+    } catch (e) { toast.error('PDF failed: ' + errMsg(e)); } finally { setExporting(false); }
   }
 
   const pace = score ? paceLine(score, now) : null;
@@ -340,6 +410,7 @@ export function CallSheet({ onOpenLeadCallReport }: { onOpenLeadCallReport?: () 
         </div>
         <div className="flex flex-wrap gap-2">
           {onOpenLeadCallReport && <Button variant="outline" size="sm" onClick={onOpenLeadCallReport}><FileText className="h-4 w-4 mr-1" /> Open Lead Call Report</Button>}
+          <Button variant="outline" size="sm" onClick={exportPdf} disabled={exporting}><Download className="h-4 w-4 mr-1" /> {exporting ? 'Building PDF…' : 'Calling sheet PDF'}</Button>
           <Button variant="outline" size="sm" onClick={refreshAll} disabled={loading}><RefreshCw className={`h-4 w-4 mr-1 ${loading ? 'animate-spin' : ''}`} /> Refresh</Button>
         </div>
       </div>
@@ -399,6 +470,16 @@ export function CallSheet({ onOpenLeadCallReport }: { onOpenLeadCallReport?: () 
 
       {/* Filters */}
       <div className="space-y-2">
+        {activeTab === 'hot' && (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 p-2">
+            <button onClick={() => setMembershipOnly((v) => !v)} aria-pressed={membershipOnly}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-semibold transition-colors ${membershipOnly ? 'border-primary bg-primary text-primary-foreground' : 'border-primary/50 text-primary hover:bg-primary/10'}`}>
+              <UserPlus className="h-4 w-4" /> Membership inquiries
+            </button>
+            <span className="text-xs text-muted-foreground flex-1 min-w-0">{membershipOnly ? 'Only people asking to join / register / become a distributor.' : 'Showing all Hot, including buyer intent.'}</span>
+            <label className="flex items-center gap-2 text-xs text-muted-foreground"><Switch checked={membershipDefault} onCheckedChange={toggleMembershipDefault} /> On by default</label>
+          </div>
+        )}
         <div className="flex flex-col sm:flex-row gap-2">
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
@@ -439,6 +520,8 @@ export function CallSheet({ onOpenLeadCallReport }: { onOpenLeadCallReport?: () 
                     {c.lead_type === 'registered' && <span className="rounded-full border border-border px-2 py-0.5 text-[10px] text-muted-foreground">Registered, not activated</span>}
                     {c.follow_up_due && <span className="rounded-full bg-destructive/15 px-2 py-0.5 text-[10px] text-destructive">Follow-up due {c.follow_up_on}</span>}
                     {c.unanswered_inbound && <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] text-primary">Unanswered</span>}
+                    {c.membership_interest && <span className="rounded-full border border-primary/40 px-2 py-0.5 text-[10px] text-primary">Membership</span>}
+                    {drafts.get(c.id)?.length ? <span className="rounded-full bg-accent px-2 py-0.5 text-[10px] text-accent-foreground">Draft</span> : null}
                   </div>
                   {c.tier_reason && <div className="mt-1 text-xs text-muted-foreground break-words">{c.tier_reason}</div>}
                 </div>
@@ -483,6 +566,20 @@ export function CallSheet({ onOpenLeadCallReport }: { onOpenLeadCallReport?: () 
                   </div>
                 )}
               </div>
+
+              {(drafts.get(c.id) || []).map((d) => (
+                <div key={d.id} className="mt-2 rounded-md border border-border bg-secondary/20 p-2 text-xs">
+                  <div className="mb-1 flex items-center gap-2 text-[10px] uppercase text-muted-foreground">
+                    Draft · {d.status === 'approved' ? 'approved' : 'awaiting your review'} · by {d.created_by} · not sent
+                  </div>
+                  <div className="whitespace-pre-wrap break-words text-foreground">{d.body}</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onClick={() => copyDraft(d)}><Copy className="h-3.5 w-3.5 mr-1" />Copy</Button>
+                    {d.status === 'draft' && <Button size="sm" variant="outline" onClick={() => setDraft(d, 'approved')}><Check className="h-3.5 w-3.5 mr-1" />Approve</Button>}
+                    <Button size="sm" variant="ghost" onClick={() => setDraft(d, 'rejected')}><X className="h-3.5 w-3.5 mr-1" />Reject</Button>
+                  </div>
+                </div>
+              ))}
 
               {openBox === c.id
                 ? <CallBox card={c} campaignKey={score?.campaign?.key || null} onSaved={refreshAll} />
