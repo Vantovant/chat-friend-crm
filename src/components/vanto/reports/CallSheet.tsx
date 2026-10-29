@@ -187,8 +187,8 @@ export function CallSheet({ onOpenLeadCallReport }: { onOpenLeadCallReport?: () 
   const [notCalledToday, setNotCalledToday] = useState(false);
   const [includeBuyers, setIncludeBuyers] = useState(false);
   const [registeredOnly, setRegisteredOnly] = useState(false);
-  const [membershipDefault, setMembershipDefault] = useState<boolean>(() => { try { return localStorage.getItem(MEMBERSHIP_DEFAULT_KEY) === '1'; } catch { return false; } });
-  const [membershipOnly, setMembershipOnly] = useState<boolean>(() => { try { return localStorage.getItem(MEMBERSHIP_DEFAULT_KEY) === '1'; } catch { return false; } });
+  const [membershipDefault, setMembershipDefault] = useState<boolean>(() => { try { return localStorage.getItem(MEMBERSHIP_DEFAULT_KEY) !== '0'; } catch { return true; } });
+  const [membershipOnly, setMembershipOnly] = useState<boolean>(() => { try { return localStorage.getItem(MEMBERSHIP_DEFAULT_KEY) !== '0'; } catch { return true; } });
   const [drafts, setDrafts] = useState<Map<string, Draft[]>>(new Map());
   const [exporting, setExporting] = useState(false);
   const [openBox, setOpenBox] = useState<string | null>(null);
