@@ -282,6 +282,13 @@ export type Database = {
             foreignKeyName: "auto_reply_corrections_contact_id_fkey"
             columns: ["contact_id"]
             isOneToOne: false
+            referencedRelation: "call_list_cards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "auto_reply_corrections_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
             referencedRelation: "contacts"
             referencedColumns: ["id"]
           },
@@ -620,6 +627,189 @@ export type Database = {
         }
         Relationships: []
       }
+      call_campaigns: {
+        Row: {
+          blocks: Json
+          created_at: string
+          cutoff_at: string | null
+          ends_at: string
+          id: string
+          is_active: boolean
+          key: string
+          name: string
+          starts_at: string
+          target_agreed: number
+          target_conversations: number
+          target_registrations: number
+          timezone: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          blocks?: Json
+          created_at?: string
+          cutoff_at?: string | null
+          ends_at: string
+          id?: string
+          is_active?: boolean
+          key: string
+          name: string
+          starts_at: string
+          target_agreed?: number
+          target_conversations?: number
+          target_registrations?: number
+          timezone?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          blocks?: Json
+          created_at?: string
+          cutoff_at?: string | null
+          ends_at?: string
+          id?: string
+          is_active?: boolean
+          key?: string
+          name?: string
+          starts_at?: string
+          target_agreed?: number
+          target_conversations?: number
+          target_registrations?: number
+          timezone?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      call_list_calls: {
+        Row: {
+          activity_id: string | null
+          called_at: string
+          campaign_key: string | null
+          channel: string
+          confirmed_under_vanto: boolean | null
+          contact_id: string
+          created_at: string
+          follow_up_on: string | null
+          id: string
+          next_action: string | null
+          note_appended: string | null
+          notes: string | null
+          outcome: string
+          reminder_id: string | null
+          tier_at_call: string | null
+          undo_state: Json
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          activity_id?: string | null
+          called_at?: string
+          campaign_key?: string | null
+          channel?: string
+          confirmed_under_vanto?: boolean | null
+          contact_id: string
+          created_at?: string
+          follow_up_on?: string | null
+          id?: string
+          next_action?: string | null
+          note_appended?: string | null
+          notes?: string | null
+          outcome: string
+          reminder_id?: string | null
+          tier_at_call?: string | null
+          undo_state?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          activity_id?: string | null
+          called_at?: string
+          campaign_key?: string | null
+          channel?: string
+          confirmed_under_vanto?: boolean | null
+          contact_id?: string
+          created_at?: string
+          follow_up_on?: string | null
+          id?: string
+          next_action?: string | null
+          note_appended?: string | null
+          notes?: string | null
+          outcome?: string
+          reminder_id?: string | null
+          tier_at_call?: string | null
+          undo_state?: Json
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_list_calls_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "call_list_cards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_list_calls_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      call_list_overrides: {
+        Row: {
+          contact_id: string
+          created_at: string
+          hidden: boolean
+          hidden_reason: string | null
+          id: string
+          pinned: boolean
+          tier_override: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          contact_id: string
+          created_at?: string
+          hidden?: boolean
+          hidden_reason?: string | null
+          id?: string
+          pinned?: boolean
+          tier_override?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          contact_id?: string
+          created_at?: string
+          hidden?: boolean
+          hidden_reason?: string | null
+          id?: string
+          pinned?: boolean
+          tier_override?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_list_overrides_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "call_list_cards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_list_overrides_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       client_nurture_campaigns: {
         Row: {
           active: boolean
@@ -739,6 +929,13 @@ export type Database = {
             foreignKeyName: "contact_activity_contact_id_fkey"
             columns: ["contact_id"]
             isOneToOne: false
+            referencedRelation: "call_list_cards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_activity_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
             referencedRelation: "contacts"
             referencedColumns: ["id"]
           },
@@ -795,6 +992,13 @@ export type Database = {
             foreignKeyName: "contact_tag_proposals_contact_id_fkey"
             columns: ["contact_id"]
             isOneToOne: false
+            referencedRelation: "call_list_cards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contact_tag_proposals_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
             referencedRelation: "contacts"
             referencedColumns: ["id"]
           },
@@ -841,6 +1045,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "contact_tags_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "call_list_cards"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "contact_tags_contact_id_fkey"
             columns: ["contact_id"]
@@ -1109,6 +1320,13 @@ export type Database = {
             foreignKeyName: "conversations_contact_id_fkey"
             columns: ["contact_id"]
             isOneToOne: false
+            referencedRelation: "call_list_cards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conversations_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
             referencedRelation: "contacts"
             referencedColumns: ["id"]
           },
@@ -1242,6 +1460,13 @@ export type Database = {
           status?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "demographics_recovery_phone_locks_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "call_list_cards"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "demographics_recovery_phone_locks_contact_id_fkey"
             columns: ["contact_id"]
@@ -2632,6 +2857,13 @@ export type Database = {
             foreignKeyName: "message_limits_contact_id_fkey"
             columns: ["contact_id"]
             isOneToOne: true
+            referencedRelation: "call_list_cards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_limits_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: true
             referencedRelation: "contacts"
             referencedColumns: ["id"]
           },
@@ -3269,6 +3501,13 @@ export type Database = {
           touch_number?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "prospect_invite_touches_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "call_list_cards"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "prospect_invite_touches_contact_id_fkey"
             columns: ["contact_id"]
@@ -4569,9 +4808,52 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      call_list_cards: {
+        Row: {
+          called_today: boolean | null
+          city: string | null
+          exclusion_reason: string | null
+          first_inquiry: string | null
+          first_name: string | null
+          follow_up_due: boolean | null
+          follow_up_on: string | null
+          has_summary: boolean | null
+          hidden: boolean | null
+          id: string | null
+          intent_reason: string | null
+          interest: string | null
+          last_call_at: string | null
+          last_call_outcome: string | null
+          last_inbound_at: string | null
+          last_inbound_preview: string | null
+          last_name: string | null
+          last_outbound_at: string | null
+          lead_type: string | null
+          msg_count: number | null
+          name: string | null
+          notes: string | null
+          phone: string | null
+          phone_normalized: string | null
+          pinned: boolean | null
+          primary_intent: string | null
+          prospect_verified: boolean | null
+          province: string | null
+          signals: Json | null
+          source_tag: string | null
+          temperature: string | null
+          tier: string | null
+          tier_rank: number | null
+          tier_reason: string | null
+          unanswered_inbound: boolean | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
+      call_campaign_scorecard: {
+        Args: { _campaign_key?: string }
+        Returns: Json
+      }
       can_admin_conversation: {
         Args: { _conversation_id: string }
         Returns: boolean
@@ -4604,6 +4886,20 @@ export type Database = {
         Args: { _assigned_to: string; _contact_id: string; _created_by: string }
         Returns: boolean
       }
+      log_call_sheet_call: {
+        Args: {
+          _campaign_key?: string
+          _channel?: string
+          _confirmed_under_vanto?: boolean
+          _contact_id: string
+          _follow_up_on?: string
+          _next_action?: string
+          _notes?: string
+          _outcome: string
+          _source?: string
+        }
+        Returns: Json
+      }
       mark_demographics_recovery_phone_sent: {
         Args: { p_phone_normalized: string; p_provider_message_id?: string }
         Returns: undefined
@@ -4635,6 +4931,7 @@ export type Database = {
           relevance: number
         }[]
       }
+      undo_call_sheet_call: { Args: { _call_id: string }; Returns: Json }
     }
     Enums: {
       comm_status: "active" | "closed" | "pending"
