@@ -1,13 +1,21 @@
 import { useEffect, useState } from 'react';
-import { FileText, Phone, BarChart3, Users, ArrowLeft, Link2 } from 'lucide-react';
+import { FileText, Phone, BarChart3, Users, ArrowLeft, Link2, ListChecks } from 'lucide-react';
 import { LeadCallReport } from './reports/LeadCallReport';
 import { IntentBackfillReview } from './reports/IntentBackfillReview';
+import { CallSheet } from './reports/CallSheet';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 
-type ReportKey = 'lead-call' | 'intent-backfill' | null;
+type ReportKey = 'call-sheet' | 'lead-call' | 'intent-backfill' | null;
 
 const reports = [
+  {
+    key: 'call-sheet' as const,
+    title: 'Call Sheet',
+    description: 'Live Hot / Lukewarm / Cold calling list with a call log, follow-ups and the weekend scorecard. Works alongside the Lead Call Report.',
+    icon: ListChecks,
+    available: true,
+  },
   {
     key: 'lead-call' as const,
     title: 'Lead Call Report',
@@ -41,13 +49,24 @@ const reports = [
 export function ReportsModule() {
   const [active, setActive] = useState<ReportKey>(null);
 
+  if (active === 'call-sheet') {
+    return (
+      <div className="h-full overflow-y-auto overflow-x-hidden p-3 md:p-6">
+        <Button variant="ghost" size="sm" onClick={() => setActive(null)} className="mb-3">
+          <ArrowLeft className="h-4 w-4 mr-1" /> Back to Reports
+        </Button>
+        <CallSheet onOpenLeadCallReport={() => setActive('lead-call')} />
+      </div>
+    );
+  }
+
   if (active === 'lead-call') {
     return (
       <div className="h-full overflow-y-auto p-4 md:p-6">
         <Button variant="ghost" size="sm" onClick={() => setActive(null)} className="mb-3">
           <ArrowLeft className="h-4 w-4 mr-1" /> Back to Reports
         </Button>
-        <LeadCallReport />
+        <LeadCallReport onOpenCallSheet={() => setActive('call-sheet')} />
       </div>
     );
   }
