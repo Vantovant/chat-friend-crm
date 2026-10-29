@@ -12,7 +12,7 @@
   "mcp": {
     "server": {
       "name": "get-well-hub",
-      "version": "1.15.0",
+      "version": "1.16.0",
       "title": "Get Well Hub"
     },
     "tools": [
@@ -1881,6 +1881,10 @@
               "type": "string",
               "description": "Match on name or phone."
             },
+            "membership_only": {
+              "type": "boolean",
+              "description": "Only membership inquiries: intent:distributor, an asked_membership signal, or an inbound message about joining/registering/membership/becoming a distributor."
+            },
             "limit": {
               "type": "integer",
               "minimum": 1,
@@ -2096,6 +2100,394 @@
             "campaign_key": {
               "type": "string",
               "description": "Default: the active campaign."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "set_call_tier",
+        "title": "Set a Call Sheet tier override",
+        "description": "WRITES: sets or clears a Call Sheet override for one contact — tier_override (hot/lukewarm/cold, or null for automatic), pinned, and hidden with hidden_reason. Only touches the Call Sheet override row; never edits contacts.temperature, do-not-contact, opt-outs or consent, and never sends anything.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "contact_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Contact id."
+            },
+            "tier_override": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "hot",
+                    "lukewarm",
+                    "cold"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Tier to force; null = back to automatic; omit = unchanged."
+            },
+            "pinned": {
+              "type": "boolean",
+              "description": "Pin to the top of its tab."
+            },
+            "hidden": {
+              "type": "boolean",
+              "description": "Hide from the sheet (shows under 'Not on the sheet')."
+            },
+            "hidden_reason": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Why it is hidden."
+            }
+          },
+          "required": [
+            "contact_id"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "add_call_signals",
+        "title": "Add Call Sheet signals (bulk)",
+        "description": "WRITES: adds up to 200 buying/joining signals that lift people on the Call Sheet (asked_membership / manual_hot / referred_by_leader → Hot; attended_presentation / zoom_registered / opened_email / clicked_link → Lukewarm when recent, Cold when older; registered_elsewhere removes them from the sheet as 'Already registered (Get Well Grow)'). Matches by phone_normalized first, then contact_id. Never creates contacts: rows that match nobody come back in `unmatched`. Idempotent: re-running the same rows adds nothing new.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "rows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "phone_normalized": {
+                    "type": "string",
+                    "description": "E.164 phone, e.g. +27821234567. Matched first."
+                  },
+                  "contact_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Contact id, used when no phone is given or the phone doesn't match."
+                  },
+                  "signal_type": {
+                    "type": "string",
+                    "enum": [
+                      "asked_membership",
+                      "attended_presentation",
+                      "zoom_registered",
+                      "opened_email",
+                      "clicked_link",
+                      "referred_by_leader",
+                      "manual_hot",
+                      "registered_elsewhere",
+                      "other"
+                    ]
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "hub",
+                      "grow",
+                      "mail",
+                      "manual"
+                    ]
+                  },
+                  "occurred_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "ISO 8601 time the signal happened."
+                  },
+                  "detail": {
+                    "type": "string",
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "signal_type",
+                  "source",
+                  "occurred_at"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 200
+            }
+          },
+          "required": [
+            "rows"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "save_message_drafts",
+        "title": "Save Call Sheet message drafts (bulk)",
+        "description": "WRITES: saves up to 100 message drafts for Call Sheet contacts with status 'draft' (created_by claude). Nothing is sent. Vanto reviews them on the Call Sheet page (Copy / Approve / Reject). Drafts must use supports-language only: no disease or cure claims, no income promises, and never repeat health details a prospect shared.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "drafts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "contact_id": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "body": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  },
+                  "tier": {
+                    "type": "string",
+                    "enum": [
+                      "hot",
+                      "lukewarm",
+                      "cold"
+                    ]
+                  },
+                  "campaign_key": {
+                    "type": "string",
+                    "description": "Default: the active campaign."
+                  }
+                },
+                "required": [
+                  "contact_id",
+                  "body"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          "required": [
+            "drafts"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_message_drafts",
+        "title": "List Call Sheet message drafts",
+        "description": "Read Call Sheet message drafts (newest first), optionally filtered by status, contact or campaign. Never sends anything.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "draft",
+                "approved",
+                "rejected",
+                "sent_by_vanto"
+              ]
+            },
+            "contact_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "campaign_key": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "description": "Default 50."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "set_draft_status",
+        "title": "Set a message draft's status",
+        "description": "WRITES: sets one Call Sheet draft to approved, rejected or sent_by_vanto (sent_by_vanto only records that Vanto sent it himself; this tool sends nothing). Approval needs Vanto's explicit instruction in this conversation: pass explicit_user_instruction: true only when Vanto has clearly said to approve this exact draft. Never approve on your own judgement.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "draft_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "approved",
+                "rejected",
+                "sent_by_vanto"
+              ]
+            },
+            "explicit_user_instruction": {
+              "type": "boolean",
+              "description": "Required true for approved: Vanto explicitly asked to approve this draft."
+            }
+          },
+          "required": [
+            "draft_id",
+            "status"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_call_campaign",
+        "title": "Get a calling campaign's settings",
+        "description": "Read a calling campaign's settings: targets, time blocks, cut-off and whether it is active. Default: the active campaign.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "campaign_key": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "set_call_campaign",
+        "title": "Change a calling campaign's settings",
+        "description": "WRITES: updates a calling campaign's targets, time blocks (SAST date/start/end/tier), cut-off (ISO 8601) and/or is_active. Default: the active campaign. Only changes the campaign settings; never sends anything.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "campaign_key": {
+              "type": "string"
+            },
+            "targets": {
+              "type": "object",
+              "properties": {
+                "conversations": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "agreed": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "registrations": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            },
+            "blocks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "date": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  "start": {
+                    "type": "string",
+                    "pattern": "^\\d{2}:\\d{2}$"
+                  },
+                  "end": {
+                    "type": "string",
+                    "pattern": "^\\d{2}:\\d{2}$"
+                  },
+                  "label": {
+                    "type": "string",
+                    "maxLength": 80
+                  },
+                  "tier": {
+                    "type": "string",
+                    "enum": [
+                      "hot",
+                      "lukewarm",
+                      "cold"
+                    ]
+                  }
+                },
+                "required": [
+                  "date",
+                  "start",
+                  "label"
+                ],
+                "additionalProperties": false
+              },
+              "maxItems": 50,
+              "description": "Replaces the whole block list."
+            },
+            "cutoff_at": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Leaderboard cut-off; null clears it."
+            },
+            "is_active": {
+              "type": "boolean"
             }
           },
           "additionalProperties": false,
