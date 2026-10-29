@@ -10,6 +10,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Download, Printer, RefreshCw, Star, Ph
 import { toast } from 'sonner';
 import { LEAD_TYPES, type LeadType } from '@/lib/vanto-data';
 import { SuggestedTasksPanel, type SuggestedTaskInput } from '@/components/vanto/plan/SuggestedTasksPanel';
+import { loadContactThreads, type ThreadMsg as SharedThreadMsg } from '@/lib/call-sheet/threads';
 
 // Tight, word-boundary distributor intent keywords.
 const DISTRIBUTOR_PATTERNS: RegExp[] = [
@@ -58,12 +59,7 @@ type Contact = {
   intent_reason?: string | null;
 };
 
-type ThreadMsg = {
-  ts: string;
-  direction: 'in' | 'out';
-  channel: 'twilio' | 'maytapi';
-  body: string;
-};
+type ThreadMsg = SharedThreadMsg;
 
 type Summary = {
   intent: string;
@@ -86,9 +82,6 @@ type Row = Contact & {
 type SortDir = 'none' | 'asc' | 'desc';
 type SortKey = 'msgs' | 'firstInquiry' | 'lastMessage';
 
-type ConversationRow = { id: string; contact_id: string | null };
-type TwilioMessageRow = { conversation_id: string; content: string | null; is_outbound: boolean | null; created_at: string };
-type MaytapiMessageRow = { contact_id: string | null; phone_e164: string | null; direction: string | null; body: string | null; received_at: string };
 type CachedSummaryRow = { contact_id: string; summary: Summary };
 
 function getErrorMessage(error: unknown): string {
@@ -131,7 +124,7 @@ function SortButton({ label, active, dir, onClick, align = 'left' }: { label: st
 }
 
 
-export function LeadCallReport() {
+export function LeadCallReport({ onOpenCallSheet }: { onOpenCallSheet?: () => void } = {}) {
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<Row[]>([]);
   const [onlyDistributors, setOnlyDistributors] = useState(false);
@@ -325,54 +318,7 @@ export function LeadCallReport() {
       const all = (contacts || []) as Contact[];
       if (all.length === 0) { setRows([]); return; }
 
-      const ids = all.map((c) => c.id);
-      const phones = all.map((c) => c.phone_normalized).filter(Boolean) as string[];
-
-      const { data: convs } = await supabase
-        .from('conversations')
-        .select('id, contact_id')
-        .in('contact_id', ids);
-      const convIdToContact = new Map<string, string>();
-      const convIds: string[] = [];
-      ((convs || []) as ConversationRow[]).forEach((c) => {
-        if (!c.contact_id) return;
-        convIdToContact.set(c.id, c.contact_id);
-        convIds.push(c.id);
-      });
-
-      const twilioByContact = new Map<string, ThreadMsg[]>();
-      if (convIds.length > 0) {
-        const { data: msgs } = await supabase
-          .from('messages')
-          .select('conversation_id, content, is_outbound, created_at')
-          .in('conversation_id', convIds)
-          .order('created_at', { ascending: true })
-          .limit(5000);
-        ((msgs || []) as TwilioMessageRow[]).forEach((m) => {
-          const cid = convIdToContact.get(m.conversation_id);
-          if (!cid) return;
-          const arr = twilioByContact.get(cid) || [];
-          arr.push({ ts: m.created_at, direction: m.is_outbound ? 'out' : 'in', channel: 'twilio', body: m.content || '' });
-          twilioByContact.set(cid, arr);
-        });
-      }
-
-      const maytapiByContact = new Map<string, ThreadMsg[]>();
-      const { data: mMsgs } = await supabase
-        .from('maytapi_messages')
-        .select('contact_id, phone_e164, direction, body, received_at')
-        .or(`contact_id.in.(${ids.join(',')}),phone_e164.in.(${phones.map((p) => `"${p}"`).join(',') || '""'})`)
-        .order('received_at', { ascending: true })
-        .limit(5000);
-      const phoneToContact = new Map<string, string>();
-      all.forEach((c) => { if (c.phone_normalized) phoneToContact.set(c.phone_normalized, c.id); });
-      ((mMsgs || []) as MaytapiMessageRow[]).forEach((m) => {
-        const cid = m.contact_id || (m.phone_e164 ? phoneToContact.get(m.phone_e164) : null);
-        if (!cid) return;
-        const arr = maytapiByContact.get(cid) || [];
-        arr.push({ ts: m.received_at, direction: m.direction === 'outbound' ? 'out' : 'in', channel: 'maytapi', body: m.body || '' });
-        maytapiByContact.set(cid, arr);
-      });
+      const { twilio: twilioByContact, maytapi: maytapiByContact } = await loadContactThreads(supabase, all);
 
       const composed: (Row & { _hasTwilio: boolean })[] = all
         .map((c) => {
@@ -701,6 +647,11 @@ export function LeadCallReport() {
             <Switch checked={compactPdf} onCheckedChange={setCompactPdf} />
             Compact PDF
           </label>
+          {onOpenCallSheet && (
+            <Button variant="outline" size="sm" onClick={onOpenCallSheet}>
+              <Phone className="h-4 w-4 mr-1" /> Open Call Sheet
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
             <RefreshCw className={`h-4 w-4 mr-1 ${loading ? 'animate-spin' : ''}`} /> Refresh
           </Button>
