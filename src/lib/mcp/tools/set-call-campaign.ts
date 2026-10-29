@@ -6,10 +6,10 @@ import { CAMPAIGN_COLS, campaignToJson, type CampaignRow } from "./get-call-camp
 const Block = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   start: z.string().regex(/^\d{2}:\d{2}$/),
-  end: z.string().regex(/^\d{2}:\d{2}$/),
-  tier: z.enum(["hot", "lukewarm", "cold"]),
-  label: z.string().max(80).optional(),
-}).passthrough();
+  end: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+  label: z.string().max(80),
+  tier: z.enum(["hot", "lukewarm", "cold"]).optional(),
+});
 
 export default defineTool({
   name: "set_call_campaign",

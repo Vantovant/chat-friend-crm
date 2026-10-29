@@ -14,10 +14,11 @@ export default defineTool({
     not_called_today: z.boolean().optional().describe("Skip people already called today (SAST)."),
     include_buyers: z.boolean().optional().describe("Also include buyer/VIP contacts (default false)."),
     search: z.string().optional().describe("Match on name or phone."),
+    membership_only: z.boolean().optional().describe("Only membership inquiries: intent:distributor, an asked_membership signal, or an inbound message about joining/registering/membership/becoming a distributor."),
     limit: z.number().int().min(1).max(100).optional().describe("Max cards (default 25, max 100)."),
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-  handler: async ({ tier, unanswered_only, not_called_today, include_buyers, search, limit }, ctx) => {
+  handler: async ({ tier, unanswered_only, not_called_today, include_buyers, search, membership_only, limit }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
     const t = tier ?? "hot";
@@ -31,6 +32,7 @@ export default defineTool({
     else q = q.eq("tier", t).order("tier_rank", { ascending: true });
     if (unanswered_only) q = q.eq("unanswered_inbound", true);
     if (not_called_today) q = q.eq("called_today", false);
+    if (membership_only) q = q.eq("membership_interest", true);
     const s = (search ?? "").trim().replace(/[,()"]/g, " ");
     if (s) {
       const d = s.replace(/\D/g, "");
