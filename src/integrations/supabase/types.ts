@@ -759,6 +759,66 @@ export type Database = {
           },
         ]
       }
+      call_list_drafts: {
+        Row: {
+          approved_at: string | null
+          approved_via: string | null
+          body: string
+          campaign_key: string | null
+          contact_id: string
+          created_at: string
+          created_by: string
+          id: string
+          status: string
+          tier: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_via?: string | null
+          body: string
+          campaign_key?: string | null
+          contact_id: string
+          created_at?: string
+          created_by?: string
+          id?: string
+          status?: string
+          tier?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          approved_at?: string | null
+          approved_via?: string | null
+          body?: string
+          campaign_key?: string | null
+          contact_id?: string
+          created_at?: string
+          created_by?: string
+          id?: string
+          status?: string
+          tier?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_list_drafts_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "call_list_cards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_list_drafts_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       call_list_overrides: {
         Row: {
           contact_id: string
@@ -803,6 +863,60 @@ export type Database = {
           },
           {
             foreignKeyName: "call_list_overrides_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      call_list_signals: {
+        Row: {
+          contact_id: string | null
+          created_at: string
+          detail: string | null
+          id: string
+          occurred_at: string
+          phone_normalized: string | null
+          signal_type: string
+          source: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          contact_id?: string | null
+          created_at?: string
+          detail?: string | null
+          id?: string
+          occurred_at?: string
+          phone_normalized?: string | null
+          signal_type: string
+          source?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          contact_id?: string | null
+          created_at?: string
+          detail?: string | null
+          id?: string
+          occurred_at?: string
+          phone_normalized?: string | null
+          signal_type?: string
+          source?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_list_signals_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "call_list_cards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "call_list_signals_contact_id_fkey"
             columns: ["contact_id"]
             isOneToOne: false
             referencedRelation: "contacts"
@@ -4829,6 +4943,7 @@ export type Database = {
           last_name: string | null
           last_outbound_at: string | null
           lead_type: string | null
+          membership_interest: boolean | null
           msg_count: number | null
           name: string | null
           notes: string | null

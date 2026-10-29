@@ -3030,10 +3030,11 @@ var list_call_sheet_default = defineTool52({
     not_called_today: z46.boolean().optional().describe("Skip people already called today (SAST)."),
     include_buyers: z46.boolean().optional().describe("Also include buyer/VIP contacts (default false)."),
     search: z46.string().optional().describe("Match on name or phone."),
+    membership_only: z46.boolean().optional().describe("Only membership inquiries: intent:distributor, an asked_membership signal, or an inbound message about joining/registering/membership/becoming a distributor."),
     limit: z46.number().int().min(1).max(100).optional().describe("Max cards (default 25, max 100).")
   },
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
-  handler: async ({ tier, unanswered_only, not_called_today, include_buyers, search, limit }, ctx) => {
+  handler: async ({ tier, unanswered_only, not_called_today, include_buyers, search, membership_only, limit }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
     const t = tier ?? "hot";
@@ -3044,6 +3045,7 @@ var list_call_sheet_default = defineTool52({
     else q = q.eq("tier", t).order("tier_rank", { ascending: true });
     if (unanswered_only) q = q.eq("unanswered_inbound", true);
     if (not_called_today) q = q.eq("called_today", false);
+    if (membership_only) q = q.eq("membership_interest", true);
     const s = (search ?? "").trim().replace(/[,()"]/g, " ");
     if (s) {
       const d = s.replace(/\D/g, "");
@@ -3329,13 +3331,328 @@ var get_campaign_scorecard_default = defineTool57({
   }
 });
 
+// src/lib/mcp/tools/set-call-tier.ts
+import { defineTool as defineTool58 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z52 } from "npm:zod@^3.25.76";
+var set_call_tier_default = defineTool58({
+  name: "set_call_tier",
+  title: "Set a Call Sheet tier override",
+  description: "WRITES: sets or clears a Call Sheet override for one contact \u2014 tier_override (hot/lukewarm/cold, or null for automatic), pinned, and hidden with hidden_reason. Only touches the Call Sheet override row; never edits contacts.temperature, do-not-contact, opt-outs or consent, and never sends anything.",
+  inputSchema: {
+    contact_id: z52.string().uuid().describe("Contact id."),
+    tier_override: z52.enum(["hot", "lukewarm", "cold"]).nullable().optional().describe("Tier to force; null = back to automatic; omit = unchanged."),
+    pinned: z52.boolean().optional().describe("Pin to the top of its tab."),
+    hidden: z52.boolean().optional().describe("Hide from the sheet (shows under 'Not on the sheet')."),
+    hidden_reason: z52.string().max(200).optional().describe("Why it is hidden.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  handler: async ({ contact_id, tier_override, pinned, hidden, hidden_reason }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const patch = { contact_id };
+    if (tier_override !== void 0) patch.tier_override = tier_override;
+    if (pinned !== void 0) patch.pinned = pinned;
+    if (hidden !== void 0) {
+      patch.hidden = hidden;
+      patch.hidden_reason = hidden ? hidden_reason ?? "hidden from sheet" : null;
+    } else if (hidden_reason !== void 0) patch.hidden_reason = hidden_reason;
+    if (Object.keys(patch).length === 1) return { content: [{ type: "text", text: "Nothing to change: pass tier_override, pinned or hidden." }], isError: true };
+    const { data: visible } = await supabase.from("contacts").select("id").eq("id", contact_id).maybeSingle();
+    if (!visible) return { content: [{ type: "text", text: "Contact not found or not visible to you." }], isError: true };
+    const { data, error } = await supabase.from("call_list_overrides").upsert(patch, { onConflict: "user_id,contact_id" }).select("contact_id, tier_override, pinned, hidden, hidden_reason").single();
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const result = { override: data };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+  }
+});
+
+// src/lib/mcp/tools/add-call-signals.ts
+import { defineTool as defineTool59 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z53 } from "npm:zod@^3.25.76";
+var SIGNAL_TYPES = [
+  "asked_membership",
+  "attended_presentation",
+  "zoom_registered",
+  "opened_email",
+  "clicked_link",
+  "referred_by_leader",
+  "manual_hot",
+  "registered_elsewhere",
+  "other"
+];
+var Row = z53.object({
+  phone_normalized: z53.string().optional().describe("E.164 phone, e.g. +27821234567. Matched first."),
+  contact_id: z53.string().uuid().optional().describe("Contact id, used when no phone is given or the phone doesn't match."),
+  signal_type: z53.enum(SIGNAL_TYPES),
+  source: z53.enum(["hub", "grow", "mail", "manual"]),
+  occurred_at: z53.string().datetime({ offset: true }).describe("ISO 8601 time the signal happened."),
+  detail: z53.string().max(500).optional()
+});
+function normPhone(p) {
+  if (!p) return null;
+  let d = p.replace(/\D/g, "");
+  if (d.startsWith("0") && d.length === 10) d = "27" + d.slice(1);
+  return d.length >= 11 ? "+" + d : null;
+}
+var add_call_signals_default = defineTool59({
+  name: "add_call_signals",
+  title: "Add Call Sheet signals (bulk)",
+  description: "WRITES: adds up to 200 buying/joining signals that lift people on the Call Sheet (asked_membership / manual_hot / referred_by_leader \u2192 Hot; attended_presentation / zoom_registered / opened_email / clicked_link \u2192 Lukewarm when recent, Cold when older; registered_elsewhere removes them from the sheet as 'Already registered (Get Well Grow)'). Matches by phone_normalized first, then contact_id. Never creates contacts: rows that match nobody come back in `unmatched`. Idempotent: re-running the same rows adds nothing new.",
+  inputSchema: { rows: z53.array(Row).min(1).max(200) },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  handler: async ({ rows }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const phones = [...new Set(rows.map((r) => normPhone(r.phone_normalized)).filter((p) => !!p))];
+    const ids = [...new Set(rows.map((r) => r.contact_id).filter((x) => !!x))];
+    const byPhone = /* @__PURE__ */ new Map();
+    const known = /* @__PURE__ */ new Set();
+    for (let i = 0; i < phones.length; i += 100) {
+      const { data } = await supabase.from("contacts").select("id, phone_normalized, created_at").in("phone_normalized", phones.slice(i, i + 100)).eq("is_deleted", false).order("created_at", { ascending: true });
+      for (const c of data ?? []) if (!byPhone.has(c.phone_normalized)) byPhone.set(c.phone_normalized, c.id);
+    }
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data } = await supabase.from("contacts").select("id").in("id", ids.slice(i, i + 100)).eq("is_deleted", false);
+      for (const c of data ?? []) known.add(c.id);
+    }
+    const insert = [];
+    const unmatched = [];
+    const seen = /* @__PURE__ */ new Set();
+    rows.forEach((r, index) => {
+      const phone = normPhone(r.phone_normalized);
+      const cid = phone && byPhone.get(phone) || (r.contact_id && known.has(r.contact_id) ? r.contact_id : null);
+      if (!cid) {
+        unmatched.push({ index, phone_normalized: phone ?? r.phone_normalized ?? null, contact_id: r.contact_id ?? null, signal_type: r.signal_type });
+        return;
+      }
+      const occurred = new Date(r.occurred_at).toISOString();
+      const k = `${cid}|${r.signal_type}|${occurred}`;
+      if (seen.has(k)) return;
+      seen.add(k);
+      insert.push({ contact_id: cid, phone_normalized: phone, signal_type: r.signal_type, source: r.source, occurred_at: occurred, detail: r.detail ?? null });
+    });
+    let added = 0;
+    if (insert.length) {
+      const { data, error } = await supabase.from("call_list_signals").upsert(insert, { onConflict: "user_id,contact_id,signal_type,occurred_at", ignoreDuplicates: true }).select("id");
+      if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+      added = (data ?? []).length;
+    }
+    const result = { received: rows.length, matched: insert.length, added, already_present: insert.length - added, unmatched };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+  }
+});
+
+// src/lib/mcp/tools/save-message-drafts.ts
+import { defineTool as defineTool60 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z54 } from "npm:zod@^3.25.76";
+var save_message_drafts_default = defineTool60({
+  name: "save_message_drafts",
+  title: "Save Call Sheet message drafts (bulk)",
+  description: "WRITES: saves up to 100 message drafts for Call Sheet contacts with status 'draft' (created_by claude). Nothing is sent. Vanto reviews them on the Call Sheet page (Copy / Approve / Reject). Drafts must use supports-language only: no disease or cure claims, no income promises, and never repeat health details a prospect shared.",
+  inputSchema: {
+    drafts: z54.array(z54.object({
+      contact_id: z54.string().uuid(),
+      body: z54.string().min(1).max(2e3),
+      tier: z54.enum(["hot", "lukewarm", "cold"]).optional(),
+      campaign_key: z54.string().optional().describe("Default: the active campaign.")
+    })).min(1).max(100)
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  handler: async ({ drafts }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const ids = [...new Set(drafts.map((d) => d.contact_id))];
+    const visible = /* @__PURE__ */ new Set();
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data } = await supabase.from("contacts").select("id").in("id", ids.slice(i, i + 100)).eq("is_deleted", false);
+      for (const c of data ?? []) visible.add(c.id);
+    }
+    const { data: camp } = await supabase.from("call_campaigns").select("key").eq("is_active", true).order("starts_at", { ascending: false }).limit(1).maybeSingle();
+    const rows = drafts.filter((d) => visible.has(d.contact_id)).map((d) => ({
+      contact_id: d.contact_id,
+      body: d.body,
+      tier: d.tier ?? null,
+      campaign_key: d.campaign_key ?? camp?.key ?? null,
+      status: "draft",
+      created_by: "claude"
+    }));
+    const skipped = drafts.filter((d) => !visible.has(d.contact_id)).map((d) => d.contact_id);
+    let saved = [];
+    if (rows.length) {
+      const { data, error } = await supabase.from("call_list_drafts").insert(rows).select("id, contact_id");
+      if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+      saved = data ?? [];
+    }
+    const result = { saved: saved.length, drafts: saved, skipped_not_visible: skipped, sent: 0 };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+  }
+});
+
+// src/lib/mcp/tools/list-message-drafts.ts
+import { defineTool as defineTool61 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z55 } from "npm:zod@^3.25.76";
+var list_message_drafts_default = defineTool61({
+  name: "list_message_drafts",
+  title: "List Call Sheet message drafts",
+  description: "Read Call Sheet message drafts (newest first), optionally filtered by status, contact or campaign. Never sends anything.",
+  inputSchema: {
+    status: z55.enum(["draft", "approved", "rejected", "sent_by_vanto"]).optional(),
+    contact_id: z55.string().uuid().optional(),
+    campaign_key: z55.string().optional(),
+    limit: z55.number().int().min(1).max(200).optional().describe("Default 50.")
+  },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ status, contact_id, campaign_key, limit }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    let q = supabase.from("call_list_drafts").select("id, contact_id, campaign_key, tier, body, status, created_by, approved_at, approved_via, created_at, updated_at", { count: "exact" });
+    if (status) q = q.eq("status", status);
+    if (contact_id) q = q.eq("contact_id", contact_id);
+    if (campaign_key) q = q.eq("campaign_key", campaign_key);
+    const { data, error, count } = await q.order("created_at", { ascending: false }).range(0, (limit ?? 50) - 1);
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    const drafts = (data ?? []).map((d) => ({
+      id: d.id,
+      contact_id: d.contact_id,
+      campaign_key: d.campaign_key,
+      tier: d.tier,
+      body: d.body,
+      status: d.status,
+      created_by: d.created_by,
+      approved_at: d.approved_at,
+      approved_via: d.approved_via,
+      created_at: d.created_at,
+      updated_at: d.updated_at
+    }));
+    const result = { total: count ?? drafts.length, count: drafts.length, drafts };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+  }
+});
+
+// src/lib/mcp/tools/set-draft-status.ts
+import { defineTool as defineTool62 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z56 } from "npm:zod@^3.25.76";
+var set_draft_status_default = defineTool62({
+  name: "set_draft_status",
+  title: "Set a message draft's status",
+  description: "WRITES: sets one Call Sheet draft to approved, rejected or sent_by_vanto (sent_by_vanto only records that Vanto sent it himself; this tool sends nothing). Approval needs Vanto's explicit instruction in this conversation: pass explicit_user_instruction: true only when Vanto has clearly said to approve this exact draft. Never approve on your own judgement.",
+  inputSchema: {
+    draft_id: z56.string().uuid(),
+    status: z56.enum(["approved", "rejected", "sent_by_vanto"]),
+    explicit_user_instruction: z56.boolean().optional().describe("Required true for approved: Vanto explicitly asked to approve this draft.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  handler: async ({ draft_id, status, explicit_user_instruction }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    if (status === "approved" && explicit_user_instruction !== true) {
+      return { content: [{ type: "text", text: "Refused: approving a draft needs Vanto's explicit instruction (explicit_user_instruction: true)." }], isError: true };
+    }
+    const supabase = supabaseForUser(ctx);
+    const patch = { status };
+    if (status === "approved") patch.approved_via = "connector";
+    const { data, error } = await supabase.from("call_list_drafts").update(patch).eq("id", draft_id).select("id, contact_id, status, approved_at, approved_via").maybeSingle();
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    if (!data) return { content: [{ type: "text", text: "Draft not found." }], isError: true };
+    const result = { draft: data, sent: false };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+  }
+});
+
+// src/lib/mcp/tools/get-call-campaign.ts
+import { defineTool as defineTool63 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z57 } from "npm:zod@^3.25.76";
+var CAMPAIGN_COLS = "key, name, starts_at, ends_at, cutoff_at, timezone, target_conversations, target_agreed, target_registrations, blocks, is_active, updated_at";
+function campaignToJson(c) {
+  return {
+    key: c.key,
+    name: c.name,
+    starts_at: c.starts_at,
+    ends_at: c.ends_at,
+    cutoff_at: c.cutoff_at,
+    timezone: c.timezone,
+    targets: { conversations: c.target_conversations, agreed: c.target_agreed, registrations: c.target_registrations },
+    blocks: JSON.parse(JSON.stringify(c.blocks ?? [])),
+    is_active: c.is_active,
+    updated_at: c.updated_at
+  };
+}
+var get_call_campaign_default = defineTool63({
+  name: "get_call_campaign",
+  title: "Get a calling campaign's settings",
+  description: "Read a calling campaign's settings: targets, time blocks, cut-off and whether it is active. Default: the active campaign.",
+  inputSchema: { campaign_key: z57.string().optional() },
+  annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  handler: async ({ campaign_key }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    let q = supabase.from("call_campaigns").select(CAMPAIGN_COLS);
+    q = campaign_key ? q.eq("key", campaign_key) : q.eq("is_active", true);
+    const { data, error } = await q.order("starts_at", { ascending: false }).limit(1).maybeSingle();
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    if (!data) return { content: [{ type: "text", text: "No matching calling campaign for your account." }], isError: true };
+    const result = { campaign: campaignToJson(data) };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+  }
+});
+
+// src/lib/mcp/tools/set-call-campaign.ts
+import { defineTool as defineTool64 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z58 } from "npm:zod@^3.25.76";
+var Block = z58.object({
+  date: z58.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  start: z58.string().regex(/^\d{2}:\d{2}$/),
+  end: z58.string().regex(/^\d{2}:\d{2}$/).optional(),
+  label: z58.string().max(80),
+  tier: z58.enum(["hot", "lukewarm", "cold"]).optional()
+});
+var set_call_campaign_default = defineTool64({
+  name: "set_call_campaign",
+  title: "Change a calling campaign's settings",
+  description: "WRITES: updates a calling campaign's targets, time blocks (SAST date/start/end/tier), cut-off (ISO 8601) and/or is_active. Default: the active campaign. Only changes the campaign settings; never sends anything.",
+  inputSchema: {
+    campaign_key: z58.string().optional(),
+    targets: z58.object({
+      conversations: z58.number().int().min(0).optional(),
+      agreed: z58.number().int().min(0).optional(),
+      registrations: z58.number().int().min(0).optional()
+    }).optional(),
+    blocks: z58.array(Block).max(50).optional().describe("Replaces the whole block list."),
+    cutoff_at: z58.string().datetime({ offset: true }).nullable().optional().describe("Leaderboard cut-off; null clears it."),
+    is_active: z58.boolean().optional()
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  handler: async ({ campaign_key, targets, blocks, cutoff_at, is_active }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const patch = {};
+    if (targets?.conversations !== void 0) patch.target_conversations = targets.conversations;
+    if (targets?.agreed !== void 0) patch.target_agreed = targets.agreed;
+    if (targets?.registrations !== void 0) patch.target_registrations = targets.registrations;
+    if (blocks !== void 0) patch.blocks = blocks;
+    if (cutoff_at !== void 0) patch.cutoff_at = cutoff_at === null ? null : new Date(cutoff_at).toISOString();
+    if (is_active !== void 0) patch.is_active = is_active;
+    if (!Object.keys(patch).length) return { content: [{ type: "text", text: "Nothing to change." }], isError: true };
+    let key = campaign_key;
+    if (!key) {
+      const { data: a } = await supabase.from("call_campaigns").select("key").eq("is_active", true).order("starts_at", { ascending: false }).limit(1).maybeSingle();
+      key = a?.key;
+      if (!key) return { content: [{ type: "text", text: "No active calling campaign; pass campaign_key." }], isError: true };
+    }
+    const { data, error } = await supabase.from("call_campaigns").update(patch).eq("key", key).select(CAMPAIGN_COLS).maybeSingle();
+    if (error) return { content: [{ type: "text", text: error.message }], isError: true };
+    if (!data) return { content: [{ type: "text", text: "Campaign not found." }], isError: true };
+    const result = { campaign: campaignToJson(data) };
+    return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: result };
+  }
+});
+
 // src/lib/mcp/index.ts
 var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
   name: "get-well-hub",
   title: "Get Well Hub",
-  version: "1.15.0",
-  instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement); to privately message a commenter (one private Messenger message per comment, within 7 days of the comment) use send_private_reply_to_comment. For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for actual group chat content (who said what, when) use list_group_messages; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual'). For the Lead Call Report, use get_lead_call_report (sorted newest-first by default) and generate_lead_call_summaries to fill in missing AI summaries; edit a lead's type/notes/pipeline stage via update_contact. To post TO a Facebook Page, use create_fb_post \u2014 it refuses to do anything unless you pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true; never pass publish_now: true unless the user has clearly asked to publish immediately. Use list_fb_posts to see what is already published, scheduled, or failed before adding more. For the AI Trainer (how the auto-reply bot answers), use list_trainer_rules / get_trainer_rule to read, create_trainer_rule / update_trainer_rule to change (no delete \u2014 switch off with enabled: false; every edit is audited in the rule's notes), and list_reply_corrections / add_reply_correction for the corrections log. Show the operator the exact rule text and get approval before any trainer write. To check the Twilio pipeline against Twilio's own records (account, balance, webhook, sender status, alerts, and Twilio-vs-Hub inbound counts per day), use get_twilio_status \u2014 read-only, admin only. For Group Guard (anti-spam in WhatsApp groups) use get_group_guard_status to read and set_group_guard_mode to change mode. For the Call Sheet (live Hot / Lukewarm / Cold = Tier A / B / C calling list for the active calling campaign), use get_campaign_scorecard for targets, pace and the current time block, list_call_sheet for who to call next, get_call_sheet_card for one person's full context, log_call to record each call (one transaction: call row, activity, dated note line, optional 09:00 SAST reminder), list_calls for the call log and list_followups_due for callbacks. Call Sheet safety rules: the Call Sheet tools never send messages; send_whatsapp_message is the only sender, and before any send you must show Vanto the exact text and get a clear yes, and respect its refusals (do-not-contact, frozen outbound, daily cap, 24-hour window). Use supports-language only: no disease or cure claims and no income promises. Health details a prospect shared are for Vanto's call only; never repeat them in messages. Never change do_not_contact, opt-outs or consent from these tools.`,
+  version: "1.16.0",
+  instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement); to privately message a commenter (one private Messenger message per comment, within 7 days of the comment) use send_private_reply_to_comment. For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for actual group chat content (who said what, when) use list_group_messages; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual'). For the Lead Call Report, use get_lead_call_report (sorted newest-first by default) and generate_lead_call_summaries to fill in missing AI summaries; edit a lead's type/notes/pipeline stage via update_contact. To post TO a Facebook Page, use create_fb_post \u2014 it refuses to do anything unless you pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true; never pass publish_now: true unless the user has clearly asked to publish immediately. Use list_fb_posts to see what is already published, scheduled, or failed before adding more. For the AI Trainer (how the auto-reply bot answers), use list_trainer_rules / get_trainer_rule to read, create_trainer_rule / update_trainer_rule to change (no delete \u2014 switch off with enabled: false; every edit is audited in the rule's notes), and list_reply_corrections / add_reply_correction for the corrections log. Show the operator the exact rule text and get approval before any trainer write. To check the Twilio pipeline against Twilio's own records (account, balance, webhook, sender status, alerts, and Twilio-vs-Hub inbound counts per day), use get_twilio_status \u2014 read-only, admin only. For Group Guard (anti-spam in WhatsApp groups) use get_group_guard_status to read and set_group_guard_mode to change mode. For the Call Sheet (live Hot / Lukewarm / Cold = Tier A / B / C calling list for the active calling campaign), use get_campaign_scorecard for targets, pace and the current time block, list_call_sheet for who to call next, get_call_sheet_card for one person's full context, log_call to record each call (one transaction: call row, activity, dated note line, optional 09:00 SAST reminder), list_calls for the call log and list_followups_due for callbacks (list_call_sheet membership_only: true shows only membership inquiries). Call Sheet writes: set_call_tier (WRITES: tier override, pin, hide \u2014 never edits contact temperature), add_call_signals (WRITES: bulk up to 200 signals, matched by phone first, never creates contacts, returns unmatched rows; registered_elsewhere removes the person from the sheet), save_message_drafts (WRITES: bulk up to 100 drafts, status draft, nothing sent), list_message_drafts (read), set_draft_status (WRITES: approved / rejected / sent_by_vanto; approved only with explicit_user_instruction: true after Vanto explicitly says so), get_call_campaign (read) and set_call_campaign (WRITES: targets, blocks, cutoff_at, is_active). Call Sheet safety rules: the Call Sheet tools never send messages; send_whatsapp_message is the only sender, and before any send you must show Vanto the exact text and get a clear yes, and respect its refusals (do-not-contact, frozen outbound, daily cap, 24-hour window). Use supports-language only: no disease or cure claims and no income promises, in messages and in drafts. Health details a prospect shared are for Vanto's call only; never repeat them in messages or drafts. Never change do_not_contact, opt-outs or consent from these tools.`,
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
     acceptedAudiences: "authenticated"
@@ -3397,7 +3714,14 @@ var mcp_default = defineMcp({
     log_call_default,
     list_calls_default,
     list_followups_due_default,
-    get_campaign_scorecard_default
+    get_campaign_scorecard_default,
+    set_call_tier_default,
+    add_call_signals_default,
+    save_message_drafts_default,
+    list_message_drafts_default,
+    set_draft_status_default,
+    get_call_campaign_default,
+    set_call_campaign_default
   ]
 });
 
