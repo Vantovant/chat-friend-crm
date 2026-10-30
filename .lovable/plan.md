@@ -1,67 +1,66 @@
-# AI Intent Auto-Tagger — Plan
+# Maytapi auto-reply + Family/Friends/Business categories
 
-## Current state (checked live, 13 Oct)
-- 1,178 live contacts; 1,116 (95%) are `lead_type = prospect` because the column defaults to `'prospect'`.
-- `lead_type` enum: prospect, registered, buyer, vip, expired — no "unclassified" value yet.
-- 24 phone numbers have more than one live contact (Matilda included).
-- An `lead-intent-classify` function already exists (hybrid rules + AI, read-only, writes to `ai_suggestions`). It uses a different intent list for conversion scoring. The new tagger will **reuse its AI call path (`_shared/ai-fallback.ts`, so your own-key fallback still works)** rather than build a second AI stack, but keep its own intent list.
-- The Lead Call Report reads Twilio messages only; Maytapi threads are loaded for context but don't qualify a contact.
+Context loaded. Here's the plan. Nothing is built until you approve.
 
-## 1. Data model (backend, permissions/RLS)
-- New table `contact_tags`: contact_id, tag, kind (`source` | `intent` | `protected` | `system`), origin (`ai` | `manual` | `system`), confidence (0–1), reason (one line), based_on_message_id, created_by, created_at, updated_at. Unique on (contact_id, tag).
-  - RLS: same visibility as the parent contact (reuses the existing contact-access helper). Only service role writes `ai`/`system` rows; users write only `manual` rows.
-  - DB guard trigger: an `ai` write can never update or delete a `manual` row.
-- New table `contact_tag_proposals` for the backfill preview (contact, proposed tags, reason, confidence, status pending/approved/rejected). Owner/admin-only RLS.
-- `contacts`: add `prospect_verified boolean default false` (fast filter for the report) and keep `tags[]` mirrored for backward compatibility with existing screens and filters.
-- Add `unclassified` to the `lead_type` enum and change the default to `unclassified`. Existing rows are **not** changed.
-- Settings in `integration_settings`: `intent_tagger_enabled` (kill switch, starts true in log-to-tags mode), `intent_tagger_min_confidence` = 0.75.
+## 1. Maytapi auto-reply (backend)
+- In `maytapi-webhook-inbound`, 1:1 inbound branch only (groups and Group Guard untouched): after the message is logged, call the existing `whatsapp-auto-reply` with `channel: "maytapi"`. No second bot.
+- `whatsapp-auto-reply`: add an `isMaytapiChannel` path that reuses the trainer-replies and knowledge logic, then sends through `maytapi-send-direct` (which already handles the daily cap, freeze switch and link previews).
+- Prospect reply rules are enforced by a shared post-processor (`_shared/prospect-reply-rules.ts`):
+  - puts https://getwellafrica.com/get-advice on the first line
+  - removes every heart emoji (all colours)
+  - keeps at most one supplement disclaimer, and drops it if one was sent to that contact in the last 7 days
+  - Twilio replies are unchanged unless you ask for it.
 
-## 2. Edge function `contact-intent-tag`
-- Input: contact_id, conversation_id, message_id, channel, `dry_run` flag.
-- Steps: load contact + manual tags → if a protected tag exists, stop (record reason, no AI call) → load new message + last 10 messages → redact phone/email before the AI call (workspace PII rule) → AI returns one primary intent + confidence + reason (structured output) → confidence ≥ threshold applies the intent tag, otherwise only `needs_review` → recompute `prospect:verified`.
-- `prospect:verified` = has a source tag AND intent in {distributor, buyer, info, health_inquiry} AND no protected tag. Recomputed on every run, so "unclear" can later become a prospect (and lose it if a protected tag is added).
-- `health_inquiry` also sets a `careful_handling` flag shown in the UI; the tagger itself never writes replies.
-- Read/tag only: no sends, no automation triggers, no cascade to hot-lead-escalate.
-- Dedupe: skip if this message id was already tagged; skip outbound and group messages.
+## 2. Gate: never reply to the wrong people
+Checks run in this order. If any check fails, the bot stays silent and the message gets an inbox flag.
+1. Kill switch `maytapi_auto_reply_enabled` (default **off**) and mode `log_only` | `live` (default `log_only` so you can review first).
+2. The person messaged first: we have never sent them anything, or their message is the newest in the chat. No reply if Vanto sent a personal 1:1 message in the last 24h.
+3. Contact category is new, `prospect` or `unclassified`. Family, friend, business, customer, distributor, downline, a protected manual tag, or do_not_contact means silence.
+4. An AI intent check reuses the `contact-intent-tag` / `lead-intent-classify` model, with phone and email redacted. It needs intent in {products, prices, joining, health_support} with confidence ≥ 0.80, and must not be personal or business chat. If unsure, it stays silent.
+5. Caps: Maytapi daily cap, `outbound_frozen`, a limit of one auto-reply per contact per 24h, and the excluded-phones list (+234 and the owner numbers).
 
-## 3. Hooks into inbound handlers (fire-and-forget, non-fatal)
-- `twilio-whatsapp-inbound`: after message insert → call tagger. On new contact creation → `source:twilio_inbound`.
-- `maytapi-webhook-inbound` (1:1 branch only; group, Group Guard and welcome branches untouched): on new contact → `source:google_ad_whatsapp`; after message insert → tagger.
-- `fb-messenger-inbound`: tagger after message insert, Vanto's own Page only (same owner gate as the auto-reply). Existing `source:facebook_ad` logic kept.
-- Website form source: I couldn't find a website-form intake in this app. Assumption: tag `source:website_form` wherever that intake is identified — please tell me which form/function feeds contacts.
-- Source tags are written once (insert-if-absent), never overwritten.
+## 3. New categories: Family, Friends, Business
+- Reuse the existing contact category column (added for Soundtech) and add the values `family`, `friend` and `business`. Data is not changed.
+- Call Sheet: `call_list_cards` excludes these contacts. They show in "Not on the sheet" with the reason "Belongs in VantoOS". Phase 3 follow-ups (`phase3-detect` / `phase3-tick`), prospect-invite and nurture flows skip them too.
+- UI: a category selector on the contact panel, and a "Belongs in VantoOS" badge plus a filter in Contacts.
+- MCP: `update_contact` gets an optional `category` (family | friend | business | prospect | service | personal). Version bumps to v1.17.0. The tool never touches consent or do_not_contact.
+- **VantoOS sync (proposal only, not built):** add `belongs_in_vantoos=true` to the existing `hub_outbox` / `enqueue_hub_contact_sync` payload. VantoOS (project 4b19e05a…) moves them to its Google Contacts-backed record keyed by phone. Hub keeps a read-only stub and drops them from prospecting. This needs a matching change on the VantoOS side, which I'll draft separately if you want it.
 
-## 4. Existing team / customer (Get Well Grow)
-- Workspace rule: no direct Hub→Grow connection; cross-app lookups go through the VantoOS synced record. Assumption: if that synced record is reachable from this project, the tagger checks it by phone and tags `existing:team`/`existing:customer`; if not, these tags are set manually for now and flagged as a dependency. Needs your confirmation.
+## 4. Safety and review log
+- New table `maytapi_auto_reply_log` (owner RLS): contact, inbound text (redacted), intent, confidence, decision (`sent` | `skipped_<reason>` | `log_only`), reply body, provider message id, and time.
+- New inbox flag "Needs your reply (bot stayed silent)", stored in that same log.
+- New review page under Reports: "Maytapi auto-replies".
+- New MCP read tool `list_maytapi_auto_replies`.
+- No test messages are sent. You switch it to `live` when you're ready.
 
-## 5. Duplicates
-- Inbound handlers already find-before-insert by normalized phone; I'll audit all three paths (and Messenger contacts that later share a phone) so a new contact is never created for an existing number.
-- New "Duplicates for review" list (the 24 phones) in Contacts — opens the existing Merge modal. No auto-merge.
+## Files I'll touch
+**Backend functions**
+- `supabase/functions/maytapi-webhook-inbound/index.ts` (1:1 hook only)
+- `supabase/functions/whatsapp-auto-reply/index.ts` (Maytapi path and gate)
+- `supabase/functions/_shared/prospect-reply-rules.ts` (new)
+- `supabase/functions/_shared/maytapi-autoreply-gate.ts` (new)
+- `supabase/functions/phase3-detect/index.ts`, `phase3-tick/index.ts` (category skip)
+- `supabase/functions/maytapi-prospect-invite-tick/index.ts` (category skip)
+- `maytapi-send-direct` is read only, with no change unless a source tag is needed
 
-## 6. UI
-- Contact view: tag chips with AI reason + confidence on hover; one-click buttons for Family / Friend / Team / Customer / Distributor; manual tags marked with a lock.
-- Lead Call Report: "Prospects only" toggle (on by default); includes Maytapi-sourced contacts; new "Source" and "Why a prospect" columns. Existing date filters, summaries and stage edits unchanged.
-- Backfill review screen (Reports tab): table of contact, proposed tags, reason, confidence; approve selected / approve all high-confidence / reject. Nothing written to `contact_tags` until approved.
+**Database (one migration)**
+- category values, the `maytapi_auto_reply_log` table with grants and RLS, settings rows, the `call_list_cards` view update, and the outbox payload flag
 
-## 7. MCP
-- `get_lead_call_report`: new params `prospects_only`, `source_tag`, `intent_tag`; returns tags, intent reason, source. Version bump; goes live on your Publish.
+**Frontend**
+- `src/components/vanto/reports/CallSheet.tsx`
+- `src/components/vanto/ReportsModule.tsx` (+ new `reports/MaytapiAutoReplyLog.tsx`)
+- the contact detail and Contacts list components (category selector and badge)
 
-## 8. Backfill (preview first)
-- Runs the tagger in `dry_run` over existing contacts with inbound messages, in small batches to respect AI rate limits, writing only to `contact_tag_proposals`. Contacts with protected tags or `do_not_contact` are skipped untouched. Rough size: ~1,100 AI calls, billed to workspace credits (or your own key per fallback mode). I'll report the count before starting.
+**MCP**
+- `src/lib/mcp/tools/update-contact.ts`, new `src/lib/mcp/tools/list-maytapi-auto-replies.ts`, `src/lib/mcp/index.ts` (v1.17.0), then manifest extraction and Publish
 
-## Safety (unchanged behaviour)
-- No message sending, cadence, follow-up, Group Guard, welcome sequence, sign-and-win or posting changes. Personal-contact exclusion and `do_not_contact` stay as they are.
-
-## Risks
-- **Lead-type default change**: any code that assumes new contacts are `prospect` (CRM pipeline, cadences, follow-up eligibility, Zazi/VantoOS sync validation) may skip "unclassified" contacts. I'll grep and list each before switching; Zazi sync may need mapping `unclassified → prospect` to avoid sync mismatch — **flagged as a cross-app schema change**.
-- AI cost per inbound message; mitigated by skipping protected contacts and dedupe.
-- PII: message text goes to the AI; phones/emails redacted, health content is sent — needs your OK.
-- Grow/VantoOS lookup may not be available (section 4).
+## Not touched
+Twilio bot behaviour, groups and Group Guard, the dispatcher, Facebook, sign-and-win, reactivation, and the older bridge connector.
 
 ## Rollback
-- Kill switch `intent_tagger_enabled=false` stops all tagging instantly. New tables are additive; hooks are non-fatal. Default can be set back to `prospect` in one migration; enum value stays harmlessly.
+Set `maytapi_auto_reply_enabled=false`. That instantly restores today's behaviour. The category values and log table are additive.
 
 ## Open questions
-1. Which form feeds `source:website_form`?
-2. OK to map `unclassified → prospect` for the Zazi/VantoOS sync?
-3. OK to send message text (with phone/email redacted) to the AI, including health messages?
+1. Should Twilio replies also get the new reply rules, or only Maytapi?
+2. Start in `log_only` for a few days, or go `live` straight away?
+3. Should customer, distributor and downline also get the "Belongs in VantoOS" flag, or only Family, Friends and Business?
