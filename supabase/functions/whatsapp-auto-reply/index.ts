@@ -998,6 +998,30 @@ Deno.serve(async (req) => {
     console.warn("[whatsapp-auto-reply] emergency guard failed open:", (err as Error).message);
   }
 
+  // ── Maytapi personal-number gate (2026-10-30, owner-approved) ──
+  // Only for 1:1 inbound from maytapi-webhook-inbound. Silent unless the AI is
+  // confident it's a product/price/joining/health enquiry from a new/prospect
+  // contact. In review-only mode the reply is produced and logged, never sent.
+  // deno-lint-ignore no-explicit-any
+  let maytapiGate: any = null;
+  if (body?.gate_source === "maytapi_inbound") {
+    try {
+      const { evaluateMaytapiGate, logGate } = await import("../_shared/maytapi-autoreply-gate.ts");
+      const g = await evaluateMaytapiGate(svc, { contact_id, conversation_id, inbound_content, phone_e164 });
+      if (g.active) {
+        if (!g.allow) {
+          await logGate(svc, g, { contact_id, conversation_id, inbound_message_id, inbound_content });
+          return jsonRes({ ok: true, auto_reply: false, action: g.decision, needs_human: g.needs_human });
+        }
+        maytapiGate = g;
+      }
+    } catch (e) {
+      // Fail closed: when the gate cannot decide, stay silent.
+      console.warn("[whatsapp-auto-reply] maytapi gate error — staying silent:", (e as Error)?.message);
+      return jsonRes({ ok: true, auto_reply: false, action: "skipped_gate_error" });
+    }
+  }
+
   const diag: Record<string, any> = {
     phone: phone_e164, conversation_id, contact_id: contact_id || "none",
     inbound_text: (inbound_content || "").slice(0, 100),

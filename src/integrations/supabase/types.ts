@@ -2785,6 +2785,78 @@ export type Database = {
         }
         Relationships: []
       }
+      maytapi_auto_reply_log: {
+        Row: {
+          confidence: number | null
+          contact_id: string | null
+          conversation_id: string | null
+          created_at: string
+          decision: string
+          id: string
+          inbound_message_id: string | null
+          inbound_text: string | null
+          intent: string | null
+          intent_reason: string | null
+          mode: string
+          needs_human: boolean
+          provider_message_id: string | null
+          reply_body: string | null
+          reviewed_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          confidence?: number | null
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          decision: string
+          id?: string
+          inbound_message_id?: string | null
+          inbound_text?: string | null
+          intent?: string | null
+          intent_reason?: string | null
+          mode?: string
+          needs_human?: boolean
+          provider_message_id?: string | null
+          reply_body?: string | null
+          reviewed_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          confidence?: number | null
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          decision?: string
+          id?: string
+          inbound_message_id?: string | null
+          inbound_text?: string | null
+          intent?: string | null
+          intent_reason?: string | null
+          mode?: string
+          needs_human?: boolean
+          provider_message_id?: string | null
+          reply_body?: string | null
+          reviewed_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "maytapi_auto_reply_log_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "call_list_cards"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "maytapi_auto_reply_log_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       maytapi_delivery_alerts: {
         Row: {
           acknowledged_at: string | null
