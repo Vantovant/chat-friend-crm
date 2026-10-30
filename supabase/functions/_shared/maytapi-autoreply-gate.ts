@@ -4,7 +4,7 @@
 // When unsure, the bot stays silent. Never sends anything itself.
 import { aiFetch } from "./ai-fallback.ts";
 
-const MODEL = "google/gemini-3-flash-preview";
+const MODEL = "openai/gpt-6-astra";
 const PROSPECT_INTENTS = new Set(["products", "prices", "joining", "health_support"]);
 const VANTOOS_CATEGORIES = new Set(["family", "friend", "business"]);
 const PROTECTED_TAGS = ["family", "friend", "team", "customer", "distributor"];
@@ -54,6 +54,7 @@ confidence 0..1. Never guess; low signal = low confidence. reason = one short li
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model: MODEL,
+      reasoning_effort: "low",
       messages: [{ role: "system", content: system }, { role: "user", content: redact(text).slice(0, 1200) }],
       response_format: {
         type: "json_schema",
