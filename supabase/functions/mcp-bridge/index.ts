@@ -938,14 +938,31 @@ Deno.serve(async (req) => {
         if ('errorResponse' in resolved) return resolved.errorResponse
         const lim = Math.min(200, Math.max(1, Number(body.limit ?? 50) || 50))
         const awaiting = body.awaiting_reply === true || body.awaiting_reply === 'true'
-        const fetchN = awaiting ? 1000 : lim
-        const { data, error } = await supabase.from('conversations')
-          .select('id,contact_id,last_message,last_message_at,last_inbound_at,last_outbound_at,unread_count,status,contacts(name,phone_normalized,is_deleted)')
-          .or(`owner_user_id.eq.${resolved.ownerId},owner_user_id.is.null`)
-          .order('last_message_at', { ascending: false, nullsFirst: false }).limit(fetchN)
-        if (error) throw error
-        let rows = (data ?? []).filter((c: any) => !c.contacts?.is_deleted)
-        if (awaiting) rows = rows.filter((c: any) => c.last_inbound_at && (!c.last_outbound_at || c.last_inbound_at > c.last_outbound_at))
+        const sel = 'id,contact_id,last_message,last_message_at,last_inbound_at,last_outbound_at,unread_count,status,contacts(name,phone_normalized,is_deleted)'
+        const ownerOr = `owner_user_id.eq.${resolved.ownerId},owner_user_id.is.null`
+        let rows: any[] = []
+        let totalAwaiting: number | null = null
+        if (awaiting) {
+          // Page through every conversation with an inbound message (no cap), then sort oldest unanswered first.
+          const PAGE = 1000
+          for (let from = 0; ; from += PAGE) {
+            const { data, error } = await supabase.from('conversations').select(sel)
+              .or(ownerOr).not('last_inbound_at', 'is', null)
+              .order('id', { ascending: true }).range(from, from + PAGE - 1)
+            if (error) throw error
+            rows.push(...(data ?? []))
+            if (!data || data.length < PAGE) break
+          }
+          rows = rows.filter((c: any) => !c.contacts?.is_deleted
+            && (!c.last_outbound_at || c.last_inbound_at > c.last_outbound_at))
+          rows.sort((a: any, b: any) => String(a.last_inbound_at).localeCompare(String(b.last_inbound_at)))
+          totalAwaiting = rows.length
+        } else {
+          const { data, error } = await supabase.from('conversations').select(sel).or(ownerOr)
+            .order('last_message_at', { ascending: false, nullsFirst: false }).limit(lim)
+          if (error) throw error
+          rows = (data ?? []).filter((c: any) => !c.contacts?.is_deleted)
+        }
         rows = rows.slice(0, lim)
         // Channel of the latest message per conversation.
         const ids = rows.map((c: any) => c.id)
@@ -964,7 +981,7 @@ Deno.serve(async (req) => {
           unread_count: c.unread_count,
           awaiting_reply: !!c.last_inbound_at && (!c.last_outbound_at || c.last_inbound_at > c.last_outbound_at),
         }))
-        return json({ ok: true, awaiting_reply_filter: awaiting, count: items.length, items })
+        return json({ ok: true, awaiting_reply_filter: awaiting, count: items.length, ...(awaiting ? { total_awaiting: totalAwaiting, sort: 'oldest_unanswered_first' } : {}), items })
       }
 
       case 'get_conversation_thread': {
