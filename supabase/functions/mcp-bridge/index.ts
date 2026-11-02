@@ -115,6 +115,9 @@ Deno.serve(async (req) => {
     'list_group_dm_candidates',
     'create_group_dm_batch',
     'approve_group_dm_batch',
+    'list_followups_due',
+    'list_conversations',
+    'get_conversation_thread',
   ]
 
   // Resolves the single super_admin profile row. This bridge authenticates via a
@@ -126,8 +129,8 @@ Deno.serve(async (req) => {
   // assumption ever stops holding.
   async function resolveOwnerId(): Promise<{ ownerId: string } | { errorResponse: Response }> {
     const { data: owners, error } = await supabase
-      .from('profiles')
-      .select('id')
+      .from('user_roles')
+      .select('id:user_id')
       .eq('role', 'super_admin')
     if (error) throw error
     if (!owners || owners.length === 0) {
@@ -866,6 +869,77 @@ Deno.serve(async (req) => {
         const gjid = String(body.group_jid ?? DEFAULT_GROUP_JID)
         // Refusals (governance gate, cap) pass through verbatim.
         return await callGroupDmPilot({ action: 'approve_and_send', group_jid: gjid, batch_id: body.batch_id })
+      }
+
+      // ---- Read-only inbox / follow-up actions (owner-scoped). ----
+      // Owner scope: conversations owned by the super_admin, plus unassigned ones
+      // (owner_user_id null), which belong to the single operator.
+      case 'list_followups_due': {
+        const resolved = await resolveOwnerId()
+        if ('errorResponse' in resolved) return resolved.errorResponse
+        const today = new Date(Date.now() + 2 * 3600_000).toISOString().slice(0, 10)
+        const days = Math.min(30, Math.max(0, Number(body.upcoming_days ?? 0) || 0))
+        const lim = Math.min(200, Math.max(1, Number(body.limit ?? 50) || 50))
+        const until = new Date(Date.parse(`${today}T00:00:00Z`) + days * 86400_000).toISOString().slice(0, 10)
+        const { data, error } = await supabase.from('call_list_cards')
+          .select('id,name,phone_normalized,tier,tier_reason,last_call_at,last_call_outcome,follow_up_on')
+          .is('exclusion_reason', null).not('follow_up_on', 'is', null).lte('follow_up_on', until)
+          .order('follow_up_on', { ascending: true }).limit(lim)
+        if (error) throw error
+        const items = (data ?? []).map((r: any) => ({ ...r, status: r.follow_up_on < today ? 'overdue' : r.follow_up_on === today ? 'due_today' : 'upcoming' }))
+        return json({ ok: true, owner_id: resolved.ownerId, today_sast: today, count: items.length, items })
+      }
+
+      case 'list_conversations': {
+        const resolved = await resolveOwnerId()
+        if ('errorResponse' in resolved) return resolved.errorResponse
+        const lim = Math.min(200, Math.max(1, Number(body.limit ?? 50) || 50))
+        const awaiting = body.awaiting_reply === true || body.awaiting_reply === 'true'
+        const fetchN = awaiting ? 1000 : lim
+        const { data, error } = await supabase.from('conversations')
+          .select('id,contact_id,last_message,last_message_at,last_inbound_at,last_outbound_at,unread_count,status,contacts(name,phone_normalized,is_deleted)')
+          .or(`owner_user_id.eq.${resolved.ownerId},owner_user_id.is.null`)
+          .order('last_message_at', { ascending: false, nullsFirst: false }).limit(fetchN)
+        if (error) throw error
+        let rows = (data ?? []).filter((c: any) => !c.contacts?.is_deleted)
+        if (awaiting) rows = rows.filter((c: any) => c.last_inbound_at && (!c.last_outbound_at || c.last_inbound_at > c.last_outbound_at))
+        rows = rows.slice(0, lim)
+        // Channel of the latest message per conversation.
+        const ids = rows.map((c: any) => c.id)
+        const chan: Record<string, string> = {}
+        if (ids.length) {
+          const { data: msgs } = await supabase.from('messages').select('conversation_id,provider,created_at')
+            .in('conversation_id', ids).order('created_at', { ascending: false }).limit(2000)
+          for (const m of msgs ?? []) if (!chan[m.conversation_id]) chan[m.conversation_id] = m.provider
+        }
+        const items = rows.map((c: any) => ({
+          conversation_id: c.id, contact_id: c.contact_id,
+          name: c.contacts?.name ?? null, phone: c.contacts?.phone_normalized ?? null,
+          channel: chan[c.id] ?? null,
+          last_message_preview: (c.last_message ?? '').slice(0, 140),
+          last_message_at: c.last_message_at, last_inbound_at: c.last_inbound_at, last_outbound_at: c.last_outbound_at,
+          unread_count: c.unread_count,
+          awaiting_reply: !!c.last_inbound_at && (!c.last_outbound_at || c.last_inbound_at > c.last_outbound_at),
+        }))
+        return json({ ok: true, awaiting_reply_filter: awaiting, count: items.length, items })
+      }
+
+      case 'get_conversation_thread': {
+        const resolved = await resolveOwnerId()
+        if ('errorResponse' in resolved) return resolved.errorResponse
+        const cid = String(body.conversation_id ?? '')
+        if (!/^[0-9a-f-]{36}$/i.test(cid)) return json({ error: 'conversation_id (uuid) required' }, 400)
+        const lim = Math.min(200, Math.max(1, Number(body.limit ?? 50) || 50))
+        const { data: conv, error } = await supabase.from('conversations')
+          .select('id,contact_id,owner_user_id,last_inbound_at,last_outbound_at,contacts(name,phone_normalized)')
+          .eq('id', cid).maybeSingle()
+        if (error) throw error
+        if (!conv || (conv.owner_user_id && conv.owner_user_id !== resolved.ownerId)) return json({ error: 'not_found' }, 404)
+        const { data: msgs, error: mErr } = await supabase.from('messages')
+          .select('id,content,is_outbound,provider,message_type,status,created_at')
+          .eq('conversation_id', cid).order('created_at', { ascending: false }).limit(lim)
+        if (mErr) throw mErr
+        return json({ ok: true, conversation_id: cid, name: (conv as any).contacts?.name ?? null, phone: (conv as any).contacts?.phone_normalized ?? null, messages: (msgs ?? []).reverse() })
       }
 
       default:
