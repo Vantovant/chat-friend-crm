@@ -6,7 +6,7 @@ export default defineTool({
   name: "update_contact",
   title: "Update a contact",
   description:
-    "Update editable fields on a contact: name, email, lead type, temperature, tags, notes, pipeline stage, the do-not-contact flag, or the contact category. Category family, friend or business marks the person "Belongs in VantoOS": they leave the Call Sheet prospect tabs, prospect follow-ups and the prospect auto-reply. Phone numbers are never changed here. A pipeline stage change is logged to contact_activity.",
+    "Update editable fields on a contact: name, email, lead type, temperature, tags, notes, pipeline stage, the do-not-contact flag, or the contact category. Category family, friend or business marks the person “Belongs in VantoOS”: they leave the Call Sheet prospect tabs, prospect follow-ups and the prospect auto-reply. Phone numbers are never changed here. A pipeline stage change is logged to contact_activity.",
   inputSchema: {
     contact_id: z.string().uuid().describe("Contact UUID."),
     name: z.string().optional(),
