@@ -1126,6 +1126,7 @@ Deno.serve(async (req) => {
             inbound_content: text,
             phone_e164: phoneE164,
             inbound_message_id: inboundMsg?.id || null,
+            gate_source: "maytapi_inbound",
           }),
         });
         const arData = await arRes.json().catch(() => ({}));
