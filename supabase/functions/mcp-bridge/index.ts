@@ -981,7 +981,7 @@ Deno.serve(async (req) => {
           unread_count: c.unread_count,
           awaiting_reply: !!c.last_inbound_at && (!c.last_outbound_at || c.last_inbound_at > c.last_outbound_at),
         }))
-        return json({ ok: true, awaiting_reply_filter: awaiting, count: items.length, items })
+        return json({ ok: true, awaiting_reply_filter: awaiting, count: items.length, ...(awaiting ? { total_awaiting: totalAwaiting, sort: 'oldest_unanswered_first' } : {}), items })
       }
 
       case 'get_conversation_thread': {
