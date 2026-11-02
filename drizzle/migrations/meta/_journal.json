@@ -92,6 +92,13 @@
       "when": 1793361859230,
       "tag": "0012_family_friend_categories_and_autoreply_log",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793637670163,
+      "tag": "0013_kairos_ref_on_tasks_reminders",
+      "breakpoints": true
     }
   ]
 }

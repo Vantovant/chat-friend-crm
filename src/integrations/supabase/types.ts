@@ -3418,8 +3418,10 @@ export type Database = {
           description: string | null
           id: string
           is_done: boolean
+          kairos_ref: string | null
           project_id: string | null
           reminder_time: string
+          source: string | null
           title: string
           updated_at: string
           user_id: string
@@ -3429,8 +3431,10 @@ export type Database = {
           description?: string | null
           id?: string
           is_done?: boolean
+          kairos_ref?: string | null
           project_id?: string | null
           reminder_time: string
+          source?: string | null
           title: string
           updated_at?: string
           user_id: string
@@ -3440,8 +3444,10 @@ export type Database = {
           description?: string | null
           id?: string
           is_done?: boolean
+          kairos_ref?: string | null
           project_id?: string | null
           reminder_time?: string
+          source?: string | null
           title?: string
           updated_at?: string
           user_id?: string
@@ -3456,6 +3462,7 @@ export type Database = {
           due_date: string | null
           estimated_minutes: number | null
           id: string
+          kairos_ref: string | null
           order_index: number
           priority: string
           project_id: string | null
@@ -3474,6 +3481,7 @@ export type Database = {
           due_date?: string | null
           estimated_minutes?: number | null
           id?: string
+          kairos_ref?: string | null
           order_index?: number
           priority?: string
           project_id?: string | null
@@ -3492,6 +3500,7 @@ export type Database = {
           due_date?: string | null
           estimated_minutes?: number | null
           id?: string
+          kairos_ref?: string | null
           order_index?: number
           priority?: string
           project_id?: string | null
