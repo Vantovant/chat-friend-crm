@@ -6,7 +6,7 @@ export default defineTool({
   name: "update_contact",
   title: "Update a contact",
   description:
-    "Update editable fields on a contact: name, email, lead type, temperature, tags, notes, pipeline stage, or the do-not-contact flag. Phone numbers are never changed here. A pipeline stage change is logged to contact_activity.",
+    "Update editable fields on a contact: name, email, lead type, temperature, tags, notes, pipeline stage, the do-not-contact flag, or the contact category. Category family, friend or business marks the person “Belongs in VantoOS”: they leave the Call Sheet prospect tabs, prospect follow-ups and the prospect auto-reply. Phone numbers are never changed here. A pipeline stage change is logged to contact_activity.",
   inputSchema: {
     contact_id: z.string().uuid().describe("Contact UUID."),
     name: z.string().optional(),
@@ -17,15 +17,18 @@ export default defineTool({
     do_not_contact: z.boolean().optional(),
     notes: z.string().nullable().optional(),
     stage_id: z.string().uuid().nullable().optional().describe("Pipeline stage UUID, or null to unassign."),
+    category: z.enum(["prospect", "family", "friend", "business", "service", "personal"]).nullable().optional()
+      .describe("Contact category. null or prospect = prospecting contact. family/friend/business = belongs in VantoOS."),
   },
   annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   handler: async (input, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
-    const { contact_id, ...fields } = input;
+    const { contact_id, category, ...fields } = input;
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
     for (const [key, value] of Object.entries(fields)) {
       if (value !== undefined) updates[key] = value;
     }
+    if (category !== undefined) updates.contact_category = category;
     if (Object.keys(updates).length === 1) {
       return { content: [{ type: "text", text: "No updatable fields provided" }], isError: true };
     }
@@ -51,7 +54,7 @@ export default defineTool({
       .update(updates)
       .eq("id", contact_id)
       .eq("is_deleted", false)
-      .select("id, name, phone_normalized, email, lead_type, temperature, tags, notes, stage_id, do_not_contact, updated_at")
+      .select("id, name, phone_normalized, email, lead_type, temperature, tags, notes, stage_id, do_not_contact, contact_category, updated_at")
       .single();
     if (error) return { content: [{ type: "text", text: error.message }], isError: true };
 
@@ -82,9 +85,10 @@ export default defineTool({
       }
     }
 
+    const belongs_in_vantoos = ["family", "friend", "business"].includes(String(data?.contact_category ?? ""));
     return {
-      content: [{ type: "text", text: JSON.stringify({ contact: data, stage_change_logged }) }],
-      structuredContent: { contact: data, stage_change_logged },
+      content: [{ type: "text", text: JSON.stringify({ contact: data, stage_change_logged, belongs_in_vantoos }) }],
+      structuredContent: { contact: data, stage_change_logged, belongs_in_vantoos },
     };
   },
 });

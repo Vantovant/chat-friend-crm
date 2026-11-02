@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
-import { FileText, Phone, BarChart3, Users, ArrowLeft, Link2, ListChecks } from 'lucide-react';
+import { FileText, Phone, BarChart3, Users, ArrowLeft, Link2, ListChecks, MessageSquare } from 'lucide-react';
 import { LeadCallReport } from './reports/LeadCallReport';
 import { IntentBackfillReview } from './reports/IntentBackfillReview';
 import { CallSheet } from './reports/CallSheet';
+import { MaytapiAutoReplyLog } from './reports/MaytapiAutoReplyLog';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 
-type ReportKey = 'call-sheet' | 'lead-call' | 'intent-backfill' | null;
+type ReportKey = 'call-sheet' | 'lead-call' | 'intent-backfill' | 'maytapi-auto-replies' | null;
 
 const reports = [
   {
@@ -21,6 +22,13 @@ const reports = [
     title: 'Lead Call Report',
     description: 'Printable list of prospects + full WhatsApp conversation history. Distributors at the top, then longest-waiting first. Up to 100 contacts.',
     icon: Phone,
+    available: true,
+  },
+  {
+    key: 'maytapi-auto-replies' as const,
+    title: 'Personal number auto-replies',
+    description: 'Every message the personal WhatsApp bot screened: what it sent or would have sent, and the ones it stayed silent on that need your reply.',
+    icon: MessageSquare,
     available: true,
   },
   {
@@ -67,6 +75,17 @@ export function ReportsModule() {
           <ArrowLeft className="h-4 w-4 mr-1" /> Back to Reports
         </Button>
         <LeadCallReport onOpenCallSheet={() => setActive('call-sheet')} />
+      </div>
+    );
+  }
+
+  if (active === 'maytapi-auto-replies') {
+    return (
+      <div className="h-full overflow-y-auto p-4 md:p-6">
+        <Button variant="ghost" size="sm" onClick={() => setActive(null)} className="mb-3">
+          <ArrowLeft className="h-4 w-4 mr-1" /> Back to Reports
+        </Button>
+        <MaytapiAutoReplyLog />
       </div>
     );
   }

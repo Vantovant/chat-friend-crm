@@ -603,7 +603,7 @@ export function CallSheet({ onOpenLeadCallReport }: { onOpenLeadCallReport?: () 
             : excluded.map((x) => (
               <div key={x.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 px-3 py-2 text-xs">
                 <span className="text-foreground break-words">{displayName(x)} <span className="text-muted-foreground">{x.phone_normalized}</span></span>
-                <span className="text-muted-foreground">{x.exclusion_reason}</span>
+                <span className="text-muted-foreground">{/^Contact category: (family|friend|business)$/.test(x.exclusion_reason ?? '') ? `Belongs in VantoOS (${(x.exclusion_reason ?? '').split(': ')[1]})` : x.exclusion_reason}</span>
                 {x.hidden && <button className="underline text-primary" onClick={() => upsertOverride(x, { hidden: false, hidden_reason: null }, 'Back on the sheet.').then(loadExcluded)}>Unhide</button>}
               </div>
             ))}

@@ -125,13 +125,20 @@ Deno.serve(async (req) => {
 
       const { data: contact } = await supabase
         .from("contacts")
-        .select("id, name, phone, phone_normalized, messenger_psid, do_not_contact, is_deleted, auto_reply_enabled, lead_type, last_group_invite_at, last_sponsor_invite_at, last_outbound_at, last_inbound_at")
+        .select("id, name, phone, phone_normalized, messenger_psid, do_not_contact, is_deleted, auto_reply_enabled, lead_type, contact_category, last_group_invite_at, last_sponsor_invite_at, last_outbound_at, last_inbound_at")
         .eq("id", row.contact_id)
         .maybeSingle();
 
       if (!contact) {
         await supabase.from("missed_inquiries").update({ status: "exhausted", last_error: "contact missing" }).eq("id", row.id);
         failed++; continue;
+      }
+
+      // ── Non-prospect categories never get prospect follow-ups (2026-10-30) ──
+      const cat = (contact as any).contact_category;
+      if (cat && cat !== "prospect") {
+        await supabase.from("missed_inquiries").update({ status: "stopped", next_send_at: null, last_error: `category:${cat}` }).eq("id", row.id);
+        skipped++; continue;
       }
 
       // ── Universal pre-send guard (Fix 1+2: cross-provider cooldown + soft-refusal) ──

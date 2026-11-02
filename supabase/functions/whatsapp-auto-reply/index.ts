@@ -1263,7 +1263,7 @@ Deno.serve(async (req) => {
       `2️⃣ *Ready for the special step?* Register here and you're officially in — your sponsor link is already set:\n👉 ${regLink}\n\n` +
       `Either way, you're not on your own. Welcome 🤝`,
 
-      `Beautiful 💛 Here's the smartest way forward:\n\n` +
+      `Beautiful! Here's the smartest way forward:\n\n` +
       `➡️ *Start in the group* — ${groupLink}\n` +
       `Drop your question there anytime. The *admins* are active and will give you a straight, personal answer.\n\n` +
       `➡️ *Want to take the official step now?* Register through this link:\n${regLink}\n\n` +
@@ -2177,7 +2177,7 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
     if (
       inQuietHours && !bypassQuietHoursForPaidLead && !dnc && contact_id &&
       quietHoursCourtesyOnly && quietCourtesyUsed === 0 &&
-      (isMaytapiChannel || isTwilioChannel)
+      (isMaytapiChannel || isTwilioChannel) && !maytapiGate
     ) {
       const courtesyText =
         "Thanks for your message 🌙\n\n" +
@@ -2415,6 +2415,21 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
   }
 
 
+  // ── Prospect reply rules (2026-10-30): advice link first, no hearts, no disclaimers ──
+  try {
+    const { applyProspectReplyRules } = await import("../_shared/prospect-reply-rules.ts");
+    replyContent = applyProspectReplyRules(replyContent);
+  } catch (e: any) {
+    console.warn("[auto-reply] prospect reply rules failed (non-fatal):", e?.message);
+  }
+
+  // ── Maytapi review-only mode: log the reply we would have sent, send nothing ──
+  if (maytapiGate && !maytapiGate.live) {
+    const { logGate } = await import("../_shared/maytapi-autoreply-gate.ts");
+    await logGate(svc, maytapiGate, { contact_id, conversation_id, inbound_message_id, inbound_content, reply_body: replyContent, decision: "log_only" });
+    return jsonRes({ ok: true, auto_reply: false, action: "log_only", reply_preview: replyContent.slice(0, 200) });
+  }
+
   // ── Dispatch via send-message ──
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
   const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
@@ -2477,6 +2492,10 @@ Tell me which area you want to support — sleep, energy, cravings, joints, stom
 
     const sentMessage = sendData?.message || null;
     diag.result = "success";
+    if (maytapiGate) {
+      const { logGate } = await import("../_shared/maytapi-autoreply-gate.ts");
+      await logGate(svc, maytapiGate, { contact_id, conversation_id, inbound_message_id, inbound_content, reply_body: replyContent, provider_message_id: sentMessage?.provider_message_id || null, decision: "sent" });
+    }
     diag.twilio_sid = sentMessage?.provider_message_id || null;
 
     await svc.from("auto_reply_events").insert({

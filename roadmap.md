@@ -18,3 +18,5 @@
 - [ ] Run backfill — waiting on Vanto (count + cost review)
 - [ ] Website form source — waiting on which form feeds contacts
 - [ ] Grow existing:team/customer lookup — no reachable synced record
+- [x] Maytapi auto-reply: switch mode to live (owner said go live 2 Nov)
+- [x] Deploy auto-reply/webhook/phase3 functions, extract MCP manifest v1.17.0
