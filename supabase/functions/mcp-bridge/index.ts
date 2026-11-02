@@ -62,7 +62,7 @@ Deno.serve(async (req) => {
   }
   if (isKairos) {
     // Kairos key: read-only allowlist. Peek the action without consuming the body.
-    const KAIROS_ALLOWED = ['list_tasks', 'list_reminders', 'list_meetings', 'list_followups_due', 'list_conversations', 'get_conversation_thread']
+    const KAIROS_ALLOWED = ['list_tasks', 'list_reminders', 'list_meetings', 'list_followups_due', 'list_conversations', 'get_conversation_thread', 'create_task', 'create_reminder']
     let kAction = ''
     try { kAction = String((await req.clone().json())?.action ?? '') } catch { /* handled below */ }
     if (!KAIROS_ALLOWED.includes(kAction)) {
@@ -477,21 +477,42 @@ Deno.serve(async (req) => {
         const resolved = await resolveOwnerId()
         if ('errorResponse' in resolved) return resolved.errorResponse
 
+        const tRef = isKairos && body.kairos_ref != null ? String(body.kairos_ref).trim() : ''
+        if (tRef.length > 80) return json({ error: 'kairos_ref_max_80_chars' }, 400)
+        const tCols = isKairos
+          ? 'id, title, priority, due_date, created_at, source, kairos_ref'
+          : 'id, title, priority, due_date, created_at'
+        if (tRef) {
+          const { data: existing, error: exErr } = await supabase
+            .from('plan_tasks').select(tCols)
+            .eq('user_id', resolved.ownerId).eq('kairos_ref', tRef).maybeSingle()
+          if (exErr) throw exErr
+          if (existing) return json({ ok: true, duplicate: true, task: existing })
+        }
+
         const payload: Record<string, unknown> = {
           user_id: resolved.ownerId,
           title,
           priority,
-          source: 'mcp',
+          source: isKairos ? 'kairos' : 'mcp',
         }
         if (dueDate) payload.due_date = new Date(dueDate).toISOString()
+        if (tRef) payload.kairos_ref = tRef
 
         const { data: inserted, error } = await supabase
           .from('plan_tasks')
           .insert(payload)
-          .select('id, title, priority, due_date, created_at')
+          .select(tCols)
           .single()
-        if (error) throw error
-        return json({ ok: true, task: inserted })
+        if (error) {
+          if (tRef && (error as { code?: string }).code === '23505') {
+            const { data: again } = await supabase.from('plan_tasks').select(tCols)
+              .eq('user_id', resolved.ownerId).eq('kairos_ref', tRef).maybeSingle()
+            if (again) return json({ ok: true, duplicate: true, task: again })
+          }
+          throw error
+        }
+        return json({ ok: true, ...(tRef ? { duplicate: false } : {}), task: inserted })
       }
 
       // NEW: list_tasks — read-only. Filter by status and/or a single
@@ -579,18 +600,40 @@ Deno.serve(async (req) => {
         const resolved = await resolveOwnerId()
         if ('errorResponse' in resolved) return resolved.errorResponse
 
+        const rRef = isKairos && body.kairos_ref != null ? String(body.kairos_ref).trim() : ''
+        if (rRef.length > 80) return json({ error: 'kairos_ref_max_80_chars' }, 400)
+        const rCols = 'id, title, reminder_time, created_at, kairos_ref'
+        if (rRef) {
+          const { data: existing, error: exErr } = await supabase
+            .from('plan_reminders').select(rCols)
+            .eq('user_id', resolved.ownerId).eq('kairos_ref', rRef).maybeSingle()
+          if (exErr) throw exErr
+          if (existing) return json({ ok: true, duplicate: true, reminder: existing })
+        }
+
+        const rPayload: Record<string, unknown> = {
+          user_id: resolved.ownerId,
+          title,
+          reminder_time: new Date(reminderTime).toISOString(),
+          description,
+        }
+        if (isKairos) rPayload.source = 'kairos'
+        if (rRef) rPayload.kairos_ref = rRef
+
         const { data: inserted, error } = await supabase
           .from('plan_reminders')
-          .insert({
-            user_id: resolved.ownerId,
-            title,
-            reminder_time: new Date(reminderTime).toISOString(),
-            description,
-          })
-          .select('id, title, reminder_time, created_at')
+          .insert(rPayload)
+          .select(rCols)
           .single()
-        if (error) throw error
-        return json({ ok: true, reminder: inserted })
+        if (error) {
+          if (rRef && (error as { code?: string }).code === '23505') {
+            const { data: again } = await supabase.from('plan_reminders').select(rCols)
+              .eq('user_id', resolved.ownerId).eq('kairos_ref', rRef).maybeSingle()
+            if (again) return json({ ok: true, duplicate: true, reminder: again })
+          }
+          throw error
+        }
+        return json({ ok: true, ...(rRef ? { duplicate: false } : {}), reminder: inserted })
       }
 
       // NEW: list_reminders — read-only. Filter by is_done and/or a single
