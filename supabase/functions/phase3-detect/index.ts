@@ -136,10 +136,14 @@ async function processOne(supabase: any, args: {
   // Check do_not_contact
   const { data: contact } = await supabase
     .from("contacts")
-    .select("id, do_not_contact")
+    .select("id, do_not_contact, contact_category")
     .eq("id", contact_id)
     .maybeSingle();
   if (!contact || contact.do_not_contact) return { action: "skipped_dnc", state: null };
+  // Non-prospect categories (family/friend/business/service/personal) never open follow-up cases.
+  if ((contact as any).contact_category && (contact as any).contact_category !== "prospect") {
+    return { action: "skipped_category", state: null };
+  }
 
   // Classify
   let intent = detectByKeyword(message_text);
