@@ -12,7 +12,7 @@
   "mcp": {
     "server": {
       "name": "get-well-hub",
-      "version": "1.16.0",
+      "version": "1.17.0",
       "title": "Get Well Hub"
     },
     "tools": [
@@ -418,7 +418,7 @@
       {
         "name": "update_contact",
         "title": "Update a contact",
-        "description": "Update editable fields on a contact: name, email, lead type, temperature, tags, notes, pipeline stage, or the do-not-contact flag. Phone numbers are never changed here. A pipeline stage change is logged to contact_activity.",
+        "description": "Update editable fields on a contact: name, email, lead type, temperature, tags, notes, pipeline stage, the do-not-contact flag, or the contact category. Category family, friend or business marks the person “Belongs in VantoOS”: they leave the Call Sheet prospect tabs, prospect follow-ups and the prospect auto-reply. Phone numbers are never changed here. A pipeline stage change is logged to contact_activity.",
         "annotations": {
           "readOnlyHint": false,
           "destructiveHint": false,
@@ -489,11 +489,63 @@
                 }
               ],
               "description": "Pipeline stage UUID, or null to unassign."
+            },
+            "category": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "prospect",
+                    "family",
+                    "friend",
+                    "business",
+                    "service",
+                    "personal"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Contact category. null or prospect = prospecting contact. family/friend/business = belongs in VantoOS."
             }
           },
           "required": [
             "contact_id"
           ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_maytapi_auto_replies",
+        "title": "List personal-number auto-reply decisions",
+        "description": "Read the review log of the personal WhatsApp number (Maytapi) auto-reply: every inbound it screened, the AI intent and confidence, the decision (sent, log_only, or skipped_<reason>), and the reply it sent or would have sent. Rows with needs_human=true are messages the bot stayed silent on that Vanto should answer personally.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "needs_human_only": {
+              "type": "boolean",
+              "description": "Only messages the bot stayed silent on that need a personal reply."
+            },
+            "decision": {
+              "type": "string",
+              "maxLength": 60,
+              "description": "Filter by exact decision, e.g. log_only or sent."
+            },
+            "limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "description": "Max rows, default 50."
+            }
+          },
           "additionalProperties": false,
           "$schema": "http://json-schema.org/draft-07/schema#"
         },
