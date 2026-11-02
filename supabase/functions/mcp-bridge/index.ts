@@ -53,9 +53,21 @@ Deno.serve(async (req) => {
   if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
 
   const expected = Deno.env.get('MCP_BRIDGE_TOKEN')
+  const kairosExpected = Deno.env.get('KAIROS_BRIDGE_TOKEN')
   const provided = req.headers.get('x-mcp-token')
-  if (!expected || !provided || provided !== expected) {
+  const isMain = !!expected && !!provided && provided === expected
+  const isKairos = !isMain && !!kairosExpected && !!provided && provided === kairosExpected
+  if (!isMain && !isKairos) {
     return json({ error: 'unauthorized' }, 401)
+  }
+  if (isKairos) {
+    // Kairos key: read-only allowlist. Peek the action without consuming the body.
+    const KAIROS_ALLOWED = ['list_tasks', 'list_reminders', 'list_meetings', 'list_followups_due', 'list_conversations', 'get_conversation_thread']
+    let kAction = ''
+    try { kAction = String((await req.clone().json())?.action ?? '') } catch { /* handled below */ }
+    if (!KAIROS_ALLOWED.includes(kAction)) {
+      return json({ error: 'forbidden', message: 'The Kairos key may only use the allowed tools.', action: kAction, allowed_tools: KAIROS_ALLOWED }, 403)
+    }
   }
 
   const supabase = createClient(
