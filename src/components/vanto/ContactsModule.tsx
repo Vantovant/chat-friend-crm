@@ -30,6 +30,7 @@ type Contact = {
   email: string | null;
   temperature: LeadTemperature;
   lead_type: string;
+  contact_category?: string | null;
   interest: string;
   tags: string[] | null;
   notes: string | null;
@@ -432,6 +433,7 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
     phone_raw: contact.phone_raw || contact.phone || '',
     email: contact.email || '',
     lead_type: contact.lead_type,
+    contact_category: contact.contact_category || '',
     temperature: contact.temperature,
     notes: contact.notes || '',
     tags: (contact.tags || []).join(', '),
@@ -476,6 +478,7 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
       phone: phoneNorm || contact.phone,
       email: form.email.trim().toLowerCase() || null,
       lead_type: form.lead_type as any,
+      contact_category: form.contact_category || null,
       temperature: form.temperature as any,
       notes: form.notes.trim() || null,
       tags: tagsArr,
@@ -636,6 +639,21 @@ function ContactDetailDrawer({ contact, onClose, onUpdated, onDeleted, userId, i
               </button>
               <span className="text-[10px] text-muted-foreground self-center">Google Contacts sync — coming soon</span>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Category</label>
+            <select value={form.contact_category} onChange={e => set('contact_category', e.target.value)} className="w-full bg-secondary/60 border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50">
+              <option value="">Prospect (default)</option>
+              <option value="family">Family — belongs in VantoOS</option>
+              <option value="friend">Friends — belongs in VantoOS</option>
+              <option value="business">Business — belongs in VantoOS</option>
+              <option value="service">Service provider</option>
+              <option value="personal">Personal</option>
+            </select>
+            {['family', 'friend', 'business'].includes(form.contact_category) && (
+              <p className="mt-1 text-[11px] text-muted-foreground">Off the Call Sheet, no prospect follow-ups, no prospect auto-reply.</p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -894,6 +912,9 @@ function ContactRow({ contact, status, selected, onToggleSelect, onClick, profil
       </td>
       <td className="px-4 py-3">
         <span className="px-2 py-1 rounded-full text-xs font-medium bg-secondary border border-border text-muted-foreground">{leadTypeLabel(contact.lead_type)}</span>
+        {['family', 'friend', 'business'].includes(contact.contact_category || '') && (
+          <span className="ml-1 px-2 py-1 rounded-full text-[10px] font-semibold border border-primary/40 bg-primary/10 text-primary whitespace-nowrap">Belongs in VantoOS</span>
+        )}
       </td>
       <td className="px-4 py-3">
         <div className="flex flex-wrap gap-1">
