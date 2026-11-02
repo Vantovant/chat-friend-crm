@@ -1263,7 +1263,7 @@ Deno.serve(async (req) => {
       `2️⃣ *Ready for the special step?* Register here and you're officially in — your sponsor link is already set:\n👉 ${regLink}\n\n` +
       `Either way, you're not on your own. Welcome 🤝`,
 
-      `Beautiful 💛 Here's the smartest way forward:\n\n` +
+      `Beautiful! Here's the smartest way forward:\n\n` +
       `➡️ *Start in the group* — ${groupLink}\n` +
       `Drop your question there anytime. The *admins* are active and will give you a straight, personal answer.\n\n` +
       `➡️ *Want to take the official step now?* Register through this link:\n${regLink}\n\n` +
