@@ -524,7 +524,9 @@ Deno.serve(async (req) => {
       let previewStatus = "n/a";       // 'ok' | 'fallback_used' | 'no_url'
       let previewImageUrl: string | null = null;
       let messageToSend = post.message_content;
-      const taggedContent = tagSiteLinks(post.message_content, { source: "whatsapp", medium: "group", campaign: "group_post" });
+      // Scheduled group posts (incl. facebook_instant copies) go out exactly as stored — no UTM tagging,
+      // because WhatsApp shows the full URL as plain text.
+      const taggedContent = post.message_content;
       messageToSend = taggedContent;
 
       // FB-instant image recovery: re-fetch from Graph once, then fallback image.
