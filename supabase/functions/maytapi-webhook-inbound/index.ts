@@ -10,6 +10,7 @@ import { guardOnJoin, guardOnMessage } from "../_shared/group-guard.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { setSourceTag, triggerIntentTag } from "../_shared/contact-tags.ts";
 
+import { webhookEnforced, signatureVerdict, webhookGate } from "../_shared/internal-auth.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -60,6 +61,13 @@ async function hmacHex(secret: string, value: string): Promise<string> {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  // v4.3: Maytapi webhooks are unsigned. Require the shared secret the dispatcher (or the Maytapi webhook URL) presents.
+  // Log-only until WEBHOOK_AUTH_ENFORCE=true, so the live sender can be confirmed first.
+  {
+    const gate = webhookGate(req, { secretEnv: "MAYTAPI_INBOUND_TOKEN", label: "maytapi-webhook-inbound", scope: "maytapi" });
+    if (!gate.ok) return new Response(JSON.stringify({ error: "unauthorized", reason: gate.reason }), { status: gate.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
 
   try {
     const PRODUCT_ID = Deno.env.get("MAYTAPI_PRODUCT_ID");

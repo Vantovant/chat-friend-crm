@@ -1,3 +1,4 @@
+import { denyUnlessInternal } from "../_shared/internal-auth.ts";
 // One-shot preview test sender — sends a WhatsApp message via Twilio
 // directly using the project's TWILIO_* secrets. No DB writes.
 const corsHeaders = {
@@ -7,6 +8,9 @@ const corsHeaders = {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  // v4.3: caller authentication (system / admin / cron secret). The public anon key is never accepted.
+  { const denied = await denyUnlessInternal(req, {}); if (denied) return denied; }
 
   const SID = Deno.env.get("TWILIO_ACCOUNT_SID");
   const TOK = Deno.env.get("TWILIO_AUTH_TOKEN");

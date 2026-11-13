@@ -16,6 +16,7 @@
 // 'disabled' and raises an urgent PLAN task.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 
+import { denyUnlessInternal } from "../_shared/internal-auth.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
@@ -148,6 +149,9 @@ async function superAdminId(svc: Svc): Promise<string | null> {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  // v4.3: caller authentication (system / admin / cron secret). The public anon key is never accepted.
+  { const denied = await denyUnlessInternal(req, { allowCron: true, legacyAnon: ["check_delivery_and_autopause"] }); if (denied) return denied; }
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
   const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;

@@ -11,6 +11,7 @@
 // The manual MCP tools (create_group_dm_batch / approve_group_dm_batch) are untouched.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 
+import { denyUnlessInternal } from "../_shared/internal-auth.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
@@ -79,6 +80,9 @@ async function callPilot(svc: Svc, body: Record<string, unknown>) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  // v4.3: caller authentication (system / admin / cron secret). The public anon key is never accepted.
+  { const denied = await denyUnlessInternal(req, { allowCron: true }); if (denied) return denied; }
 
   const svc = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
   const startedAt = new Date().toISOString();

@@ -1,6 +1,10 @@
+import { denyUnlessInternal } from "../_shared/internal-auth.ts";
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, content-type" };
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+
+  // v4.3: caller authentication (system / admin / cron secret). The public anon key is never accepted.
+  { const denied = await denyUnlessInternal(req, {}); if (denied) return denied; }
   const SID = Deno.env.get("TWILIO_ACCOUNT_SID")!;
   const TOK = Deno.env.get("TWILIO_AUTH_TOKEN")!;
   const url = new URL(req.url);

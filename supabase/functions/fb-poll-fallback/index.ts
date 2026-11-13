@@ -3,6 +3,7 @@
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
+import { denyUnlessInternal } from "../_shared/internal-auth.ts";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 // Fallback to _NEW: the rotated token was stored under META_PAGE_ACCESS_TOKEN_NEW.
@@ -14,6 +15,9 @@ const GRAPH = 'https://graph.facebook.com/v19.0';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+
+  // v4.3: caller authentication (system / admin / cron secret). The public anon key is never accepted.
+  { const denied = await denyUnlessInternal(req, {}); if (denied) return denied; }
 
   try {
     if (!PAGE_TOKEN || !PAGE_ID) {

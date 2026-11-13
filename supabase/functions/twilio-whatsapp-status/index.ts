@@ -5,6 +5,7 @@
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
+import { webhookEnforced, signatureVerdict, webhookGate } from "../_shared/internal-auth.ts";
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -64,8 +65,9 @@ Deno.serve(async (req) => {
   const twilioSig = req.headers.get('X-Twilio-Signature') || '';
   const webhookUrl = `${Deno.env.get('SUPABASE_URL')}/functions/v1/twilio-whatsapp-status`;
   const valid = await verifyTwilioSignature(webhookUrl, params, twilioSig, authToken);
-  if (!valid) {
-    console.warn('[twilio-status] Invalid Twilio signature — continuing for sandbox');
+  {
+    const v = signatureVerdict(valid, 'twilio-status', 'twilio');   // v4.3: refuse forged status callbacks when WEBHOOK_AUTH_ENFORCE=true (log-only by default)
+    if (!v.ok) return new Response('invalid signature', { status: v.status, headers: { 'Content-Type': 'text/plain' } });
   }
 
   const messageSid = params['MessageSid'] || '';

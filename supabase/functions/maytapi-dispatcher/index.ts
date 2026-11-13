@@ -1,3 +1,5 @@
+import { webhookEnforced } from "../_shared/internal-auth.ts";
+import { timingSafeEqualStr } from "../_shared/require-admin-or-system.ts";
 // Maytapi webhook dispatcher
 // - Returns 200 immediately
 // - Forwards the unmodified payload to two downstream CRMs in parallel
@@ -39,10 +41,13 @@ Deno.serve(async (req) => {
 
   // Optional shared-secret token gate
   const requiredToken = Deno.env.get("DISPATCHER_TOKEN");
+  if (!requiredToken && webhookEnforced("maytapi")) {   // v4.3: an unset secret is a refusal once enforcement is on
+    return new Response(JSON.stringify({ error: "unauthorized", reason: "webhook_secret_not_configured" }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+  }
   if (requiredToken) {
     const url = new URL(req.url);
-    const provided = url.searchParams.get("token");
-    if (provided !== requiredToken) {
+    const provided = url.searchParams.get("token") ?? "";
+    if (!timingSafeEqualStr(provided, requiredToken)) {
       console.warn("[dispatcher] rejected: bad token");
       return new Response(JSON.stringify({ error: "unauthorized" }), {
         status: 401,
@@ -75,7 +80,11 @@ Deno.serve(async (req) => {
 
   // Fire-and-forget: don't await before responding
   const work = Promise.allSettled(
-    targets.map((t) => forwardOne(t.url, t.label, body, forwardHeaders)),
+    targets.map((t) => forwardOne(t.url, t.label, body,
+      // v4.3: the inbound secret is sent ONLY to our own CRM target, never to the other downstream system.
+      t.label === "vantocrm" && Deno.env.get("MAYTAPI_INBOUND_TOKEN")
+        ? { ...forwardHeaders, "x-webhook-token": Deno.env.get("MAYTAPI_INBOUND_TOKEN")! }
+        : forwardHeaders)),
   ).then((results) => {
     console.log("[dispatcher] forward results:", JSON.stringify(results));
   });
