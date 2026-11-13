@@ -1,0 +1,68 @@
+-- PROPOSED ONLY - NOT APPLIED. Requires a separate explicit approval. Part of the zazi-sync-all security fix (v4.4).
+-- Purpose: make the DB trigger authenticate to zazi-sync-all with the shared secret (not the public anon key) and
+--          stop a failed outbound call from aborting the user's write.
+-- PREREQUISITES (manual, each approved separately; ALL must exist BEFORE this migration is applied):
+--   1. Vault secret 'zazi_sync_cron_secret' holding the SAME value as the edge-function secret CRON_SHARED_SECRET (>=32 chars).
+--   2. Vault secret 'zazi_sync_gateway_jwt' holding the PUBLIC anon key (kept out of git). The platform gateway may still require a JWT
+--      header; the function treats it as public and grants nothing. Only the secret above authenticates the trigger.
+--   3. The edge-function secret CRON_SHARED_SECRET is set (it is read by zazi-sync-all v4.4 once that is deployed in step 3 below, and by the Package A guard).
+--   NOT a prerequisite: zazi-sync-all v4.4 does NOT need to be deployed first. It is deployed AFTER this migration (see order below).
+-- SAFE ORDER (trigger FIRST, function SECOND - so no moment exists where a legitimate trigger is refused):
+--   (1) secrets exist -> (2) apply THIS migration: the trigger now sends the gateway JWT + x-cron-secret; the CURRENTLY deployed
+--   zazi-sync-all ignores the extra header and still accepts the anon key, so nothing breaks ->
+--   (3) deploy zazi-sync-all v4.4, which accepts ONLY service-role or x-cron-secret and never the anon key, regardless of
+--   ALLOW_LEGACY_ANON_CRON -> (4) verify new audit rows keep appearing -> done. The global legacy flag is not needed for this function.
+--   If a Vault secret is missing when this migration runs, the trigger skips the sync with a WARNING and user writes are unaffected;
+--   the sync is then simply dormant until the secrets are added.
+-- NOTE: while the master host does not resolve, every sync fails at the edge function (HTTP 500 after authentication) regardless.
+--       This does not block deployment: authentication is checked BEFORE any master call, so a trigger that authenticates
+--       still leaves an audit row (status error), and a refused trigger leaves none. Do NOT change SYNC_SUPABASE_URL as part of this deployment.
+CREATE OR REPLACE FUNCTION public.trigger_sync_to_master()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, extensions
+AS $fn$
+DECLARE
+  _payload jsonb;
+  _action  text;
+  _record  jsonb;
+  _func_url text;
+  _secret  text;
+  _gw      text;
+BEGIN
+  _func_url := coalesce(nullif(current_setting('app.settings.supabase_url', true), ''), 'https://nqyyvqcmcyggvlcswkio.supabase.co')
+               || '/functions/v1/zazi-sync-all';
+  SELECT decrypted_secret INTO _secret FROM vault.decrypted_secrets WHERE name = 'zazi_sync_cron_secret' LIMIT 1;
+  SELECT decrypted_secret INTO _gw FROM vault.decrypted_secrets WHERE name = 'zazi_sync_gateway_jwt' LIMIT 1;
+  IF _secret IS NULL OR length(_secret) < 32 OR _gw IS NULL THEN
+    RAISE WARNING 'trigger_sync_to_master: sync secret or gateway JWT not configured; skipping sync for %.%', TG_TABLE_SCHEMA, TG_TABLE_NAME;
+    IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN
+    _action := 'DELETE'; _record := jsonb_build_object('id', OLD.id);
+  ELSE
+    _action := 'UPSERT'; _record := to_jsonb(NEW) - 'last_synced_at';
+  END IF;
+  _payload := jsonb_build_object('table', TG_TABLE_NAME, 'record', _record, 'action', _action);
+
+  BEGIN
+    PERFORM extensions.http_set_curlopt('CURLOPT_TIMEOUT', '3');
+    PERFORM extensions.http(ROW('POST'::extensions.http_method, _func_url,
+      ARRAY[extensions.http_header('apikey', _gw),
+            extensions.http_header('Authorization', 'Bearer ' || _gw),
+            extensions.http_header('x-cron-secret', _secret)]::extensions.http_header[],
+      'application/json', _payload::text)::extensions.http_request);
+  EXCEPTION WHEN OTHERS THEN
+    -- A sync problem must never roll back or block the user's own write.
+    RAISE WARNING 'trigger_sync_to_master: sync call failed for %.% (%): %', TG_TABLE_SCHEMA, TG_TABLE_NAME, TG_OP, SQLERRM;
+  END;
+
+  IF TG_OP = 'DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
+END;
+$fn$;
+REVOKE EXECUTE ON FUNCTION public.trigger_sync_to_master() FROM PUBLIC, anon, authenticated;
+
+-- ROLLBACK: re-create the function exactly as defined in supabase/migrations/20260222100617_02d3be3b-5603-4318-8594-09c740f321f0.sql
+--           (then re-run the REVOKE above). No data is touched by this migration.

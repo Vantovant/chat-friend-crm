@@ -1,4 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { denyUnlessInternal } from '../_shared/internal-auth.ts';
+import { validateBootstrapTable } from '../_shared/zazi-sync-policy.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -25,6 +27,9 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
+
+  // v4.4 security: admin session or system only (no cron lane, no legacy anon). Manual one-off tool.
+  { const denied = await denyUnlessInternal(req, { allowCron: false }); if (denied) return new Response(denied.body, { status: denied.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }); }
 
   const startedAt = new Date().toISOString();
 
@@ -53,6 +58,9 @@ Deno.serve(async (req) => {
     const requestedTable = body.table; // optional: sync single table
     const batchSize = body.batchSize || 50;
 
+    if (requestedTable !== undefined && !validateBootstrapTable(requestedTable)) {
+      return new Response(JSON.stringify({ error: 'table_not_allowed' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
     const tablesToSync = requestedTable
       ? [requestedTable]
       : ALL_TABLES;
