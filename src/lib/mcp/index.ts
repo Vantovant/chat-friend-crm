@@ -64,6 +64,8 @@ import setDraftStatus from "./tools/set-draft-status";
 import getCallCampaign from "./tools/get-call-campaign";
 import setCallCampaign from "./tools/set-call-campaign";
 import listMaytapiAutoReplies from "./tools/list-maytapi-auto-replies";
+import momentumBrief from "./tools/momentum-brief";
+import momentumGetContent from "./tools/momentum-get-content";
 
 const projectRef = import.meta.env.VITE_SUPABASE_PROJECT_ID ?? "project-ref-unset";
 
@@ -78,6 +80,8 @@ export default defineMcp({
     acceptedAudiences: "authenticated",
   }),
   tools: [
+    momentumBrief,
+    momentumGetContent,
     getDispatchPolicy,
     getDispatcherHealth,
     getMaytapiStatus,
