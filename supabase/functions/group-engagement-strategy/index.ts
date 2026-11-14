@@ -11,6 +11,7 @@ import { aiFetch } from "../_shared/ai-fallback.ts";
  */
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
+import { denyUnlessInternal } from "../_shared/internal-auth.ts";
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -41,6 +42,9 @@ function maskPhone(v: string | null | undefined) {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: corsHeaders });
+
+  // v4.3: caller authentication (system / admin / cron secret). The public anon key is never accepted.
+  { const denied = await denyUnlessInternal(req, { allowCron: true, legacyAnon: true }); if (denied) return denied; }
 
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,

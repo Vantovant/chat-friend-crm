@@ -13,6 +13,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { pageOwner, resolvePageToken } from '../_shared/fb-page-token.ts';
 import { extractFbImage } from '../_shared/fb-image.ts';
 
+import { webhookEnforced, signatureVerdict, webhookGate } from "../_shared/internal-auth.ts";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 // Fallback to _NEW: the rotated token was stored under META_PAGE_ACCESS_TOKEN_NEW,
@@ -35,7 +36,7 @@ const GRAPH = 'https://graph.facebook.com/v19.0';
 const VANTO_USER_ID = 'e336f0a0-ccf5-4992-9607-25c5bf590b11';
 
 async function verifySignature(rawBody: string, header: string | null): Promise<boolean> {
-  if (!APP_SECRET) return true; // dev fallback
+  if (!APP_SECRET) return !webhookEnforced("meta"); // dev fallback; v4.3: fail closed when WEBHOOK_AUTH_ENFORCE=true
   if (!header || !header.startsWith('sha256=')) return false;
   const expected = header.slice(7);
   const key = await crypto.subtle.importKey(
@@ -179,7 +180,7 @@ Deno.serve(async (req) => {
 
     // Only enforce HMAC for real webhook payloads from Meta.
     // Manual calls from the admin UI (post_url / text) come through user JWT and don't carry this header.
-    if (looksLikeWebhook && sigHeader) {
+    if (looksLikeWebhook && (sigHeader || webhookEnforced("meta"))) {   // v4.3: missing signature refused when enforcement is on
       const ok = await verifySignature(rawBody, sigHeader);
       if (!ok) {
         console.warn('[fb-ingest] invalid X-Hub-Signature-256');

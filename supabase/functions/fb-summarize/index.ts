@@ -4,6 +4,7 @@ import { aiFetch } from "../_shared/ai-fallback.ts";
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
+import { denyUnlessInternal } from "../_shared/internal-auth.ts";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY')!;
@@ -44,6 +45,9 @@ function safetyCheck(body: string): { flags: any; failed: boolean } {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+
+  // v4.3: caller authentication (system / admin / cron secret). The public anon key is never accepted.
+  { const denied = await denyUnlessInternal(req, {}); if (denied) return denied; }
   try {
     const { fb_source_post_id } = await req.json();
     if (!fb_source_post_id) return json({ ok: false, error: 'fb_source_post_id required' }, 200);

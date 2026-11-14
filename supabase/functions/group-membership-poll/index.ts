@@ -20,6 +20,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 
+import { denyUnlessInternal } from "../_shared/internal-auth.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -245,6 +246,9 @@ async function pollGroup(svc: any, groupJid: string) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  // v4.3: caller authentication (system / admin / cron secret). The public anon key is never accepted.
+  { const denied = await denyUnlessInternal(req, { allowCron: true, legacyAnon: true }); if (denied) return denied; }
 
   const svc = createClient(SUPABASE_URL, SERVICE_KEY);
   const started = new Date().toISOString();

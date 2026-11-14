@@ -8,6 +8,7 @@
 // An empty/idle queue is explicitly NOT an alert.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 
+import { denyUnlessInternal } from "../_shared/internal-auth.ts";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -18,6 +19,9 @@ const DROP_WINDOW_MS = 2 * 60 * 60 * 1000;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  // v4.3: caller authentication (system / admin / cron secret). The public anon key is never accepted.
+  { const denied = await denyUnlessInternal(req, { allowCron: true, legacyAnon: true }); if (denied) return denied; }
 
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,

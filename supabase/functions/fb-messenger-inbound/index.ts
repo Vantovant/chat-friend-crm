@@ -10,6 +10,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import { resolvePageToken, pageOwner } from '../_shared/fb-page-token.ts';
 import { triggerIntentTag } from '../_shared/contact-tags.ts';
 
+import { webhookEnforced, signatureVerdict, webhookGate } from "../_shared/internal-auth.ts";
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const APP_SECRET = Deno.env.get('META_APP_SECRET') ?? '';
@@ -21,7 +22,7 @@ const GRAPH = 'https://graph.facebook.com/v19.0';
 const VANTO_USER_ID = 'e336f0a0-ccf5-4992-9607-25c5bf590b11';
 
 async function verifySignature(rawBody: string, header: string | null): Promise<boolean> {
-  if (!APP_SECRET) return true; // dev fallback, matches fb-ingest
+  if (!APP_SECRET) return !webhookEnforced("meta"); // dev fallback; v4.3: fail closed when WEBHOOK_AUTH_ENFORCE=true
   if (!header || !header.startsWith('sha256=')) return false;
   const expected = header.slice(7);
   const key = await crypto.subtle.importKey(
@@ -55,7 +56,7 @@ Deno.serve(async (req) => {
   try {
     const rawBody = await req.text();
     const sigHeader = req.headers.get('x-hub-signature-256');
-    if (sigHeader) {
+    if (sigHeader || webhookEnforced("meta")) {   // v4.3: a MISSING signature header is refused when enforcement is on
       const ok = await verifySignature(rawBody, sigHeader);
       if (!ok) {
         console.warn('[fb-messenger-inbound] invalid X-Hub-Signature-256');
