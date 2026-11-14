@@ -924,6 +924,51 @@ export type Database = {
           },
         ]
       }
+      campaign_send_deferrals: {
+        Row: {
+          campaign: string
+          deferrals: number
+          escalated_at: string | null
+          first_deferred_at: string
+          last_deferred_at: string
+          last_reason: string | null
+          last_scope: string | null
+          resolve_outcome: string | null
+          resolved_at: string | null
+          retry_at: string
+          step: number | null
+          subject_id: string
+        }
+        Insert: {
+          campaign: string
+          deferrals?: number
+          escalated_at?: string | null
+          first_deferred_at?: string
+          last_deferred_at?: string
+          last_reason?: string | null
+          last_scope?: string | null
+          resolve_outcome?: string | null
+          resolved_at?: string | null
+          retry_at: string
+          step?: number | null
+          subject_id: string
+        }
+        Update: {
+          campaign?: string
+          deferrals?: number
+          escalated_at?: string | null
+          first_deferred_at?: string
+          last_deferred_at?: string
+          last_reason?: string | null
+          last_scope?: string | null
+          resolve_outcome?: string | null
+          resolved_at?: string | null
+          retry_at?: string
+          step?: number | null
+          subject_id?: string
+        }
+        Relationships: []
+      }
       client_nurture_campaigns: {
         Row: {
           active: boolean
@@ -1382,6 +1427,161 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      content_audit_log: {
+        Row: {
+          actor: string | null
+          at: string
+          detail: Json | null
+          event: string
+          id: number
+        }
+        Insert: {
+          actor?: string | null
+          at?: string
+          detail?: Json | null
+          event: string
+          id?: number
+        }
+        Update: {
+          actor?: string | null
+          at?: string
+          detail?: Json | null
+          event?: string
+          id?: number
+        }
+        Relationships: []
+      }
+      content_deliveries: {
+        Row: {
+          attempts: number
+          channel: string
+          content_item_id: string
+          created_at: string
+          destination_jid: string | null
+          destination_name: string
+          id: string
+          idempotency_key: string
+          last_error: string | null
+          order_index: number
+          planned_at: string
+          post_id: string | null
+          provider_message_id: string | null
+          status: string
+        }
+        Insert: {
+          attempts?: number
+          channel?: string
+          content_item_id: string
+          created_at?: string
+          destination_jid?: string | null
+          destination_name: string
+          id?: string
+          idempotency_key: string
+          last_error?: string | null
+          order_index: number
+          planned_at: string
+          post_id?: string | null
+          provider_message_id?: string | null
+          status?: string
+        }
+        Update: {
+          attempts?: number
+          channel?: string
+          content_item_id?: string
+          created_at?: string
+          destination_jid?: string | null
+          destination_name?: string
+          id?: string
+          idempotency_key?: string
+          last_error?: string | null
+          order_index?: number
+          planned_at?: string
+          post_id?: string | null
+          provider_message_id?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "content_deliveries_content_item_id_fkey"
+            columns: ["content_item_id"]
+            isOneToOne: false
+            referencedRelation: "content_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      content_items: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          body: string
+          body_sha256: string
+          created_at: string
+          held: boolean
+          held_at: string | null
+          held_reason: string | null
+          id: string
+          kind: string
+          rejected_reason: string | null
+          source_changed: boolean
+          source_changed_at: string | null
+          source_checksum: string | null
+          source_slug: string | null
+          source_system: string | null
+          source_updated_at: string | null
+          status: string
+          submitted_at: string | null
+          title: string
+          version: number
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          body: string
+          body_sha256: string
+          created_at?: string
+          held?: boolean
+          held_at?: string | null
+          held_reason?: string | null
+          id?: string
+          kind?: string
+          rejected_reason?: string | null
+          source_changed?: boolean
+          source_changed_at?: string | null
+          source_checksum?: string | null
+          source_slug?: string | null
+          source_system?: string | null
+          source_updated_at?: string | null
+          status?: string
+          submitted_at?: string | null
+          title: string
+          version?: number
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          body?: string
+          body_sha256?: string
+          created_at?: string
+          held?: boolean
+          held_at?: string | null
+          held_reason?: string | null
+          id?: string
+          kind?: string
+          rejected_reason?: string | null
+          source_changed?: boolean
+          source_changed_at?: string | null
+          source_checksum?: string | null
+          source_slug?: string | null
+          source_system?: string | null
+          source_updated_at?: string | null
+          status?: string
+          submitted_at?: string | null
+          title?: string
+          version?: number
+        }
+        Relationships: []
       }
       conversations: {
         Row: {
@@ -2310,6 +2510,39 @@ export type Database = {
         }
         Relationships: []
       }
+      group_guard_alert_failures: {
+        Row: {
+          alert_text: string | null
+          created_at: string
+          detail: string | null
+          group_jid: string | null
+          http_status: number | null
+          id: number
+          reason: string
+          target_phone: string | null
+        }
+        Insert: {
+          alert_text?: string | null
+          created_at?: string
+          detail?: string | null
+          group_jid?: string | null
+          http_status?: number | null
+          id?: number
+          reason: string
+          target_phone?: string | null
+        }
+        Update: {
+          alert_text?: string | null
+          created_at?: string
+          detail?: string | null
+          group_jid?: string | null
+          http_status?: number | null
+          id?: number
+          reason?: string
+          target_phone?: string | null
+        }
+        Relationships: []
+      }
       group_health_reports: {
         Row: {
           created_at: string
@@ -2857,6 +3090,33 @@ export type Database = {
           },
         ]
       }
+      maytapi_cap_holds: {
+        Row: {
+          first_held_at: string
+          hold_reason: string
+          last_held_at: string
+          post_id: string
+          release_outcome: string | null
+          released_at: string | null
+        }
+        Insert: {
+          first_held_at?: string
+          hold_reason?: string
+          last_held_at?: string
+          post_id: string
+          release_outcome?: string | null
+          released_at?: string | null
+        }
+        Update: {
+          first_held_at?: string
+          hold_reason?: string
+          last_held_at?: string
+          post_id?: string
+          release_outcome?: string | null
+          released_at?: string | null
+        }
+        Relationships: []
+      }
       maytapi_delivery_alerts: {
         Row: {
           acknowledged_at: string | null
@@ -3010,6 +3270,48 @@ export type Database = {
           status?: string | null
           user_id?: string
           zazi_action_id?: string | null
+        }
+        Relationships: []
+      }
+      maytapi_send_ledger: {
+        Row: {
+          dedupe_key: string | null
+          destination: string | null
+          detail: string | null
+          finalized_at: string | null
+          id: string
+          ref_id: string | null
+          ref_table: string | null
+          reserved_at: string
+          route: string
+          sast_day: string
+          status: string
+        }
+        Insert: {
+          dedupe_key?: string | null
+          destination?: string | null
+          detail?: string | null
+          finalized_at?: string | null
+          id?: string
+          ref_id?: string | null
+          ref_table?: string | null
+          reserved_at?: string
+          route: string
+          sast_day: string
+          status?: string
+        }
+        Update: {
+          dedupe_key?: string | null
+          destination?: string | null
+          detail?: string | null
+          finalized_at?: string | null
+          id?: string
+          ref_id?: string | null
+          ref_table?: string | null
+          reserved_at?: string
+          route?: string
+          sast_day?: string
+          status?: string
         }
         Relationships: []
       }
@@ -3232,6 +3534,87 @@ export type Database = {
         }
         Relationships: []
       }
+      momentum_frames: {
+        Row: {
+          frame: string
+        }
+        Insert: {
+          frame: string
+        }
+        Update: {
+          frame?: string
+        }
+        Relationships: []
+      }
+      momentum_group_verifications: {
+        Row: {
+          confirmed_member_count: number
+          created_at: string
+          group_jid: string
+          group_name: string
+          hub_member_count: number
+          id: string
+          status: string
+          tolerance: number
+          verified_by: string
+        }
+        Insert: {
+          confirmed_member_count: number
+          created_at?: string
+          group_jid: string
+          group_name: string
+          hub_member_count: number
+          id?: string
+          status: string
+          tolerance: number
+          verified_by: string
+        }
+        Update: {
+          confirmed_member_count?: number
+          created_at?: string
+          group_jid?: string
+          group_name?: string
+          hub_member_count?: number
+          id?: string
+          status?: string
+          tolerance?: number
+          verified_by?: string
+        }
+        Relationships: []
+      }
+      momentum_source_articles: {
+        Row: {
+          checksum: string
+          plain_text: string
+          raw_content: string
+          received_at: string
+          source_slug: string
+          source_system: string
+          source_updated_at: string
+          title: string
+        }
+        Insert: {
+          checksum: string
+          plain_text: string
+          raw_content: string
+          received_at?: string
+          source_slug: string
+          source_system?: string
+          source_updated_at: string
+          title: string
+        }
+        Update: {
+          checksum?: string
+          plain_text?: string
+          raw_content?: string
+          received_at?: string
+          source_slug?: string
+          source_system?: string
+          source_updated_at?: string
+          title?: string
+        }
+        Relationships: []
+      }
       option_b_audit_log: {
         Row: {
           attempt_outcome: string
@@ -3298,6 +3681,60 @@ export type Database = {
           template_id?: string | null
           template_label?: string | null
           trigger_type?: string
+        }
+        Relationships: []
+      }
+      parked_item_reviews: {
+        Row: {
+          action: string
+          admin_user_id: string
+          campaign: string
+          decided_at: string
+          evidence: string
+          evidence_source: string
+          id: string
+          idempotency_key: string
+          ledger_id: string | null
+          outcome: string
+          result: Json
+          resume_at: string | null
+          state_after: Json
+          state_before: Json
+          subject_id: string
+        }
+        Insert: {
+          action: string
+          admin_user_id: string
+          campaign: string
+          decided_at?: string
+          evidence: string
+          evidence_source: string
+          id?: string
+          idempotency_key: string
+          ledger_id?: string | null
+          outcome: string
+          result: Json
+          resume_at?: string | null
+          state_after: Json
+          state_before: Json
+          subject_id: string
+        }
+        Update: {
+          action?: string
+          admin_user_id?: string
+          campaign?: string
+          decided_at?: string
+          evidence?: string
+          evidence_source?: string
+          id?: string
+          idempotency_key?: string
+          ledger_id?: string | null
+          outcome?: string
+          result?: Json
+          resume_at?: string | null
+          state_after?: Json
+          state_before?: Json
+          subject_id?: string
         }
         Relationships: []
       }
@@ -5044,8 +5481,45 @@ export type Database = {
         }
         Relationships: []
       }
+      maytapi_held_sends_v: {
+        Row: {
+          deferrals: number | null
+          destination: string | null
+          first_held_at: string | null
+          item_status: string | null
+          kind: string | null
+          last_held_at: string | null
+          reason: string | null
+          retry_at: string | null
+          scheduled_at: string | null
+          source: string | null
+          subject_id: string | null
+        }
+        Relationships: []
+      }
+      momentum_delivery_status_v: {
+        Row: {
+          attempts: number | null
+          delivery_id: string | null
+          delivery_status: string | null
+          destination_name: string | null
+          earliest_next_after_others: string | null
+          item_status: string | null
+          last_error: string | null
+          planned_at: string | null
+          source_changed: boolean | null
+          source_slug: string | null
+          title: string | null
+          version: number | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
+      approve_content_item: {
+        Args: { p_approver: string; p_expected_sha: string; p_item: string }
+        Returns: number
+      }
       call_campaign_scorecard: {
         Args: { _campaign_key?: string }
         Returns: Json
@@ -5062,6 +5536,23 @@ export type Database = {
         }[]
       }
       disable_april_flash_sale_rule: { Args: never; Returns: undefined }
+      draft_teaching_from_source: {
+        Args: { p_actor?: string; p_parts: Json; p_slug: string }
+        Returns: string
+      }
+      finalize_maytapi_send: {
+        Args: { p_detail?: string; p_id: string; p_outcome: string }
+        Returns: undefined
+      }
+      flag_source_change: {
+        Args: {
+          p_actor?: string
+          p_new_checksum: string
+          p_new_updated_at: string
+          p_source_slug: string
+        }
+        Returns: number
+      }
       get_user_role: {
         Args: never
         Returns: Database["public"]["Enums"]["user_role"]
@@ -5072,6 +5563,10 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      hold_content_item: {
+        Args: { p_actor?: string; p_item: string; p_reason: string }
+        Returns: number
       }
       is_admin_or_super_admin: { Args: never; Returns: boolean }
       is_foreign_owned_contact: {
@@ -5100,17 +5595,137 @@ export type Database = {
         Args: { p_phone_normalized: string; p_provider_message_id?: string }
         Returns: undefined
       }
+      momentum_allow_group: {
+        Args: { p_actor: string; p_jid: string }
+        Returns: boolean
+      }
+      momentum_group_candidates: {
+        Args: { p_query: string }
+        Returns: {
+          allowed: boolean
+          group_jid: string
+          group_name: string
+          hub_member_count: number
+          verified: boolean
+        }[]
+      }
+      momentum_last_delivery_at: {
+        Args: { p_exclude?: string; p_jid: string }
+        Returns: string
+      }
+      momentum_min_interval: { Args: never; Returns: string }
+      momentum_next_slot: {
+        Args: { p_exclude?: string; p_jid: string; p_not_before: string }
+        Returns: string
+      }
+      momentum_release_due: {
+        Args: { p_limit?: number }
+        Returns: {
+          delivery_id: string
+          detail: string
+          outcome: string
+        }[]
+      }
+      momentum_verify_group: {
+        Args: {
+          p_confirmed_count: number
+          p_jid: string
+          p_tolerance?: number
+          p_verifier: string
+        }
+        Returns: string
+      }
+      plan_content_delivery: {
+        Args: {
+          p_actor?: string
+          p_destinations: Json
+          p_first_at: string
+          p_item: string
+        }
+        Returns: {
+          delivery_id: string
+          destination_jid: string
+          outcome: string
+          planned_at: string
+        }[]
+      }
+      queue_momentum_post: { Args: { p_delivery_id: string }; Returns: string }
+      reconcile_maytapi_send: {
+        Args: { p_id: string; p_note: string; p_outcome: string }
+        Returns: undefined
+      }
+      record_source_article: {
+        Args: {
+          p_actor?: string
+          p_plain: string
+          p_raw: string
+          p_slug: string
+          p_title: string
+          p_updated_at: string
+        }
+        Returns: number
+      }
+      reject_content_item: {
+        Args: { p_actor?: string; p_item: string; p_reason: string }
+        Returns: undefined
+      }
       release_cadence_send_slot: { Args: never; Returns: undefined }
+      release_demographics_recovery_phone: {
+        Args: { p_contact_id?: string; p_phone_normalized: string }
+        Returns: Json
+      }
       release_message_slot: {
         Args: { p_contact_id: string }
         Returns: undefined
+      }
+      release_parked_campaign_item: {
+        Args: {
+          p_action: string
+          p_admin_user_id: string
+          p_campaign: string
+          p_evidence: string
+          p_evidence_source: string
+          p_idempotency_key: string
+          p_ledger_id?: string
+          p_outcome: string
+          p_resume_at?: string
+          p_subject_id: string
+        }
+        Returns: Json
       }
       reserve_cadence_send_slot: { Args: { p_limit: number }; Returns: number }
       reserve_demographics_recovery_phone: {
         Args: { p_contact_id?: string; p_phone_normalized: string }
         Returns: Json
       }
+      reserve_maytapi_send: {
+        Args: {
+          p_dedupe_key?: string
+          p_destination: string
+          p_once?: boolean
+          p_ref_id: string
+          p_ref_table: string
+          p_route: string
+        }
+        Returns: Json
+      }
       reserve_message_slot: { Args: { p_contact_id: string }; Returns: Json }
+      resnapshot_content_item: {
+        Args: {
+          p_actor?: string
+          p_body: string
+          p_item: string
+          p_source_checksum: string
+          p_source_slug: string
+          p_source_system: string
+          p_source_updated_at: string
+        }
+        Returns: undefined
+      }
+      retire_content_item: {
+        Args: { p_actor?: string; p_item: string }
+        Returns: number
+      }
       search_knowledge: {
         Args: {
           collection_filter?: string
@@ -5126,6 +5741,10 @@ export type Database = {
           file_title: string
           relevance: number
         }[]
+      }
+      submit_content_for_review: {
+        Args: { p_actor?: string; p_item: string }
+        Returns: undefined
       }
       undo_call_sheet_call: { Args: { _call_id: string }; Returns: Json }
     }
