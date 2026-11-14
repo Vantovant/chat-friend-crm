@@ -5618,6 +5618,20 @@ export type Database = {
         Args: { p_exclude?: string; p_jid: string; p_not_before: string }
         Returns: string
       }
+      momentum_plan_exact: {
+        Args: {
+          p_actor?: string
+          p_destinations: Json
+          p_first_at: string
+          p_item: string
+        }
+        Returns: {
+          delivery_id: string
+          destination_jid: string
+          outcome: string
+          planned_at: string
+        }[]
+      }
       momentum_release_due: {
         Args: { p_limit?: number }
         Returns: {
@@ -5625,6 +5639,19 @@ export type Database = {
           detail: string
           outcome: string
         }[]
+      }
+      momentum_retime_item: {
+        Args: { p_actor?: string; p_first_at: string; p_item: string }
+        Returns: {
+          delivery_id: string
+          destination_jid: string
+          new_planned_at: string
+          old_planned_at: string
+        }[]
+      }
+      momentum_slot_conflict: {
+        Args: { p_exclude_item?: string; p_jid: string; p_slot: string }
+        Returns: string
       }
       momentum_verify_group: {
         Args: {
