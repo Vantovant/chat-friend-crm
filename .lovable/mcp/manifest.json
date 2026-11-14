@@ -17,6 +17,276 @@
     },
     "tools": [
       {
+        "name": "momentum_brief",
+        "title": "Momentum briefing (read-only)",
+        "description": "Read-only Momentum intelligence. Returns the live state of the A-Team Momentum engine for planning: safety gates (engine, scheduler, emergency, freeze, 120-minute gap), allow-listed groups, every teaching and nugget with status/version and planned deliveries (SAST), the Mon/Wed/Fri 09:15/09:25/09:35 rhythm for the coming weeks with what is scheduled, what is proposed and what is a gap, and exceptions (retime needed, needs approval, held, failed, inert). Use it to answer 'what should we do next week?': explain reasoning (each proposed day has a reason and alternatives), then ask Vanto ONE decision. Revisions (assign / exclude / first_release) rebuild the plan when Vanto wants a change. It never approves, schedules, sends or changes any setting. Teaching and nugget wording is Mr Baloyi's and is never edited; read it with momentum_get_content.",
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "week_start": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "A Monday (YYYY-MM-DD). Default: next Monday in South Africa."
+            },
+            "weeks": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3,
+              "description": "How many weeks to plan (default 2)."
+            },
+            "assign": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "propertyNames": {
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "description": "Vanto's revisions: date (YYYY-MM-DD) -> item id to use that day, or \"none\" to leave the day empty. Use the alternatives from the brief."
+            },
+            "exclude": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "description": "Item ids to leave out of the plan."
+            },
+            "first_release": {
+              "type": "string",
+              "pattern": "^\\d{2}:\\d{2}$",
+              "description": "First group's release time (SAST, HH:MM). Default 09:15; the other groups follow 10 minutes apart."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "momentum_get_content",
+        "title": "Read a Momentum teaching or nugget verbatim",
+        "description": "Read-only. Returns one Momentum item's exact stored text, version, status, text hash and recent audit trail via the admin gateway. Quote the text verbatim; never paraphrase, correct or 'improve' Mr Baloyi's wording. Get item ids from momentum_brief.",
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "item_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Item id from momentum_brief."
+            }
+          },
+          "required": [
+            "item_id"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "momentum_preview_plan",
+        "title": "Preview the Momentum campaign (read-only)",
+        "description": "Read-only. Builds the exact campaign preview for the coming weeks: the FULL verbatim text of every message that would be scheduled (with its hash), the groups, the exact SAST times, any re-timing of already-scheduled deliveries, problems and exceptions, plus a proposal_hash and the confirm_phrase Vanto must type to approve. Use revisions (assign / exclude / first_release) to change the plan when Vanto asks, and call this again. Show Vanto the exact messages before asking for approval. Nothing is approved, scheduled or sent by this tool.",
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "week_start": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "A Monday (YYYY-MM-DD). Default: next Monday in South Africa."
+            },
+            "weeks": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3,
+              "description": "How many weeks to plan (default 2)."
+            },
+            "assign": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "propertyNames": {
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "description": "Vanto's revisions: date (YYYY-MM-DD) -> item id to use that day, or \"none\" to leave the day empty. Use the alternatives from the brief."
+            },
+            "exclude": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "description": "Item ids to leave out of the plan."
+            },
+            "first_release": {
+              "type": "string",
+              "pattern": "^\\d{2}:\\d{2}$",
+              "description": "First group's release time (SAST, HH:MM). Default 09:15; the other groups follow 10 minutes apart."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "momentum_approve_plan",
+        "title": "Approve and schedule the previewed Momentum campaign",
+        "description": "WRITES: records Vanto's approval of the EXACT texts shown in momentum_preview_plan (pinned by hash) and schedules their deliveries at the exact previewed times, plus any previewed re-timing. Requires the same revision parameters used for the preview, the proposal_hash, the confirm_phrase Vanto TYPED himself (never fill it in on his behalf) and user_confirmed: true. It re-derives the plan from live data and refuses if anything changed since the preview. Each step is idempotent and the run stops at the first failure. It never sends anything, never turns Engine or Scheduler on, never edits teaching wording, and every action is audit-logged under Vanto's admin session.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "week_start": {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+              "description": "A Monday (YYYY-MM-DD). Default: next Monday in South Africa."
+            },
+            "weeks": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3,
+              "description": "How many weeks to plan (default 2)."
+            },
+            "assign": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "propertyNames": {
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "description": "Vanto's revisions: date (YYYY-MM-DD) -> item id to use that day, or \"none\" to leave the day empty. Use the alternatives from the brief."
+            },
+            "exclude": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "description": "Item ids to leave out of the plan."
+            },
+            "first_release": {
+              "type": "string",
+              "pattern": "^\\d{2}:\\d{2}$",
+              "description": "First group's release time (SAST, HH:MM). Default 09:15; the other groups follow 10 minutes apart."
+            },
+            "proposal_hash": {
+              "type": "string",
+              "minLength": 64,
+              "maxLength": 64,
+              "description": "proposal_hash from momentum_preview_plan."
+            },
+            "confirm_phrase": {
+              "type": "string",
+              "description": "The exact phrase Vanto typed, e.g. APPROVE 4F7Q2A."
+            },
+            "user_confirmed": {
+              "type": "boolean",
+              "const": true,
+              "description": "Must be true, only after Vanto typed the phrase in this conversation."
+            },
+            "confirmed_not_distributed": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "description": "Nugget item ids Vanto has explicitly confirmed were NOT already distributed (see requires_distribution_confirmation in the preview)."
+            }
+          },
+          "required": [
+            "proposal_hash",
+            "confirm_phrase",
+            "user_confirmed"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "momentum_pause",
+        "title": "Pause Momentum deliveries (hold)",
+        "description": "Safe-direction write: puts approved items back on hold, which parks their planned deliveries (nothing is deleted or sent). scope 'all' holds every item that has planned deliveries; scope 'item' holds one. A reason is required. Holding removes the item's approval until Vanto re-approves the exact text, so use it when Vanto says pause/stop. For an instant stop of ALL outbound WhatsApp also offer set_maytapi_freeze. Resuming is a separate, deliberate re-approval; this tool cannot resume.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string",
+              "enum": [
+                "all",
+                "item"
+              ]
+            },
+            "item_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 300
+            }
+          },
+          "required": [
+            "scope",
+            "reason"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "momentum_report",
+        "title": "Momentum delivery and exception report (read-only)",
+        "description": "Read-only. What has been delivered, what is planned in the next 7 days, delivery counts by status, and exceptions (failed, needs review, overdue). Use it to answer 'tell me what has been delivered' and for daily check-ins. Never changes anything.",
+        "annotations": {
+          "readOnlyHint": true,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null
+      },
+      {
         "name": "get_dispatch_policy",
         "title": "Get WhatsApp dispatch policy",
         "description": "Read the live WhatsApp group dispatch guardrails: cron interval, inter-send floor, hourly cap, daily cap, freeze state, the approved group list, standing rules and incident history.",

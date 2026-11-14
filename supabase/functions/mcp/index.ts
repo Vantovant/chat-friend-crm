@@ -770,9 +770,9 @@ var create_plan_reminder_default = defineTool15({
 import { defineTool as defineTool16 } from "npm:@lovable.dev/mcp-js@0.26.1";
 import { z as z12 } from "npm:zod@^3.25.76";
 var DAY_MS = 24 * 60 * 60 * 1e3;
-function err(text, extra) {
+function err(text2, extra) {
   return {
-    content: [{ type: "text", text }],
+    content: [{ type: "text", text: text2 }],
     structuredContent: { sent: false, ...extra ?? {} },
     isError: true
   };
@@ -1822,8 +1822,8 @@ var create_group_dm_batch_default = defineTool37({
     const supabase = supabaseForUser(ctx);
     const groupJid = group_jid || DEFAULT_GROUP_JID;
     const messageBody = message_body.trim();
-    const err2 = (text, extra) => ({
-      content: [{ type: "text", text }],
+    const err2 = (text2, extra) => ({
+      content: [{ type: "text", text: text2 }],
       structuredContent: { created: false, ...extra ?? {} },
       isError: true
     });
@@ -1908,8 +1908,8 @@ var approve_group_dm_batch_default = defineTool38({
   handler: async ({ batch_id }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const supabase = supabaseForUser(ctx);
-    const err2 = (text, extra) => ({
-      content: [{ type: "text", text }],
+    const err2 = (text2, extra) => ({
+      content: [{ type: "text", text: text2 }],
       structuredContent: { sent: 0, refused: true, ...extra ?? {} },
       isError: true
     });
@@ -3159,10 +3159,10 @@ function paceLine(sc, now = Date.now()) {
   const share = sc.elapsed_share ?? 0;
   const expected = Math.ceil(sc.targets.conversations * share);
   const onPace = sc.actuals.conversations >= expected && sc.actuals.registrations >= Math.floor(sc.targets.registrations * share);
-  const text = share <= 0 ? "Campaign has not started yet." : onPace ? `On pace: ${sc.actuals.conversations} conversations vs ${expected} expected by now.` : `Behind pace: ${sc.actuals.conversations} conversations vs ${expected} expected by now.`;
+  const text2 = share <= 0 ? "Campaign has not started yet." : onPace ? `On pace: ${sc.actuals.conversations} conversations vs ${expected} expected by now.` : `Behind pace: ${sc.actuals.conversations} conversations vs ${expected} expected by now.`;
   const sast = new Date(now + 2 * 36e5);
   const isFriEvening = sast.getUTCDay() === 5 && sast.getUTCHours() >= 17;
-  return { onPace, text, advice: !onPace && isFriEvening ? "Double the 1-on-1 calling on Saturday morning." : null };
+  return { onPace, text: text2, advice: !onPace && isFriEvening ? "Double the 1-on-1 calling on Saturday morning." : null };
 }
 
 // src/lib/mcp/tools/log-call.ts
@@ -3692,6 +3692,536 @@ var list_maytapi_auto_replies_default = defineTool65({
   }
 });
 
+// src/lib/mcp/tools/momentum-brief.ts
+import { defineTool as defineTool66 } from "npm:@lovable.dev/mcp-js@0.26.1";
+
+// src/lib/mcp/tools/momentum-brief-logic.ts
+var SAST_OFFSET_MIN = 120;
+var SERIES_ORDER = ["4-step-duplication", "three-skills-duplication"];
+var ALREADY_DISTRIBUTED = [{ label: "Teaching 1: The Hero Trap (Lesson 1)", where: "sent before Momentum", note: "never re-propose" }];
+var WORDING_FLAGS = {
+  "three-skills-duplication": "Monday/Friday wording flag: Vanto must confirm the exact original wording before approval. Momentum never edits Mr Baloyi's text."
+};
+var pad = (n) => String(n).padStart(2, "0");
+function toSast(iso) {
+  const d = new Date(new Date(iso).getTime() + SAST_OFFSET_MIN * 6e4);
+  return { date: `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`, time: `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`, dow: d.getUTCDay() };
+}
+var WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+function addDays(date, n) {
+  const d = /* @__PURE__ */ new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function dow(date) {
+  return (/* @__PURE__ */ new Date(`${date}T00:00:00Z`)).getUTCDay();
+}
+function nextMonday(sastDate) {
+  const k = (8 - dow(sastDate)) % 7;
+  return addDays(sastDate, k === 0 ? 7 : k);
+}
+function slotIso(date, hhmm) {
+  return new Date((/* @__PURE__ */ new Date(`${date}T${hhmm}:00Z`)).getTime() - SAST_OFFSET_MIN * 6e4).toISOString();
+}
+var bool = (v) => String(v ?? "").trim().toLowerCase() === "true";
+function slotTimesFrom(first) {
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(first ?? "09:15");
+  if (!m) throw new Error("first_release must be HH:MM (SAST)");
+  const base = Number(m[1]) * 60 + Number(m[2]);
+  return [0, 10, 20].map((o) => {
+    const t = base + o;
+    if (t >= 24 * 60) throw new Error("first_release too late for three slots");
+    return `${pad(Math.floor(t / 60))}:${pad(t % 60)}`;
+  });
+}
+function buildBrief(input) {
+  const { now, items, settings } = input;
+  const SLOTS = slotTimesFrom(input.firstRelease);
+  const exclude = new Set(input.exclude ?? []);
+  const assign = input.assign ?? {};
+  const nowSast = toSast(now.toISOString());
+  const weeks = Math.min(Math.max(input.weeks ?? 2, 1), 3);
+  const start = input.weekStart ?? nextMonday(nowSast.date);
+  if (dow(start) !== 1) throw new Error("week_start must be a Monday (YYYY-MM-DD)");
+  let allow = [];
+  try {
+    const p = JSON.parse(String(settings.momentum_nugget_target_groups ?? "[]"));
+    if (Array.isArray(p)) allow = p.map((g) => ({ name: String(g.name), jid: String(g.jid) }));
+  } catch {
+  }
+  const gates = {
+    engine_enabled: bool(settings.momentum_engine_enabled),
+    scheduler_enabled: bool(settings.momentum_scheduler_enabled),
+    emergency_paused: bool(settings.emergency_all_auto_paused),
+    outbound_frozen: bool(settings.maytapi_outbound_frozen),
+    min_interval_minutes: Number(settings.momentum_min_interval_minutes ?? 120),
+    release_batch: Number(settings.momentum_release_batch ?? 3),
+    daily_cap: settings.maytapi_daily_cap != null ? Number(settings.maytapi_daily_cap) : null
+  };
+  const sendingPossible = gates.engine_enabled && gates.scheduler_enabled && !gates.emergency_paused && !gates.outbound_frozen;
+  const live = items.filter((i) => !["retired", "rejected"].includes(i.status));
+  const dels = (i) => (i.deliveries ?? []).filter((d) => d.status !== "cancelled");
+  const summary = (i) => ({
+    id: i.id,
+    kind: i.kind,
+    title: i.title,
+    version: i.version,
+    status: i.status,
+    held: !!i.held,
+    approved_at: i.approved_at ?? null,
+    text_sha256_prefix: (i.body_sha256 ?? "").slice(0, 8) || null,
+    source_slug: i.source_slug ?? null,
+    deliveries: dels(i).map((d) => ({ group: d.destination_name ?? null, at_sast: d.planned_at ? `${toSast(d.planned_at).date} ${toSast(d.planned_at).time}` : null, status: d.status }))
+  });
+  const rank = (i) => {
+    const k = SERIES_ORDER.indexOf(i.source_slug ?? "");
+    return k >= 0 ? k : SERIES_ORDER.length + (i.created_at ? Date.parse(i.created_at) / 1e13 : 0);
+  };
+  const teachings = live.filter((i) => i.kind === "teaching").sort((a, b) => rank(a) - rank(b));
+  const nuggets = live.filter((i) => i.kind === "nugget").sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
+  const exceptions = [];
+  const used = /* @__PURE__ */ new Set();
+  const byDate = /* @__PURE__ */ new Map();
+  for (const i of live) for (const d of dels(i)) {
+    if (!d.planned_at) continue;
+    const k = toSast(d.planned_at).date;
+    byDate.set(k, [...byDate.get(k) ?? [], { item: i, d }]);
+  }
+  const eligible = (i) => !used.has(i.id) && !exclude.has(i.id) && dels(i).length === 0 && !i.held && !i.source_changed;
+  const nextOf = (pool) => pool.find(eligible);
+  const byId = new Map(live.map((i) => [i.id, i]));
+  const intervalMs = gates.min_interval_minutes * 6e4;
+  const conflictFor = (slotIsoStr, group, ownId) => items.some((o) => o.id !== ownId && dels(o).some((d) => d.destination_name === group && d.planned_at && Math.abs(Date.parse(d.planned_at) - Date.parse(slotIsoStr)) < intervalMs));
+  const weekPlans = [];
+  for (let w = 0; w < weeks; w++) {
+    const monday = addDays(start, 7 * w);
+    const days = [];
+    for (const [off, rhythm, prefer] of [[0, "Understand", "nugget"], [2, "Practise", "teaching"], [4, "Continue and pass it on", "nugget"]]) {
+      const date = addDays(monday, off);
+      const slots = SLOTS.map((t, k) => ({ group: allow[k]?.name ?? null, at_sast: `${date} ${t}` }));
+      const existing = byDate.get(date) ?? [];
+      const day = { date, weekday: WEEKDAY[dow(date)], rhythm, slots };
+      if (existing.length) {
+        const item = existing[0].item;
+        day.state = "scheduled";
+        day.item = summary(item);
+        const off2 = existing.filter(({ d }) => !SLOTS.includes(toSast(d.planned_at).time));
+        if (off2.length) {
+          day.retime_needed = true;
+          day.retime_to_first_at = slotIso(date, SLOTS[0]);
+          exceptions.push({ severity: "action", code: "RETIME_NEEDED", item: item.id, message: `${item.title}: ${off2.length} delivery time(s) differ from ${SLOTS.join(" / ")} (currently ${existing.map(({ d }) => toSast(d.planned_at).time).join(" / ")}). Re-time the planned deliveries; never retire and re-plan (the approval would be lost).` });
+        }
+        if (!sendingPossible) exceptions.push({ severity: "info", code: "SCHEDULED_BUT_INERT", item: item.id, message: `${item.title} is planned for ${date} but nothing will send: engine/scheduler gates are not both ON (by design until final activation).` });
+        if (item.status !== "approved") exceptions.push({ severity: "warning", code: "PLANNED_NOT_APPROVED", item: item.id, message: `${item.title} has deliveries but status is ${item.status}.` });
+        days.push(day);
+        continue;
+      }
+      if (assign[date] === "none") {
+        day.state = "skipped";
+        day.recommendation = { text: "Skipped at Vanto's request." };
+        days.push(day);
+        continue;
+      }
+      const forced = assign[date] ? byId.get(assign[date]) : void 0;
+      if (assign[date] && (!forced || !eligible(forced))) exceptions.push({ severity: "warning", code: "ASSIGN_INELIGIBLE", message: `${date}: the item chosen for this day is not available (missing, held, already scheduled or excluded); using the default instead.` });
+      const other = prefer === "nugget" ? "teaching" : "nugget";
+      let pick = forced && eligible(forced) ? forced : void 0, why = pick ? "Chosen by Vanto for this day." : "";
+      if (!pick) pick = nextOf(prefer === "nugget" ? nuggets : teachings);
+      if (pick && !why) why = `${prefer} slot in the Mon/Wed/Fri rhythm (${rhythm}).`;
+      else if (!(prefer === "nugget" && off === 4)) {
+        pick = nextOf(other === "nugget" ? nuggets : teachings);
+        if (pick) why = `No ${prefer} left to place, so the next ${other} fills this ${rhythm} slot.`;
+      }
+      if (!pick) {
+        day.state = "gap";
+        day.recommendation = { text: `No ready content for ${rhythm}. Create or source a ${prefer}.` };
+        exceptions.push({ severity: "warning", code: "CONTENT_GAP", message: `${day.weekday} ${date}: no unscheduled approved-or-draft ${prefer} available.` });
+        days.push(day);
+        continue;
+      }
+      used.add(pick.id);
+      const alternatives = [...nuggets, ...teachings].filter(eligible).slice(0, 4).map((a) => ({ item_id: a.id, kind: a.kind, title: a.title, status: a.status }));
+      const firstAt = slotIso(date, SLOTS[0]);
+      slots.forEach((sl, k) => {
+        if (conflictFor(slotIso(date, SLOTS[k]), sl.group)) exceptions.push({ severity: "action", code: "SLOT_CONFLICT", item: pick.id, message: `${day.weekday} ${date}: ${sl.group} already has a delivery within ${gates.min_interval_minutes} minutes of ${SLOTS[k]}.` });
+      });
+      const steps = pick.status === "approved" ? ["plan 3 deliveries at the slot times"] : ["submit for review", "Vanto approves the exact text", "plan 3 deliveries at the slot times"];
+      day.state = "proposed";
+      day.recommendation = { item: summary(pick), reason: why, alternatives, plan: { first_at: firstAt, group_jids: allow.map((g) => g.jid), steps }, steps, requires_vanto: pick.status === "approved" ? ["confirm the plan"] : ["approve the exact text", "confirm the plan"], warnings: [WORDING_FLAGS[pick.source_slug ?? ""], pick.kind === "nugget" ? "Prior distribution cannot be verified through MCP; Vanto confirms it has not already been sent before approval. If uncertain, hold it and use an alternative." : void 0, pick.kind === "teaching" && !SERIES_ORDER.includes(pick.source_slug ?? "") ? "Series position unconfirmed (only Teachings 2 and 3 are fixed)." : void 0].filter(Boolean) };
+      exceptions.push({ severity: "action", code: pick.status === "approved" ? "NEEDS_PLANNING" : "NEEDS_APPROVAL", item: pick.id, message: `${day.weekday} ${date}: ${pick.title} (${pick.status}) is proposed but not scheduled.` });
+      days.push(day);
+    }
+    weekPlans.push({ week_starting: monday, days });
+  }
+  for (const i of live) {
+    if (i.source_changed) exceptions.push({ severity: "warning", code: "SOURCE_CHANGED", item: i.id, message: `${i.title}: source article changed since import; do not use until reviewed.` });
+    if (i.held) exceptions.push({ severity: "warning", code: "HELD", item: i.id, message: `${i.title} is on hold${i.held_reason ? `: ${i.held_reason}` : ""}.` });
+    for (const d of dels(i)) {
+      if (d.status === "failed") exceptions.push({ severity: "action", code: "DELIVERY_FAILED", item: i.id, message: `${i.title} to ${d.destination_name}: ${d.last_error ?? "failed"}.` });
+      if (d.status === "planned" && d.planned_at && Date.parse(d.planned_at) < now.getTime() && !sendingPossible) exceptions.push({ severity: "warning", code: "PAST_DUE_NOT_SENT", item: i.id, message: `${i.title} to ${d.destination_name} was due ${toSast(d.planned_at).date} ${toSast(d.planned_at).time} but gates are not ON.` });
+    }
+  }
+  if (allow.length < 3) exceptions.push({ severity: "warning", code: "GROUPS_INCOMPLETE", message: `Only ${allow.length} allow-listed group(s); the rhythm needs 3.` });
+  const sev = { action: 0, warning: 1, info: 2 };
+  exceptions.sort((a, b) => sev[a.severity] - sev[b.severity]);
+  const firstAction = exceptions.find((e) => e.severity === "action");
+  return {
+    read_only: true,
+    as_of_sast: `${nowSast.date} ${nowSast.time}`,
+    gates,
+    sending_possible: sendingPossible,
+    groups: allow,
+    slot_times_sast: [...SLOTS],
+    inventory: { teachings: teachings.map(summary), nuggets: nuggets.map(summary), already_distributed: ALREADY_DISTRIBUTED },
+    weeks: weekPlans,
+    exceptions,
+    decision_hint: firstAction ? `Ask Vanto ONE decision first, about: ${firstAction.code} (${firstAction.message})` : "No action needed; offer a brief.",
+    guidance: ["Nothing in this brief approves, schedules or sends anything.", "Never treat a draft as approved; approval is Vanto's, on the exact text hash.", "Quote teaching text only via momentum_get_content, verbatim.", "Engine and Scheduler are switched ON only by Vanto, separately."]
+  };
+}
+
+// src/lib/mcp/tools/momentum-api.ts
+import { z as z60 } from "npm:zod@^3.25.76";
+var paramsSchema = {
+  week_start: z60.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("A Monday (YYYY-MM-DD). Default: next Monday in South Africa."),
+  weeks: z60.number().int().min(1).max(3).optional().describe("How many weeks to plan (default 2)."),
+  assign: z60.record(z60.string().regex(/^\d{4}-\d{2}-\d{2}$/), z60.string()).optional().describe(`Vanto's revisions: date (YYYY-MM-DD) -> item id to use that day, or "none" to leave the day empty. Use the alternatives from the brief.`),
+  exclude: z60.array(z60.string().uuid()).optional().describe("Item ids to leave out of the plan."),
+  first_release: z60.string().regex(/^\d{2}:\d{2}$/).optional().describe("First group's release time (SAST, HH:MM). Default 09:15; the other groups follow 10 minutes apart.")
+};
+var toBriefParams = (p) => ({ weekStart: p.week_start, weeks: p.weeks, assign: p.assign, exclude: p.exclude, firstRelease: p.first_release });
+function adminApi(supabase) {
+  return async (action, body) => {
+    const { data, error } = await supabase.functions.invoke("momentum-admin", { body: { action, ...body } });
+    if (error) return { ok: false, error: String(error.message ?? error) };
+    return data ?? { ok: false, error: "empty_response" };
+  };
+}
+async function loadState(api) {
+  const [l, s] = await Promise.all([api("list", {}), api("status", {})]);
+  if (!l.ok) return { error: `Could not read Momentum items (admin session required): ${l.error ?? "unknown"}` };
+  if (!s.ok) return { error: `Could not read Momentum settings: ${s.error ?? "unknown"}` };
+  return { items: l.items ?? [], settings: s.settings ?? {} };
+}
+async function loadBodies(api, ids, items) {
+  const out = {};
+  for (const id of [...new Set(ids)]) {
+    const r = await api("get", { item_id: id });
+    if (!r.ok || !r.item) return { error: `Could not read the text of item ${id}: ${r.error ?? "unknown"}` };
+    out[id] = { body: String(r.item.body ?? ""), sha: String(r.item.body_sha256 ?? items.find((i) => i.id === id)?.body_sha256 ?? "") };
+  }
+  return { bodies: out };
+}
+var text = (o) => ({ content: [{ type: "text", text: JSON.stringify(o, null, 2) }], structuredContent: o });
+var refuse = (m, extra) => ({ content: [{ type: "text", text: m }], structuredContent: { refused: true, message: m, ...extra ?? {} }, isError: true });
+
+// src/lib/mcp/tools/momentum-brief.ts
+var momentum_brief_default = defineTool66({
+  name: "momentum_brief",
+  title: "Momentum briefing (read-only)",
+  description: "Read-only Momentum intelligence. Returns the live state of the A-Team Momentum engine for planning: safety gates (engine, scheduler, emergency, freeze, 120-minute gap), allow-listed groups, every teaching and nugget with status/version and planned deliveries (SAST), the Mon/Wed/Fri 09:15/09:25/09:35 rhythm for the coming weeks with what is scheduled, what is proposed and what is a gap, and exceptions (retime needed, needs approval, held, failed, inert). Use it to answer 'what should we do next week?': explain reasoning (each proposed day has a reason and alternatives), then ask Vanto ONE decision. Revisions (assign / exclude / first_release) rebuild the plan when Vanto wants a change. It never approves, schedules, sends or changes any setting. Teaching and nugget wording is Mr Baloyi's and is never edited; read it with momentum_get_content.",
+  inputSchema: paramsSchema,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  handler: async (input, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const fail = (m) => ({ content: [{ type: "text", text: m }], isError: true });
+    const [list, status] = await Promise.all([
+      supabase.functions.invoke("momentum-admin", { body: { action: "list" } }),
+      supabase.functions.invoke("momentum-admin", { body: { action: "status" } })
+    ]);
+    if (list.error || !list.data?.ok) return fail(`Could not read Momentum items (admin session required): ${list.error?.message ?? list.data?.error ?? "unknown"}`);
+    if (status.error || !status.data?.ok) return fail(`Could not read Momentum settings: ${status.error?.message ?? status.data?.error ?? "unknown"}`);
+    try {
+      const brief = buildBrief({ now: /* @__PURE__ */ new Date(), items: list.data.items ?? [], settings: status.data.settings ?? {}, ...toBriefParams(input) });
+      return { content: [{ type: "text", text: JSON.stringify(brief, null, 2) }], structuredContent: brief };
+    } catch (e) {
+      return fail(e instanceof Error ? e.message : "brief failed");
+    }
+  }
+});
+
+// src/lib/mcp/tools/momentum-get-content.ts
+import { defineTool as defineTool67 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z61 } from "npm:zod@^3.25.76";
+var momentum_get_content_default = defineTool67({
+  name: "momentum_get_content",
+  title: "Read a Momentum teaching or nugget verbatim",
+  description: "Read-only. Returns one Momentum item's exact stored text, version, status, text hash and recent audit trail via the admin gateway. Quote the text verbatim; never paraphrase, correct or 'improve' Mr Baloyi's wording. Get item ids from momentum_brief.",
+  inputSchema: { item_id: z61.string().uuid().describe("Item id from momentum_brief.") },
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  handler: async ({ item_id }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const supabase = supabaseForUser(ctx);
+    const { data, error } = await supabase.functions.invoke("momentum-admin", { body: { action: "get", item_id } });
+    if (error || !data?.ok) return { content: [{ type: "text", text: `Could not read item: ${error?.message ?? data?.error ?? "unknown"}` }], isError: true };
+    const it = data.item ?? {};
+    const out = { read_only: true, id: it.id, kind: it.kind, title: it.title, version: it.version, status: it.status, held: !!it.held, text_sha256: it.body_sha256 ?? null, body: it.body, approved_at: it.approved_at ?? null, source: data.source ?? null, audit: data.audit ?? [] };
+    return { content: [{ type: "text", text: JSON.stringify(out, null, 2) }], structuredContent: out };
+  }
+});
+
+// src/lib/mcp/tools/momentum-preview-plan.ts
+import { defineTool as defineTool68 } from "npm:@lovable.dev/mcp-js@0.26.1";
+
+// src/lib/mcp/tools/momentum-plan-logic.ts
+async function sha256Hex(text2) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text2));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+var ALLOWED_ACTIONS = ["submit", "approve", "plan", "retime", "hold"];
+function stepsFromBrief(brief, shaOf) {
+  const steps = [];
+  const problems = [];
+  for (const w of brief.weeks) for (const d of w.days) {
+    if (d.state === "scheduled" && d.retime_needed && d.retime_to_first_at) {
+      steps.push({ type: "retime", item_id: d.item.id, title: d.item.title, first_at: d.retime_to_first_at, from_times: d.item.deliveries.map((x) => x.at_sast) });
+    }
+    if (d.state === "proposed") {
+      const r = d.recommendation, it = r.item, sha = shaOf(it.id);
+      if (!sha) {
+        problems.push(`${it.title}: text hash unavailable`);
+        continue;
+      }
+      if (!["draft", "in_review", "approved"].includes(it.status)) {
+        problems.push(`${it.title}: status ${it.status} cannot be scheduled`);
+        continue;
+      }
+      const actions = it.status === "draft" ? ["submit", "approve", "plan"] : it.status === "in_review" ? ["approve", "plan"] : ["plan"];
+      steps.push({ type: "schedule", item_id: it.id, title: it.title, kind: it.kind, version: it.version, text_sha256: sha, status_before: it.status, first_at: r.plan.first_at, group_jids: r.plan.group_jids, actions });
+    }
+  }
+  return { steps, problems };
+}
+async function buildPreview(args) {
+  const { brief, bodies } = args;
+  const problems = [];
+  const shaOf = (id) => {
+    const b = bodies[id];
+    if (!b) return null;
+    return b.sha;
+  };
+  const { steps, problems: p2 } = stepsFromBrief(brief, shaOf);
+  problems.push(...p2);
+  for (const s of steps) if (s.type === "schedule") {
+    const b = bodies[s.item_id];
+    if (!b || await sha256Hex(b.body) !== b.sha) problems.push(`${s.title}: the stored text does not match its hash; it cannot be previewed as exact`);
+  }
+  const canonical = JSON.stringify({ steps, groups: brief.groups.map((g) => g.jid), slots: brief.slot_times_sast });
+  const hash = await sha256Hex(canonical);
+  const phrase = `APPROVE ${hash.slice(0, 6).toUpperCase()}`;
+  const messages = [];
+  for (const s of steps) if (s.type === "schedule") {
+    const day = brief.weeks.flatMap((w) => w.days).find((d) => d.recommendation?.item?.id === s.item_id);
+    messages.push({ item_id: s.item_id, title: s.title, kind: s.kind, version: s.version, text_sha256: s.text_sha256, text: bodies[s.item_id]?.body ?? "", deliveries: (day?.slots ?? []).map((x) => ({ group: x.group, at_sast: x.at_sast })) });
+  }
+  return {
+    read_only: true,
+    proposal_hash: hash,
+    confirm_phrase: phrase,
+    requires_distribution_confirmation: steps.filter((s) => s.type === "schedule" && s.kind === "nugget").map((s) => ({ item_id: s.item_id, title: s.title, question: "Has Vanto confirmed this nugget has NOT already been sent to these groups? If unsure, hold it and use an alternative." })),
+    to_approve: steps.length === 0 ? "Nothing to approve: no unscheduled proposals and no re-timing needed." : `To approve, Vanto must type exactly: ${phrase}`,
+    steps,
+    messages,
+    problems,
+    exceptions: brief.exceptions,
+    gates: brief.gates,
+    sending_possible: brief.sending_possible,
+    params_used: args.params,
+    note: "Nothing is approved, scheduled or sent by previewing. Approval covers exactly the texts (by hash), groups and times shown."
+  };
+}
+async function executeSteps(steps, api) {
+  const results = [];
+  let halted = false;
+  const call = async (action, body) => {
+    if (!ALLOWED_ACTIONS.includes(action)) throw new Error(`action ${action} is not allowed`);
+    return api(action, { ...body, via: "mcp" });
+  };
+  for (const step of steps) {
+    if (halted) {
+      results.push({ step, outcome: "skipped", detail: "not run because an earlier step failed" });
+      continue;
+    }
+    if (step.type === "retime") {
+      const r = await call("retime", { item_id: step.item_id, first_at: step.first_at });
+      if (r.ok) results.push({ step, outcome: "done", detail: `re-timed ${(r.retimed ?? []).length} planned deliveries` });
+      else {
+        results.push({ step, outcome: "failed", detail: r.error ?? "retime failed" });
+        halted = true;
+      }
+      continue;
+    }
+    let failed = "";
+    for (const a of step.actions) {
+      const r = a === "submit" ? await call("submit", { item_id: step.item_id }) : a === "approve" ? await call("approve", { item_id: step.item_id, expected_sha256: step.text_sha256 }) : await call("plan", { item_id: step.item_id, group_jids: step.group_jids, first_at: step.first_at, exact: true });
+      if (!r.ok) {
+        failed = `${a}: ${r.error ?? "failed"}`;
+        break;
+      }
+      if (a === "plan") {
+        const outcomes = (r.planned ?? []).map((p) => p.outcome);
+        if (outcomes.some((o) => o === "already_planned")) {
+          results.push({ step, outcome: "done", detail: "already planned (no duplicates created)" });
+          failed = "ok";
+          break;
+        }
+      }
+    }
+    if (failed === "ok") continue;
+    if (failed) {
+      results.push({ step, outcome: "failed", detail: failed });
+      halted = true;
+    } else results.push({ step, outcome: "done", detail: step.actions.join(" \u2192 ") });
+  }
+  return { results, halted };
+}
+
+// src/lib/mcp/tools/momentum-preview-plan.ts
+var momentum_preview_plan_default = defineTool68({
+  name: "momentum_preview_plan",
+  title: "Preview the Momentum campaign (read-only)",
+  description: "Read-only. Builds the exact campaign preview for the coming weeks: the FULL verbatim text of every message that would be scheduled (with its hash), the groups, the exact SAST times, any re-timing of already-scheduled deliveries, problems and exceptions, plus a proposal_hash and the confirm_phrase Vanto must type to approve. Use revisions (assign / exclude / first_release) to change the plan when Vanto asks, and call this again. Show Vanto the exact messages before asking for approval. Nothing is approved, scheduled or sent by this tool.",
+  inputSchema: paramsSchema,
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  handler: async (input, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const api = adminApi(supabaseForUser(ctx));
+    const st = await loadState(api);
+    if ("error" in st) return refuse(st.error);
+    try {
+      const brief = buildBrief({ now: /* @__PURE__ */ new Date(), items: st.items, settings: st.settings, ...toBriefParams(input) });
+      const ids = brief.weeks.flatMap((w) => w.days).filter((d) => d.state === "proposed").map((d) => d.recommendation.item.id);
+      const lb = await loadBodies(api, ids, st.items);
+      if (lb.error !== void 0) return refuse(lb.error);
+      const bodies = lb.bodies;
+      return text(await buildPreview({ brief, bodies, params: input }));
+    } catch (e) {
+      return refuse(e instanceof Error ? e.message : "preview failed");
+    }
+  }
+});
+
+// src/lib/mcp/tools/momentum-approve-plan.ts
+import { defineTool as defineTool69 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z62 } from "npm:zod@^3.25.76";
+
+// src/lib/mcp/tools/momentum-report-logic.ts
+function buildReport(input) {
+  const { now, items, settings } = input;
+  const rows = items.flatMap((i) => (i.deliveries ?? []).map((d) => ({ item: i, d })));
+  const fmt = (iso) => iso ? `${toSast(iso).date} ${toSast(iso).time}` : null;
+  const line = (r) => ({ title: r.item.title, kind: r.item.kind, version: r.item.version, group: r.d.destination_name ?? null, at_sast: fmt(r.d.planned_at), status: r.d.status, error: r.d.last_error ?? null });
+  const counts = {};
+  for (const r of rows) counts[r.d.status] = (counts[r.d.status] ?? 0) + 1;
+  const week = now.getTime() + 7 * 864e5;
+  const on = (k) => String(settings[k] ?? "").trim().toLowerCase() === "true";
+  const sendingPossible = on("momentum_engine_enabled") && on("momentum_scheduler_enabled") && !on("emergency_all_auto_paused") && !on("maytapi_outbound_frozen");
+  const exceptions = [];
+  for (const r of rows) {
+    if (r.d.status === "failed") exceptions.push({ severity: "action", code: "DELIVERY_FAILED", message: `${r.item.title} to ${r.d.destination_name}: ${r.d.last_error ?? "failed"}` });
+    if (r.d.status === "needs_review") exceptions.push({ severity: "action", code: "NEEDS_REVIEW", message: `${r.item.title} to ${r.d.destination_name}: ${r.d.last_error ?? "needs review"}` });
+    if (r.d.status === "planned" && r.d.planned_at && Date.parse(r.d.planned_at) < now.getTime() && !sendingPossible) exceptions.push({ severity: "warning", code: "PAST_DUE_NOT_SENT", message: `${r.item.title} to ${r.d.destination_name} was due ${fmt(r.d.planned_at)} and has not been sent (gates are not ON).` });
+  }
+  const upcoming = rows.filter((r) => r.d.status === "planned" && r.d.planned_at && Date.parse(r.d.planned_at) >= now.getTime() && Date.parse(r.d.planned_at) <= week).sort((a, b) => Date.parse(a.d.planned_at) - Date.parse(b.d.planned_at)).map(line);
+  const delivered = rows.filter((r) => r.d.status === "sent").map(line);
+  return {
+    read_only: true,
+    as_of_sast: `${toSast(now.toISOString()).date} ${toSast(now.toISOString()).time}`,
+    sending_possible: sendingPossible,
+    counts,
+    delivered,
+    delivered_count: delivered.length,
+    upcoming_7_days: upcoming,
+    exceptions,
+    summary: delivered.length === 0 ? `Nothing has been delivered by Momentum yet. ${upcoming.length} delivery(ies) are planned in the next 7 days${sendingPossible ? "" : ", and none will send until Engine and Scheduler are switched on"}.` : `${delivered.length} delivered; ${upcoming.length} planned in the next 7 days.`
+  };
+}
+
+// src/lib/mcp/tools/momentum-approve-plan.ts
+var momentum_approve_plan_default = defineTool69({
+  name: "momentum_approve_plan",
+  title: "Approve and schedule the previewed Momentum campaign",
+  description: "WRITES: records Vanto's approval of the EXACT texts shown in momentum_preview_plan (pinned by hash) and schedules their deliveries at the exact previewed times, plus any previewed re-timing. Requires the same revision parameters used for the preview, the proposal_hash, the confirm_phrase Vanto TYPED himself (never fill it in on his behalf) and user_confirmed: true. It re-derives the plan from live data and refuses if anything changed since the preview. Each step is idempotent and the run stops at the first failure. It never sends anything, never turns Engine or Scheduler on, never edits teaching wording, and every action is audit-logged under Vanto's admin session.",
+  inputSchema: {
+    ...paramsSchema,
+    proposal_hash: z62.string().length(64).describe("proposal_hash from momentum_preview_plan."),
+    confirm_phrase: z62.string().describe("The exact phrase Vanto typed, e.g. APPROVE 4F7Q2A."),
+    user_confirmed: z62.literal(true).describe("Must be true, only after Vanto typed the phrase in this conversation."),
+    confirmed_not_distributed: z62.array(z62.string().uuid()).optional().describe("Nugget item ids Vanto has explicitly confirmed were NOT already distributed (see requires_distribution_confirmation in the preview).")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  handler: async (input, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const api = adminApi(supabaseForUser(ctx));
+    const st = await loadState(api);
+    if ("error" in st) return refuse(st.error);
+    const { proposal_hash, confirm_phrase, user_confirmed: _u, confirmed_not_distributed, ...params } = input;
+    try {
+      const brief = buildBrief({ now: /* @__PURE__ */ new Date(), items: st.items, settings: st.settings, ...toBriefParams(params) });
+      const ids = brief.weeks.flatMap((w) => w.days).filter((d) => d.state === "proposed").map((d) => d.recommendation.item.id);
+      const lb = await loadBodies(api, ids, st.items);
+      if (lb.error !== void 0) return refuse(lb.error);
+      const bodies = lb.bodies;
+      const prev = await buildPreview({ brief, bodies, params });
+      if (prev.problems.length) return refuse(`Refused: ${prev.problems.join("; ")}`, { preview: prev });
+      if (prev.proposal_hash !== proposal_hash) return refuse("Refused: the plan has changed since the preview (texts, schedule, groups or times). Nothing was done. Review the new preview and approve it with its new phrase.", { new_preview: prev });
+      if (confirm_phrase.trim().toUpperCase() !== prev.confirm_phrase) return refuse(`Refused: the confirmation phrase does not match. Vanto must type exactly: ${prev.confirm_phrase}. Nothing was done.`);
+      if (prev.steps.length === 0) return refuse("Nothing to approve or schedule.");
+      const unconfirmed = prev.requires_distribution_confirmation.filter((r) => !(confirmed_not_distributed ?? []).includes(r.item_id));
+      if (unconfirmed.length) return refuse(`Refused: Vanto must first confirm these nuggets were never sent before: ${unconfirmed.map((u) => u.title).join(", ")}. If unsure, hold them and choose an alternative. Nothing was done.`, { needs_confirmation: unconfirmed });
+      const { results, halted } = await executeSteps(prev.steps, api);
+      const after = await loadState(api);
+      const report = "error" in after ? null : buildReport({ now: /* @__PURE__ */ new Date(), items: after.items, settings: after.settings });
+      return text({ approved_by: "Vanto's admin session (audit-logged)", halted_on_failure: halted, results: results.map((r) => ({ type: r.step.type, item: r.step.title, outcome: r.outcome, detail: r.detail })), read_back: report, reminder: "Nothing sends until Vanto separately switches Engine and Scheduler ON.", ...halted ? { next: "Some steps did not complete. Run momentum_preview_plan again to see what remains and approve it with the new phrase." } : {} });
+    } catch (e) {
+      return refuse(e instanceof Error ? e.message : "approval failed");
+    }
+  }
+});
+
+// src/lib/mcp/tools/momentum-pause.ts
+import { defineTool as defineTool70 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z63 } from "npm:zod@^3.25.76";
+var momentum_pause_default = defineTool70({
+  name: "momentum_pause",
+  title: "Pause Momentum deliveries (hold)",
+  description: "Safe-direction write: puts approved items back on hold, which parks their planned deliveries (nothing is deleted or sent). scope 'all' holds every item that has planned deliveries; scope 'item' holds one. A reason is required. Holding removes the item's approval until Vanto re-approves the exact text, so use it when Vanto says pause/stop. For an instant stop of ALL outbound WhatsApp also offer set_maytapi_freeze. Resuming is a separate, deliberate re-approval; this tool cannot resume.",
+  inputSchema: { scope: z63.enum(["all", "item"]), item_id: z63.string().uuid().optional(), reason: z63.string().min(3).max(300) },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  handler: async ({ scope, item_id, reason }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    if (scope === "item" && !item_id) return refuse("item_id is required when scope is 'item'.");
+    const api = adminApi(supabaseForUser(ctx));
+    const st = await loadState(api);
+    if ("error" in st) return refuse(st.error);
+    const targets = st.items.filter((i) => (scope === "item" ? i.id === item_id : true) && ["approved", "in_review"].includes(i.status) && !i.held && (i.deliveries ?? []).some((d) => d.status === "planned"));
+    if (targets.length === 0) return text({ paused: [], message: "Nothing to pause: no item with planned deliveries that is not already on hold." });
+    const out = [];
+    for (const t of targets) {
+      const r = await api("hold", { item_id: t.id, reason, via: "mcp" });
+      out.push({ item: t.title, ok: !!r.ok, deliveries_held: r.deliveries_held ?? null, error: r.ok ? void 0 : r.error });
+    }
+    return text({ paused: out, message: "Held. Nothing was deleted. Each item needs Vanto's re-approval of its exact text before it can be scheduled again.", also_available: "set_maytapi_freeze stops all outbound WhatsApp instantly." });
+  }
+});
+
+// src/lib/mcp/tools/momentum-report.ts
+import { defineTool as defineTool71 } from "npm:@lovable.dev/mcp-js@0.26.1";
+var momentum_report_default = defineTool71({
+  name: "momentum_report",
+  title: "Momentum delivery and exception report (read-only)",
+  description: "Read-only. What has been delivered, what is planned in the next 7 days, delivery counts by status, and exceptions (failed, needs review, overdue). Use it to answer 'tell me what has been delivered' and for daily check-ins. Never changes anything.",
+  inputSchema: {},
+  annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  handler: async (_i, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const st = await loadState(adminApi(supabaseForUser(ctx)));
+    if ("error" in st) return refuse(st.error);
+    return text(buildReport({ now: /* @__PURE__ */ new Date(), items: st.items, settings: st.settings }));
+  }
+});
+
 // src/lib/mcp/index.ts
 var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
@@ -3704,6 +4234,12 @@ var mcp_default = defineMcp({
     acceptedAudiences: "authenticated"
   }),
   tools: [
+    momentum_brief_default,
+    momentum_get_content_default,
+    momentum_preview_plan_default,
+    momentum_approve_plan_default,
+    momentum_pause_default,
+    momentum_report_default,
     get_dispatch_policy_default,
     get_dispatcher_health_default,
     get_maytapi_status_default,
