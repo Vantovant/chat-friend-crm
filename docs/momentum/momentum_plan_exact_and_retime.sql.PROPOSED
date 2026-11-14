@@ -1,0 +1,91 @@
+-- PROPOSED, NOT APPLIED. Momentum Intelligence Phase 1b: exact planning and safe re-timing.
+-- Why: plan_content_delivery uses momentum_next_slot(), which looks at the LATEST delivery of a group (including future ones),
+-- so planning Monday after Wednesday is already planned silently pushes Monday to Wednesday + 120 min. These functions plan or move
+-- deliveries to EXACT slots, checking only deliveries within the group interval on either side, and refuse instead of shifting.
+-- Additive only: no existing function, table, trigger or row is changed. Service role only. Sends nothing, queues nothing.
+-- The release engine already tolerates out-of-order planned deliveries (it only waits on earlier-planned, queued or sent ones).
+
+create or replace function public.momentum_slot_conflict(p_jid text, p_slot timestamptz, p_exclude_item uuid default null)
+returns timestamptz language sql stable set search_path = public as $$
+  select case when cd.status = 'sent' then coalesce(p.last_attempt_at, cd.planned_at) else cd.planned_at end
+    from content_deliveries cd left join scheduled_group_posts p on p.id = cd.post_id
+   where cd.destination_jid = p_jid and cd.status in ('planned','queued','sent','needs_review')
+     and (p_exclude_item is null or cd.content_item_id <> p_exclude_item)
+     and abs(extract(epoch from ((case when cd.status = 'sent' then coalesce(p.last_attempt_at, cd.planned_at) else cd.planned_at end) - p_slot)))
+         < extract(epoch from public.momentum_min_interval())
+   order by 1 limit 1
+$$;
+
+create or replace function public.momentum_plan_exact(p_item uuid, p_destinations jsonb, p_first_at timestamptz, p_actor text default 'system')
+returns table(delivery_id uuid, destination_jid text, planned_at timestamptz, outcome text)
+language plpgsql security definer set search_path = public as $$
+declare i content_items%rowtype; allow jsonb; e jsonb; idx int := 0; v_slot timestamptz; v_id uuid; v_n int; v_c timestamptz;
+begin
+  select * into i from content_items where id = p_item for update;
+  if not found then raise exception 'content item % not found', p_item; end if;
+  if i.status <> 'approved' or i.source_changed or i.held then raise exception 'plan: item is % (held=%, source_changed=%), not plannable', i.status, i.held, i.source_changed; end if;
+  if p_first_at < now() + interval '15 minutes' then raise exception 'plan: first slot must be at least 15 minutes in the future'; end if;
+  if jsonb_typeof(p_destinations) <> 'array' or jsonb_array_length(p_destinations) = 0 then raise exception 'plan: destinations must be a non-empty array'; end if;
+  begin select value::jsonb into allow from integration_settings where key = 'momentum_nugget_target_groups'; exception when others then allow := null; end;
+  if allow is null or jsonb_typeof(allow) <> 'array' then raise exception 'plan: momentum_nugget_target_groups not configured'; end if;
+  -- validate everything first so a bad destination or conflict leaves nothing half-planned
+  for e in select * from jsonb_array_elements(p_destinations) loop
+    if coalesce(e->>'jid','') !~ '@g\.us$' or coalesce(e->>'name','') = '' then raise exception 'plan: each destination needs name and a @g.us jid'; end if;
+    if not exists (select 1 from jsonb_array_elements(allow) a where a->>'name' = e->>'name' and a->>'jid' = e->>'jid') then
+      raise exception 'destination_not_allowed: % is not in momentum_nugget_target_groups', e->>'name';
+    end if;
+  end loop;
+  idx := 0;
+  for e in select * from jsonb_array_elements(p_destinations) loop
+    if not exists (select 1 from content_deliveries cd where cd.content_item_id = p_item and cd.destination_jid = e->>'jid' and cd.status in ('planned','queued','sent','needs_review')) then
+      v_slot := p_first_at + make_interval(mins => 10 * idx);
+      v_c := public.momentum_slot_conflict(e->>'jid', v_slot, null);
+      if v_c is not null then raise exception 'slot_conflict: % already has a delivery at % (within the % interval)', e->>'name', v_c, public.momentum_min_interval(); end if;
+    end if;
+    idx := idx + 1;
+  end loop;
+  idx := 0;
+  for e in select * from jsonb_array_elements(p_destinations) loop
+    if exists (select 1 from content_deliveries cd where cd.content_item_id = p_item and cd.destination_jid = e->>'jid' and cd.status in ('planned','queued','sent','needs_review')) then
+      delivery_id := null; destination_jid := e->>'jid'; planned_at := null; outcome := 'already_planned'; return next; idx := idx + 1; continue;
+    end if;
+    v_slot := p_first_at + make_interval(mins => 10 * idx);
+    select count(*) into v_n from content_deliveries cd where cd.content_item_id = p_item and cd.destination_jid = e->>'jid';
+    insert into content_deliveries (content_item_id, destination_name, destination_jid, order_index, planned_at, idempotency_key)
+    values (p_item, e->>'name', e->>'jid', idx + 1, v_slot, format('%s|v%s|%s|%s', p_item, i.version, e->>'jid', v_n + 1))
+    returning id into v_id;
+    insert into content_audit_log(actor, event, detail) values (p_actor, 'planned', jsonb_build_object('delivery', v_id, 'item', p_item, 'planned_at', v_slot, 'exact', true));
+    delivery_id := v_id; destination_jid := e->>'jid'; planned_at := v_slot; outcome := 'planned'; return next;
+    idx := idx + 1;
+  end loop;
+end $$;
+
+-- Moves the PLANNED deliveries of an approved item to new exact slots. Approval, text, version and idempotency keys are untouched.
+create or replace function public.momentum_retime_item(p_item uuid, p_first_at timestamptz, p_actor text default 'system')
+returns table(delivery_id uuid, destination_jid text, old_planned_at timestamptz, new_planned_at timestamptz)
+language plpgsql security definer set search_path = public as $$
+declare i content_items%rowtype; d record; v_new timestamptz; v_c timestamptz; v_n int := 0;
+begin
+  select * into i from content_items where id = p_item for update;
+  if not found then raise exception 'retime: item % not found', p_item; end if;
+  if i.status <> 'approved' or i.source_changed or i.held then raise exception 'retime: item is % (held=%, source_changed=%), not retimable', i.status, i.held, i.source_changed; end if;
+  if p_first_at < now() + interval '15 minutes' then raise exception 'retime: first slot must be at least 15 minutes in the future'; end if;
+  for d in select * from content_deliveries where content_item_id = p_item and status = 'planned' order by order_index, id for update loop
+    v_new := p_first_at + make_interval(mins => 10 * (d.order_index - 1));
+    v_c := public.momentum_slot_conflict(d.destination_jid, v_new, p_item);
+    if v_c is not null then raise exception 'slot_conflict: % already has a delivery at % (within the % interval)', d.destination_name, v_c, public.momentum_min_interval(); end if;
+    v_n := v_n + 1;
+  end loop;
+  if v_n = 0 then raise exception 'retime: item % has no planned deliveries', p_item; end if;
+  for d in select * from content_deliveries where content_item_id = p_item and status = 'planned' order by order_index, id for update loop
+    v_new := p_first_at + make_interval(mins => 10 * (d.order_index - 1));
+    update content_deliveries set planned_at = v_new where id = d.id;
+    insert into content_audit_log(actor, event, detail) values (p_actor, 'retimed', jsonb_build_object('delivery', d.id, 'item', p_item, 'from', d.planned_at, 'to', v_new));
+    delivery_id := d.id; destination_jid := d.destination_jid; old_planned_at := d.planned_at; new_planned_at := v_new; return next;
+  end loop;
+end $$;
+
+revoke all on function public.momentum_slot_conflict(text, timestamptz, uuid), public.momentum_plan_exact(uuid, jsonb, timestamptz, text),
+  public.momentum_retime_item(uuid, timestamptz, text) from public, anon, authenticated;
+grant execute on function public.momentum_slot_conflict(text, timestamptz, uuid), public.momentum_plan_exact(uuid, jsonb, timestamptz, text),
+  public.momentum_retime_item(uuid, timestamptz, text) to service_role;
