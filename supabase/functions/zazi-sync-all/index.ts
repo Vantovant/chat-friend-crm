@@ -1,4 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { denyUnlessInternal } from '../_shared/internal-auth.ts';
+import { validateSyncRequest, MAX_BODY_BYTES } from '../_shared/zazi-sync-policy.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -10,6 +12,11 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // v4.4 security: server-to-server only. System (service-role) or the dedicated cron/shared secret; the public anon key is
+  // NEVER accepted here, even when ALLOW_LEGACY_ANON_CRON=true (that global flag is for the scheduled-job transition only). Admin sessions are
+  // refused: nothing legitimate calls this from a browser.
+  { const denied = await denyUnlessInternal(req, { allowCron: true, legacyAnon: false, allowAdmin: false }); if (denied) return new Response(denied.body, { status: denied.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }); }
+
   const startedAt = new Date().toISOString();
 
   // Cloud service client for audit logging
@@ -20,14 +27,18 @@ Deno.serve(async (req) => {
   );
 
   try {
-    const { table, record, action } = await req.json();
-
-    if (!table || !action) {
-      return new Response(JSON.stringify({ error: 'Missing table or action' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
+    const rawText = await req.text();
+    if (rawText.length > MAX_BODY_BYTES) {
+      return new Response(JSON.stringify({ error: 'payload_too_large' }), { status: 413, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
+    let parsed: unknown = null;
+    try { parsed = JSON.parse(rawText); } catch { /* validated below */ }
+    // v4.4: strict allow-list of tables/actions, UUID record id, sane column names. Nothing reaches the master client unless valid.
+    const verdict = validateSyncRequest(parsed);
+    if (!verdict.ok) {
+      return new Response(JSON.stringify({ error: verdict.reason }), { status: verdict.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    }
+    const { table, record, action } = verdict;
 
     // Use SYNC_SUPABASE_SERVICE_ROLE_KEY to bypass Master RLS
     const syncUrl = Deno.env.get('SYNC_SUPABASE_URL');
