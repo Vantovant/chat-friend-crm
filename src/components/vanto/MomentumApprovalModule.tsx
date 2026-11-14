@@ -5,6 +5,7 @@ import { useMomentumAction } from '@/hooks/use-momentum-admin';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   ALLOW_GROUP_CONFIRM, availableActions, canApproveText, deliverySummary, needsReason, statusBadge,
@@ -23,7 +24,8 @@ export function MomentumApprovalModule() {
       <p className="text-sm text-muted-foreground">Momentum approvals are restricted to administrators.</p></div></div>
   );
   return (
-    <div className="p-4 md:p-6 max-w-5xl mx-auto space-y-4">
+    <div className="h-full overflow-y-auto">
+    <div className="p-4 md:p-6 pb-10 max-w-5xl mx-auto space-y-4">
       <div><h1 className="text-lg font-semibold">Momentum teachings</h1>
         <p className="text-sm text-muted-foreground">Review, approve, reject or hold teaching messages. Nothing here sends a message: approved messages only go out when the engine is switched on separately.</p></div>
       <Tabs defaultValue="review">
@@ -32,6 +34,7 @@ export function MomentumApprovalModule() {
         <TabsContent value="groups"><GroupsTab /></TabsContent>
         <TabsContent value="status"><StatusTab /></TabsContent>
       </Tabs>
+    </div>
     </div>
   );
 }
@@ -49,6 +52,9 @@ function ReviewTab() {
   const [note, setNote] = useState<string | null>(null);
   const selRef = useRef<string | null>(null);
   selRef.current = sel;
+  const isMobile = useIsMobile();
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => { if (isMobile && detail && panelRef.current) panelRef.current.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, [isMobile, detail]);
 
   const load = useCallback(async () => {
     const r = await run<{ items: MomentumItem[] }>('list'); if (r) setItems(r.items);
@@ -69,23 +75,11 @@ function ReviewTab() {
     if (r) { setNote(`Done: ${a}`); setPending(null); setReason(''); await load(); if (selRef.current === item.id) await open(item.id); }
   };
 
-  return (
-    <div className="grid md:grid-cols-[320px_1fr] gap-4 mt-3">
-      <div className="space-y-2">
-        {items.length === 0 && <p className="text-sm text-muted-foreground">No messages yet.</p>}
-        {items.map((i) => { const b = statusBadge(i); return (
-          <button key={i.id} onClick={() => open(i.id)} className={`w-full text-left rounded-lg border p-3 ${sel === i.id ? 'border-primary' : 'border-border'} bg-card`}>
-            <div className="text-sm font-medium">{i.title}</div>
-            <div className="mt-1 flex items-center gap-2"><span className={`text-xs rounded px-2 py-0.5 ${TONE[b.tone]}`}>{b.label}</span><span className="text-xs text-muted-foreground">v{i.version}</span></div>
-            <div className="text-xs text-muted-foreground mt-1">{deliverySummary(i.deliveries)}</div>
-          </button>); })}
-      </div>
-      <div>
-        {!item || !detail ? <p className="text-sm text-muted-foreground">Choose a message to review.</p> : (
-          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+  const panel = !item || !detail ? null : (
+          <div ref={panelRef} className="rounded-xl border border-border bg-card p-4 space-y-3 mt-2 md:mt-0">
             <div className="flex items-center justify-between"><h2 className="font-medium">{item.title}</h2><span className={`text-xs rounded px-2 py-0.5 ${TONE[statusBadge(item).tone]}`}>{statusBadge(item).label}</span></div>
             <p className="text-xs text-muted-foreground">This is the exact text that will be sent, word for word.</p>
-            <pre className="whitespace-pre-wrap text-sm rounded-lg bg-muted p-3 max-h-80 overflow-auto font-sans">{detail.item.body}</pre>
+            <pre className="whitespace-pre-wrap text-sm rounded-lg bg-muted p-3 md:max-h-80 md:overflow-auto font-sans">{detail.item.body}</pre>
             {detail.source && <p className="text-xs text-muted-foreground">Source article: {detail.source.title} (last changed {new Date(detail.source.source_updated_at).toLocaleString()}).{item.source_changed && ' The article changed after this message was approved: it is on hold until you review it again.'}</p>}
             {item.held_reason && <p className="text-xs text-amber-700">Hold reason: {item.held_reason}</p>}
             {item.rejected_reason && <p className="text-xs text-rose-700">Rejected: {item.rejected_reason}</p>}
@@ -107,8 +101,26 @@ function ReviewTab() {
               {availableActions(item).includes('retire') && <Button size="sm" variant="ghost" disabled={busy} onClick={() => { if (window.confirm('Retire this message? Its scheduled deliveries will be cancelled.')) act('retire'); }}>Retire</Button>}
             </div>
             {note && <p className="text-xs text-emerald-700">{note}</p>}
-          </div>)}
-        {error && <p className="text-sm text-rose-700 mt-2">{error}</p>}
+          </div>);
+
+  return (
+    <div className="grid md:grid-cols-[320px_1fr] gap-4 mt-3">
+      <div className="space-y-2">
+        {items.length === 0 && <p className="text-sm text-muted-foreground">No messages yet.</p>}
+        {items.map((i) => { const b = statusBadge(i); return (
+          <div key={i.id}>
+          <button onClick={() => open(i.id)} className={`w-full text-left rounded-lg border p-3 ${sel === i.id ? 'border-primary' : 'border-border'} bg-card`}>
+            <div className="text-sm font-medium">{i.title}</div>
+            <div className="mt-1 flex items-center gap-2"><span className={`text-xs rounded px-2 py-0.5 ${TONE[b.tone]}`}>{b.label}</span><span className="text-xs text-muted-foreground">v{i.version}</span></div>
+            <div className="text-xs text-muted-foreground mt-1">{deliverySummary(i.deliveries)}</div>
+          </button>
+          {isMobile && sel === i.id && (panel ?? <p className="text-sm text-muted-foreground mt-2">Loading…</p>)}
+          </div>); })}
+        {isMobile && error && <p className="text-sm text-rose-700 mt-2">{error}</p>}
+      </div>
+      <div className="hidden md:block">
+        {!isMobile && (panel ?? <p className="text-sm text-muted-foreground">Choose a message to review.</p>)}
+        {!isMobile && error && <p className="text-sm text-rose-700 mt-2">{error}</p>}
       </div>
     </div>
   );
