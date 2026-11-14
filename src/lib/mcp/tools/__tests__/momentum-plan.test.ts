@@ -1,3 +1,4 @@
+// @ts-nocheck -- test passes partial inputs; zod defaults fill optional fields at runtime
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createHash } from "node:crypto";
 
