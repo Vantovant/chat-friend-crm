@@ -132,10 +132,11 @@ function GroupsTab() {
         <div key={g.group_jid} className="rounded-lg border border-border bg-card p-3 space-y-2">
           <div className="text-sm font-medium">{g.group_name}</div>
           <div className="text-xs text-muted-foreground">Hub shows {g.hub_member_count} members · {g.verified ? 'verified' : 'not verified'} · {g.allowed ? 'on the Momentum list' : 'not on the Momentum list'}</div>
-          {!g.allowed && <div className="flex flex-wrap gap-2 items-center">
-            <Input className="w-52" type="number" placeholder="Members in WhatsApp" value={counts[g.group_jid] ?? ''} onChange={(e) => setCounts({ ...counts, [g.group_jid]: e.target.value })} />
-            <Button size="sm" variant="outline" disabled={busy || !counts[g.group_jid]} onClick={() => verify(g.group_jid)}>Verify</Button>
-            <Button size="sm" disabled={busy || !g.verified} onClick={() => allow(g.group_jid)}>Add to Momentum list</Button></div>}
+          {(!g.verified || !g.allowed) && <div className="flex flex-wrap gap-2 items-center">
+            {!g.verified && <>
+              <Input className="w-52" type="number" min={1} placeholder="Members in WhatsApp" value={counts[g.group_jid] ?? ''} onChange={(e) => setCounts({ ...counts, [g.group_jid]: e.target.value })} />
+              <Button size="sm" variant="outline" disabled={busy || !(Number(counts[g.group_jid]) >= 1)} onClick={() => verify(g.group_jid)}>Verify</Button></>}
+            {!g.allowed && <Button size="sm" disabled={busy || !g.verified} onClick={() => allow(g.group_jid)}>Add to Momentum list</Button>}</div>}
         </div>))}
       {groups.length === 0 && <p className="text-xs text-muted-foreground">No groups shown. Search by part of the group name.</p>}
       {msg && <p className="text-sm text-emerald-700">{msg}</p>}{error && <p className="text-sm text-rose-700">{error}</p>}
