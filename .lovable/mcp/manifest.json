@@ -19,7 +19,7 @@
       {
         "name": "momentum_brief",
         "title": "Momentum briefing (read-only)",
-        "description": "Read-only Momentum intelligence. Returns the live state of the A-Team Momentum engine for planning: safety gates (engine, scheduler, emergency, freeze, 120-minute gap), allow-listed groups, every teaching and nugget with status/version and planned deliveries (SAST), the Mon/Wed/Fri 09:15/09:25/09:35 rhythm for the coming weeks with what is scheduled, what is proposed and what is a gap, and exceptions (retime needed, needs approval, held, failed, inert). Use it to answer 'what should we do next week?': explain reasoning (each proposed day has a reason and alternatives), then ask Vanto ONE decision. Revisions (assign / exclude / first_release) rebuild the plan when Vanto wants a change. It never approves, schedules, sends or changes any setting. Teaching and nugget wording is Mr Baloyi's and is never edited; read it with momentum_get_content.",
+        "description": "Read-only Momentum intelligence. Returns the live state of the A-Team Momentum engine for planning (including per-group DISTRIBUTION MEMORY: which content already went to which group by Momentum, by hand, or on confirmed evidence; a group is never assumed from another, and incomplete history is reported as unknown, never as 'not distributed'): safety gates (engine, scheduler, emergency, freeze, 120-minute gap), allow-listed groups, every teaching and nugget with status/version and planned deliveries (SAST), the Mon/Wed/Fri 09:15/09:25/09:35 rhythm for the coming weeks with what is scheduled, what is proposed and what is a gap, and exceptions (retime needed, needs approval, held, failed, inert). Use it to answer 'what should we do next week?': explain reasoning (each proposed day has a reason and alternatives), then ask Vanto ONE decision. Revisions (assign / exclude / first_release) rebuild the plan when Vanto wants a change. It never approves, schedules, sends or changes any setting. Teaching and nugget wording is Mr Baloyi's and is never edited; read it with momentum_get_content.",
         "annotations": {
           "readOnlyHint": true,
           "destructiveHint": false,
@@ -217,7 +217,7 @@
                 "type": "string",
                 "format": "uuid"
               },
-              "description": "Nugget item ids Vanto has explicitly confirmed were NOT already distributed (see requires_distribution_confirmation in the preview)."
+              "description": "Item ids Vanto has explicitly confirmed were NOT already distributed to the groups listed in groups_to_confirm (see requires_distribution_confirmation in the preview)."
             }
           },
           "required": [
@@ -283,6 +283,123 @@
           "$schema": "http://json-schema.org/draft-07/schema#",
           "type": "object",
           "properties": {}
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "momentum_confirm_distribution",
+        "title": "Record (or retract) that content was already distributed to a group",
+        "description": "Records, with an audit trail, that a teaching/nugget was ALREADY distributed to ONE allow-listed WhatsApp group outside Momentum (e.g. Vanto posted it by hand), so Momentum never proposes it again for that group. One record per (content, group): a record for one group says nothing about the others. Use ONLY on Vanto's own statement or evidence he shows (e.g. a WhatsApp screenshot): quote his words in `statement` and describe the evidence in `evidence_ref`; never infer distribution yourself. Without user_confirmed: true it is a dry run that shows exactly what would be recorded. Idempotent (repeating the same evidence creates no duplicate). action 'retract' withdraws a mistaken record (needs record_id and a reason). The original teaching/nugget text is never touched.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "record",
+                "retract"
+              ],
+              "default": "record"
+            },
+            "item_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "The content item (required for record)."
+            },
+            "group": {
+              "type": "string",
+              "minLength": 2,
+              "description": "Allow-listed group name or JID (required for record)."
+            },
+            "distributed_at": {
+              "type": "string",
+              "description": "When it was actually posted: ISO with zone, or 'YYYY-MM-DD HH:MM' in South Africa time (required for record)."
+            },
+            "origin": {
+              "type": "string",
+              "enum": [
+                "manual_whatsapp",
+                "external_evidence"
+              ],
+              "default": "manual_whatsapp",
+              "description": "manual_whatsapp: posted by hand in the group. external_evidence: confirmed by other evidence."
+            },
+            "evidence_ref": {
+              "type": "string",
+              "minLength": 5,
+              "maxLength": 300,
+              "description": "What proves it, e.g. 'WhatsApp screenshot from Vanto, Duplication Movement, 15:09 on 14 Nov 2026'."
+            },
+            "statement": {
+              "type": "string",
+              "minLength": 10,
+              "maxLength": 1000,
+              "description": "Vanto's own words confirming it, verbatim."
+            },
+            "note": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "record_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "For retract: the record id (see momentum_brief inventory distribution)."
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 300,
+              "description": "For retract: why the record is withdrawn."
+            },
+            "user_confirmed": {
+              "type": "boolean",
+              "default": false,
+              "description": "Must be true to write. Only after Vanto has stated/confirmed it in this conversation."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "momentum_scan_distribution",
+        "title": "Scan Hub history for already-distributed Momentum content",
+        "description": "Looks through Hub's existing WhatsApp group history (inbound group messages, Hub-sent group posts, Momentum's own sent deliveries) for the allow-listed groups and reports which teachings/nuggets already appear in which group. Matching: exact hash, normalised text or Momentum's own delivery id = verified; similar or text-with-extra-words = CANDIDATE needing human review (never a confirmed delivery). It also reports per-group history COVERAGE: posts made from the admin's own phone are not captured, so an empty result means UNKNOWN, not 'never distributed'. Dry run by default; record_matches: true writes the records (idempotent, no duplicates on repeat scans). It never edits content, schedules or sends. For something the history cannot see, use momentum_confirm_distribution.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "item_id": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Limit the scan to one content item."
+            },
+            "days_back": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 365,
+              "default": 60
+            },
+            "record_matches": {
+              "type": "boolean",
+              "default": false,
+              "description": "true = record the matches (verified/candidate). Default false = report only."
+            }
+          },
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
         },
         "outputSchema": null
       },

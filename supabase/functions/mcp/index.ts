@@ -3695,6 +3695,238 @@ var list_maytapi_auto_replies_default = defineTool65({
 // src/lib/mcp/tools/momentum-brief.ts
 import { defineTool as defineTool66 } from "npm:@lovable.dev/mcp-js@0.26.1";
 
+// src/lib/mcp/tools/momentum-plan-logic.ts
+async function sha256Hex(text2) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text2));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+var ALLOWED_ACTIONS = ["submit", "approve", "plan", "retime", "hold"];
+function stepsFromBrief(brief, shaOf) {
+  const steps = [];
+  const problems = [];
+  for (const w of brief.weeks) for (const d of w.days) {
+    if (d.state === "scheduled" && d.retime_needed && d.retime_to_first_at) {
+      steps.push({ type: "retime", item_id: d.item.id, title: d.item.title, first_at: d.retime_to_first_at, from_times: d.item.deliveries.map((x) => x.at_sast) });
+    }
+    if (d.state === "proposed") {
+      const r = d.recommendation, it = r.item, sha = shaOf(it.id);
+      if (!sha) {
+        problems.push(`${it.title}: text hash unavailable`);
+        continue;
+      }
+      if (!["draft", "in_review", "approved"].includes(it.status)) {
+        problems.push(`${it.title}: status ${it.status} cannot be scheduled`);
+        continue;
+      }
+      const actions = it.status === "draft" ? ["submit", "approve", "plan"] : it.status === "in_review" ? ["approve", "plan"] : ["plan"];
+      steps.push({ type: "schedule", item_id: it.id, title: it.title, kind: it.kind, version: it.version, text_sha256: sha, status_before: it.status, first_at: r.plan.first_at, group_jids: r.plan.group_jids, ...r.plan.slots ? { slots: r.plan.slots.map((x) => ({ jid: x.jid, at: x.at })) } : {}, skipped_groups: r.plan.skipped_groups ?? [], unverified: r.plan.unverified ?? [], actions });
+      if (r.plan.group_jids.length === 0) {
+        problems.push(`${it.title}: already distributed in every group, nothing to schedule`);
+        steps.pop();
+      }
+    }
+  }
+  return { steps, problems };
+}
+async function buildPreview(args) {
+  const { brief, bodies } = args;
+  const problems = [];
+  const shaOf = (id) => {
+    const b = bodies[id];
+    if (!b) return null;
+    return b.sha;
+  };
+  const { steps, problems: p2 } = stepsFromBrief(brief, shaOf);
+  problems.push(...p2);
+  for (const s of steps) if (s.type === "schedule") {
+    const b = bodies[s.item_id];
+    if (!b || await sha256Hex(b.body) !== b.sha) problems.push(`${s.title}: the stored text does not match its hash; it cannot be previewed as exact`);
+  }
+  const canonical = JSON.stringify({ steps, groups: brief.groups.map((g) => g.jid), slots: brief.slot_times_sast });
+  const hash = await sha256Hex(canonical);
+  const phrase = `APPROVE ${hash.slice(0, 6).toUpperCase()}`;
+  const messages = [];
+  for (const s of steps) if (s.type === "schedule") {
+    const day = brief.weeks.flatMap((w) => w.days).find((d) => d.recommendation?.item?.id === s.item_id);
+    messages.push({ item_id: s.item_id, title: s.title, kind: s.kind, version: s.version, text_sha256: s.text_sha256, text: bodies[s.item_id]?.body ?? "", deliveries: (day?.slots ?? []).filter((x) => !x.skip).map((x) => ({ group: x.group, at_sast: x.at_sast })) });
+  }
+  return {
+    read_only: true,
+    proposal_hash: hash,
+    confirm_phrase: phrase,
+    // per-group: any group not VERIFIED either way must be confirmed by Vanto (nuggets always when unknown; any kind when a candidate match exists)
+    requires_distribution_confirmation: steps.filter((s) => s.type === "schedule" && (s.unverified ?? []).some((u) => u.state === "candidate" || s.kind === "nugget" && u.state === "unknown")).map((s) => ({ item_id: s.item_id, title: s.title, groups_to_confirm: (s.unverified ?? []).filter((u) => u.state === "candidate" || s.kind === "nugget").map((u) => ({ group: u.group, memory_says: u.state === "candidate" ? "possible earlier post found (candidate, needs review)" : "unknown: history incomplete" })), skipped_as_already_distributed: s.skipped_groups ?? [], question: "Has Vanto confirmed this content has NOT already been sent to the groups listed in groups_to_confirm? If unsure, hold it, record any earlier post with momentum_confirm_distribution, or use an alternative." })),
+    to_approve: steps.length === 0 ? "Nothing to approve: no unscheduled proposals and no re-timing needed." : `To approve, Vanto must type exactly: ${phrase}`,
+    steps,
+    messages,
+    problems,
+    exceptions: brief.exceptions,
+    gates: brief.gates,
+    sending_possible: brief.sending_possible,
+    params_used: args.params,
+    note: "Nothing is approved, scheduled or sent by previewing. Approval covers exactly the texts (by hash), groups and times shown."
+  };
+}
+async function executeSteps(steps, api) {
+  const results = [];
+  let halted = false;
+  const call = async (action, body) => {
+    if (!ALLOWED_ACTIONS.includes(action)) throw new Error(`action ${action} is not allowed`);
+    return api(action, { ...body, via: "mcp" });
+  };
+  for (const step of steps) {
+    if (halted) {
+      results.push({ step, outcome: "skipped", detail: "not run because an earlier step failed" });
+      continue;
+    }
+    if (step.type === "retime") {
+      const r = await call("retime", { item_id: step.item_id, first_at: step.first_at });
+      if (r.ok) results.push({ step, outcome: "done", detail: `re-timed ${(r.retimed ?? []).length} planned deliveries` });
+      else {
+        results.push({ step, outcome: "failed", detail: r.error ?? "retime failed" });
+        halted = true;
+      }
+      continue;
+    }
+    let failed = "";
+    for (const a of step.actions) {
+      const r = a === "submit" ? await call("submit", { item_id: step.item_id }) : a === "approve" ? await call("approve", { item_id: step.item_id, expected_sha256: step.text_sha256 }) : await call("plan", { item_id: step.item_id, group_jids: step.group_jids, first_at: step.first_at, exact: true, ...step.slots ? { slots: step.slots } : {} });
+      if (!r.ok) {
+        failed = `${a}: ${r.error ?? "failed"}`;
+        break;
+      }
+      if (a === "plan") {
+        const outcomes = (r.planned ?? []).map((p) => p.outcome);
+        if (outcomes.some((o) => o === "already_planned")) {
+          results.push({ step, outcome: "done", detail: "already planned (no duplicates created)" });
+          failed = "ok";
+          break;
+        }
+      }
+    }
+    if (failed === "ok") continue;
+    if (failed) {
+      results.push({ step, outcome: "failed", detail: failed });
+      halted = true;
+    } else results.push({ step, outcome: "done", detail: step.actions.join(" \u2192 ") });
+  }
+  return { results, halted };
+}
+
+// src/lib/mcp/tools/momentum-distribution-logic.ts
+var NO_DISTRIBUTION_DATA = { available: false, records: [], coverage: null };
+function normalise(t) {
+  return String(t ?? "").normalize("NFKC").replace(/[​-‏‪-‮⁠﻿︎️]/g, "").replace(/[‘’‚′]/g, "'").replace(/[“”„″]/g, '"').replace(/[‐-―−]/g, "-").replace(/…/g, "...").replace(/[*_~`]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+var words = (t) => new Set(normalise(t).split(/[^\p{L}\p{N}']+/u).filter((w) => w.length >= 3));
+function similarity(a, b) {
+  const A = words(a), B = words(b);
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  for (const w of A) if (B.has(w)) inter++;
+  return inter / (A.size + B.size - inter);
+}
+var MIN_MATCH_CHARS = 60;
+var APPROX_THRESHOLD = 0.8;
+async function matchHistory(items, messages) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const prepared = items.map((i) => ({ i, n: normalise(i.body) })).filter((p) => p.n.length >= MIN_MATCH_CHARS);
+  for (const m of messages) {
+    if (!m.group_jid) continue;
+    const push = (item, kind, score) => {
+      const k = `${item.id}|${m.group_jid}|${m.source}:${m.ref}`;
+      if (seen.has(k)) return;
+      seen.add(k);
+      out.push({ content_item_id: item.id, content_version: m.content_version ?? item.version ?? null, group_jid: m.group_jid, at: m.at, evidence_ref: `${m.source}:${m.ref}`, source: m.source, kind, score });
+    };
+    if (m.content_item_id && byId.has(m.content_item_id)) {
+      push(byId.get(m.content_item_id), "identifier", 1);
+      continue;
+    }
+    const body = m.body ?? "";
+    if (!body.trim()) continue;
+    const nb = normalise(body);
+    if (nb.length < MIN_MATCH_CHARS) continue;
+    const hash = await sha256Hex(body);
+    for (const { i, n } of prepared) {
+      if (hash === i.sha256) {
+        push(i, "exact", 1);
+        continue;
+      }
+      if (nb === n) {
+        push(i, "normalised", 1);
+        continue;
+      }
+      if (nb.includes(n)) {
+        push(i, "contains", 0.9);
+        continue;
+      }
+      const s = similarity(body, i.body);
+      if (s >= APPROX_THRESHOLD) push(i, "approximate", Number(s.toFixed(3)));
+    }
+  }
+  return out;
+}
+function recordFromMatch(m) {
+  const verified = m.kind === "identifier" || m.kind === "exact" || m.kind === "normalised";
+  const origin = m.source === "content_deliveries" ? "momentum" : "manual_whatsapp";
+  return {
+    content_item_id: m.content_item_id,
+    content_version: m.content_version,
+    group_jid: m.group_jid,
+    distributed_at: m.at,
+    origin,
+    evidence_ref: m.evidence_ref,
+    status: verified ? "verified" : "candidate",
+    confidence: m.kind === "identifier" ? "exact" : m.kind === "exact" ? "exact" : m.kind === "normalised" ? "normalised" : "approximate",
+    note: verified ? `scan: ${m.kind} match on ${m.source}` : `scan: ${m.kind} similarity ${m.score} on ${m.source}; REQUIRES human review, not a confirmed delivery`
+  };
+}
+var DAY = 864e5;
+function coverageVerdict(jid, name, cov, now) {
+  const c = cov?.find((x) => x.group_jid === jid);
+  const reasons = [];
+  if (cov === null) reasons.push("distribution history is not available");
+  else if (!c || c.inbound_messages + c.outbound_messages === 0) reasons.push("no messages are captured for this group");
+  else {
+    if (c.outbound_messages === 0) reasons.push("posts made from the group admin's own phone are not captured");
+    if (c.last_at && now.getTime() - Date.parse(c.last_at) > 2 * DAY) reasons.push(`captured history ends ${c.last_at.slice(0, 10)}`);
+  }
+  return { group_jid: jid, group_name: name ?? c?.group_name ?? null, complete: reasons.length === 0, reasons, first_at: c?.first_at ?? null, last_at: c?.last_at ?? null };
+}
+function groupState(itemId, jid, name, d, now) {
+  const mine = d.records.filter((r) => r.content_item_id === itemId && r.group_jid === jid && r.status !== "retracted");
+  const v = mine.filter((r) => r.status === "verified").sort((a, b) => (a.distributed_at ?? "").localeCompare(b.distributed_at ?? ""))[0];
+  if (v) return { state: "verified", record: v };
+  const cands = mine.filter((r) => r.status === "candidate");
+  if (cands.length) return { state: "candidate", records: cands };
+  const cv = coverageVerdict(jid, name, d.coverage, now);
+  return cv.complete ? { state: "clear" } : { state: "unknown", reasons: cv.reasons };
+}
+function recordView(r, sastTime) {
+  return { record_id: r.id ?? null, at_sast: r.distributed_at ? sastTime(r.distributed_at) : null, origin: r.origin, confidence: r.confidence, evidence_ref: r.evidence_ref, version: r.content_version ?? null };
+}
+function parseWhen(s) {
+  const t = s.trim();
+  const local = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::\d{2})?$/.exec(t);
+  const ms = local ? Date.parse(`${local[1]}T${local[2]}:00Z`) - 2 * 36e5 : /(?:Z|[+-]\d{2}:?\d{2})$/.test(t) ? Date.parse(t) : NaN;
+  return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+}
+function resolveGroup(q, allow) {
+  const n = q.trim().toLowerCase();
+  return allow.find((g) => g.jid.toLowerCase() === n) ?? allow.find((g) => g.name.toLowerCase() === n) ?? null;
+}
+function parseAllowList(raw) {
+  try {
+    const p = JSON.parse(String(raw ?? "[]"));
+    return Array.isArray(p) ? p.map((g) => ({ name: String(g.name), jid: String(g.jid) })) : [];
+  } catch {
+    return [];
+  }
+}
+
 // src/lib/mcp/tools/momentum-brief-logic.ts
 var SAST_OFFSET_MIN = 120;
 var SERIES_ORDER = ["4-step-duplication", "three-skills-duplication"];
@@ -3724,6 +3956,7 @@ function slotIso(date, hhmm) {
   return new Date((/* @__PURE__ */ new Date(`${date}T${hhmm}:00Z`)).getTime() - SAST_OFFSET_MIN * 6e4).toISOString();
 }
 var bool = (v) => String(v ?? "").trim().toLowerCase() === "true";
+var sastText = (iso) => `${toSast(iso).date} ${toSast(iso).time}`;
 function slotTimesFrom(first) {
   const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(first ?? "09:15");
   if (!m) throw new Error("first_release must be HH:MM (SAST)");
@@ -3736,6 +3969,7 @@ function slotTimesFrom(first) {
 }
 function buildBrief(input) {
   const { now, items, settings } = input;
+  const dist = input.distribution ?? NO_DISTRIBUTION_DATA;
   const SLOTS = slotTimesFrom(input.firstRelease);
   const exclude = new Set(input.exclude ?? []);
   const assign = input.assign ?? {};
@@ -3759,6 +3993,14 @@ function buildBrief(input) {
     daily_cap: settings.maytapi_daily_cap != null ? Number(settings.maytapi_daily_cap) : null
   };
   const sendingPossible = gates.engine_enabled && gates.scheduler_enabled && !gates.emergency_paused && !gates.outbound_frozen;
+  const distView = (id, g) => {
+    const st = groupState(id, g.jid, g.name, dist, now);
+    if (st.state === "verified") return { group: g.name, state: "verified_distributed", ...recordView(st.record, sastText) };
+    if (st.state === "candidate") return { group: g.name, state: "candidate_needs_review", evidence: st.records.map((r) => ({ ...recordView(r, sastText), note: r.note ?? null })) };
+    if (st.state === "unknown") return { group: g.name, state: "unverified_history_incomplete", why: st.reasons };
+    return { group: g.name, state: "no_evidence_history_complete" };
+  };
+  const fullyDistributed = (id) => allow.length > 0 && allow.every((g) => groupState(id, g.jid, g.name, dist, now).state === "verified");
   const live = items.filter((i) => !["retired", "rejected"].includes(i.status));
   const dels = (i) => (i.deliveries ?? []).filter((d) => d.status !== "cancelled");
   const summary = (i) => ({
@@ -3771,7 +4013,8 @@ function buildBrief(input) {
     approved_at: i.approved_at ?? null,
     text_sha256_prefix: (i.body_sha256 ?? "").slice(0, 8) || null,
     source_slug: i.source_slug ?? null,
-    deliveries: dels(i).map((d) => ({ group: d.destination_name ?? null, at_sast: d.planned_at ? `${toSast(d.planned_at).date} ${toSast(d.planned_at).time}` : null, status: d.status }))
+    deliveries: dels(i).map((d) => ({ group: d.destination_name ?? null, at_sast: d.planned_at ? `${toSast(d.planned_at).date} ${toSast(d.planned_at).time}` : null, status: d.status })),
+    distribution: allow.map((g) => distView(i.id, g))
   });
   const rank = (i) => {
     const k = SERIES_ORDER.indexOf(i.source_slug ?? "");
@@ -3787,7 +4030,7 @@ function buildBrief(input) {
     const k = toSast(d.planned_at).date;
     byDate.set(k, [...byDate.get(k) ?? [], { item: i, d }]);
   }
-  const eligible = (i) => !used.has(i.id) && !exclude.has(i.id) && dels(i).length === 0 && !i.held && !i.source_changed;
+  const eligible = (i) => !used.has(i.id) && !exclude.has(i.id) && dels(i).length === 0 && !i.held && !i.source_changed && !fullyDistributed(i.id);
   const nextOf = (pool) => pool.find(eligible);
   const byId = new Map(live.map((i) => [i.id, i]));
   const intervalMs = gates.min_interval_minutes * 6e4;
@@ -3841,13 +4084,33 @@ function buildBrief(input) {
       }
       used.add(pick.id);
       const alternatives = [...nuggets, ...teachings].filter(eligible).slice(0, 4).map((a) => ({ item_id: a.id, kind: a.kind, title: a.title, status: a.status }));
-      const firstAt = slotIso(date, SLOTS[0]);
+      const states = allow.map((g, k) => ({ g, k, st: groupState(pick.id, g.jid, g.name, dist, now) }));
+      const skipped = states.filter((x) => x.st.state === "verified"), targets = states.filter((x) => x.st.state !== "verified");
+      const unknownG = targets.filter((x) => x.st.state === "unknown"), candG = targets.filter((x) => x.st.state === "candidate");
+      const outSlots = slots.map((sl, k) => {
+        const v = states[k];
+        return v && v.st.state === "verified" ? { ...sl, skip: { reason: "already_distributed", ...recordView(v.st.record, sastText) } } : sl;
+      });
+      day.slots = outSlots;
+      const destinations = targets.filter((x) => x.k < SLOTS.length).map((x) => ({ jid: x.g.jid, name: x.g.name, at: slotIso(date, SLOTS[x.k]) }));
+      const firstAt = destinations[0]?.at ?? slotIso(date, SLOTS[0]);
       slots.forEach((sl, k) => {
+        if (states[k]?.st.state === "verified") return;
         if (conflictFor(slotIso(date, SLOTS[k]), sl.group)) exceptions.push({ severity: "action", code: "SLOT_CONFLICT", item: pick.id, message: `${day.weekday} ${date}: ${sl.group} already has a delivery within ${gates.min_interval_minutes} minutes of ${SLOTS[k]}.` });
       });
       const steps = pick.status === "approved" ? ["plan 3 deliveries at the slot times"] : ["submit for review", "Vanto approves the exact text", "plan 3 deliveries at the slot times"];
       day.state = "proposed";
-      day.recommendation = { item: summary(pick), reason: why, alternatives, plan: { first_at: firstAt, group_jids: allow.map((g) => g.jid), steps }, steps, requires_vanto: pick.status === "approved" ? ["confirm the plan"] : ["approve the exact text", "confirm the plan"], warnings: [WORDING_FLAGS[pick.source_slug ?? ""], pick.kind === "nugget" ? "Prior distribution cannot be verified through MCP; Vanto confirms it has not already been sent before approval. If uncertain, hold it and use an alternative." : void 0, pick.kind === "teaching" && !SERIES_ORDER.includes(pick.source_slug ?? "") ? "Series position unconfirmed (only Teachings 2 and 3 are fixed)." : void 0].filter(Boolean) };
+      day.recommendation = { item: summary(pick), reason: why, alternatives, plan: { first_at: firstAt, group_jids: targets.map((x) => x.g.jid), destinations, ...skipped.length ? { slots: destinations } : {}, skipped_groups: skipped.map((x) => x.g.name), unverified: [...unknownG, ...candG].map((x) => ({ group: x.g.name, state: x.st.state })), steps }, steps, requires_vanto: pick.status === "approved" ? ["confirm the plan"] : ["approve the exact text", "confirm the plan"], warnings: [
+        WORDING_FLAGS[pick.source_slug ?? ""],
+        pick.kind === "nugget" && !dist.available ? "Prior distribution NOT verified: distribution memory is unavailable, so every group is unknown. Vanto confirms it has not already been sent before approval. If uncertain, hold it and use an alternative." : void 0,
+        pick.kind === "nugget" && dist.available && unknownG.length ? `Prior distribution NOT verified for ${unknownG.map((x) => x.g.name).join(", ")} (${[...new Set(unknownG.flatMap((x) => x.st.reasons))].join("; ")}). This is UNKNOWN, not "never distributed". Vanto confirms per group before approval; if uncertain, hold it and use an alternative.` : void 0,
+        candG.length ? `Possible earlier distribution (candidate match, needs review, NOT a confirmed delivery) in ${candG.map((x) => x.g.name).join(", ")}.` : void 0,
+        skipped.length ? `Already distributed (verified) in ${skipped.map((x) => x.g.name).join(", ")}: those groups are skipped; the other groups are judged on their own evidence.` : void 0,
+        pick.kind === "teaching" && !SERIES_ORDER.includes(pick.source_slug ?? "") ? "Series position unconfirmed (only Teachings 2 and 3 are fixed)." : void 0
+      ].filter(Boolean) };
+      for (const x of skipped) exceptions.push({ severity: "info", code: "ALREADY_DISTRIBUTED_IN_GROUP", item: pick.id, message: `${pick.title} is already recorded as distributed in ${x.g.name}; it is not proposed there.` });
+      for (const x of candG) exceptions.push({ severity: "action", code: "DISTRIBUTION_CANDIDATE", item: pick.id, message: `${pick.title}: a possible earlier post was found in ${x.g.name}. Review it (momentum_confirm_distribution) before scheduling there.` });
+      if (pick.kind === "nugget" && unknownG.length) exceptions.push({ severity: "warning", code: "DISTRIBUTION_UNVERIFIED", item: pick.id, message: `${pick.title}: earlier distribution cannot be verified in ${unknownG.map((x) => x.g.name).join(", ")} (incomplete history). Unknown, not "never sent".` });
       exceptions.push({ severity: "action", code: pick.status === "approved" ? "NEEDS_PLANNING" : "NEEDS_APPROVAL", item: pick.id, message: `${day.weekday} ${date}: ${pick.title} (${pick.status}) is proposed but not scheduled.` });
       days.push(day);
     }
@@ -3861,6 +4124,8 @@ function buildBrief(input) {
       if (d.status === "planned" && d.planned_at && Date.parse(d.planned_at) < now.getTime() && !sendingPossible) exceptions.push({ severity: "warning", code: "PAST_DUE_NOT_SENT", item: i.id, message: `${i.title} to ${d.destination_name} was due ${toSast(d.planned_at).date} ${toSast(d.planned_at).time} but gates are not ON.` });
     }
   }
+  if (!dist.available) exceptions.push({ severity: "warning", code: "DISTRIBUTION_MEMORY_UNAVAILABLE", message: "Distribution memory could not be read (not installed or not reachable), so prior distribution is unknown for every group." });
+  for (const i of live) if (fullyDistributed(i.id)) exceptions.push({ severity: "info", code: "ALREADY_DISTRIBUTED_EVERYWHERE", item: i.id, message: `${i.title} is recorded as distributed in all allow-listed groups; it is not proposed again.` });
   if (allow.length < 3) exceptions.push({ severity: "warning", code: "GROUPS_INCOMPLETE", message: `Only ${allow.length} allow-listed group(s); the rhythm needs 3.` });
   const sev = { action: 0, warning: 1, info: 2 };
   exceptions.sort((a, b) => sev[a.severity] - sev[b.severity]);
@@ -3872,6 +4137,7 @@ function buildBrief(input) {
     sending_possible: sendingPossible,
     groups: allow,
     slot_times_sast: [...SLOTS],
+    distribution_memory: { available: dist.available, records: dist.records.filter((r) => r.status !== "retracted").length, coverage: allow.map((g) => coverageVerdict(g.jid, g.name, dist.coverage, now)), note: "A group is judged only by its own evidence. Incomplete history means UNKNOWN, never 'not distributed'. Record outside distribution with momentum_confirm_distribution." },
     inventory: { teachings: teachings.map(summary), nuggets: nuggets.map(summary), already_distributed: ALREADY_DISTRIBUTED },
     weeks: weekPlans,
     exceptions,
@@ -3903,6 +4169,15 @@ async function loadState(api) {
   if (!s.ok) return { error: `Could not read Momentum settings: ${s.error ?? "unknown"}` };
   return { items: l.items ?? [], settings: s.settings ?? {} };
 }
+async function loadDistribution(api) {
+  try {
+    const r = await api("distributions", {});
+    if (!r.ok) return { available: false, records: [], coverage: null, error: r.error };
+    return { available: true, records: r.records ?? [], coverage: r.coverage ?? null };
+  } catch (e) {
+    return { available: false, records: [], coverage: null, error: e instanceof Error ? e.message : "unavailable" };
+  }
+}
 async function loadBodies(api, ids, items) {
   const out = {};
   for (const id of [...new Set(ids)]) {
@@ -3919,24 +4194,20 @@ var refuse = (m, extra) => ({ content: [{ type: "text", text: m }], structuredCo
 var momentum_brief_default = defineTool66({
   name: "momentum_brief",
   title: "Momentum briefing (read-only)",
-  description: "Read-only Momentum intelligence. Returns the live state of the A-Team Momentum engine for planning: safety gates (engine, scheduler, emergency, freeze, 120-minute gap), allow-listed groups, every teaching and nugget with status/version and planned deliveries (SAST), the Mon/Wed/Fri 09:15/09:25/09:35 rhythm for the coming weeks with what is scheduled, what is proposed and what is a gap, and exceptions (retime needed, needs approval, held, failed, inert). Use it to answer 'what should we do next week?': explain reasoning (each proposed day has a reason and alternatives), then ask Vanto ONE decision. Revisions (assign / exclude / first_release) rebuild the plan when Vanto wants a change. It never approves, schedules, sends or changes any setting. Teaching and nugget wording is Mr Baloyi's and is never edited; read it with momentum_get_content.",
+  description: "Read-only Momentum intelligence. Returns the live state of the A-Team Momentum engine for planning (including per-group DISTRIBUTION MEMORY: which content already went to which group by Momentum, by hand, or on confirmed evidence; a group is never assumed from another, and incomplete history is reported as unknown, never as 'not distributed'): safety gates (engine, scheduler, emergency, freeze, 120-minute gap), allow-listed groups, every teaching and nugget with status/version and planned deliveries (SAST), the Mon/Wed/Fri 09:15/09:25/09:35 rhythm for the coming weeks with what is scheduled, what is proposed and what is a gap, and exceptions (retime needed, needs approval, held, failed, inert). Use it to answer 'what should we do next week?': explain reasoning (each proposed day has a reason and alternatives), then ask Vanto ONE decision. Revisions (assign / exclude / first_release) rebuild the plan when Vanto wants a change. It never approves, schedules, sends or changes any setting. Teaching and nugget wording is Mr Baloyi's and is never edited; read it with momentum_get_content.",
   inputSchema: paramsSchema,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   handler: async (input, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
-    const supabase = supabaseForUser(ctx);
-    const fail = (m) => ({ content: [{ type: "text", text: m }], isError: true });
-    const [list, status] = await Promise.all([
-      supabase.functions.invoke("momentum-admin", { body: { action: "list" } }),
-      supabase.functions.invoke("momentum-admin", { body: { action: "status" } })
-    ]);
-    if (list.error || !list.data?.ok) return fail(`Could not read Momentum items (admin session required): ${list.error?.message ?? list.data?.error ?? "unknown"}`);
-    if (status.error || !status.data?.ok) return fail(`Could not read Momentum settings: ${status.error?.message ?? status.data?.error ?? "unknown"}`);
+    const api = adminApi(supabaseForUser(ctx));
+    const st = await loadState(api);
+    if ("error" in st) return refuse(st.error);
+    const distribution = await loadDistribution(api);
     try {
-      const brief = buildBrief({ now: /* @__PURE__ */ new Date(), items: list.data.items ?? [], settings: status.data.settings ?? {}, ...toBriefParams(input) });
+      const brief = buildBrief({ now: /* @__PURE__ */ new Date(), items: st.items, settings: st.settings, distribution, ...toBriefParams(input) });
       return { content: [{ type: "text", text: JSON.stringify(brief, null, 2) }], structuredContent: brief };
     } catch (e) {
-      return fail(e instanceof Error ? e.message : "brief failed");
+      return refuse(e instanceof Error ? e.message : "brief failed");
     }
   }
 });
@@ -3963,121 +4234,6 @@ var momentum_get_content_default = defineTool67({
 
 // src/lib/mcp/tools/momentum-preview-plan.ts
 import { defineTool as defineTool68 } from "npm:@lovable.dev/mcp-js@0.26.1";
-
-// src/lib/mcp/tools/momentum-plan-logic.ts
-async function sha256Hex(text2) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text2));
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-var ALLOWED_ACTIONS = ["submit", "approve", "plan", "retime", "hold"];
-function stepsFromBrief(brief, shaOf) {
-  const steps = [];
-  const problems = [];
-  for (const w of brief.weeks) for (const d of w.days) {
-    if (d.state === "scheduled" && d.retime_needed && d.retime_to_first_at) {
-      steps.push({ type: "retime", item_id: d.item.id, title: d.item.title, first_at: d.retime_to_first_at, from_times: d.item.deliveries.map((x) => x.at_sast) });
-    }
-    if (d.state === "proposed") {
-      const r = d.recommendation, it = r.item, sha = shaOf(it.id);
-      if (!sha) {
-        problems.push(`${it.title}: text hash unavailable`);
-        continue;
-      }
-      if (!["draft", "in_review", "approved"].includes(it.status)) {
-        problems.push(`${it.title}: status ${it.status} cannot be scheduled`);
-        continue;
-      }
-      const actions = it.status === "draft" ? ["submit", "approve", "plan"] : it.status === "in_review" ? ["approve", "plan"] : ["plan"];
-      steps.push({ type: "schedule", item_id: it.id, title: it.title, kind: it.kind, version: it.version, text_sha256: sha, status_before: it.status, first_at: r.plan.first_at, group_jids: r.plan.group_jids, actions });
-    }
-  }
-  return { steps, problems };
-}
-async function buildPreview(args) {
-  const { brief, bodies } = args;
-  const problems = [];
-  const shaOf = (id) => {
-    const b = bodies[id];
-    if (!b) return null;
-    return b.sha;
-  };
-  const { steps, problems: p2 } = stepsFromBrief(brief, shaOf);
-  problems.push(...p2);
-  for (const s of steps) if (s.type === "schedule") {
-    const b = bodies[s.item_id];
-    if (!b || await sha256Hex(b.body) !== b.sha) problems.push(`${s.title}: the stored text does not match its hash; it cannot be previewed as exact`);
-  }
-  const canonical = JSON.stringify({ steps, groups: brief.groups.map((g) => g.jid), slots: brief.slot_times_sast });
-  const hash = await sha256Hex(canonical);
-  const phrase = `APPROVE ${hash.slice(0, 6).toUpperCase()}`;
-  const messages = [];
-  for (const s of steps) if (s.type === "schedule") {
-    const day = brief.weeks.flatMap((w) => w.days).find((d) => d.recommendation?.item?.id === s.item_id);
-    messages.push({ item_id: s.item_id, title: s.title, kind: s.kind, version: s.version, text_sha256: s.text_sha256, text: bodies[s.item_id]?.body ?? "", deliveries: (day?.slots ?? []).map((x) => ({ group: x.group, at_sast: x.at_sast })) });
-  }
-  return {
-    read_only: true,
-    proposal_hash: hash,
-    confirm_phrase: phrase,
-    requires_distribution_confirmation: steps.filter((s) => s.type === "schedule" && s.kind === "nugget").map((s) => ({ item_id: s.item_id, title: s.title, question: "Has Vanto confirmed this nugget has NOT already been sent to these groups? If unsure, hold it and use an alternative." })),
-    to_approve: steps.length === 0 ? "Nothing to approve: no unscheduled proposals and no re-timing needed." : `To approve, Vanto must type exactly: ${phrase}`,
-    steps,
-    messages,
-    problems,
-    exceptions: brief.exceptions,
-    gates: brief.gates,
-    sending_possible: brief.sending_possible,
-    params_used: args.params,
-    note: "Nothing is approved, scheduled or sent by previewing. Approval covers exactly the texts (by hash), groups and times shown."
-  };
-}
-async function executeSteps(steps, api) {
-  const results = [];
-  let halted = false;
-  const call = async (action, body) => {
-    if (!ALLOWED_ACTIONS.includes(action)) throw new Error(`action ${action} is not allowed`);
-    return api(action, { ...body, via: "mcp" });
-  };
-  for (const step of steps) {
-    if (halted) {
-      results.push({ step, outcome: "skipped", detail: "not run because an earlier step failed" });
-      continue;
-    }
-    if (step.type === "retime") {
-      const r = await call("retime", { item_id: step.item_id, first_at: step.first_at });
-      if (r.ok) results.push({ step, outcome: "done", detail: `re-timed ${(r.retimed ?? []).length} planned deliveries` });
-      else {
-        results.push({ step, outcome: "failed", detail: r.error ?? "retime failed" });
-        halted = true;
-      }
-      continue;
-    }
-    let failed = "";
-    for (const a of step.actions) {
-      const r = a === "submit" ? await call("submit", { item_id: step.item_id }) : a === "approve" ? await call("approve", { item_id: step.item_id, expected_sha256: step.text_sha256 }) : await call("plan", { item_id: step.item_id, group_jids: step.group_jids, first_at: step.first_at, exact: true });
-      if (!r.ok) {
-        failed = `${a}: ${r.error ?? "failed"}`;
-        break;
-      }
-      if (a === "plan") {
-        const outcomes = (r.planned ?? []).map((p) => p.outcome);
-        if (outcomes.some((o) => o === "already_planned")) {
-          results.push({ step, outcome: "done", detail: "already planned (no duplicates created)" });
-          failed = "ok";
-          break;
-        }
-      }
-    }
-    if (failed === "ok") continue;
-    if (failed) {
-      results.push({ step, outcome: "failed", detail: failed });
-      halted = true;
-    } else results.push({ step, outcome: "done", detail: step.actions.join(" \u2192 ") });
-  }
-  return { results, halted };
-}
-
-// src/lib/mcp/tools/momentum-preview-plan.ts
 var momentum_preview_plan_default = defineTool68({
   name: "momentum_preview_plan",
   title: "Preview the Momentum campaign (read-only)",
@@ -4089,8 +4245,9 @@ var momentum_preview_plan_default = defineTool68({
     const api = adminApi(supabaseForUser(ctx));
     const st = await loadState(api);
     if ("error" in st) return refuse(st.error);
+    const distribution = await loadDistribution(api);
     try {
-      const brief = buildBrief({ now: /* @__PURE__ */ new Date(), items: st.items, settings: st.settings, ...toBriefParams(input) });
+      const brief = buildBrief({ now: /* @__PURE__ */ new Date(), items: st.items, settings: st.settings, distribution, ...toBriefParams(input) });
       const ids = brief.weeks.flatMap((w) => w.days).filter((d) => d.state === "proposed").map((d) => d.recommendation.item.id);
       const lb = await loadBodies(api, ids, st.items);
       if (lb.error !== void 0) return refuse(lb.error);
@@ -4148,7 +4305,7 @@ var momentum_approve_plan_default = defineTool69({
     proposal_hash: z62.string().length(64).describe("proposal_hash from momentum_preview_plan."),
     confirm_phrase: z62.string().describe("The exact phrase Vanto typed, e.g. APPROVE 4F7Q2A."),
     user_confirmed: z62.literal(true).describe("Must be true, only after Vanto typed the phrase in this conversation."),
-    confirmed_not_distributed: z62.array(z62.string().uuid()).optional().describe("Nugget item ids Vanto has explicitly confirmed were NOT already distributed (see requires_distribution_confirmation in the preview).")
+    confirmed_not_distributed: z62.array(z62.string().uuid()).optional().describe("Item ids Vanto has explicitly confirmed were NOT already distributed to the groups listed in groups_to_confirm (see requires_distribution_confirmation in the preview).")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   handler: async (input, ctx) => {
@@ -4157,8 +4314,9 @@ var momentum_approve_plan_default = defineTool69({
     const st = await loadState(api);
     if ("error" in st) return refuse(st.error);
     const { proposal_hash, confirm_phrase, user_confirmed: _u, confirmed_not_distributed, ...params } = input;
+    const distribution = await loadDistribution(api);
     try {
-      const brief = buildBrief({ now: /* @__PURE__ */ new Date(), items: st.items, settings: st.settings, ...toBriefParams(params) });
+      const brief = buildBrief({ now: /* @__PURE__ */ new Date(), items: st.items, settings: st.settings, distribution, ...toBriefParams(params) });
       const ids = brief.weeks.flatMap((w) => w.days).filter((d) => d.state === "proposed").map((d) => d.recommendation.item.id);
       const lb = await loadBodies(api, ids, st.items);
       if (lb.error !== void 0) return refuse(lb.error);
@@ -4169,7 +4327,7 @@ var momentum_approve_plan_default = defineTool69({
       if (confirm_phrase.trim().toUpperCase() !== prev.confirm_phrase) return refuse(`Refused: the confirmation phrase does not match. Vanto must type exactly: ${prev.confirm_phrase}. Nothing was done.`);
       if (prev.steps.length === 0) return refuse("Nothing to approve or schedule.");
       const unconfirmed = prev.requires_distribution_confirmation.filter((r) => !(confirmed_not_distributed ?? []).includes(r.item_id));
-      if (unconfirmed.length) return refuse(`Refused: Vanto must first confirm these nuggets were never sent before: ${unconfirmed.map((u) => u.title).join(", ")}. If unsure, hold them and choose an alternative. Nothing was done.`, { needs_confirmation: unconfirmed });
+      if (unconfirmed.length) return refuse(`Refused: Vanto must first confirm these were never sent to the listed groups before: ${unconfirmed.map((u) => `${u.title} (${u.groups_to_confirm.map((g) => g.group).join(", ")})`).join("; ")}. If unsure, hold them and choose an alternative. Nothing was done.`, { needs_confirmation: unconfirmed });
       const { results, halted } = await executeSteps(prev.steps, api);
       const after = await loadState(api);
       const report = "error" in after ? null : buildReport({ now: /* @__PURE__ */ new Date(), items: after.items, settings: after.settings });
@@ -4222,6 +4380,108 @@ var momentum_report_default = defineTool71({
   }
 });
 
+// src/lib/mcp/tools/momentum-confirm-distribution.ts
+import { defineTool as defineTool72 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z64 } from "npm:zod@^3.25.76";
+var momentum_confirm_distribution_default = defineTool72({
+  name: "momentum_confirm_distribution",
+  title: "Record (or retract) that content was already distributed to a group",
+  description: "Records, with an audit trail, that a teaching/nugget was ALREADY distributed to ONE allow-listed WhatsApp group outside Momentum (e.g. Vanto posted it by hand), so Momentum never proposes it again for that group. One record per (content, group): a record for one group says nothing about the others. Use ONLY on Vanto's own statement or evidence he shows (e.g. a WhatsApp screenshot): quote his words in `statement` and describe the evidence in `evidence_ref`; never infer distribution yourself. Without user_confirmed: true it is a dry run that shows exactly what would be recorded. Idempotent (repeating the same evidence creates no duplicate). action 'retract' withdraws a mistaken record (needs record_id and a reason). The original teaching/nugget text is never touched.",
+  inputSchema: {
+    action: z64.enum(["record", "retract"]).default("record"),
+    item_id: z64.string().uuid().optional().describe("The content item (required for record)."),
+    group: z64.string().min(2).optional().describe("Allow-listed group name or JID (required for record)."),
+    distributed_at: z64.string().optional().describe("When it was actually posted: ISO with zone, or 'YYYY-MM-DD HH:MM' in South Africa time (required for record)."),
+    origin: z64.enum(["manual_whatsapp", "external_evidence"]).default("manual_whatsapp").describe("manual_whatsapp: posted by hand in the group. external_evidence: confirmed by other evidence."),
+    evidence_ref: z64.string().min(5).max(300).optional().describe("What proves it, e.g. 'WhatsApp screenshot from Vanto, Duplication Movement, 15:09 on 14 Nov 2026'."),
+    statement: z64.string().min(10).max(1e3).optional().describe("Vanto's own words confirming it, verbatim."),
+    note: z64.string().max(500).optional(),
+    record_id: z64.string().uuid().optional().describe("For retract: the record id (see momentum_brief inventory distribution)."),
+    reason: z64.string().min(3).max(300).optional().describe("For retract: why the record is withdrawn."),
+    user_confirmed: z64.boolean().default(false).describe("Must be true to write. Only after Vanto has stated/confirmed it in this conversation.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  handler: async (input, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const api = adminApi(supabaseForUser(ctx));
+    if (input.action === "retract") {
+      if (!input.record_id || !input.reason) return refuse("record_id and reason are required to retract.");
+      if (!input.user_confirmed) return text({ dry_run: true, would_retract: input.record_id, reason: input.reason, note: "Nothing written. Repeat with user_confirmed: true after Vanto confirms." });
+      const r2 = await api("distribution_retract", { distribution_id: input.record_id, reason: input.reason, via: "mcp" });
+      return r2.ok ? text({ retracted: r2.result, note: "The record is withdrawn (kept in the audit log). Momentum will treat that group as unverified again." }) : refuse(`Retract failed: ${r2.error ?? "unknown"}`);
+    }
+    if (!input.item_id || !input.group || !input.distributed_at || !input.evidence_ref) return refuse("item_id, group, distributed_at and evidence_ref are required to record a distribution.");
+    if (input.origin === "external_evidence" && !input.statement) return refuse("external_evidence needs Vanto's own words in `statement`.");
+    const st = await loadState(api);
+    if ("error" in st) return refuse(st.error);
+    const item = st.items.find((i) => i.id === input.item_id);
+    if (!item) return refuse("That content item does not exist.");
+    const allow = parseAllowList(st.settings.momentum_nugget_target_groups);
+    const g = resolveGroup(input.group, allow);
+    if (!g) return refuse(`"${input.group}" is not an allow-listed group. Allowed: ${allow.map((x) => x.name).join(", ")}.`);
+    const at = parseWhen(input.distributed_at);
+    if (!at) return refuse("distributed_at must be ISO with a time zone or 'YYYY-MM-DD HH:MM' (South Africa time).");
+    if (Date.parse(at) > Date.now() + 5 * 6e4) return refuse("distributed_at cannot be in the future.");
+    const plan = { item: item.title, version: item.version, group: g.name, group_jid: g.jid, distributed_at_utc: at, origin: input.origin, confidence: "confirmed", evidence_ref: input.evidence_ref, statement: input.statement ?? null };
+    if (!input.user_confirmed) return text({ dry_run: true, would_record: plan, note: "Nothing written. This records distribution for THIS group only. Repeat with user_confirmed: true after Vanto confirms." });
+    const r = await api("distribution_record", { item_id: item.id, group_jid: g.jid, origin: input.origin, evidence_ref: input.evidence_ref, status: "verified", confidence: "confirmed", distributed_at: at, note: input.note, statement: input.statement, via: "mcp" });
+    if (!r.ok) return refuse(`Record failed: ${r.error ?? "unknown"}. Nothing was changed.`);
+    const after = await loadDistribution(api);
+    const mine = after.records.filter((x) => x.content_item_id === item.id && x.status !== "retracted").map((x) => ({ group: x.group_name, status: x.status, confidence: x.confidence, origin: x.origin, at: x.distributed_at }));
+    return text({ recorded: r.result, plan, distribution_of_this_content: mine, note: "Content text, approval and schedules are unchanged. Momentum will no longer propose this content for this group." });
+  }
+});
+
+// src/lib/mcp/tools/momentum-scan-distribution.ts
+import { defineTool as defineTool73 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z65 } from "npm:zod@^3.25.76";
+var momentum_scan_distribution_default = defineTool73({
+  name: "momentum_scan_distribution",
+  title: "Scan Hub history for already-distributed Momentum content",
+  description: "Looks through Hub's existing WhatsApp group history (inbound group messages, Hub-sent group posts, Momentum's own sent deliveries) for the allow-listed groups and reports which teachings/nuggets already appear in which group. Matching: exact hash, normalised text or Momentum's own delivery id = verified; similar or text-with-extra-words = CANDIDATE needing human review (never a confirmed delivery). It also reports per-group history COVERAGE: posts made from the admin's own phone are not captured, so an empty result means UNKNOWN, not 'never distributed'. Dry run by default; record_matches: true writes the records (idempotent, no duplicates on repeat scans). It never edits content, schedules or sends. For something the history cannot see, use momentum_confirm_distribution.",
+  inputSchema: {
+    item_id: z65.string().uuid().optional().describe("Limit the scan to one content item."),
+    days_back: z65.number().int().min(1).max(365).default(60),
+    record_matches: z65.boolean().default(false).describe("true = record the matches (verified/candidate). Default false = report only.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  handler: async (input, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const api = adminApi(supabaseForUser(ctx));
+    const st = await loadState(api);
+    if ("error" in st) return refuse(st.error);
+    const dist = await loadDistribution(api);
+    if (!dist.available) return refuse(`Distribution memory is not available yet (${dist.error ?? "not installed"}). Nothing was scanned or written.`);
+    const live = st.items.filter((i) => !["retired", "rejected"].includes(i.status) && (!input.item_id || i.id === input.item_id));
+    if (live.length === 0) return refuse("No matching content items.");
+    const lb = await loadBodies(api, live.map((i) => i.id), st.items);
+    if (lb.error !== void 0) return refuse(lb.error);
+    const h = await api("distribution_history", { days_back: input.days_back });
+    if (!h.ok) return refuse(`Could not read history: ${h.error ?? "unknown"}`);
+    const items = live.map((i) => ({ id: i.id, version: i.version, title: i.title, body: lb.bodies[i.id].body, sha256: lb.bodies[i.id].sha }));
+    const matches = await matchHistory(items, h.messages ?? []);
+    const allow = parseAllowList(st.settings.momentum_nugget_target_groups);
+    const name = (jid) => allow.find((g) => g.jid === jid)?.name ?? jid;
+    const title = (id) => items.find((i) => i.id === id)?.title ?? id;
+    const proposed = matches.map((m) => ({ m, rec: recordFromMatch(m) }));
+    const written = [];
+    if (input.record_matches) {
+      for (const { rec } of proposed) {
+        const r = await api("distribution_record", { item_id: rec.content_item_id, group_jid: rec.group_jid, origin: rec.origin, evidence_ref: rec.evidence_ref, status: rec.status, confidence: rec.confidence, distributed_at: rec.distributed_at, note: rec.note, via: "mcp" });
+        written.push({ item: title(rec.content_item_id), group: name(rec.group_jid), status: rec.status, outcome: r.ok ? r.result?.[0]?.outcome ?? "recorded" : `failed: ${r.error}` });
+      }
+    }
+    const now = /* @__PURE__ */ new Date();
+    return text({
+      scanned: { items: items.length, history_rows: (h.messages ?? []).length, days_back: input.days_back, truncated: !!h.truncated },
+      matches: proposed.map(({ m, rec }) => ({ item: title(m.content_item_id), group: name(m.group_jid), match: m.kind, would_be: rec.status, confidence: rec.confidence, at_utc: m.at, evidence_ref: m.evidence_ref })),
+      coverage: allow.map((g) => coverageVerdict(g.jid, g.name, dist.coverage, now)),
+      ...input.record_matches ? { recorded: written } : { dry_run: true, note: "Nothing written. Repeat with record_matches: true to store these records." },
+      reminder: "No match does NOT mean 'never distributed' where coverage is incomplete. Candidates are not confirmed deliveries."
+    });
+  }
+});
+
 // src/lib/mcp/index.ts
 var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
@@ -4240,6 +4500,8 @@ var mcp_default = defineMcp({
     momentum_approve_plan_default,
     momentum_pause_default,
     momentum_report_default,
+    momentum_confirm_distribution_default,
+    momentum_scan_distribution_default,
     get_dispatch_policy_default,
     get_dispatcher_health_default,
     get_maytapi_status_default,
