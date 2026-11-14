@@ -1511,6 +1511,74 @@ export type Database = {
           },
         ]
       }
+      content_distributions: {
+        Row: {
+          confidence: string
+          content_item_id: string
+          content_version: number | null
+          distributed_at: string | null
+          evidence_ref: string
+          group_jid: string
+          group_name: string | null
+          id: string
+          note: string | null
+          origin: string
+          recorded_at: string
+          recorded_by: string
+          retract_reason: string | null
+          retracted_at: string | null
+          retracted_by: string | null
+          statement: string | null
+          status: string
+        }
+        Insert: {
+          confidence: string
+          content_item_id: string
+          content_version?: number | null
+          distributed_at?: string | null
+          evidence_ref: string
+          group_jid: string
+          group_name?: string | null
+          id?: string
+          note?: string | null
+          origin: string
+          recorded_at?: string
+          recorded_by: string
+          retract_reason?: string | null
+          retracted_at?: string | null
+          retracted_by?: string | null
+          statement?: string | null
+          status: string
+        }
+        Update: {
+          confidence?: string
+          content_item_id?: string
+          content_version?: number | null
+          distributed_at?: string | null
+          evidence_ref?: string
+          group_jid?: string
+          group_name?: string | null
+          id?: string
+          note?: string | null
+          origin?: string
+          recorded_at?: string
+          recorded_by?: string
+          retract_reason?: string | null
+          retracted_at?: string | null
+          retracted_by?: string | null
+          statement?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "content_distributions_content_item_id_fkey"
+            columns: ["content_item_id"]
+            isOneToOne: false
+            referencedRelation: "content_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       content_items: {
         Row: {
           approved_at: string | null
@@ -5599,6 +5667,18 @@ export type Database = {
         Args: { p_actor: string; p_jid: string }
         Returns: boolean
       }
+      momentum_distribution_coverage: {
+        Args: never
+        Returns: {
+          first_at: string
+          group_jid: string
+          group_name: string
+          hub_sent_posts: number
+          inbound_messages: number
+          last_at: string
+          outbound_messages: number
+        }[]
+      }
       momentum_group_candidates: {
         Args: { p_query: string }
         Returns: {
@@ -5632,6 +5712,24 @@ export type Database = {
           planned_at: string
         }[]
       }
+      momentum_record_distribution: {
+        Args: {
+          p_actor?: string
+          p_confidence: string
+          p_distributed_at?: string
+          p_evidence: string
+          p_item: string
+          p_jid: string
+          p_note?: string
+          p_origin: string
+          p_statement?: string
+          p_status: string
+        }
+        Returns: {
+          id: string
+          outcome: string
+        }[]
+      }
       momentum_release_due: {
         Args: { p_limit?: number }
         Returns: {
@@ -5647,6 +5745,13 @@ export type Database = {
           destination_jid: string
           new_planned_at: string
           old_planned_at: string
+        }[]
+      }
+      momentum_retract_distribution: {
+        Args: { p_actor?: string; p_id: string; p_reason: string }
+        Returns: {
+          id: string
+          outcome: string
         }[]
       }
       momentum_slot_conflict: {
