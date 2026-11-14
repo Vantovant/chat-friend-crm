@@ -32,8 +32,18 @@ const bool = (v: unknown) => String(v ?? "").trim().toLowerCase() === "true";
 
 export type Brief = ReturnType<typeof buildBrief>;
 
-export function buildBrief(input: { now: Date; items: Item[]; settings: Settings; weekStart?: string; weeks?: number }) {
+export type BriefParams = { weekStart?: string; weeks?: number; assign?: Record<string, string>; exclude?: string[]; firstRelease?: string };
+export function slotTimesFrom(first?: string): string[] {
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(first ?? "09:15"); if (!m) throw new Error("first_release must be HH:MM (SAST)");
+  const base = Number(m[1]) * 60 + Number(m[2]);
+  return [0, 10, 20].map((o) => { const t = base + o; if (t >= 24 * 60) throw new Error("first_release too late for three slots"); return `${pad(Math.floor(t / 60))}:${pad(t % 60)}`; });
+}
+
+export function buildBrief(input: { now: Date; items: Item[]; settings: Settings } & BriefParams) {
   const { now, items, settings } = input;
+  const SLOTS = slotTimesFrom(input.firstRelease);
+  const exclude = new Set(input.exclude ?? []);
+  const assign = input.assign ?? {};
   const nowSast = toSast(now.toISOString());
   const weeks = Math.min(Math.max(input.weeks ?? 2, 1), 3);
   const start = input.weekStart ?? nextMonday(nowSast.date);
@@ -66,35 +76,47 @@ export function buildBrief(input: { now: Date; items: Item[]; settings: Settings
   const byDate = new Map<string, { item: Item; d: Delivery }[]>();
   for (const i of live) for (const d of dels(i)) { if (!d.planned_at) continue; const k = toSast(d.planned_at).date; byDate.set(k, [...(byDate.get(k) ?? []), { item: i, d }]); }
 
-  const nextOf = (pool: Item[]) => pool.find((i) => !used.has(i.id) && dels(i).length === 0 && !i.held && !i.source_changed);
+  const eligible = (i: Item) => !used.has(i.id) && !exclude.has(i.id) && dels(i).length === 0 && !i.held && !i.source_changed;
+  const nextOf = (pool: Item[]) => pool.find(eligible);
+  const byId = new Map(live.map((i) => [i.id, i]));
+  // other planned deliveries of the same group within the minimum interval of a slot (excluding the item's own)
+  const intervalMs = gates.min_interval_minutes * 60000;
+  const conflictFor = (slotIsoStr: string, group: string | null, ownId?: string) => items.some((o) => o.id !== ownId && dels(o).some((d) => d.destination_name === group && d.planned_at && Math.abs(Date.parse(d.planned_at) - Date.parse(slotIsoStr)) < intervalMs));
   const weekPlans: any[] = [];
   for (let w = 0; w < weeks; w++) {
     const monday = addDays(start, 7 * w);
     const days: any[] = [];
     for (const [off, rhythm, prefer] of [[0, "Understand", "nugget"], [2, "Practise", "teaching"], [4, "Continue and pass it on", "nugget"]] as const) {
       const date = addDays(monday, off);
-      const slots = SLOT_TIMES.map((t, k) => ({ group: allow[k]?.name ?? null, at_sast: `${date} ${t}` }));
+      const slots = SLOTS.map((t, k) => ({ group: allow[k]?.name ?? null, at_sast: `${date} ${t}` }));
       const existing = byDate.get(date) ?? [];
       const day: any = { date, weekday: WEEKDAY[dow(date)], rhythm, slots };
       if (existing.length) {
         const item = existing[0].item;
         day.state = "scheduled"; day.item = summary(item);
-        const off = existing.filter(({ d }) => !SLOT_TIMES.includes(toSast(d.planned_at!).time as any));
-        if (off.length) { day.retime_needed = true; exceptions.push({ severity: "action", code: "RETIME_NEEDED", item: item.id, message: `${item.title}: ${off.length} delivery time(s) differ from ${SLOT_TIMES.join(" / ")} (currently ${existing.map(({ d }) => toSast(d.planned_at!).time).join(" / ")}). Phase 1b retime needed; do not retire and re-plan (approval would be lost).` }); }
+        const off = existing.filter(({ d }) => !SLOTS.includes(toSast(d.planned_at!).time));
+        if (off.length) { day.retime_needed = true; day.retime_to_first_at = slotIso(date, SLOTS[0]); exceptions.push({ severity: "action", code: "RETIME_NEEDED", item: item.id, message: `${item.title}: ${off.length} delivery time(s) differ from ${SLOTS.join(" / ")} (currently ${existing.map(({ d }) => toSast(d.planned_at!).time).join(" / ")}). Re-time the planned deliveries; never retire and re-plan (the approval would be lost).` }); }
         if (!sendingPossible) exceptions.push({ severity: "info", code: "SCHEDULED_BUT_INERT", item: item.id, message: `${item.title} is planned for ${date} but nothing will send: engine/scheduler gates are not both ON (by design until final activation).` });
         if (item.status !== "approved") exceptions.push({ severity: "warning", code: "PLANNED_NOT_APPROVED", item: item.id, message: `${item.title} has deliveries but status is ${item.status}.` });
         days.push(day); continue;
       }
+      if (assign[date] === "none") { day.state = "skipped"; day.recommendation = { text: "Skipped at Vanto's request." }; days.push(day); continue; }
+      const forced = assign[date] ? byId.get(assign[date]) : undefined;
+      if (assign[date] && (!forced || !eligible(forced))) exceptions.push({ severity: "warning", code: "ASSIGN_INELIGIBLE", message: `${date}: the item chosen for this day is not available (missing, held, already scheduled or excluded); using the default instead.` });
       // Friday is a nugget-only slot: never fall back to a full teaching there.
       const other = prefer === "nugget" ? "teaching" : "nugget";
-      let pick = nextOf(prefer === "nugget" ? nuggets : teachings), why = "";
-      if (pick) why = `${prefer} slot in the Mon/Wed/Fri rhythm (${rhythm}).`;
+      let pick: Item | undefined = forced && eligible(forced) ? forced : undefined, why = pick ? "Chosen by Vanto for this day." : "";
+      if (!pick) pick = nextOf(prefer === "nugget" ? nuggets : teachings);
+      if (pick && !why) why = `${prefer} slot in the Mon/Wed/Fri rhythm (${rhythm}).`;
       else if (!(prefer === "nugget" && off === 4)) { pick = nextOf(other === "nugget" ? nuggets : teachings); if (pick) why = `No ${prefer} left to place, so the next ${other} fills this ${rhythm} slot.`; }
       if (!pick) { day.state = "gap"; day.recommendation = { text: `No ready content for ${rhythm}. Create or source a ${prefer}.` }; exceptions.push({ severity: "warning", code: "CONTENT_GAP", message: `${day.weekday} ${date}: no unscheduled approved-or-draft ${prefer} available.` }); days.push(day); continue; }
       used.add(pick.id);
+      const alternatives = [...nuggets, ...teachings].filter(eligible).slice(0, 4).map((a) => ({ item_id: a.id, kind: a.kind, title: a.title, status: a.status }));
+      const firstAt = slotIso(date, SLOTS[0]);
+      slots.forEach((sl, k) => { if (conflictFor(slotIso(date, SLOTS[k]), sl.group)) exceptions.push({ severity: "action", code: "SLOT_CONFLICT", item: pick!.id, message: `${day.weekday} ${date}: ${sl.group} already has a delivery within ${gates.min_interval_minutes} minutes of ${SLOTS[k]}.` }); });
       const steps = pick.status === "approved" ? ["plan 3 deliveries at the slot times"] : ["submit for review", "Vanto approves the exact text", "plan 3 deliveries at the slot times"];
       day.state = "proposed";
-      day.recommendation = { item: summary(pick), reason: why, steps, requires_vanto: pick.status === "approved" ? ["confirm the plan"] : ["approve the exact text", "confirm the plan"], warnings: [WORDING_FLAGS[pick.source_slug ?? ""], pick.kind === "nugget" ? "Prior distribution cannot be verified through MCP; Vanto confirms it has not already been sent before approval. If uncertain, hold it and use an alternative." : undefined, pick.kind === "teaching" && !SERIES_ORDER.includes(pick.source_slug ?? "") ? "Series position unconfirmed (only Teachings 2 and 3 are fixed)." : undefined].filter(Boolean) };
+      day.recommendation = { item: summary(pick), reason: why, alternatives, plan: { first_at: firstAt, group_jids: allow.map((g) => g.jid), steps }, steps, requires_vanto: pick.status === "approved" ? ["confirm the plan"] : ["approve the exact text", "confirm the plan"], warnings: [WORDING_FLAGS[pick.source_slug ?? ""], pick.kind === "nugget" ? "Prior distribution cannot be verified through MCP; Vanto confirms it has not already been sent before approval. If uncertain, hold it and use an alternative." : undefined, pick.kind === "teaching" && !SERIES_ORDER.includes(pick.source_slug ?? "") ? "Series position unconfirmed (only Teachings 2 and 3 are fixed)." : undefined].filter(Boolean) };
       exceptions.push({ severity: "action", code: pick.status === "approved" ? "NEEDS_PLANNING" : "NEEDS_APPROVAL", item: pick.id, message: `${day.weekday} ${date}: ${pick.title} (${pick.status}) is proposed but not scheduled.` });
       days.push(day);
     }
@@ -115,7 +137,7 @@ export function buildBrief(input: { now: Date; items: Item[]; settings: Settings
   const firstAction = exceptions.find((e) => e.severity === "action");
   return {
     read_only: true, as_of_sast: `${nowSast.date} ${nowSast.time}`, gates, sending_possible: sendingPossible,
-    groups: allow, slot_times_sast: [...SLOT_TIMES],
+    groups: allow, slot_times_sast: [...SLOTS],
     inventory: { teachings: teachings.map(summary), nuggets: nuggets.map(summary), already_distributed: ALREADY_DISTRIBUTED },
     weeks: weekPlans, exceptions,
     decision_hint: firstAction ? `Ask Vanto ONE decision first, about: ${firstAction.code} (${firstAction.message})` : "No action needed; offer a brief.",

@@ -1,6 +1,7 @@
 // momentum-admin: the single front door for the Momentum approval screen. ADMIN SESSION ONLY (no cron lane, no legacy anon, no service callers:
 // every write needs a real signed-in admin because approvals record WHO approved). It never sends, queues or schedules anything.
-// Actions: list | get | submit | approve | reject | hold | retire | plan | status | group_candidates | group_verify | group_allow
+// Actions: list | get | submit | approve | reject | hold | retire | plan | retime | status | group_candidates | group_verify | group_allow
+// `via: "mcp"` (optional) only labels the audit actor so MCP-driven actions are distinguishable; it grants nothing.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { requireAdminOrSystem } from "../_shared/require-admin-or-system.ts";
 
@@ -16,11 +17,13 @@ Deno.serve(async (req) => {
   if (!guard.ok) return json({ ok: false, error: guard.reason }, guard.status);
   if (guard.kind !== "admin" || !guard.userId) return json({ ok: false, error: "admin_session_required" }, 403);
   const actor = guard.userId;
+  let who = actor;   // audit label for text actors; approvals still record the real admin id
 
   let b: any = {}; try { b = await req.json(); } catch { return json({ ok: false, error: "bad_json" }, 400); }
   const svc = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
   const fail = (e: { message: string } | null) => json({ ok: false, error: String(e?.message ?? "failed").slice(0, 300) }, 400);
   const item = uuid(b.item_id);
+  if (b.via === "mcp") who = `${actor} via mcp`;
 
   switch (b.action) {
     case "list": {
@@ -42,7 +45,7 @@ Deno.serve(async (req) => {
     }
     case "submit": {
       if (!item) return json({ ok: false, error: "item_id_required" }, 400);
-      const { error } = await svc.rpc("submit_content_for_review", { p_item: item, p_actor: actor }); return error ? fail(error) : json({ ok: true });
+      const { error } = await svc.rpc("submit_content_for_review", { p_item: item, p_actor: who }); return error ? fail(error) : json({ ok: true });
     }
     case "approve": {   // the approver must send the hash of the text on screen; a changed text is refused by the database
       const sha = text(b.expected_sha256, 64); if (!item || !sha) return json({ ok: false, error: "item_id_and_expected_sha256_required" }, 400);
@@ -51,15 +54,15 @@ Deno.serve(async (req) => {
     }
     case "reject": {
       const reason = text(b.reason); if (!item || !reason) return json({ ok: false, error: "item_id_and_reason_required" }, 400);
-      const { error } = await svc.rpc("reject_content_item", { p_item: item, p_reason: reason, p_actor: actor }); return error ? fail(error) : json({ ok: true });
+      const { error } = await svc.rpc("reject_content_item", { p_item: item, p_reason: reason, p_actor: who }); return error ? fail(error) : json({ ok: true });
     }
     case "hold": {
       const reason = text(b.reason); if (!item || !reason) return json({ ok: false, error: "item_id_and_reason_required" }, 400);
-      const { data, error } = await svc.rpc("hold_content_item", { p_item: item, p_reason: reason, p_actor: actor }); return error ? fail(error) : json({ ok: true, deliveries_held: data });
+      const { data, error } = await svc.rpc("hold_content_item", { p_item: item, p_reason: reason, p_actor: who }); return error ? fail(error) : json({ ok: true, deliveries_held: data });
     }
     case "retire": {
       if (!item) return json({ ok: false, error: "item_id_required" }, 400);
-      const { data, error } = await svc.rpc("retire_content_item", { p_item: item, p_actor: actor }); return error ? fail(error) : json({ ok: true, deliveries_cancelled: data });
+      const { data, error } = await svc.rpc("retire_content_item", { p_item: item, p_actor: who }); return error ? fail(error) : json({ ok: true, deliveries_cancelled: data });
     }
     case "plan": {   // plans deliveries only (inert until the engine + scheduler switches are on); destinations come from the allow-list by JID, never from client-typed names
       const jids: unknown = b.group_jids, first = typeof b.first_at === "string" ? Date.parse(b.first_at) : NaN;
@@ -67,8 +70,15 @@ Deno.serve(async (req) => {
       const { data: s } = await svc.from("integration_settings").select("value").eq("key", "momentum_nugget_target_groups").maybeSingle();
       let allow: any[] = []; try { allow = JSON.parse(String(s?.value ?? "[]")); } catch { /* unreadable = empty */ }
       const dest = []; for (const j of jids) { const g = Array.isArray(allow) ? allow.find((a) => a?.jid === j) : null; if (!g) return json({ ok: false, error: "group_not_on_allow_list" }, 400); dest.push({ name: g.name, jid: g.jid }); }
-      const { data, error } = await svc.rpc("plan_content_delivery", { p_item: item, p_destinations: dest, p_first_at: new Date(first).toISOString(), p_actor: actor });
+      // exact: true plans the EXACT slots (refuses on a per-group interval conflict instead of shifting the time)
+      const { data, error } = await svc.rpc(b.exact === true ? "momentum_plan_exact" : "plan_content_delivery", { p_item: item, p_destinations: dest, p_first_at: new Date(first).toISOString(), p_actor: who });
       return error ? fail(error) : json({ ok: true, planned: data });
+    }
+    case "retime": {   // moves PLANNED deliveries of an approved item to new exact slots; approval and idempotency keys are untouched
+      const first = typeof b.first_at === "string" ? Date.parse(b.first_at) : NaN;
+      if (!item || Number.isNaN(first)) return json({ ok: false, error: "item_id_first_at_required" }, 400);
+      const { data, error } = await svc.rpc("momentum_retime_item", { p_item: item, p_first_at: new Date(first).toISOString(), p_actor: who });
+      return error ? fail(error) : json({ ok: true, retimed: data });
     }
     case "status": {   // read-only view of the safety switches; this function can never change a setting
       const keys = ["momentum_engine_enabled", "momentum_scheduler_enabled", "momentum_min_interval_minutes", "momentum_release_batch", "momentum_nugget_target_groups", "maytapi_outbound_frozen", "emergency_all_auto_paused", "maytapi_daily_cap"];

@@ -66,6 +66,10 @@ import setCallCampaign from "./tools/set-call-campaign";
 import listMaytapiAutoReplies from "./tools/list-maytapi-auto-replies";
 import momentumBrief from "./tools/momentum-brief";
 import momentumGetContent from "./tools/momentum-get-content";
+import momentumPreviewPlan from "./tools/momentum-preview-plan";
+import momentumApprovePlan from "./tools/momentum-approve-plan";
+import momentumPause from "./tools/momentum-pause";
+import momentumReport from "./tools/momentum-report";
 
 const projectRef = import.meta.env.VITE_SUPABASE_PROJECT_ID ?? "project-ref-unset";
 
@@ -82,6 +86,10 @@ export default defineMcp({
   tools: [
     momentumBrief,
     momentumGetContent,
+    momentumPreviewPlan,
+    momentumApprovePlan,
+    momentumPause,
+    momentumReport,
     getDispatchPolicy,
     getDispatcherHealth,
     getMaytapiStatus,
