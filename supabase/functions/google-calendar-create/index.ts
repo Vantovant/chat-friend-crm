@@ -133,30 +133,30 @@ Deno.serve(async (req) => {
         waReason = 'no_phone';
       } else {
         const toNumber = String(rawPhone).replace(/[^\d+]/g, '').replace(/^\+/, '');
-        const PRODUCT_ID = Deno.env.get('MAYTAPI_PRODUCT_ID');
-        const PHONE_ID = Deno.env.get('MAYTAPI_PHONE_ID');
-        const MAYTAPI_TOKEN = Deno.env.get('MAYTAPI_API_TOKEN');
-        if (!PRODUCT_ID || !PHONE_ID || !MAYTAPI_TOKEN) {
-          waReason = 'maytapi_not_configured';
-        } else {
-          try {
-            const url = `https://api.maytapi.com/api/${PRODUCT_ID}/${PHONE_ID}/sendMessage`;
-            const resp = await fetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'x-maytapi-key': MAYTAPI_TOKEN },
-              body: JSON.stringify({ to_number: toNumber, type: 'text', message: waMessage }),
-            });
-            const data = await resp.json().catch(() => ({}));
-            if (resp.ok && data?.success !== false) {
-              waSent = true;
-              waMsgId = data?.data?.msgId || null;
-            } else {
-              waReason = data?.message || `http_${resp.status}`;
-              console.error('Maytapi send failed', resp.status, data);
-            }
-          } catch (e) {
-            waReason = `maytapi_error:${String((e as Error)?.message || e)}`;
+        // Routed through maytapi-send-direct so the shared emergency/freeze, per-contact rate limit and the
+        // 40/SAST-day atomic cap apply. (Previously this called Maytapi directly and bypassed all of them.)
+        try {
+          const sdRes = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SERVICE_KEY}` },
+            body: JSON.stringify({
+              to_number: toNumber, message: waMessage, preview_url: htmlLink, skip_trust_header: true,
+              contact_id: contactId, source: 'calendar_confirmation',
+            }),
+          });
+          const sd = await sdRes.json().catch(() => ({}));
+          if (sdRes.ok && sd?.success === true) {
+            waSent = true;
+            waMsgId = sd?.message_id || null;
+          } else if (sd?.ambiguous) {
+            waReason = 'ambiguous_outcome_manual_review';
+          } else {
+            waReason = sd?.reason || sd?.error || `http_${sdRes.status}`;
+            console.error('maytapi-send-direct refused/failed', sdRes.status, sd);
           }
+        } catch (e) {
+          // The call to send-direct itself failed: whether it delivered is unknown. Never retried here.
+          waReason = `send_direct_unreachable_outcome_unknown:${String((e as Error)?.message || e)}`;
         }
       }
     }

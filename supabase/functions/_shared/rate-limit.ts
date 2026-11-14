@@ -14,6 +14,8 @@ export type ReserveResult = {
   ok: boolean;
   skipped?: boolean;
   failed_open?: boolean;
+  failed_closed?: boolean;
+  detail?: string;
   reason?: string;
   limit?: number;
   count?: number;
@@ -24,18 +26,29 @@ export type ReserveResult = {
   limit_24h?: number;
 };
 
-export async function reserveMessageSlot(svc: any, contactId: string | null | undefined): Promise<ReserveResult> {
+// failClosed (opt-in): when the limiter itself cannot answer (RPC error, thrown error, unusable reply),
+// refuse instead of allowing. Default stays fail-open so existing callers (ticks, auto-reply) are unchanged;
+// maytapi-send-direct, the choke point for every Maytapi 1:1 send, passes failClosed: true.
+export async function reserveMessageSlot(
+  svc: any,
+  contactId: string | null | undefined,
+  opts: { failClosed?: boolean } = {},
+): Promise<ReserveResult> {
   if (!contactId) return { ok: true, skipped: true };
+  const closed = (why: string): ReserveResult => ({ ok: false, failed_closed: true, reason: "rate_limiter_unavailable", detail: why });
   try {
     const { data, error } = await svc.rpc("reserve_message_slot", { p_contact_id: contactId });
     if (error) {
-      console.warn("[rate-limit] rpc error, failing open:", error.message);
-      return { ok: true, failed_open: true };
+      console.warn(`[rate-limit] rpc error, failing ${opts.failClosed ? "closed" : "open"}:`, error.message);
+      return opts.failClosed ? closed(error.message) : { ok: true, failed_open: true };
+    }
+    if (opts.failClosed && (data === null || typeof data !== "object" || typeof (data as any).ok !== "boolean")) {
+      return closed("unusable_rpc_reply");
     }
     return (data ?? { ok: true }) as ReserveResult;
   } catch (err) {
-    console.warn("[rate-limit] threw, failing open:", (err as Error).message);
-    return { ok: true, failed_open: true };
+    console.warn(`[rate-limit] threw, failing ${opts.failClosed ? "closed" : "open"}:`, (err as Error).message);
+    return opts.failClosed ? closed((err as Error).message) : { ok: true, failed_open: true };
   }
 }
 

@@ -1,0 +1,40 @@
+-- PROPOSED (13 Nov 2026) - NOT APPLIED, NOT in supabase/migrations (Lovable must not run it). Needs its own written approval.
+-- Creates the schedule for momentum-engine-tick and leaves it INACTIVE. Even when active, the tick does nothing until BOTH
+-- momentum_engine_enabled and momentum_scheduler_enabled are 'true' (they are 'false' by default) and the emergency pause is off.
+-- Uses the Vault secrets already created in Stage 0: cron_shared_secret (x-cron-secret) and zazi_sync_gateway_jwt (the public anon JWT the
+-- platform gateway wants). No key or secret is written in this file.
+-- Schedule '2-59/5 * * * *' = minutes 2,7,12,... so the tick queues a due post 3 minutes BEFORE the dispatcher's 5-minute tick (:00,:05,...)
+-- if the dispatcher runs on the usual 5-minute grid; check `select schedule from cron.job where jobname like '%dispatch%'` and shift if it differs.
+-- PREREQUISITES: Phase A, B/C and D migrations applied; momentum-engine-tick deployed; Vanto has approved turning the engine on.
+
+-- STEP 1 (create, inactive). Re-running is a no-op because the job name is unique-checked first.
+do $$
+declare v_id bigint;
+begin
+  if exists (select 1 from cron.job where jobname = 'momentum-engine-tick') then raise notice 'momentum-engine-tick already exists: no change'; return; end if;
+  if not exists (select 1 from vault.decrypted_secrets where name = 'cron_shared_secret') then raise exception 'vault secret cron_shared_secret missing'; end if;
+  if not exists (select 1 from vault.decrypted_secrets where name = 'zazi_sync_gateway_jwt') then raise exception 'vault secret zazi_sync_gateway_jwt missing'; end if;
+  v_id := cron.schedule('momentum-engine-tick', '2-59/5 * * * *', $cmd$
+    select net.http_post(
+      url := 'https://nqyyvqcmcyggvlcswkio.supabase.co/functions/v1/momentum-engine-tick',
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'apikey', (select decrypted_secret from vault.decrypted_secrets where name = 'zazi_sync_gateway_jwt' limit 1),
+        'Authorization', 'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'zazi_sync_gateway_jwt' limit 1),
+        'x-cron-secret', (select decrypted_secret from vault.decrypted_secrets where name = 'cron_shared_secret' limit 1)),
+      body := '{}'::jsonb);
+  $cmd$);
+  perform cron.alter_job(v_id, active := false);
+end $$;
+-- VERIFY (read-only): must show active = false.
+--   select jobid, jobname, schedule, active from cron.job where jobname = 'momentum-engine-tick';
+
+-- STEP 2 (ONLY on Vanto's separate approval, after the dry run): activate.
+--   select cron.alter_job((select jobid from cron.job where jobname = 'momentum-engine-tick'), active := true);
+-- STEP 3: confirm results the same way as the other jobs (queued != delivered): the function log shows lane=cron_secret, and
+--   select outcome, count(*) from <call the tick manually> ...   or watch content_deliveries / scheduled_group_posts (source='momentum_nugget').
+
+-- ROLLBACK / STOP (instant, any time):
+--   select cron.alter_job((select jobid from cron.job where jobname = 'momentum-engine-tick'), active := false);
+-- HARD STOP (also stops anything already queued from being delivered): set integration_settings maytapi_outbound_frozen = 'true'  (or emergency_all_auto_paused = 'true').
+-- REMOVE: select cron.unschedule('momentum-engine-tick');

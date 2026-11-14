@@ -28,6 +28,7 @@ const APIConsoleModule = lazy(() => import('@/components/vanto/APIConsoleModule'
 const SettingsModule = lazy(() => import('@/components/vanto/SettingsModule').then(m => ({ default: m.SettingsModule })));
 const GroupCampaignsModule = lazy(() => import('@/components/vanto/GroupCampaignsModule').then(m => ({ default: m.GroupCampaignsModule })));
 const GroupAdministratorModule = lazy(() => import('@/components/vanto/GroupAdministratorModule').then(m => ({ default: m.GroupAdministratorModule })));
+const MomentumApprovalModule = lazy(() => import('@/components/vanto/MomentumApprovalModule').then(m => ({ default: m.MomentumApprovalModule })));
 const ReviewQueueModule = lazy(() => import('@/components/vanto/ReviewQueueModule').then(m => ({ default: m.ReviewQueueModule })));
 const ReportsModule = lazy(() => import('@/components/vanto/ReportsModule').then(m => ({ default: m.ReportsModule })));
 const ProspectorDraftsModule = lazy(() => import('@/components/vanto/ProspectorDraftsModule').then(m => ({ default: m.ProspectorDraftsModule })));
@@ -110,6 +111,7 @@ const Index = () => {
       case 'group-campaigns': return <GroupCampaignsModule />;
       case 'group-administrator': return <GroupAdministratorModule />;
       case 'review-queue': return <ReviewQueueModule />;
+      case 'momentum': return <MomentumApprovalModule />;
       case 'reports': return <ReportsModule />;
       case 'prospector-drafts': return <ProspectorDraftsModule />;
       case 'plan': return <PlanModule />;

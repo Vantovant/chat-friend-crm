@@ -45,6 +45,7 @@ const navItems: NavItem[] = [
   { id: 'api-console', label: 'API Console', icon: Terminal },
   { id: 'reports', label: 'Reports', icon: FileText, adminOnly: true },
   { id: 'review-queue', label: 'Review Queue', icon: ShieldCheck, adminOnly: true },
+  { id: 'momentum', label: 'Momentum Teachings', icon: CalendarCheck, adminOnly: true },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 

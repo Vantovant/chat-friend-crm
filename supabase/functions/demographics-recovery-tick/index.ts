@@ -2,6 +2,7 @@
 // Backfills email / city / province for existing prospects by sending ONE
 // polite WhatsApp ask (via Maytapi). Respects all rate limits + kill switches.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { classifySendResponse, recordDeferral, resolveDeferral, activeDeferralSet, limiterOutageVerdict } from "../_shared/send-outcome.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,6 +11,9 @@ const corsHeaders = {
 
 const BATCH_SIZE = 10; // contacts per tick
 const DAILY_RECOVERY_CAP = 50; // HARD cap: max recovery asks sent per UTC day
+const CAMPAIGN = "demographics-recovery-tick";
+// A refusal in one of these scopes affects EVERY send: stop the batch instead of burning through the remaining contacts.
+const GLOBAL_SCOPES = new Set(["daily_cap", "freeze", "emergency_pause", "rate_limiter", "settings_unreadable", "phone_not_ready", "unknown"]);
 const RECENT_WARM_THRESHOLD = 100; // first N cumulative sends use the short "warm" ask
 
 function formatMissing(missing: string[]): string {
@@ -144,9 +148,11 @@ Deno.serve(async (req) => {
       }
     }
 
-    const eligible = candidates.filter((c) => convByContact.has(c.id)).slice(0, BATCH_SIZE);
+    // Contacts deferred by a temporary send refusal wait out their backoff (they stay eligible: nothing was stamped or locked for good).
+    const deferredNow = await activeDeferralSet(supabase, CAMPAIGN, new Date().toISOString());
+    const eligible = candidates.filter((c) => convByContact.has(c.id) && !deferredNow.has(c.id)).slice(0, BATCH_SIZE);
 
-    let sent = 0, failed = 0, skipped_rate_limited = 0, skipped_daily_cap = 0, skipped_phone_locked = 0;
+    let sent = 0, failed = 0, skipped_rate_limited = 0, skipped_daily_cap = 0, skipped_phone_locked = 0, deferred = 0, ambiguous = 0;
 
     const { reserveMessageSlot, releaseMessageSlot, logRateLimited } = await import("../_shared/rate-limit.ts");
 
@@ -193,7 +199,17 @@ Deno.serve(async (req) => {
       }
 
       // ── Per-contact rate-limit reserve ──
-      const rl = await reserveMessageSlot(supabase, c.id);
+      // v4.1: fail CLOSED. If the limiter cannot answer, nothing is sent, nothing is stamped, the cadence slot is returned,
+      // the contact stays eligible and the batch stops (the outage is global).
+      const rl = await reserveMessageSlot(supabase, c.id, { failClosed: true });
+      const outage = limiterOutageVerdict(rl);
+      if (outage) {
+        await supabase.rpc("release_cadence_send_slot");
+        const d = await recordDeferral(supabase, CAMPAIGN, c.id, null, outage);
+        console.warn(`[demographics-recovery] limiter unavailable, failing closed contact=${c.id} retry_at=${d.retryAt}`);
+        deferred++;
+        break;
+      }
       if (!rl.ok) {
         await logRateLimited(supabase, c.id, rl.reason || "unknown", rl.retry_after, { caller: "demographics-recovery-tick" });
         skipped_rate_limited++;
@@ -229,20 +245,48 @@ Deno.serve(async (req) => {
       const conv = convByContact.get(c.id)!;
 
       // ── Send via Maytapi (skip_rate_limit: already reserved above) ──
-      const sendResp = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
-        body: JSON.stringify({ to_number: phoneNormalized, message, contact_id: c.id, skip_rate_limit: true }),
-      });
-      const sendData = await sendResp.json().catch(() => ({}));
+      let sendResp: Response | null = null;
+      let rawSend: any = null;
+      let sendThrew = false;
+      try {
+        sendResp = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
+          body: JSON.stringify({ to_number: phoneNormalized, message, contact_id: c.id, skip_rate_limit: true }),
+        });
+        rawSend = await sendResp.json().catch(() => null);
+      } catch { sendThrew = true; }
+      const sendData = rawSend ?? {};
+      const verdict = classifySendResponse(sendResp ? sendResp.status : null, rawSend, sendThrew);
 
-      if (!sendResp.ok) {
+      // ── TEMPORARY refusal (cap / freeze / emergency pause / limiter): NOTHING was sent. Undo every reservation made for this
+      //    attempt so the contact stays eligible, record a backoff, and (for global scopes) stop the batch. ──
+      if (verdict.kind === "temporary") {
+        await releaseMessageSlot(supabase, c.id);
+        await supabase.rpc("release_cadence_send_slot");
+        await supabase.rpc("release_demographics_recovery_phone", { p_phone_normalized: phoneNormalized, p_contact_id: c.id });
+        const d = await recordDeferral(supabase, CAMPAIGN, c.id, null, verdict);
+        console.log(`[demographics-recovery] deferred contact=${c.id} scope=${verdict.scope} reason=${verdict.reason} retry_at=${d.retryAt} n=${d.deferrals}`);
+        deferred++;
+        if (GLOBAL_SCOPES.has(verdict.scope || "unknown")) break;
+        continue;
+      }
+
+      // ── AMBIGUOUS / duplicate-in-flight: delivery unknown. Stamp and phone lock are KEPT, so this is never retried automatically. ──
+      if (verdict.kind === "ambiguous" || verdict.kind === "duplicate") {
+        ambiguous++;
+        console.warn(`[demographics-recovery] AMBIGUOUS outcome for ${c.id}: ${verdict.reason} — not retried automatically`);
+        continue;
+      }
+      await resolveDeferral(supabase, CAMPAIGN, c.id, verdict.kind === "sent" ? "sent" : "permanent_failure");
+
+      if (verdict.kind !== "sent") {
         // Roll back the rate-limit reservation but KEEP demographics_asked_at and
         // phone lock stamped to avoid re-spamming the same number on failure loops.
         // Operator can clear manually if a safe retry is needed.
         await releaseMessageSlot(supabase, c.id);
         failed++;
-        console.warn(`[demographics-recovery] send failed for ${c.id}:`, sendData?.error || sendResp.status);
+        console.warn(`[demographics-recovery] send failed for ${c.id}:`, sendData?.error || sendResp?.status);
         continue;
       }
 
@@ -300,6 +344,8 @@ Deno.serve(async (req) => {
       sent,
       failed,
       skipped_rate_limited,
+      deferred,
+      ambiguous,
       skipped_daily_cap,
       skipped_phone_locked,
       batch_size: BATCH_SIZE,

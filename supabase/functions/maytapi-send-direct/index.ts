@@ -16,6 +16,8 @@
 // whatsapp-auto-reply (EMERGENCY FIRST-TOUCH TRUST PATCH).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { tagSiteLinks } from "../_shared/utm.ts";
+import { strictSafetyPrecheck, reserveSend, finalizeSend, classifyMaytapi, refusalHttpStatus, refusalBody, sha256Hex, nextSastMidnightIso } from "../_shared/maytapi-cap.ts";
+import { releaseMessageSlot } from "../_shared/rate-limit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -110,101 +112,79 @@ Deno.serve(async (req) => {
       }), { status: guard.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    const { to_number, message, skip_trust_header, attach_image_url, contact_id: bodyContactId, skip_rate_limit, source } = await req.json();
+    const { to_number, message, skip_trust_header, attach_image_url, contact_id: bodyContactId, skip_rate_limit, source, preview_url } = await req.json();
     if (!to_number || !message) {
       return new Response(JSON.stringify({ error: "to_number and message required" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // ── Master kill switch (emergency_all_auto_paused) ──
-    try {
-      const SUPABASE_URL_GUARD = Deno.env.get("SUPABASE_URL");
-      const SERVICE_ROLE_GUARD = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-      if (SUPABASE_URL_GUARD && SERVICE_ROLE_GUARD) {
-        const svcGuard = createClient(SUPABASE_URL_GUARD, SERVICE_ROLE_GUARD);
-        const { isEmergencyPaused } = await import("../_shared/emergency-guard.ts");
-        if (await isEmergencyPaused(svcGuard)) {
-          console.log("[maytapi-send-direct] emergency_all_auto_paused=true — refusing send");
-          return new Response(JSON.stringify({ success: false, paused: true, reason: "emergency_all_auto_paused" }), {
-            status: 423, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-      }
-    } catch (err) {
-      console.warn("[maytapi-send-direct] emergency guard failed open:", (err as Error).message);
+    // ── Strict safety precheck: emergency pause + suite freeze + readable daily cap. FAILS CLOSED. ──
+    // (Authoritative, atomic enforcement happens again inside reserve_maytapi_send, right before the provider call.)
+    const SUPABASE_URL_PRE = Deno.env.get("SUPABASE_URL");
+    const SERVICE_ROLE_PRE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    if (!SUPABASE_URL_PRE || !SERVICE_ROLE_PRE) {
+      return new Response(JSON.stringify(refusalBody("safety_settings_unreadable", { paused: true })), {
+        status: 423, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
-
-    // ── Suite-wide freeze (VantoOS Maytapi restriction 2026-07-23) ──
-    try {
-      const SUPABASE_URL_F = Deno.env.get("SUPABASE_URL");
-      const SERVICE_ROLE_F = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-      if (SUPABASE_URL_F && SERVICE_ROLE_F) {
-        const svcF = createClient(SUPABASE_URL_F, SERVICE_ROLE_F);
-        const { data: frozen } = await svcF
-          .from("integration_settings").select("value").eq("key", "maytapi_outbound_frozen").maybeSingle();
-        const isFrozen = String(frozen?.value ?? "").trim().toLowerCase() === "true";
-        if (isFrozen) {
-          const { data: until } = await svcF
-            .from("integration_settings").select("value").eq("key", "maytapi_freeze_until_at").maybeSingle();
-          const blockedUntil = until?.value ?? null;
-          if (!blockedUntil || new Date(blockedUntil).getTime() > Date.now()) {
-            console.log("[maytapi-send-direct] suite_daily_cap freeze active — refusing send", { blockedUntil });
-            return new Response(JSON.stringify({
-              success: false, paused: true, allowed: false,
-              reason: "suite_daily_cap",
-              blocked_until: blockedUntil,
-              daily_limit: 20,
-              member_app_keys: ["getwell_hub"],
-            }), { status: 423, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-          }
-        }
-      }
-    } catch (err) {
-      console.warn("[maytapi-send-direct] suite freeze check failed open:", (err as Error).message);
+    const svcCap = createClient(SUPABASE_URL_PRE, SERVICE_ROLE_PRE);
+    const pre = await strictSafetyPrecheck(svcCap);
+    if (!pre.ok) {
+      console.log("[maytapi-send-direct] refusing send:", pre.reason);
+      return new Response(JSON.stringify(refusalBody(pre.reason, {
+        paused: true, allowed: false, blocked_until: pre.blocked_until ?? null,
+        member_app_keys: ["getwell_hub"],
+      })), { status: pre.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
-
 
     // ── Atomic per-contact rate-limit reserve (30/5min + 100/24h, configurable) ──
-    // Acts as the central choke point for all outbound sends.
+    // Acts as the central choke point for all outbound sends. FAILS CLOSED: if the limiter cannot be
+    // consulted (missing env, contact lookup error, RPC error/throw, unusable reply) the send is refused (503).
+    // Only "no contact is known for this number" (a normal case) skips the per-contact check.
     let _reservedContactId: string | null = null;
     if (!skip_rate_limit) {
+      const refuseLimiter = (why: string) => {
+        console.error(`[maytapi-send-direct] rate limiter unavailable, refusing send (fail closed): ${why}`);
+        return new Response(JSON.stringify(refusalBody("rate_limiter_unavailable", { detail: why })),
+          { status: 423, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      };
       try {
         const SUPABASE_URL_RL = Deno.env.get("SUPABASE_URL");
         const SERVICE_ROLE_RL = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
-        if (SUPABASE_URL_RL && SERVICE_ROLE_RL) {
-          const svcRl = createClient(SUPABASE_URL_RL, SERVICE_ROLE_RL);
-          let contactIdForRl: string | null = bodyContactId || null;
-          if (!contactIdForRl) {
-            const normalized = "+" + String(to_number).replace(/[^\d]/g, "");
-            const { data: cRow } = await svcRl
-              .from("contacts")
-              .select("id")
-              .eq("phone_normalized", normalized)
-              .maybeSingle();
-            contactIdForRl = cRow?.id || null;
+        if (!SUPABASE_URL_RL || !SERVICE_ROLE_RL) return refuseLimiter("env_missing");
+        const svcRl = createClient(SUPABASE_URL_RL, SERVICE_ROLE_RL);
+        let contactIdForRl: string | null = bodyContactId || null;
+        if (!contactIdForRl) {
+          const normalized = "+" + String(to_number).replace(/[^\d]/g, "");
+          const { data: cRow, error: cErr } = await svcRl
+            .from("contacts")
+            .select("id")
+            .eq("phone_normalized", normalized)
+            .maybeSingle();
+          if (cErr) return refuseLimiter(`contact_lookup_failed: ${cErr.message}`);
+          contactIdForRl = cRow?.id || null;
+        }
+        if (contactIdForRl) {
+          const { reserveMessageSlot, logRateLimited } = await import("../_shared/rate-limit.ts");
+          const r = await reserveMessageSlot(svcRl, contactIdForRl, { failClosed: true });
+          if (r.failed_closed) return refuseLimiter(r.detail || "limiter_error");
+          if (!r.ok) {
+            await logRateLimited(svcRl, contactIdForRl, r.reason || "unknown", r.retry_after, { caller: "maytapi-send-direct" });
+            console.log(`[maytapi-send-direct] rate-limited contact=${contactIdForRl} reason=${r.reason} retry_after=${r.retry_after}`);
+            // v4: 423 + structured body (was 429). Pre-send refusal: nothing reserved, nothing sent. Legacy keys kept.
+            return new Response(JSON.stringify({
+              ...refusalBody(r.reason || "contact_rate_limited", { retry_after: r.retry_after ?? null, contact_id: contactIdForRl }),
+              scope: "contact_rate_limit",
+              rate_limited: true,
+            }), {
+              status: 423, headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
           }
-          if (contactIdForRl) {
-            const { reserveMessageSlot, logRateLimited } = await import("../_shared/rate-limit.ts");
-            const r = await reserveMessageSlot(svcRl, contactIdForRl);
-            if (!r.ok) {
-              await logRateLimited(svcRl, contactIdForRl, r.reason || "unknown", r.retry_after, { caller: "maytapi-send-direct" });
-              console.log(`[maytapi-send-direct] rate-limited contact=${contactIdForRl} reason=${r.reason} retry_after=${r.retry_after}`);
-              return new Response(JSON.stringify({
-                success: false,
-                rate_limited: true,
-                reason: r.reason,
-                retry_after: r.retry_after,
-                contact_id: contactIdForRl,
-              }), {
-                status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-              });
-            }
-            _reservedContactId = contactIdForRl;
-          }
+          _reservedContactId = contactIdForRl;
         }
       } catch (err) {
-        console.warn("[maytapi-send-direct] rate-limit reserve failed open:", (err as Error).message);
+        return refuseLimiter(`exception: ${(err as Error).message}`);
       }
     }
 
@@ -231,9 +211,10 @@ Deno.serve(async (req) => {
     const readiness = await assertMaytapiReady(PRODUCT_ID, PHONE_ID, TOKEN);
     if (!readiness.ok) {
       return new Response(JSON.stringify({
-        success: false,
+        ...refusalBody("phone_not_ready", { phone_reason: readiness.reason }),
         error: "Maytapi phone is not ready; refusing to hand off messages that may backlog and send later.",
         reason: readiness.reason,
+        scope: "phone_not_ready",
       }), {
         status: 423, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -388,7 +369,11 @@ Deno.serve(async (req) => {
     // Now: the first non-shop URL anywhere in the message drives the preview.
     finalMessage = tagSiteLinks(finalMessage, { source: "whatsapp", medium: "dm", campaign: source ? String(source) : "crm_dm" });
     const allUrls = [...finalMessage.matchAll(/https?:\/\/[^\s)>\]*]+/gi)].map((m) => m[0].replace(/[.,!?;:_]+$/, ""));
-    const previewUrl = allUrls.find((u) => !u.startsWith(SHOP_URL)) ?? null;
+    // Optional exact preview URL from the caller (e.g. calendar confirmations, whose Google links may legitimately end in
+    // "_" which the sentence-punctuation strip above would remove). Used only if it is http(s) AND appears verbatim in the
+    // final message; otherwise the detected URL is used as before.
+    const explicitPreview = typeof preview_url === "string" && /^https?:\/\/\S+$/i.test(preview_url) && finalMessage.includes(preview_url) ? preview_url : null;
+    const previewUrl = explicitPreview ?? (allUrls.find((u) => !u.startsWith(SHOP_URL)) ?? null);
     const useMedia = typeof attach_image_url === "string" && /^https?:\/\//i.test(attach_image_url);
     const usePreview = !useMedia && !!previewUrl;
     const payload: Record<string, unknown> = useMedia
@@ -398,15 +383,41 @@ Deno.serve(async (req) => {
         : { to_number: cleanNumber, type: "text", message: finalMessage };
 
 
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-maytapi-key": TOKEN },
-      body: JSON.stringify(payload),
-    });
+    // Shared atomic reservation immediately before the provider call: counts toward the 40/SAST-day cap,
+    // re-checks emergency/freeze/cap fail-closed, and blocks an identical in-flight or uncertain send (caller retries).
+    const resv = await reserveSend(svcCap, "direct_1to1", null, source ? String(source) : null, cleanNumber,
+      { dedupeKey: "dm:" + await sha256Hex(cleanNumber + "\n" + finalMessage) });
+    if (!resv.ok) {
+      await releaseMessageSlot(svcCap, _reservedContactId);
+      return new Response(JSON.stringify(refusalBody(resv.reason)),
+        { status: refusalHttpStatus(resv.reason), headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || data?.success === false) {
-      console.error("Maytapi send-direct failed:", resp.status, data);
+    let resp: Response | null = null;
+    let data: any = null;
+    let threw = false;
+    try {
+      resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-maytapi-key": TOKEN },
+        body: JSON.stringify(payload),
+      });
+      data = await resp.json().catch(() => null);
+    } catch { threw = true; }
+    const outcome = classifyMaytapi(resp ? resp.status : null, data, threw);
+    await finalizeSend(svcCap, resv.id, outcome, `direct_1to1 http=${resp ? resp.status : "none"}`);
+
+    if (outcome === "uncertain") {
+      // AMBIGUOUS: may or may not have been delivered. Slot stays counted. Callers must NOT retry automatically.
+      console.error("Maytapi send-direct AMBIGUOUS outcome:", resp?.status ?? "none");
+      return new Response(JSON.stringify({
+        success: false, ambiguous: true, reason: "AMBIGUOUS_OUTCOME",
+        error: "Send outcome unknown; do not retry automatically. Reconcile manually.",
+      }), { status: 504, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    if (outcome === "failed_confirmed") {
+      console.error("Maytapi send-direct failed:", resp?.status, data);
+      await releaseMessageSlot(svcCap, _reservedContactId);
       return new Response(JSON.stringify({ error: data?.message || "Send failed", details: data }), {
         status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

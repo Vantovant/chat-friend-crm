@@ -16,6 +16,12 @@
 // POST { dry_run: true } → renders previews and enrolls nothing-destructive; sends nothing.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
+import { classifySendResponse, recordDeferral, resolveDeferral, claimRow, limiterOutageVerdict, type SendVerdict } from "../_shared/send-outcome.ts";
+
+const CAMPAIGN = "fb-cadence-tick";
+const LEASE_MS = 15 * 60 * 1000;
+// A refusal in one of these scopes affects EVERY send: defer the rest of the batch too instead of hammering one row per tick.
+const GLOBAL_SCOPES = new Set(["daily_cap", "freeze", "emergency_pause", "rate_limiter", "settings_unreadable", "phone_not_ready", "unknown"]);
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -209,7 +215,7 @@ Deno.serve(async (req) => {
     // ── Due rows ──
     const { data: due, error: dueErr } = await sb
       .from("prospect_cadence_state")
-      .select("id, contact_id, sequence_key, current_step, next_send_at, status, meta, started_at")
+      .select("id, contact_id, sequence_key, current_step, next_send_at, status, meta, started_at, pause_reason")
       .eq("status", "active")
       .eq("sequence_key", SEQUENCE_KEY)
       .lte("next_send_at", now.toISOString())
@@ -262,13 +268,34 @@ Deno.serve(async (req) => {
     let minuteWindowStart = Date.now();
     let sentInWindow = 0;
 
-    for (const row of (due || []) as any[]) {
+    diag.deferred = 0; diag.ambiguous = 0;
+    const dueRows = (due || []) as any[];
+    for (let rowIdx = 0; rowIdx < dueRows.length; rowIdx++) {
+      const row = dueRows[rowIdx];
       if (diag.sent >= dailyLimit) { diag.stopped_reason = "fb_cadence_daily_limit_reached"; break; }
       if (!dryRun && sentInWindow >= PER_MINUTE_LIMIT) {
         const elapsed = Date.now() - minuteWindowStart;
         if (elapsed < 60_000) await new Promise((r) => setTimeout(r, 60_000 - elapsed));
         minuteWindowStart = Date.now();
         sentInWindow = 0;
+      }
+
+      if (!dryRun) {
+        // Never auto-retry an uncertain send: a previous run marked this row in_flight and never recorded the outcome.
+        if (typeof row.pause_reason === "string" && row.pause_reason.startsWith("in_flight:")) {
+          await sb.from("prospect_cadence_state").update({
+            status: "paused", next_send_at: null, updated_at: now.toISOString(),
+            pause_reason: `ambiguous_outcome_manual_review:in_flight_lease_expired(${row.pause_reason.slice(10, 40)})`.slice(0, 200),
+          }).eq("id", row.id).eq("status", "active");
+          diag.ambiguous++; diag.skipped++;
+          continue;
+        }
+        // Duplicate-processing guard: compare-and-set lease on next_send_at.
+        const lease = new Date(Date.now() + LEASE_MS).toISOString();
+        if (!(await claimRow(sb, "prospect_cadence_state", row.id, "next_send_at", row.next_send_at, lease, { pause_reason: `claimed:${now.toISOString()}` }))) {
+          diag.skipped++;
+          continue;
+        }
       }
 
       diag.processed++;
@@ -398,7 +425,26 @@ Deno.serve(async (req) => {
 
       // ── Per-contact rate-limit reserve ──
       const { reserveMessageSlot, releaseMessageSlot, logRateLimited } = await import("../_shared/rate-limit.ts");
-      const rl = await reserveMessageSlot(sb, contact.id);
+      // v4.1: fail CLOSED. If the limiter cannot answer, nothing is sent; the step and recipient are preserved and the batch is deferred.
+      const rl = await reserveMessageSlot(sb, contact.id, { failClosed: true });
+      const outage = limiterOutageVerdict(rl);
+      if (outage) {
+        const dfr = await recordDeferral(sb, CAMPAIGN, row.id, nextStepNum, outage);
+        const reasonTxt = `${outage.scope}:${outage.reason}`;
+        await sb.from("prospect_cadence_state").update(dfr.escalate
+          ? { status: "paused", next_send_at: null, pause_reason: `deferred_too_long_manual_review:${reasonTxt}`.slice(0, 200), updated_at: now.toISOString() }
+          : { next_send_at: dfr.retryAt, pause_reason: `deferred:${reasonTxt}`.slice(0, 200), updated_at: now.toISOString() },
+        ).eq("id", row.id);
+        diag.deferred++; diag.skipped++;
+        for (const rest of dueRows.slice(rowIdx + 1)) {
+          const dr = await recordDeferral(sb, CAMPAIGN, rest.id, (rest.current_step || 0) + 1, outage);
+          await sb.from("prospect_cadence_state").update({ next_send_at: dr.retryAt, pause_reason: `deferred:${reasonTxt}`.slice(0, 200), updated_at: now.toISOString() })
+            .eq("id", rest.id).eq("status", "active").eq("next_send_at", rest.next_send_at);
+          diag.deferred++;
+        }
+        diag.stopped_reason = "deferred_rate_limiter";
+        break;
+      }
       if (!rl.ok) {
         await logRateLimited(sb, contact.id, rl.reason || "unknown", rl.retry_after, { caller: "fb-cadence-tick", step: nextStepNum });
         await sb.from("prospect_cadence_state").update({
@@ -413,10 +459,13 @@ Deno.serve(async (req) => {
       let sendOk = false;
       let providerMessageId: string | null = null;
       let sendError: string | null = null;
+      let verdict: SendVerdict | null = null;
       const channel: "maytapi" = "maytapi";
 
       // ── All steps go straight to Maytapi (no 24h window gate) ──
       {
+        // Mark in flight BEFORE the provider call (see the in_flight check at the top of the loop).
+        await sb.from("prospect_cadence_state").update({ pause_reason: `in_flight:${new Date().toISOString()}` }).eq("id", row.id);
         try {
           const r = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
             method: "POST",
@@ -430,28 +479,60 @@ Deno.serve(async (req) => {
               source: `cadence_${SEQUENCE_KEY}_step${nextStepNum}`,
             }),
           });
-          const d = await r.json().catch(() => ({}));
+          const dRaw = await r.json().catch(() => null);
+          const d = dRaw ?? {};
+          verdict = classifySendResponse(r.status, dRaw, false);
           // (channel is fixed to "maytapi" — do NOT reassign, it is a const)
-          if (r.status === 423) {
-            // Maytapi went down mid-batch — reschedule, release the slot, stop the run.
-            await releaseMessageSlot(sb, contact.id);
-            await sb.from("prospect_cadence_state").update({
-              next_send_at: new Date(now.getTime() + 3600 * 1000).toISOString(),
-              pause_reason: "maytapi_not_ready_mid_batch",
-              updated_at: now.toISOString(),
-            }).eq("id", row.id);
-            diag.stopped_reason = "maytapi_not_ready_mid_batch";
-            diag.skipped++;
-            break;
-          }
-          sendOk = r.ok && !d?.error;
+          sendOk = verdict.kind === "sent";
           providerMessageId = d?.message_id || d?.provider_message_id || providerMessageId;
           if (!sendOk) sendError = d?.error || `HTTP ${r.status}`;
         } catch (e) {
+          verdict = classifySendResponse(null, null, true);
           sendError = (e as Error).message || "send_exception";
         }
       }
 
+      // ── TEMPORARY refusal (cap / freeze / emergency pause / limiter / phone not ready): NOTHING was sent. ──
+      // Keep the step and recipient, release the slot, write NO failure log, and retry later with backoff + jitter.
+      if (verdict && verdict.kind === "temporary") {
+        await releaseMessageSlot(sb, contact.id);
+        const dfr = await recordDeferral(sb, CAMPAIGN, row.id, nextStepNum, verdict);
+        const reasonTxt = `${verdict.scope}:${verdict.reason}`;
+        await sb.from("prospect_cadence_state").update(dfr.escalate
+          ? { status: "paused", next_send_at: null, pause_reason: `deferred_too_long_manual_review:${reasonTxt}`.slice(0, 200), updated_at: now.toISOString() }
+          : { next_send_at: dfr.retryAt, pause_reason: `deferred:${reasonTxt}`.slice(0, 200), updated_at: now.toISOString() },
+        ).eq("id", row.id);
+        diag.deferred++; diag.skipped++;
+        if (GLOBAL_SCOPES.has(verdict.scope || "unknown")) {
+          for (const rest of dueRows.slice(rowIdx + 1)) {
+            const dr = await recordDeferral(sb, CAMPAIGN, rest.id, (rest.current_step || 0) + 1, verdict);
+            await sb.from("prospect_cadence_state").update({ next_send_at: dr.retryAt, pause_reason: `deferred:${reasonTxt}`.slice(0, 200), updated_at: now.toISOString() })
+              .eq("id", rest.id).eq("status", "active").eq("next_send_at", rest.next_send_at);
+            diag.deferred++;
+          }
+          diag.stopped_reason = `deferred_${verdict.scope}`;
+          break;
+        }
+        continue;
+      }
+
+      // ── AMBIGUOUS / duplicate-in-flight / thrown fetch: delivery unknown. NEVER retried automatically. Park for a human. ──
+      if (!sendOk && verdict && (verdict.kind === "ambiguous" || verdict.kind === "duplicate")) {
+        await sb.from("cadence_log").insert({
+          contact_id: contact.id, sequence_key: SEQUENCE_KEY, step: nextStepNum,
+          template_key: `${stepDef.templateKey}_${channel}`, message_preview: messageBody.slice(0, 200),
+          status: "uncertain", error: `${verdict.kind}:${verdict.reason}`.slice(0, 200),
+        });
+        await sb.from("prospect_cadence_state").update({
+          status: "paused", next_send_at: null, updated_at: now.toISOString(),
+          pause_reason: `ambiguous_outcome_manual_review:${verdict.reason}`.slice(0, 200),
+        }).eq("id", row.id);
+        diag.ambiguous++;
+        diag.errors.push({ contact_id: contact.id, step: nextStepNum, error: `ambiguous:${verdict.reason}` });
+        continue;
+      }
+
+      await resolveDeferral(sb, CAMPAIGN, row.id, sendOk ? "sent" : "permanent_failure");
       if (!sendOk) await releaseMessageSlot(sb, contact.id);
 
       await sb.from("cadence_log").insert({
