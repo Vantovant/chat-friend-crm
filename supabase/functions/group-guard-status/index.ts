@@ -35,6 +35,12 @@ Deno.serve(async (req) => {
     const { data: actions } = await svc.from("group_guard_actions")
       .select("created_at,group_jid,phone,reason,mode,action,removed_ok,deleted_count")
       .order("created_at", { ascending: false }).limit(20);
+    const { data: alertFailures } = await svc.from("group_guard_alert_failures")
+      .select("created_at,group_jid,target_phone,reason,http_status")
+      .order("created_at", { ascending: false }).limit(20);
+    const { count: alertFailures7d } = await svc.from("group_guard_alert_failures")
+      .select("id", { count: "exact", head: true })
+      .gte("created_at", new Date(Date.now() - 7 * 86400_000).toISOString());
     const body = {
       settings: {
         mode: s.mode, country_block_enabled: s.countryBlock, blocked_prefixes: s.blockedPrefixes,
@@ -44,6 +50,9 @@ Deno.serve(async (req) => {
       },
       preflight,
       last_actions: actions || [],
+      // Alerts that could not be delivered (cap/freeze/emergency/ambiguous/error). Enforcement is NOT affected by these.
+      alert_failures_7d: alertFailures7d ?? 0,
+      last_alert_failures: alertFailures || [],
     };
     return new Response(JSON.stringify(body, null, 2), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (e) {

@@ -1,0 +1,85 @@
+-- PROPOSED v2 (13 Nov 2026) - NOT APPLIED, NOT in supabase/migrations (Lovable will not run it). Needs separate written approval per job.
+-- Supersedes v1 (kept as cron_cutover_v4.3.sql.PROPOSED.v1_superseded). v1 used the Authorization Bearer style for every job.
+-- WHAT CHANGED: this version does not rebuild any command. It edits each job's LIVE command text in place and changes exactly one thing:
+--   headers:='{...}'::jsonb   becomes   headers:=('{...}'::jsonb || jsonb_build_object('x-cron-secret', <vault cron_shared_secret>))
+-- so every job keeps its own header style (six send the anon key only in `apikey`; job 53 sends `Authorization: Bearer`), its URL, its body and its
+-- schedule exactly as they are. No token or secret is written in this file; the secret is read from Vault each time the job runs.
+--
+-- PREREQUISITES (all done on 13 Nov except 3-4): 1 Vault secret cron_shared_secret exists (Stage 0 done); 2 edge secret CRON_SHARED_SECRET set with
+--   the same value (Stage 0 done); 3 Package A deployed with ALLOW_LEGACY_ANON_CRON=true (Stage 2); 4 your private backup of the ORIGINAL commands
+--   (done: 3 backups saved).
+-- ORDER: one job at a time, in the order below. After each job: wait for two ticks, run its VERIFY query, check the function log shows
+--   lane=cron_secret (the guard_accept line), then continue. Stop at the first anomaly and run that job's ROLLBACK.
+-- SAFETY GUARDS IN EVERY STATEMENT: the job must exist and still be active; its command must contain exactly one `headers:='{...}'::jsonb` literal and
+--   no x-cron-secret yet (so re-running is a no-op); otherwise the statement changes nothing and returns NULL.
+-- Check BEFORE running (read-only): select jobname, command ilike '%x-cron-secret%' as already_done from cron.job where jobname in (...);
+
+-- Helper used by every statement below (created in pg_temp, vanishes with the session):
+create or replace function pg_temp.cutover_job(p_job text) returns text language plpgsql as $f$
+declare v_id bigint; v_cmd text; v_new text; v_n int;
+begin
+  select jobid, command into v_id, v_cmd from cron.job where jobname = p_job and active;
+  if v_id is null then return 'skip: job missing or inactive'; end if;
+  if v_cmd like '%x-cron-secret%' then return 'skip: already cut over'; end if;
+  select count(*) into v_n from regexp_matches(v_cmd, 'headers\s*:=\s*''\{[^'']*\}''::jsonb', 'g');
+  if v_n <> 1 then return 'refuse: expected exactly one headers literal, found ' || v_n; end if;
+  v_new := regexp_replace(v_cmd, '(headers\s*:=\s*)(''\{[^'']*\}''::jsonb)',
+           '\1(\2 || jsonb_build_object(''x-cron-secret'', (select decrypted_secret from vault.decrypted_secrets where name = ''cron_shared_secret'' limit 1)))');
+  if v_new = v_cmd then return 'refuse: no change produced'; end if;
+  perform cron.alter_job(v_id, command := v_new);
+  return 'cut over job ' || v_id;
+end $f$;
+
+-- ---- 1. group-membership-poll-15min (jobid 57) ----
+select pg_temp.cutover_job('group-membership-poll-15min');
+-- VERIFY (read-only, after two ticks): select d.status, d.return_message, d.start_time from cron.job_run_details d where d.jobid = 57 order by d.start_time desc limit 3;
+--   and select (command like '%x-cron-secret%') as has_secret from cron.job where jobid = 57;   -- expect true
+-- ROLLBACK (paste the ORIGINAL command from your private backup; keeps id, schedule, active flag):
+--   select cron.alter_job(57, command := $cmd$<ORIGINAL COMMAND FROM BACKUP>$cmd$);
+
+-- ---- 2. dispatcher-watchdog-poll (jobid 47) ----
+select pg_temp.cutover_job('dispatcher-watchdog-poll');
+-- VERIFY (read-only, after two ticks): select d.status, d.return_message, d.start_time from cron.job_run_details d where d.jobid = 47 order by d.start_time desc limit 3;
+--   and select (command like '%x-cron-secret%') as has_secret from cron.job where jobid = 47;   -- expect true
+-- ROLLBACK (paste the ORIGINAL command from your private backup; keeps id, schedule, active flag):
+--   select cron.alter_job(47, command := $cmd$<ORIGINAL COMMAND FROM BACKUP>$cmd$);
+
+-- ---- 3. group-welcome-process-10min (jobid 55) ----
+select pg_temp.cutover_job('group-welcome-process-10min');
+-- VERIFY (read-only, after two ticks): select d.status, d.return_message, d.start_time from cron.job_run_details d where d.jobid = 55 order by d.start_time desc limit 3;
+--   and select (command like '%x-cron-secret%') as has_secret from cron.job where jobid = 55;   -- expect true
+-- ROLLBACK (paste the ORIGINAL command from your private backup; keeps id, schedule, active flag):
+--   select cron.alter_job(55, command := $cmd$<ORIGINAL COMMAND FROM BACKUP>$cmd$);
+
+-- ---- 4. group-dm-pilot-delivery-check (jobid 53) ----
+select pg_temp.cutover_job('group-dm-pilot-delivery-check');
+-- VERIFY (read-only, after two ticks): select d.status, d.return_message, d.start_time from cron.job_run_details d where d.jobid = 53 order by d.start_time desc limit 3;
+--   and select (command like '%x-cron-secret%') as has_secret from cron.job where jobid = 53;   -- expect true
+-- ROLLBACK (paste the ORIGINAL command from your private backup; keeps id, schedule, active flag):
+--   select cron.alter_job(53, command := $cmd$<ORIGINAL COMMAND FROM BACKUP>$cmd$);
+
+-- ---- 5. group-data-quality-snapshot-daily (jobid 56) ----
+select pg_temp.cutover_job('group-data-quality-snapshot-daily');
+-- VERIFY (read-only, after two ticks): select d.status, d.return_message, d.start_time from cron.job_run_details d where d.jobid = 56 order by d.start_time desc limit 3;
+--   and select (command like '%x-cron-secret%') as has_secret from cron.job where jobid = 56;   -- expect true
+-- ROLLBACK (paste the ORIGINAL command from your private backup; keeps id, schedule, active flag):
+--   select cron.alter_job(56, command := $cmd$<ORIGINAL COMMAND FROM BACKUP>$cmd$);
+
+-- ---- 6. group-engagement-digest-daily (jobid 51) ----
+select pg_temp.cutover_job('group-engagement-digest-daily');
+-- VERIFY (read-only, after two ticks): select d.status, d.return_message, d.start_time from cron.job_run_details d where d.jobid = 51 order by d.start_time desc limit 3;
+--   and select (command like '%x-cron-secret%') as has_secret from cron.job where jobid = 51;   -- expect true
+-- ROLLBACK (paste the ORIGINAL command from your private backup; keeps id, schedule, active flag):
+--   select cron.alter_job(51, command := $cmd$<ORIGINAL COMMAND FROM BACKUP>$cmd$);
+
+-- ---- 7. group-engagement-strategy-weekly (jobid 52) ----
+select pg_temp.cutover_job('group-engagement-strategy-weekly');
+-- VERIFY (read-only, after two ticks): select d.status, d.return_message, d.start_time from cron.job_run_details d where d.jobid = 52 order by d.start_time desc limit 3;
+--   and select (command like '%x-cron-secret%') as has_secret from cron.job where jobid = 52;   -- expect true
+-- ROLLBACK (paste the ORIGINAL command from your private backup; keeps id, schedule, active flag):
+--   select cron.alter_job(52, command := $cmd$<ORIGINAL COMMAND FROM BACKUP>$cmd$);
+
+-- NOT IN THE SEVEN, BUT REQUIRED BEFORE STAGE 6 (removing ALLOW_LEGACY_ANON_CRON): maytapi-send-group-poll (jobid 40, */5, Authorization Bearer, anon key).
+-- The 13 Nov inventory shows it still sends only the anon key, and maytapi-send-group accepts it only through the legacy lane. If the flag is removed first,
+-- the dispatcher would stop sending. It uses the same helper: select pg_temp.cutover_job('maytapi-send-group-poll');  (needs its own approval).
+-- ONLY AFTER every job shows two successful ticks with lane=cron_secret: remove ALLOW_LEGACY_ANON_CRON (no earlier than Tue 17 Nov; separate approval).

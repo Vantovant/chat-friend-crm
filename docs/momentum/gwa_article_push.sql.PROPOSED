@@ -1,0 +1,52 @@
+-- PROPOSED (13 Nov 2026) - NOT APPLIED. For the GET WELL AFRICA database (project d3f0ed55-...), run by hand in its SQL editor: no Lovable credits.
+-- Purpose: when one of the A-Team teaching articles is edited, tell the Hub (momentum-source-change) so every approved WhatsApp message built from
+-- the old text goes back on hold for review. It only READS the article and POSTS it; it never changes an article, publishes anything or sends a message.
+-- A failure to notify can never block saving an article (the trigger swallows errors and logs a warning).
+--
+-- PREREQUISITES (Vanto): (1) deploy momentum-source-change on the Hub and set its edge secret MOMENTUM_SOURCE_WEBHOOK_SECRET (>= 32 random chars);
+--   (2) in THIS database's Vault create two secrets:  momentum_source_webhook_secret = the same value,  hub_gateway_jwt = the Hub's PUBLIC anon key;
+--   (3) create extension pg_net below (free, needed for HTTP calls; not installed on this database today).
+-- Signature = HMAC-SHA256(secret, "<ts>.<slug>.<updated_at>.<sha256(title)>.<sha256(content)>"), verified by the Hub on the fields, not on JSON bytes.
+
+create extension if not exists pg_net with schema extensions;
+
+create or replace function public.momentum_push_article(p_slug text) returns bigint
+language plpgsql security definer set search_path = public, extensions, vault as $$
+declare a record; v_secret text; v_gw text; v_ts text := floor(extract(epoch from now()))::bigint::text; v_upd text; v_sig text;
+begin
+  select title, content, content_format, updated_at into a from public.blog_posts where slug = p_slug;
+  if not found then raise exception 'momentum_push_article: no article %', p_slug; end if;
+  select decrypted_secret into v_secret from vault.decrypted_secrets where name = 'momentum_source_webhook_secret' limit 1;
+  select decrypted_secret into v_gw     from vault.decrypted_secrets where name = 'hub_gateway_jwt' limit 1;
+  if v_secret is null or length(v_secret) < 32 or v_gw is null then raise exception 'momentum_push_article: vault secrets missing'; end if;
+  v_upd := to_char(a.updated_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"');
+  v_sig := encode(hmac(convert_to(v_ts || '.' || p_slug || '.' || v_upd || '.' || encode(digest(convert_to(a.title, 'UTF8'), 'sha256'), 'hex') || '.' ||
+                                   encode(digest(convert_to(a.content, 'UTF8'), 'sha256'), 'hex'), 'UTF8'), convert_to(v_secret, 'UTF8'), 'sha256'), 'hex');
+  return net.http_post(
+    url := 'https://nqyyvqcmcyggvlcswkio.supabase.co/functions/v1/momentum-source-change',
+    headers := jsonb_build_object('Content-Type', 'application/json', 'apikey', v_gw, 'Authorization', 'Bearer ' || v_gw,
+                                  'x-momentum-timestamp', v_ts, 'x-momentum-signature', v_sig),
+    body := jsonb_build_object('slug', p_slug, 'title', a.title, 'content', a.content, 'content_format', a.content_format, 'updated_at', v_upd));
+end $$;
+revoke all on function public.momentum_push_article(text) from public, anon, authenticated;
+
+-- Watched articles: Mr Baloyi's seven teachings and the intro. Add a slug here only to start watching another article.
+create or replace function public.momentum_watch_trigger() returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.slug = any (array['4x4-duplication','hero-trap-duplication','4-step-duplication','simple-beats-clever','three-skills-duplication',
+                           'weekly-rhythm-duplication','without-you-duplication','teach-someone-to-teach'])
+     and (old.content is distinct from new.content or old.title is distinct from new.title) then
+    begin perform public.momentum_push_article(new.slug);
+    exception when others then raise warning 'momentum push failed for %: %', new.slug, sqlerrm; end;
+  end if;
+  return new;
+end $$;
+revoke all on function public.momentum_watch_trigger() from public, anon, authenticated;
+drop trigger if exists momentum_watch_articles on public.blog_posts;
+create trigger momentum_watch_articles after update on public.blog_posts for each row execute function public.momentum_watch_trigger();
+
+-- ONE-TIME BACKFILL (read-only towards the articles: it re-sends the CURRENT text without touching updated_at):
+--   select slug, public.momentum_push_article(slug) from public.blog_posts where slug in (
+--     '4x4-duplication','hero-trap-duplication','4-step-duplication','simple-beats-clever','three-skills-duplication',
+--     'weekly-rhythm-duplication','without-you-duplication','teach-someone-to-teach');
+-- ROLLBACK:  drop trigger momentum_watch_articles on public.blog_posts; drop function public.momentum_watch_trigger(); drop function public.momentum_push_article(text);

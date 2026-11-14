@@ -1,0 +1,271 @@
+{
+ "source": "live read-only SELECT on cron.job, 2026-11-13 (role claim decoded in SQL; no token values)",
+ "jobs": [
+  {
+   "job": "backlink-cadence-tick-daily",
+   "schedule": "0 4 * * *",
+   "active": true,
+   "target": "backlink-cadence-tick",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "backlink-weekly-digest",
+   "schedule": "0 6 * * 1",
+   "active": true,
+   "target": "backlink-weekly-digest",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "cadence-tick-every-15min",
+   "schedule": "*/15 * * * *",
+   "active": false,
+   "target": "cadence-tick",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "closer-suggest-3a-backfill",
+   "schedule": "*/10 * * * *",
+   "active": true,
+   "target": "closer-suggest-3a",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "demographics-recovery-tick-every-5min",
+   "schedule": "*/5 * * * *",
+   "active": true,
+   "target": "demographics-recovery-tick",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "dispatcher-watchdog-poll",
+   "schedule": "*/15 * * * *",
+   "active": true,
+   "target": "dispatcher-watchdog",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "docs-weekly-conversion",
+   "schedule": "0 4 * * 1",
+   "active": true,
+   "target": "docs-auto-generate",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "drive-ingest-6h",
+   "schedule": "15 */6 * * *",
+   "active": true,
+   "target": "drive-ingest",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "fast-closer-tick-30min",
+   "schedule": "*/30 * * * *",
+   "active": true,
+   "target": "fast-closer-tick",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "fb-cadence-tick-15min",
+   "schedule": "*/15 * * * *",
+   "active": true,
+   "target": "fb-cadence-tick",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "fb-token-health-check-daily",
+   "schedule": "0 6 * * *",
+   "active": true,
+   "target": "fb-token-health-check",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "group-1930-followup-daily",
+   "schedule": "30 17 * * *",
+   "active": true,
+   "target": "group-1930-followup",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "group-data-quality-snapshot-daily",
+   "schedule": "10 6 * * *",
+   "active": true,
+   "target": "group-data-quality-snapshot",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "group-dm-pilot-auto-daily",
+   "schedule": "0 6 * * *",
+   "active": false,
+   "target": "group-dm-pilot-auto-daily",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "group-dm-pilot-delivery-check",
+   "schedule": "*/5 * * * *",
+   "active": true,
+   "target": "group-dm-pilot",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "group-engagement-digest-daily",
+   "schedule": "0 6 * * *",
+   "active": true,
+   "target": "group-engagement-digest",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "group-engagement-strategy-weekly",
+   "schedule": "30 6 * * 1",
+   "active": true,
+   "target": "group-engagement-strategy",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "group-intel-scan-daily",
+   "schedule": "0 6 * * *",
+   "active": true,
+   "target": "group-intel-scan",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "group-membership-poll-15min",
+   "schedule": "*/15 * * * *",
+   "active": true,
+   "target": "group-membership-poll",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "group-welcome-enroll-daily",
+   "schedule": "15 6 * * *",
+   "active": false,
+   "target": "group-welcome-sequence",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "group-welcome-process-10min",
+   "schedule": "*/10 * * * *",
+   "active": true,
+   "target": "group-welcome-sequence",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "hub-pull-contacts-15min",
+   "schedule": "*/15 * * * *",
+   "active": true,
+   "target": "hub-pull-contacts",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "maytapi-send-group-poll",
+   "schedule": "*/5 * * * *",
+   "active": true,
+   "target": "maytapi-send-group",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "phase3-detect-15min",
+   "schedule": "*/15 * * * *",
+   "active": true,
+   "target": "phase3-detect",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "phase3-tick-15min",
+   "schedule": "*/15 * * * *",
+   "active": false,
+   "target": "phase3-tick",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "reactivation-w1",
+   "schedule": "0 8 * * *",
+   "active": true,
+   "target": "reactivation-campaign-tick",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "reactivation-w2",
+   "schedule": "0 11 * * *",
+   "active": true,
+   "target": "reactivation-campaign-tick",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "reactivation-w3",
+   "schedule": "0 13 * * *",
+   "active": true,
+   "target": "reactivation-campaign-tick",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "reactivation-w4",
+   "schedule": "0 15 * * *",
+   "active": true,
+   "target": "reactivation-campaign-tick",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "recovery-tick-15min",
+   "schedule": "*/15 * * * *",
+   "active": true,
+   "target": "recovery-tick",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "search-console-daily",
+   "schedule": "0 3 * * *",
+   "active": true,
+   "target": "search-console-fetch",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "sheets-sync-nightly",
+   "schedule": "0 0 * * *",
+   "active": true,
+   "target": "sheets-sync",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "sign-and-win-w1",
+   "schedule": "0 7 * * *",
+   "active": true,
+   "target": "sign-and-win-outreach-tick",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "sign-and-win-w2",
+   "schedule": "0 13 * * *",
+   "active": true,
+   "target": "sign-and-win-outreach-tick",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "unanswered-recovery-3x-daily",
+   "schedule": "0 6,10,13 * * *",
+   "active": true,
+   "target": "unanswered-recovery-tick",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "weekly-conversion-report-mon-08sast",
+   "schedule": "0 6 * * 1",
+   "active": true,
+   "target": "weekly-conversion-report",
+   "jwt_role": "anon"
+  },
+  {
+   "job": "reactivation-hard-stop-2026-07-31",
+   "schedule": "0 22 31 7 *",
+   "active": true,
+   "target": null,
+   "jwt_role": null
+  },
+  {
+   "job": "webhook-idempotency-purge",
+   "schedule": "15 3 * * *",
+   "active": true,
+   "target": null,
+   "jwt_role": null
+  }
+ ]
+}

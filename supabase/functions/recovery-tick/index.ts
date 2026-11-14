@@ -3,6 +3,7 @@ import { aiFetch } from "../_shared/ai-fallback.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { maybeAppendGroupInvite, markGroupInvited } from "../_shared/group-invite.ts";
 import { maybeAppendSponsorCta, markSponsorCtaSent } from "../_shared/intent-links.ts";
+import { classifySendResponse, recordDeferral, resolveDeferral, claimRow, limiterOutageVerdict } from "../_shared/send-outcome.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -11,6 +12,10 @@ const corsHeaders = {
 
 const STEP_DELAYS_HOURS = [24, 24 * 3, 24 * 7, 24 * 14, 24 * 30]; // Day 1, 3, 7, 14, 30
 const MAX_STEPS = 5;
+const CAMPAIGN = "recovery-tick";
+const LEASE_MS = 15 * 60 * 1000;
+// A refusal in one of these scopes affects EVERY send, so the rest of the batch is deferred too (not hammered one per tick).
+const GLOBAL_SCOPES = new Set(["daily_cap", "freeze", "emergency_pause", "rate_limiter", "settings_unreadable", "phone_not_ready", "unknown"]);
 
 // IMPORTANT: These leads came from the Get Well Africa Facebook advert (mostly NRM / APLGO products),
 // replied via the Twilio business number, and DO NOT know "Vanto" personally. Every follow-up MUST
@@ -135,7 +140,7 @@ Deno.serve(async (req) => {
     // Find due rows (limit batch size)
     const { data: due, error } = await supabase
       .from("missed_inquiries")
-      .select("id, contact_id, conversation_id, current_step, last_inbound_snippet, attempts")
+      .select("id, contact_id, conversation_id, current_step, last_inbound_snippet, attempts, next_send_at, last_error")
       .eq("status", "active")
       .eq("cadence", "legacy_5step")
       .lte("next_send_at", nowIso)
@@ -145,7 +150,26 @@ Deno.serve(async (req) => {
 
     let sent = 0, failed = 0, completed = 0;
 
-    for (const row of due || []) {
+    const dueRows: any[] = due || [];
+    for (let rowIdx = 0; rowIdx < dueRows.length; rowIdx++) {
+      const row = dueRows[rowIdx];
+
+      // ── Never auto-retry an uncertain send ──
+      // A previous run marked this row "in_flight" (the provider call started) and never recorded the outcome (crash/timeout).
+      // The message may have been delivered, so it is NOT resent: park the row for manual review with its step preserved.
+      if (typeof row.last_error === "string" && row.last_error.startsWith("in_flight:")) {
+        await supabase.from("missed_inquiries").update({
+          status: "stopped", last_error: `ambiguous_outcome_manual_review:in_flight_lease_expired(${row.last_error.slice(10, 40)})`,
+        }).eq("id", row.id).eq("status", "active");
+        failed++; continue;
+      }
+
+      // ── Duplicate-processing guard: compare-and-set lease on next_send_at ──
+      const leaseUntil = new Date(Date.now() + LEASE_MS).toISOString();
+      if (!(await claimRow(supabase, "missed_inquiries", row.id, "next_send_at", row.next_send_at, leaseUntil, { last_error: `claimed:${nowIso}` }))) {
+        continue; // another run owns (or already advanced) this row
+      }
+
       // Fetch contact
       const { data: contact } = await supabase
         .from("contacts")
@@ -237,7 +261,23 @@ Deno.serve(async (req) => {
       // ── Atomic rate-limit reserve (per-contact 30/5min + 100/24h) ──
       {
         const { reserveMessageSlot, logRateLimited } = await import("../_shared/rate-limit.ts");
-        const rl = await reserveMessageSlot(supabase, contact.id);
+        // v4.1: fail CLOSED. If the limiter cannot answer, nothing is sent (never fall back to "no limit").
+        const rl = await reserveMessageSlot(supabase, contact.id, { failClosed: true });
+        const outage = limiterOutageVerdict(rl);
+        if (outage) {
+          const d = await recordDeferral(supabase, CAMPAIGN, row.id, stepIdx + 1, outage);
+          await supabase.from("missed_inquiries").update(d.escalate
+            ? { status: "stopped", last_error: `deferred_too_long_manual_review:${outage.scope}:${outage.reason}` }
+            : { next_send_at: d.retryAt, last_error: `deferred:${outage.scope}:${outage.reason}` }).eq("id", row.id);
+          console.warn(`[recovery-tick] limiter unavailable, failing closed row=${row.id} retry_at=${d.retryAt}`);
+          failed++;
+          for (const rest of dueRows.slice(rowIdx + 1)) {
+            const dr = await recordDeferral(supabase, CAMPAIGN, rest.id, (rest.current_step ?? 0) + 1, outage);
+            await supabase.from("missed_inquiries").update({ next_send_at: dr.retryAt, last_error: `deferred:${outage.scope}:${outage.reason}` })
+              .eq("id", rest.id).eq("status", "active").eq("next_send_at", rest.next_send_at);
+          }
+          break;
+        }
         if (!rl.ok) {
           await logRateLimited(supabase, contact.id, rl.reason || "unknown", rl.retry_after, { caller: "recovery-tick", step: stepIdx + 1 });
           const reschedAt = rl.retry_after || new Date(Date.now() + 5 * 60 * 1000).toISOString();
@@ -249,20 +289,73 @@ Deno.serve(async (req) => {
         }
       }
 
+      // Mark the row in flight BEFORE the provider call (see the in_flight check at the top of the loop).
+      await supabase.from("missed_inquiries").update({ last_error: `in_flight:${new Date().toISOString()}` }).eq("id", row.id);
+
       // Send via Maytapi direct (skip_rate_limit: already reserved above)
-      const sendResp = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
-        body: JSON.stringify({ to_number: phone, message, contact_id: contact.id, skip_rate_limit: true }),
-      });
-      const sendData = await sendResp.json().catch(() => ({}));
+      let sendResp: Response | null = null;
+      let rawSend: any = null;
+      let sendThrew = false;
+      try {
+        sendResp = await fetch(`${SUPABASE_URL}/functions/v1/maytapi-send-direct`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
+          body: JSON.stringify({ to_number: phone, message, contact_id: contact.id, skip_rate_limit: true }),
+        });
+        rawSend = await sendResp.json().catch(() => null);
+      } catch { sendThrew = true; }
+      const sendData = rawSend ?? {};
+      const verdict = classifySendResponse(sendResp ? sendResp.status : null, rawSend, sendThrew);
+
+      // ── TEMPORARY refusal (cap / freeze / emergency pause / limiter): nothing was sent. Keep step, attempts and recipient. ──
+      if (verdict.kind === "temporary") {
+        const { releaseMessageSlot } = await import("../_shared/rate-limit.ts");
+        await releaseMessageSlot(supabase, contact.id);
+        const d = await recordDeferral(supabase, CAMPAIGN, row.id, stepIdx + 1, verdict);
+        await supabase.from("missed_inquiries").update(d.escalate
+          ? { status: "stopped", last_error: `deferred_too_long_manual_review:${verdict.scope}:${verdict.reason}`.slice(0, 200) }
+          : { next_send_at: d.retryAt, last_error: `deferred:${verdict.scope}:${verdict.reason}`.slice(0, 200) },
+        ).eq("id", row.id);
+        console.log(`[recovery-tick] deferred row=${row.id} step=${stepIdx + 1} scope=${verdict.scope} reason=${verdict.reason} retry_at=${d.retryAt} n=${d.deferrals}`);
+        failed++;
+        if (GLOBAL_SCOPES.has(verdict.scope || "unknown")) {
+          for (const rest of dueRows.slice(rowIdx + 1)) {
+            const dr = await recordDeferral(supabase, CAMPAIGN, rest.id, (rest.current_step ?? 0) + 1, verdict);
+            await supabase.from("missed_inquiries").update({ next_send_at: dr.retryAt, last_error: `deferred:${verdict.scope}:${verdict.reason}`.slice(0, 200) })
+              .eq("id", rest.id).eq("status", "active").eq("next_send_at", rest.next_send_at);
+          }
+          break;
+        }
+        continue;
+      }
+
+      // ── AMBIGUOUS / duplicate-in-flight: delivery unknown. NEVER retried automatically; step preserved; parked for a human. ──
+      if (verdict.kind === "ambiguous" || verdict.kind === "duplicate") {
+        const amb = { step: stepIdx + 1, sent_at: new Date().toISOString(), success: false, outcome: verdict.kind, message_id: null,
+          error: `${verdict.kind}:${verdict.reason}`, message_preview: message.slice(0, 200) };
+        await supabase.from("missed_inquiries").update({
+          attempts: [...attempts, amb], status: "stopped",
+          last_error: `ambiguous_outcome_manual_review:${verdict.reason}`.slice(0, 200),
+        }).eq("id", row.id);
+        await supabase.from("option_b_audit_log").insert({
+          contact_id: row.contact_id, conversation_id: row.conversation_id, phone_normalized: phone, trigger_type: "recovery", channel: "maytapi",
+          template_label: `recovery_step_${stepIdx + 1}`, message_text: message, message_preview: message.slice(0, 200),
+          delivery_status: "uncertain", error_message: amb.error, safety_checks_passed: ["contact_present", "phone_present"],
+          reason_allowed: `Recovery step ${stepIdx + 1}: outcome uncertain, not retried automatically`, operating_mode: "option_b",
+          governance_flags: { option_b_paused: false }, attempt_outcome: "uncertain",
+        });
+        failed++; continue;
+      }
+
+      const sendOk = verdict.kind === "sent";
+      await resolveDeferral(supabase, CAMPAIGN, row.id, sendOk ? "sent" : "permanent_failure");
 
       const newAttempt = {
         step: stepIdx + 1,
         sent_at: new Date().toISOString(),
-        success: sendResp.ok,
+        success: sendOk,
         message_id: sendData?.message_id || null,
-        error: sendResp.ok ? null : (sendData?.error || `HTTP ${sendResp.status}`),
+        error: sendOk ? null : (sendData?.error || `HTTP ${sendResp?.status}`),
         message_preview: message.slice(0, 200),
       };
 
@@ -274,7 +367,7 @@ Deno.serve(async (req) => {
         : new Date(Date.now() + STEP_DELAYS_HOURS[nextStep] * 3600000).toISOString();
 
       // Also log into messages table so the conversation timeline shows it
-      if (sendResp.ok && row.conversation_id) {
+      if (sendOk && row.conversation_id) {
         await supabase.from("messages").insert({
           conversation_id: row.conversation_id,
           content: message,
@@ -293,8 +386,8 @@ Deno.serve(async (req) => {
         current_step: nextStep,
         next_send_at: nextSendAt,
         attempts: newAttempts,
-        status: isLast && sendResp.ok ? "exhausted" : "active",
-        last_error: sendResp.ok ? null : newAttempt.error,
+        status: isLast && sendOk ? "exhausted" : "active",
+        last_error: sendOk ? null : newAttempt.error,
       }).eq("id", row.id);
 
       // Option B audit trail
@@ -308,8 +401,8 @@ Deno.serve(async (req) => {
         message_text: message,
         message_preview: message.slice(0, 200),
         provider_message_id: sendData?.message_id || null,
-        delivery_status: sendResp.ok ? "sent" : "failed",
-        error_message: sendResp.ok ? null : newAttempt.error,
+        delivery_status: sendOk ? "sent" : "failed",
+        error_message: sendOk ? null : newAttempt.error,
         safety_checks_passed: [
           "contact_present",
           "phone_present",
@@ -319,17 +412,17 @@ Deno.serve(async (req) => {
         reason_allowed: `Recovery step ${stepIdx + 1} for missed Facebook→Twilio inquiry; legacy 5-step cadence`,
         operating_mode: "option_b",
         governance_flags: { option_b_paused: false },
-        attempt_outcome: sendResp.ok ? "delivered" : "failed",
+        attempt_outcome: sendOk ? "delivered" : "failed",
       });
 
-      if (sendResp.ok && groupInviteAppended) {
+      if (sendOk && groupInviteAppended) {
         await markGroupInvited(supabase, contact.id);
       }
-      if (sendResp.ok && sponsorCtaAppended) {
+      if (sendOk && sponsorCtaAppended) {
         await markSponsorCtaSent(supabase, contact.id);
       }
 
-      if (sendResp.ok) sent++; else failed++;
+      if (sendOk) sent++; else failed++;
     }
 
     return new Response(JSON.stringify({ success: true, processed: due?.length || 0, sent, failed, completed }), {

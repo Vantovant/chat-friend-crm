@@ -1,6 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { tagSiteLinks } from "../_shared/utm.ts";
 import { recoverFbImage, saveSourceImage } from "../_shared/fb-image.ts";
+import { strictSafetyPrecheck, reserveSend, finalizeSend, classifyMaytapi, refusalHttpStatus, refusalBody, sha256Hex, isTooLateToDispatch, recordCapHolds, readCapHold, releaseCapHold } from "../_shared/maytapi-cap.ts";
+import { loadMomentumGate, isMomentumPostAllowed } from "../_shared/momentum-gate.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,9 +12,8 @@ const corsHeaders = {
 const MAYTAPI_BASE = "https://api.maytapi.com/api";
 // Legacy publishable JWT still used by the database cron created before the
 // platform key-format migration. This is a public client credential, not a secret.
-const LEGACY_CRON_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5xeXl2cWNtY3lnZ3ZsY3N3a2lvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1NDYxMjYsImV4cCI6MjA4NzEyMjEyNn0.oK04GkXogHo9pohYd4A7XAV0-Q-qSu-uUiGWaj4ClM8";
+// (v4.2) The hardcoded anon-role "legacy cron" key was removed: the public anon key is not a credential.
 const URL_REGEX = /https?:\/\/[^\s]+/i;
-const MAX_GROUP_POST_DELAY_MS = 2 * 60 * 60 * 1000;
 const ONE_DAY_SALE_CUTOFF_SAST = Date.UTC(2026, 4, 26, 22, 0, 0); // 2026-05-27 00:00 Africa/Johannesburg
 const ONE_DAY_SALE_MARKERS = [
   "APLGO WITH LOVE SALE",
@@ -27,11 +28,6 @@ function isExpiredOneDaySaleMessage(message: string): boolean {
   const text = message.toLowerCase();
   const isSaleMessage = ONE_DAY_SALE_MARKERS.some((marker) => text.includes(marker.toLowerCase()));
   return isSaleMessage && Date.now() >= ONE_DAY_SALE_CUTOFF_SAST;
-}
-
-function isTooLateToDispatch(scheduledAt: string): boolean {
-  const scheduledMs = new Date(scheduledAt).getTime();
-  return Number.isFinite(scheduledMs) && Date.now() - scheduledMs > MAX_GROUP_POST_DELAY_MS;
 }
 
 async function assertMaytapiReady(productId: string, phoneId: string, token: string): Promise<{ ok: boolean; reason?: string }> {
@@ -189,10 +185,8 @@ Deno.serve(async (req) => {
   try {
     // 🔒 Invited-user gate: block agent-role users from posting through the shared Maytapi number.
     const { requireAdminOrSystem } = await import("../_shared/require-admin-or-system.ts");
-    const bearerToken = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
-    const guard = bearerToken === LEGACY_CRON_PUBLISHABLE_KEY
-      ? { ok: true as const, kind: "system" as const }
-      : await requireAdminOrSystem(req);
+    // Cron lane is opt-in here ONLY (queue-drain tick); it can never reach the admin lane below.
+    const guard = await requireAdminOrSystem(req, { allowCron: true });
     if (!guard.ok) {
       return new Response(JSON.stringify({
         success: false,
@@ -229,49 +223,22 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-    // ── Master kill switch (emergency_all_auto_paused) ──
-    try {
-      const { isEmergencyPaused } = await import("../_shared/emergency-guard.ts");
-      if (await isEmergencyPaused(supabase)) {
-        console.log("[maytapi-send-group] emergency_all_auto_paused=true — refusing send");
-        return new Response(JSON.stringify({ success: false, processed: 0, paused: true, reason: "emergency_all_auto_paused" }), {
-          status: 423, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-    } catch (err) {
-      console.warn("[maytapi-send-group] emergency guard failed open:", (err as Error).message);
+    // ── Strict safety precheck: emergency pause + suite freeze + readable daily cap. FAILS CLOSED. ──
+    // (Authoritative, atomic enforcement happens again inside reserve_maytapi_send.)
+    const pre = await strictSafetyPrecheck(supabase);
+    if (!pre.ok) {
+      console.log("[maytapi-send-group] refusing send:", pre.reason);
+      return new Response(JSON.stringify(refusalBody(pre.reason, {
+        processed: 0, paused: true, allowed: false, blocked_until: pre.blocked_until ?? null,
+        member_app_keys: ["getwell_hub"],
+      })), { status: pre.status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
-
-    // ── Suite-wide freeze (VantoOS Maytapi restriction 2026-07-23) ──
-    try {
-      const { data: frozen } = await supabase
-        .from("integration_settings").select("value").eq("key", "maytapi_outbound_frozen").maybeSingle();
-      const isFrozen = String(frozen?.value ?? "").trim().toLowerCase() === "true";
-      if (isFrozen) {
-        const { data: until } = await supabase
-          .from("integration_settings").select("value").eq("key", "maytapi_freeze_until_at").maybeSingle();
-        const blockedUntil = until?.value ?? null;
-        if (!blockedUntil || new Date(blockedUntil).getTime() > Date.now()) {
-          console.log("[maytapi-send-group] suite_daily_cap freeze active — refusing send", { blockedUntil });
-          return new Response(JSON.stringify({
-            success: false, processed: 0, paused: true, allowed: false,
-            reason: "suite_daily_cap",
-            blocked_until: blockedUntil,
-            daily_limit: 20,
-            member_app_keys: ["getwell_hub"],
-          }), { status: 423, headers: { ...corsHeaders, "Content-Type": "application/json" } });
-        }
-      }
-    } catch (err) {
-      console.warn("[maytapi-send-group] suite freeze check failed open:", (err as Error).message);
-    }
-
 
     // Direct Group Administrator lane: used by pilot-group auto-reply.
     // This must send immediately to Maytapi, not fall through to the scheduled queue.
     if (directBody?.group_jid && directBody?.message) {
-      const authHeader = req.headers.get("Authorization") || "";
-      if (authHeader !== `Bearer ${SERVICE_ROLE_KEY}`) {
+      // Administrator lane: trusted server-to-server callers only (guard already did a constant-time service-role match).
+      if (guard.kind !== "system") {
         return new Response(JSON.stringify({ success: false, error: "Administrator group lane only" }), {
           status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -300,18 +267,39 @@ Deno.serve(async (req) => {
         });
       }
 
-      const sendRes = await fetch(`${MAYTAPI_BASE}/${PRODUCT_ID}/${PHONE_ID}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-maytapi-key": API_TOKEN },
-        body: JSON.stringify({ to_number: targetJid, type: "text", message }),
-      });
-      const sendData = await sendRes.json().catch(() => ({}));
+      // Shared atomic reservation: counts toward the 40/day SAST cap, honours freeze/emergency, blocks in-flight duplicates.
+      const lane = await reserveSend(supabase, "direct_admin_lane", null, null, targetJid,
+        { dedupeKey: "grp:" + await sha256Hex(targetJid + "\n" + message) });
+      if (!lane.ok) {
+        return new Response(JSON.stringify(refusalBody(lane.reason, { detail: lane.detail ?? null })), {
+          status: refusalHttpStatus(lane.reason), headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      let sendRes: Response | null = null;
+      let sendData: any = null;
+      let laneThrew = false;
+      try {
+        sendRes = await fetch(`${MAYTAPI_BASE}/${PRODUCT_ID}/${PHONE_ID}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-maytapi-key": API_TOKEN },
+          body: JSON.stringify({ to_number: targetJid, type: "text", message }),
+        });
+        sendData = await sendRes.json().catch(() => null);
+      } catch { laneThrew = true; }
+      const laneOutcome = classifyMaytapi(sendRes ? sendRes.status : null, sendData, laneThrew);
+      await finalizeSend(supabase, lane.id, laneOutcome, `admin_lane http=${sendRes ? sendRes.status : "none"}`);
       const providerMessageId = sendData?.data?.msgId || sendData?.msgId || null;
 
-      if (!sendRes.ok || sendData?.success === false) {
+      if (laneOutcome === "uncertain") {
+        return new Response(JSON.stringify({
+          success: false, ambiguous: true, reason: "AMBIGUOUS_OUTCOME",
+          error: "Send outcome unknown; not retried. Reconcile manually.",
+        }), { status: 504, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      if (laneOutcome === "failed_confirmed") {
         return new Response(JSON.stringify({
           success: false,
-          error: sendData?.message || sendData?.error || `Maytapi HTTP ${sendRes.status}`,
+          error: sendData?.message || sendData?.error || `Maytapi HTTP ${sendRes?.status}`,
           details: sendData,
         }), {
           status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -396,6 +384,7 @@ Deno.serve(async (req) => {
 
     // Load locked group allowlist ONCE per tick. Every queued group send must
     // target one of these names; no stale row or manual mistake can escape it.
+    const momentumGate = await loadMomentumGate(supabase);
     let groupAllowlist: Set<string> | null = null;
     {
       const { data: row } = await supabase
@@ -425,10 +414,18 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      if (!groupAllowlist || !groupAllowlist.has(post.target_group_name)) {
+      // Source-scoped gate: momentum posts are admitted ONLY by momentum_nugget_target_groups (name+jid) with the
+      // engine enabled; every other source keeps the existing fb_auto_target_groups behaviour unchanged.
+      const isMomentum = post.source === "momentum_nugget";
+      const gateAllowed = isMomentum
+        ? isMomentumPostAllowed(momentumGate, post)
+        : (!!groupAllowlist && groupAllowlist.has(post.target_group_name));
+      if (!gateAllowed) {
         await supabase.from("scheduled_group_posts").update({
           status: "failed",
-          failure_reason: `BLOCKED: "${post.target_group_name}" is not in the locked 11 approved WhatsApp groups.`,
+          failure_reason: isMomentum
+            ? `BLOCKED: momentum post to "${post.target_group_name}" is not permitted (engine disabled, group not in momentum_nugget_target_groups, or settings unreadable).`
+            : `BLOCKED: "${post.target_group_name}" is not in the locked 11 approved WhatsApp groups.`,
           last_attempt_at: new Date().toISOString(),
         }).eq("id", post.id);
         results.push({ id: post.id, status: "blocked_not_in_locked_groups" });
@@ -445,7 +442,14 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      if (isTooLateToDispatch(post.scheduled_at)) {
+      // Time a post spent HELD by the daily cap (our own control) is not "stale backlog after an outage".
+      const capHold = await readCapHold(supabase, String(post.id));
+      if (!capHold.ok) {
+        // Cannot tell whether lateness is cap-caused: never fail a post on that doubt. Leave it pending.
+        results.push({ id: post.id, status: "held_cap_hold_unreadable" });
+        break;
+      }
+      if (isTooLateToDispatch(post.scheduled_at, capHold.heldSince)) {
         await supabase.from("scheduled_group_posts").update({
           status: "failed",
           failure_reason: "BLOCKED: scheduled group post is more than 2 hours late. Refusing to release stale backlog after a WhatsApp restriction or outage.",
@@ -467,6 +471,35 @@ Deno.serve(async (req) => {
           continue;
         }
       }
+
+      // Shared atomic reservation (cap 40/SAST day, freeze, emergency, in-flight duplicate). Row is untouched if refused.
+      const resv = await reserveSend(supabase, "group_post", "scheduled_group_posts", String(post.id),
+        String(post.target_group_name), { dedupeKey: `post:${post.id}`, once: true });
+      if (!resv.ok) {
+        if (resv.reason === "duplicate_in_flight_or_uncertain") {
+          if (resv.detail?.conflict_status === "reserved") {
+            // Another invocation is sending this very post right now: leave the row alone.
+            results.push({ id: post.id, status: "skipped_in_flight_elsewhere" });
+            continue;
+          }
+          await supabase.from("scheduled_group_posts").update({
+            status: "failed",
+            failure_reason: "AMBIGUOUS_OUTCOME: this post already has a sent or uncertain send recorded. Not re-sent. Reconcile manually.",
+            last_attempt_at: new Date().toISOString(),
+          }).eq("id", post.id);
+          results.push({ id: post.id, status: "blocked_duplicate_send" });
+          continue;
+        }
+        if (resv.reason === "daily_cap_reached") {
+          // Hold EVERY due pending post (not only this one) so none of them is later failed as "stale" because of the cap.
+          const n = await recordCapHolds(supabase, new Date().toISOString());
+          console.log(`[maytapi-send-group] daily cap reached: ${n} due post(s) held, none failed`);
+        }
+        results.push({ id: post.id, status: `held_${resv.reason}` });
+        break; // cap / freeze / emergency / unreadable apply to every remaining post this tick
+      }
+      let slotFinalized = false;
+      let sendAttempted = false;
 
       await supabase.from("scheduled_group_posts").update({
         status: "executing",
@@ -515,6 +548,7 @@ Deno.serve(async (req) => {
           status: "failed",
           failure_reason: `Could not resolve group JID for "${post.target_group_name}". Ensure the group is linked in Maytapi or has a JID stored.`,
         }).eq("id", post.id);
+        await finalizeSend(supabase, resv.id, "failed_confirmed", "no_jid_nothing_sent");
         results.push({ id: post.id, status: "failed", error: "No JID" });
         continue;
       }
@@ -596,18 +630,25 @@ Deno.serve(async (req) => {
           }
         }
 
-        const sendRes = await fetch(
-          `${MAYTAPI_BASE}/${PRODUCT_ID}/${PHONE_ID}/sendMessage`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "x-maytapi-key": API_TOKEN },
-            body: JSON.stringify(body),
-          }
-        );
+        sendAttempted = true;
+        let sendRes: Response | null = null;
+        let sendData: any = null;
+        let threw = false;
+        try {
+          sendRes = await fetch(
+            `${MAYTAPI_BASE}/${PRODUCT_ID}/${PHONE_ID}/sendMessage`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "x-maytapi-key": API_TOKEN },
+              body: JSON.stringify(body),
+            }
+          );
+          sendData = await sendRes.json().catch(() => null);
+        } catch { threw = true; }
+        const outcome = classifyMaytapi(sendRes ? sendRes.status : null, sendData, threw);
+        slotFinalized = await finalizeSend(supabase, resv.id, outcome, `group_post http=${sendRes ? sendRes.status : "none"}`);
 
-        const sendData = await sendRes.json();
-
-        if (sendRes.ok && sendData.success) {
+        if (outcome === "sent") {
           await supabase.from("scheduled_group_posts").update({
             status: "sent",
             provider_message_id: sendData.data?.msgId || sendData.msgId || null,
@@ -619,14 +660,26 @@ Deno.serve(async (req) => {
             ...(previewStatus === "fallback_used" ? { message_content: messageToSend } : {}),
           }).eq("id", post.id);
           results.push({ id: post.id, status: "sent", preview: previewStatus });
+          await releaseCapHold(supabase, String(post.id), "sent");
 
           // Stamp last_group_send_at to enforce the configured inter-send floor
           await supabase
             .from("integration_settings")
             .upsert({ key: "last_group_send_at", value: new Date().toISOString() }, { onConflict: "key" });
+        } else if (outcome === "uncertain") {
+          // AMBIGUOUS: the provider may or may not have delivered. Never auto-retried; slot stays counted.
+          await supabase.from("scheduled_group_posts").update({
+            status: "failed",
+            failure_reason: `AMBIGUOUS_OUTCOME: Maytapi send outcome unknown (HTTP ${sendRes ? sendRes.status : "none"}). NOT retried. Check WhatsApp, then reconcile_maytapi_send.`,
+            target_group_jid: targetJid,
+          }).eq("id", post.id);
+          results.push({ id: post.id, status: "ambiguous_manual_review" });
+          await supabase.from("integration_settings")
+            .upsert({ key: "last_group_send_at", value: new Date().toISOString() }, { onConflict: "key" });
+          await raiseDeliveryAlert(supabase, post, targetJid, "AMBIGUOUS_OUTCOME", (post.attempt_count || 0) + 1);
         } else {
 
-          const reason = sendData.message || sendData.error || JSON.stringify(sendData);
+          const reason = sendData?.message || sendData?.error || JSON.stringify(sendData);
           const newAttemptCount = (post.attempt_count || 0) + 1;
           await supabase.from("scheduled_group_posts").update({
             status: "failed",
@@ -645,9 +698,14 @@ Deno.serve(async (req) => {
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Unknown send error";
         const newAttemptCount = (post.attempt_count || 0) + 1;
+        if (!slotFinalized) {
+          await finalizeSend(supabase, resv.id, sendAttempted ? "uncertain" : "failed_confirmed", `exception: ${msg}`.slice(0, 200));
+        }
         await supabase.from("scheduled_group_posts").update({
           status: "failed",
-          failure_reason: `Send exception: ${msg}`,
+          failure_reason: sendAttempted
+            ? `AMBIGUOUS_OUTCOME: exception after the provider call started (${msg}). NOT retried; reconcile manually.`
+            : `Send exception: ${msg}`,
         }).eq("id", post.id);
         results.push({ id: post.id, status: "failed", error: msg });
 

@@ -154,17 +154,36 @@ async function maytapiDeleteRecent(svc: Svc, jid: string, phoneE164: string): Pr
   return n;
 }
 
-async function sendAlert(s: GuardSettings, text: string) {
+// Alerts are best-effort and NEVER gate enforcement (act() removes/deletes before alerting). They go through
+// maytapi-send-direct, so they are counted in the 40/day cap and can be refused (cap, freeze, emergency, ambiguous).
+// Every failed or refused alert is recorded in group_guard_alert_failures and surfaced by get_group_guard_status.
+async function recordAlertFailure(svc: Svc, jid: string, phoneE164: string, text: string, reason: string, httpStatus: number | null, detail: unknown) {
+  try {
+    await svc.from("group_guard_alert_failures").insert({
+      group_jid: jid, target_phone: phoneE164, reason: String(reason).slice(0, 200),
+      http_status: httpStatus, alert_text: text.slice(0, 500),
+      detail: detail == null ? null : JSON.stringify(detail).slice(0, 1000),
+    });
+  } catch (e) { console.warn("[group-guard] could not record alert failure:", (e as Error)?.message); }
+}
+
+async function sendAlert(svc: Svc, s: GuardSettings, text: string, jid: string, phoneE164: string) {
   // Owner request 2026-09-30: alert goes to group_guard_alert_phone, falling back to zazi_group_admin_phone.
   const to = s.alertPhone || s.adminPhone;
-  if (!to) return;
+  if (!to) { await recordAlertFailure(svc, jid, phoneE164, text, "no_alert_phone_configured", null, null); return; }
   try {
-    await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/maytapi-send-direct`, {
+    const r = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/maytapi-send-direct`, {
       method: "POST",
       headers: { Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`, "Content-Type": "application/json" },
       body: JSON.stringify({ to_number: "+" + to, message: text, skip_trust_header: true, source: "group_guard_alert" }),
     });
-  } catch (e) { console.warn("[group-guard] alert failed:", (e as Error)?.message); }
+    const j: any = await r.json().catch(() => null);
+    if (!r.ok || j?.success !== true) {
+      await recordAlertFailure(svc, jid, phoneE164, text, j?.reason || (j?.ambiguous ? "AMBIGUOUS_OUTCOME" : `http_${r.status}`), r.status, j);
+    }
+  } catch (e) {
+    await recordAlertFailure(svc, jid, phoneE164, text, `exception: ${(e as Error)?.message}`, null, null);
+  }
 }
 
 // One action per incident: the unique index (group_jid, phone, 10-min bucket) makes
@@ -192,7 +211,7 @@ async function act(svc: Svc, s: GuardSettings, jid: string, groupName: string, p
   }
   const verb = s.mode === "enforce" ? (removedOk ? "removed" : "tried to remove (failed)") : "would have removed";
   const tail = s.mode === "enforce" ? ` ${deleted} messages deleted.` : " (log-only mode, nothing removed)";
-  await sendAlert(s, `🛡️ Group Guard ${verb} ${phoneE164} from ${groupName}: ${reason}.${tail}`);
+  await sendAlert(svc, s, `🛡️ Group Guard ${verb} ${phoneE164} from ${groupName}: ${reason}.${tail}`, jid, phoneE164);
   return { id: claimed.id, removed_ok: removedOk, deleted };
 }
 

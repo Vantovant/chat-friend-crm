@@ -1,0 +1,32 @@
+-- PROPOSED - NOT APPLIED, NOT in supabase/migrations (so Lovable will not run it). Requires separate approval.
+-- Purpose: move the maytapi-send-group-poll cron from "anon key = system" to a dedicated cron secret.
+--
+-- Prerequisites (operator, one time; the secret is never written into this file or the repo):
+--   1. Generate a >= 32 char random secret OUTSIDE this chat, e.g.  openssl rand -hex 32
+--   2. Set it as the edge-function secret  CRON_SHARED_SECRET  (Lovable Cloud -> Secrets).
+--   3. Store the SAME value in Vault:  select vault.create_secret('<paste value>', 'cron_shared_secret');
+--      (verify first, read-only:  select extname from pg_extension where extname in ('supabase_vault','pg_net','pg_cron');)
+--   4. Deploy the v4.2 guard with env ALLOW_LEGACY_ANON_CRON=true  (keeps the old cron draining the queue meanwhile).
+-- Then run this, watch two ticks succeed, then REMOVE ALLOW_LEGACY_ANON_CRON (or set it to false).
+
+do $$ declare j text; begin
+  for j in select jobname from cron.job where jobname = 'maytapi-send-group-poll' loop perform cron.unschedule(j); end loop;
+end $$;
+
+select cron.schedule(
+  'maytapi-send-group-poll', '*/5 * * * *',
+  $$select net.http_post(
+    url:='https://nqyyvqcmcyggvlcswkio.supabase.co/functions/v1/maytapi-send-group',
+    headers:=jsonb_build_object(
+      'Content-Type','application/json',
+      -- the gateway still wants a JWT; this is the PUBLIC anon JWT already present in the current job (grants nothing in the guard)
+      'Authorization','Bearer <ANON_JWT_ALREADY_IN_THE_CURRENT_JOB>',
+      'x-cron-secret',(select decrypted_secret from vault.decrypted_secrets where name='cron_shared_secret')
+    ),
+    body:='{"trigger":"cron"}'::jsonb
+  );$$
+);
+
+-- Rollback (restores the previous behaviour; needs ALLOW_LEGACY_ANON_CRON=true on the function):
+--   select cron.unschedule('maytapi-send-group-poll');
+--   select cron.schedule('maytapi-send-group-poll','*/5 * * * *', $$select net.http_post(url:='https://nqyyvqcmcyggvlcswkio.supabase.co/functions/v1/maytapi-send-group', headers:='{"Content-Type":"application/json","Authorization":"Bearer <ANON_JWT>"}'::jsonb, body:='{"trigger":"cron"}'::jsonb);$$);
