@@ -2,7 +2,7 @@ import { defineTool } from "@lovable.dev/mcp-js";
 import { notAuthenticated, supabaseForUser } from "../supabase";
 import { buildBrief } from "./momentum-brief-logic";
 import { buildPreview } from "./momentum-plan-logic";
-import { adminApi, loadBodies, loadState, paramsSchema, refuse, text, toBriefParams } from "./momentum-api";
+import { adminApi, loadBodies, loadDistribution, loadState, paramsSchema, refuse, text, toBriefParams } from "./momentum-api";
 
 // READ-ONLY. Shows the exact campaign (full message texts, groups, times) and the phrase Vanto must type to approve it.
 export default defineTool({
@@ -16,8 +16,9 @@ export default defineTool({
     if (!ctx.isAuthenticated()) return notAuthenticated;
     const api = adminApi(supabaseForUser(ctx));
     const st = await loadState(api); if ("error" in st) return refuse(st.error);
+    const distribution = await loadDistribution(api);
     try {
-      const brief = buildBrief({ now: new Date(), items: st.items, settings: st.settings, ...toBriefParams(input) });
+      const brief = buildBrief({ now: new Date(), items: st.items, settings: st.settings, distribution, ...toBriefParams(input) });
       const ids = (brief.weeks.flatMap((w: any) => w.days) as any[]).filter((d) => d.state === "proposed").map((d) => d.recommendation.item.id as string);
       const lb = await loadBodies(api, ids, st.items); if (lb.error !== undefined) return refuse(lb.error); const bodies = lb.bodies;
       return text(await buildPreview({ brief, bodies, params: input }));

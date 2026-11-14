@@ -1,6 +1,7 @@
 // momentum-admin: the single front door for the Momentum approval screen. ADMIN SESSION ONLY (no cron lane, no legacy anon, no service callers:
 // every write needs a real signed-in admin because approvals record WHO approved). It never sends, queues or schedules anything.
 // Actions: list | get | submit | approve | reject | hold | retire | plan | retime | status | group_candidates | group_verify | group_allow
+//          | distributions | distribution_history | distribution_record | distribution_retract   (Distribution Memory; never sends or schedules)
 // `via: "mcp"` (optional) only labels the audit actor so MCP-driven actions are distinguishable; it grants nothing.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { requireAdminOrSystem } from "../_shared/require-admin-or-system.ts";
@@ -69,7 +70,9 @@ Deno.serve(async (req) => {
       if (!item || !Array.isArray(jids) || jids.length === 0 || jids.length > 3 || Number.isNaN(first)) return json({ ok: false, error: "item_id_group_jids_first_at_required" }, 400);
       const { data: s } = await svc.from("integration_settings").select("value").eq("key", "momentum_nugget_target_groups").maybeSingle();
       let allow: any[] = []; try { allow = JSON.parse(String(s?.value ?? "[]")); } catch { /* unreadable = empty */ }
-      const dest = []; for (const j of jids) { const g = Array.isArray(allow) ? allow.find((a) => a?.jid === j) : null; if (!g) return json({ ok: false, error: "group_not_on_allow_list" }, 400); dest.push({ name: g.name, jid: g.jid }); }
+      // optional per-group slots (used when a group is skipped because it already received the content): [{jid, at}]
+      const slotAt = new Map<string, string>(); if (Array.isArray(b.slots)) for (const sl of b.slots) { const t = typeof sl?.at === "string" ? Date.parse(sl.at) : NaN; if (typeof sl?.jid !== "string" || Number.isNaN(t)) return json({ ok: false, error: "bad_slots" }, 400); slotAt.set(sl.jid, new Date(t).toISOString()); }
+      const dest: any[] = []; for (const j of jids) { const g = Array.isArray(allow) ? allow.find((a) => a?.jid === j) : null; if (!g) return json({ ok: false, error: "group_not_on_allow_list" }, 400); dest.push({ name: g.name, jid: g.jid, ...(slotAt.has(j) ? { at: slotAt.get(j) } : {}) }); }
       // exact: true plans the EXACT slots (refuses on a per-group interval conflict instead of shifting the time)
       const { data, error } = await svc.rpc(b.exact === true ? "momentum_plan_exact" : "plan_content_delivery", { p_item: item, p_destinations: dest, p_first_at: new Date(first).toISOString(), p_actor: who });
       return error ? fail(error) : json({ ok: true, planned: data });
@@ -97,6 +100,49 @@ Deno.serve(async (req) => {
     case "group_allow": {   // typed confirmation so it cannot happen by a stray click
       const jid = text(b.group_jid, 80); if (!jid || b.confirm !== "ALLOW THIS GROUP") return json({ ok: false, error: "group_jid_and_confirm_required" }, 400);
       const { data, error } = await svc.rpc("momentum_allow_group", { p_jid: jid, p_actor: actor }); return error ? fail(error) : json({ ok: true, added: data });
+    }
+    case "distributions": {   // read-only: recorded distributions (not retracted) + what history Hub can actually see per group
+      const { data: rec, error } = await svc.from("content_distributions")
+        .select("id,content_item_id,content_version,group_jid,group_name,distributed_at,origin,evidence_ref,status,confidence,note,recorded_by,recorded_at")
+        .neq("status", "retracted").order("recorded_at", { ascending: false }).limit(1000);
+      if (error) return json({ ok: false, error: `distribution_memory_unavailable: ${String(error.message).slice(0, 200)}` }, 200);
+      const { data: cov, error: ce } = await svc.rpc("momentum_distribution_coverage");
+      return json({ ok: true, records: rec ?? [], coverage: ce ? null : (cov ?? []).map((c: any) => ({ ...c, inbound_messages: Number(c.inbound_messages), outbound_messages: Number(c.outbound_messages), hub_sent_posts: Number(c.hub_sent_posts) })) });
+    }
+    case "distribution_history": {   // read-only: group history the matcher may compare against content (allow-listed groups only, bounded)
+      const days = Math.min(Math.max(Number(b.days_back) || 60, 1), 365), since = new Date(Date.now() - days * 86400000).toISOString();
+      const { data: s } = await svc.from("integration_settings").select("value").eq("key", "momentum_nugget_target_groups").maybeSingle();
+      let allow: any[] = []; try { allow = JSON.parse(String(s?.value ?? "[]")); } catch { /* unreadable = empty */ }
+      const jids = (Array.isArray(allow) ? allow : []).map((a) => a?.jid).filter((j) => typeof j === "string");
+      if (jids.length === 0) return json({ ok: true, messages: [], truncated: false });
+      const cut = (t: unknown) => (typeof t === "string" ? t.slice(0, 4000) : null);
+      const { data: mm, error: e1 } = await svc.from("maytapi_messages").select("id,conversation_key,body,received_at").in("conversation_key", jids).gte("received_at", since).not("body", "is", null).order("received_at", { ascending: false }).limit(3000);
+      if (e1) return fail(e1);
+      const { data: pp, error: e2 } = await svc.from("scheduled_group_posts").select("id,target_group_jid,message_content,last_attempt_at").in("target_group_jid", jids).eq("status", "sent").gte("last_attempt_at", since).limit(2000);
+      if (e2) return fail(e2);
+      const { data: dd, error: e3 } = await svc.from("content_deliveries").select("id,content_item_id,destination_jid,planned_at,post_id").eq("status", "sent").in("destination_jid", jids).limit(1000);
+      if (e3) return fail(e3);
+      const { data: its } = await svc.from("content_items").select("id,version").in("id", [...new Set((dd ?? []).map((d: any) => d.content_item_id))]);
+      const ver = new Map((its ?? []).map((i: any) => [i.id, i.version]));
+      const messages = [
+        ...(mm ?? []).map((m: any) => ({ source: "maytapi_messages", ref: m.id, group_jid: m.conversation_key, at: m.received_at, body: cut(m.body) })),
+        ...(pp ?? []).map((p: any) => ({ source: "scheduled_group_posts", ref: p.id, group_jid: p.target_group_jid, at: p.last_attempt_at, body: cut(p.message_content) })),
+        ...(dd ?? []).map((d: any) => ({ source: "content_deliveries", ref: d.id, group_jid: d.destination_jid, at: d.planned_at, content_item_id: d.content_item_id, content_version: ver.get(d.content_item_id) ?? null })),
+      ];
+      return json({ ok: true, messages, truncated: (mm ?? []).length >= 3000 || (pp ?? []).length >= 2000 });
+    }
+    case "distribution_record": {   // audited, idempotent; never edits content text, hash, approval or any schedule
+      const jid = text(b.group_jid, 80), ev = text(b.evidence_ref, 300), origin = text(b.origin, 30), st = text(b.status, 20), conf = text(b.confidence, 20);
+      const at = typeof b.distributed_at === "string" ? Date.parse(b.distributed_at) : NaN;
+      if (!item || !jid || !ev || !origin || !st || !conf) return json({ ok: false, error: "item_id_group_jid_evidence_ref_origin_status_confidence_required" }, 400);
+      const { data, error } = await svc.rpc("momentum_record_distribution", { p_item: item, p_jid: jid, p_origin: origin, p_evidence: ev, p_status: st, p_confidence: conf, p_distributed_at: Number.isNaN(at) ? null : new Date(at).toISOString(), p_note: text(b.note, 500), p_statement: text(b.statement, 1000), p_actor: who });
+      return error ? fail(error) : json({ ok: true, result: data });
+    }
+    case "distribution_retract": {
+      const id = uuid(b.distribution_id), reason = text(b.reason);
+      if (!id || !reason) return json({ ok: false, error: "distribution_id_and_reason_required" }, 400);
+      const { data, error } = await svc.rpc("momentum_retract_distribution", { p_id: id, p_reason: reason, p_actor: who });
+      return error ? fail(error) : json({ ok: true, result: data });
     }
     default: return json({ ok: false, error: "unknown_action" }, 400);
   }

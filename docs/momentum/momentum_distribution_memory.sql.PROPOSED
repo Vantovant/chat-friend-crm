@@ -1,0 +1,173 @@
+-- PROPOSED, NOT APPLIED. Momentum Intelligence: DISTRIBUTION MEMORY.
+-- Records what has already gone to which group (Momentum, manual WhatsApp post, or confirmed external evidence).
+-- Additive: one new table + new functions + a REPLACEMENT of momentum_plan_exact (adds a hard per-group already-distributed refusal and an
+-- optional per-destination "at"). No existing row, table, trigger or setting is changed. Content text/hash/approval are never touched.
+-- Service role only. Sends nothing, queues nothing, changes no schedule.
+
+create table if not exists public.content_distributions (
+  id               uuid primary key default gen_random_uuid(),
+  content_item_id  uuid not null references public.content_items(id),
+  content_version  int,
+  group_jid        text not null check (group_jid ~ '@g\.us$'),
+  group_name       text,
+  distributed_at   timestamptz,
+  origin           text not null check (origin in ('momentum','manual_whatsapp','external_evidence')),
+  evidence_ref     text not null check (length(btrim(evidence_ref)) >= 5),
+  status           text not null check (status in ('verified','candidate','retracted')),
+  confidence       text not null check (confidence in ('exact','normalised','approximate','confirmed')),
+  note             text,
+  statement        text,                         -- the approver's own words, verbatim, for external confirmations
+  recorded_by      text not null,
+  recorded_at      timestamptz not null default now(),
+  retracted_at     timestamptz,
+  retracted_by     text,
+  retract_reason   text,
+  check (status <> 'verified' or distributed_at is not null),
+  unique (content_item_id, group_jid, evidence_ref)               -- repeated scans / repeated confirmations can never duplicate
+);
+-- at most ONE verified record per (item, group): a second verification is reported as already_verified
+create unique index if not exists content_distributions_one_verified on public.content_distributions (content_item_id, group_jid) where status = 'verified';
+create index if not exists content_distributions_group on public.content_distributions (group_jid, status);
+alter table public.content_distributions enable row level security;   -- no policies: reachable only through the momentum-admin gateway
+revoke all on public.content_distributions from public, anon, authenticated;
+
+create or replace function public.momentum_record_distribution(
+  p_item uuid, p_jid text, p_origin text, p_evidence text, p_status text, p_confidence text,
+  p_distributed_at timestamptz default null, p_note text default null, p_statement text default null, p_actor text default 'system')
+returns table(id uuid, outcome text)
+language plpgsql security definer set search_path = public as $$
+declare i content_items%rowtype; allow jsonb; g jsonb; x content_distributions%rowtype; v content_distributions%rowtype; v_id uuid;
+begin
+  if p_status not in ('verified','candidate') then raise exception 'record: status must be verified or candidate'; end if;
+  if p_origin not in ('momentum','manual_whatsapp','external_evidence') then raise exception 'record: bad origin'; end if;
+  if p_confidence not in ('exact','normalised','approximate','confirmed') then raise exception 'record: bad confidence'; end if;
+  if coalesce(btrim(p_evidence),'') = '' or length(btrim(p_evidence)) < 5 then raise exception 'record: an evidence reference is required'; end if;
+  if p_status = 'verified' and p_distributed_at is null then raise exception 'record: a verified record needs the actual distribution time'; end if;
+  if p_status = 'verified' and p_distributed_at > now() + interval '5 minutes' then raise exception 'record: distribution time cannot be in the future'; end if;
+  if p_status = 'candidate' and p_confidence in ('exact','normalised','confirmed') then raise exception 'record: a candidate cannot carry %-confidence', p_confidence; end if;
+  if p_origin = 'external_evidence' and (p_status <> 'verified' or coalesce(length(btrim(p_statement)),0) < 10) then raise exception 'record: external confirmation needs the approver''s statement'; end if;
+  select * into i from content_items ci where ci.id = p_item;
+  if not found then raise exception 'record: content item % not found', p_item; end if;
+  begin select value::jsonb into allow from integration_settings where key = 'momentum_nugget_target_groups'; exception when others then allow := null; end;
+  select a into g from jsonb_array_elements(coalesce(allow,'[]'::jsonb)) a where a->>'jid' = p_jid limit 1;
+  if g is null then raise exception 'destination_not_allowed: % is not an allow-listed group', p_jid; end if;
+
+  select * into x from content_distributions cd where cd.content_item_id = p_item and cd.group_jid = p_jid and cd.evidence_ref = btrim(p_evidence);
+  select * into v from content_distributions cd where cd.content_item_id = p_item and cd.group_jid = p_jid and cd.status = 'verified';
+  if found and p_status = 'verified' and (x.id is null or x.id <> v.id) then
+    id := v.id; outcome := 'already_verified'; return next; return;           -- one verified record per item+group; first evidence wins
+  end if;
+  if x.id is not null then
+    if x.status = 'candidate' and p_status = 'verified' then
+      update content_distributions cd set status = 'verified', confidence = p_confidence, origin = p_origin, distributed_at = p_distributed_at, statement = coalesce(p_statement, cd.statement),
+        note = coalesce(p_note, cd.note) where cd.id = x.id;
+      insert into content_audit_log(actor, event, detail) values (p_actor, 'distribution_upgraded', jsonb_build_object('distribution', x.id, 'item', p_item, 'group', p_jid));
+      id := x.id; outcome := 'upgraded'; return next; return;
+    elsif x.status = 'retracted' and p_status = 'verified' then
+      update content_distributions cd set status = 'verified', confidence = p_confidence, origin = p_origin, distributed_at = p_distributed_at, statement = coalesce(p_statement, cd.statement),
+        note = coalesce(p_note, cd.note), retracted_at = null, retracted_by = null, retract_reason = null where cd.id = x.id;
+      insert into content_audit_log(actor, event, detail) values (p_actor, 'distribution_reinstated', jsonb_build_object('distribution', x.id, 'item', p_item, 'group', p_jid));
+      id := x.id; outcome := 'reinstated'; return next; return;
+    end if;
+    id := x.id; outcome := 'already_recorded'; return next; return;           -- idempotent: same evidence, nothing to do
+  end if;
+  insert into content_distributions(content_item_id, content_version, group_jid, group_name, distributed_at, origin, evidence_ref, status, confidence, note, statement, recorded_by)
+  values (p_item, i.version, p_jid, g->>'name', p_distributed_at, p_origin, btrim(p_evidence), p_status, p_confidence, p_note, p_statement, p_actor) returning content_distributions.id into v_id;
+  insert into content_audit_log(actor, event, detail) values (p_actor, 'distribution_recorded',
+    jsonb_build_object('distribution', v_id, 'item', p_item, 'group', p_jid, 'status', p_status, 'origin', p_origin, 'confidence', p_confidence, 'evidence', btrim(p_evidence), 'distributed_at', p_distributed_at));
+  id := v_id; outcome := 'recorded'; return next;
+end $$;
+
+create or replace function public.momentum_retract_distribution(p_id uuid, p_reason text, p_actor text default 'system')
+returns table(id uuid, outcome text)
+language plpgsql security definer set search_path = public as $$
+declare x content_distributions%rowtype;
+begin
+  if coalesce(length(btrim(p_reason)),0) < 3 then raise exception 'retract: a reason is required'; end if;
+  select * into x from content_distributions cd where cd.id = p_id for update;
+  if not found then raise exception 'retract: record % not found', p_id; end if;
+  if x.status = 'retracted' then id := x.id; outcome := 'already_retracted'; return next; return; end if;
+  update content_distributions cd set status = 'retracted', retracted_at = now(), retracted_by = p_actor, retract_reason = btrim(p_reason) where cd.id = p_id;
+  insert into content_audit_log(actor, event, detail) values (p_actor, 'distribution_retracted', jsonb_build_object('distribution', p_id, 'item', x.content_item_id, 'group', x.group_jid, 'reason', btrim(p_reason)));
+  id := x.id; outcome := 'retracted'; return next;
+end $$;
+
+-- Per allow-listed group: what history Hub can actually see. READ-ONLY over existing tables.
+create or replace function public.momentum_distribution_coverage()
+returns table(group_jid text, group_name text, inbound_messages bigint, outbound_messages bigint, first_at timestamptz, last_at timestamptz, hub_sent_posts bigint)
+language plpgsql stable security definer set search_path = public as $$
+declare allow jsonb;
+begin
+  begin select value::jsonb into allow from integration_settings where key = 'momentum_nugget_target_groups'; exception when others then allow := null; end;
+  return query
+  select a->>'jid', a->>'name',
+         (select count(*) from maytapi_messages m where m.conversation_key = a->>'jid' and m.direction = 'inbound'),
+         (select count(*) from maytapi_messages m where m.conversation_key = a->>'jid' and m.direction <> 'inbound'),
+         (select min(m.received_at) from maytapi_messages m where m.conversation_key = a->>'jid'),
+         (select max(m.received_at) from maytapi_messages m where m.conversation_key = a->>'jid'),
+         (select count(*) from scheduled_group_posts p where p.target_group_jid = a->>'jid' and p.status = 'sent')
+    from jsonb_array_elements(coalesce(allow,'[]'::jsonb)) a;
+end $$;
+
+-- REPLACEMENT of momentum_plan_exact (same signature). Changes vs the deployed version, and only these:
+--  1. refuses any group that already has a VERIFIED distribution of this item ('already_distributed'), checked before anything is planned
+--  2. a destination may carry its own "at" (ISO time); without it the slot is first_at + 10 min x index, exactly as before
+--  3. order_index is the group's position in the allow-list when "at" is given (so a later retime keeps the 10-minute pattern)
+create or replace function public.momentum_plan_exact(p_item uuid, p_destinations jsonb, p_first_at timestamptz, p_actor text default 'system')
+returns table(delivery_id uuid, destination_jid text, planned_at timestamptz, outcome text)
+language plpgsql security definer set search_path = public as $$
+declare i content_items%rowtype; allow jsonb; e jsonb; idx int := 0; v_slot timestamptz; v_id uuid; v_n int; v_c timestamptz; v_pos int; v_ord int; v_first timestamptz;
+begin
+  select * into i from content_items where id = p_item for update;
+  if not found then raise exception 'content item % not found', p_item; end if;
+  if i.status <> 'approved' or i.source_changed or i.held then raise exception 'plan: item is % (held=%, source_changed=%), not plannable', i.status, i.held, i.source_changed; end if;
+  if p_first_at < now() + interval '15 minutes' then raise exception 'plan: first slot must be at least 15 minutes in the future'; end if;
+  if jsonb_typeof(p_destinations) <> 'array' or jsonb_array_length(p_destinations) = 0 then raise exception 'plan: destinations must be a non-empty array'; end if;
+  begin select value::jsonb into allow from integration_settings where key = 'momentum_nugget_target_groups'; exception when others then allow := null; end;
+  if allow is null or jsonb_typeof(allow) <> 'array' then raise exception 'plan: momentum_nugget_target_groups not configured'; end if;
+  for e in select * from jsonb_array_elements(p_destinations) loop
+    if coalesce(e->>'jid','') !~ '@g\.us$' or coalesce(e->>'name','') = '' then raise exception 'plan: each destination needs name and a @g.us jid'; end if;
+    if not exists (select 1 from jsonb_array_elements(allow) a where a->>'name' = e->>'name' and a->>'jid' = e->>'jid') then
+      raise exception 'destination_not_allowed: % is not in momentum_nugget_target_groups', e->>'name';
+    end if;
+    if exists (select 1 from content_distributions cd where cd.content_item_id = p_item and cd.group_jid = e->>'jid' and cd.status = 'verified') then
+      raise exception 'already_distributed: % already received this content (verified distribution record)', e->>'name';
+    end if;
+    if e ? 'at' then
+      begin v_first := (e->>'at')::timestamptz; exception when others then raise exception 'plan: bad "at" for %', e->>'name'; end;
+      if v_first < now() + interval '15 minutes' then raise exception 'plan: first slot must be at least 15 minutes in the future'; end if;
+    end if;
+  end loop;
+  idx := 0;
+  for e in select * from jsonb_array_elements(p_destinations) loop
+    if not exists (select 1 from content_deliveries cd where cd.content_item_id = p_item and cd.destination_jid = e->>'jid' and cd.status in ('planned','queued','sent','needs_review')) then
+      v_slot := case when e ? 'at' then (e->>'at')::timestamptz else p_first_at + make_interval(mins => 10 * idx) end;
+      v_c := public.momentum_slot_conflict(e->>'jid', v_slot, null);
+      if v_c is not null then raise exception 'slot_conflict: % already has a delivery at % (within the % interval)', e->>'name', v_c, public.momentum_min_interval(); end if;
+    end if;
+    idx := idx + 1;
+  end loop;
+  idx := 0;
+  for e in select * from jsonb_array_elements(p_destinations) loop
+    if exists (select 1 from content_deliveries cd where cd.content_item_id = p_item and cd.destination_jid = e->>'jid' and cd.status in ('planned','queued','sent','needs_review')) then
+      delivery_id := null; destination_jid := e->>'jid'; planned_at := null; outcome := 'already_planned'; return next; idx := idx + 1; continue;
+    end if;
+    v_slot := case when e ? 'at' then (e->>'at')::timestamptz else p_first_at + make_interval(mins => 10 * idx) end;
+    v_ord := idx + 1;
+    if e ? 'at' then select o::int into v_pos from jsonb_array_elements(allow) with ordinality t(a, o) where a->>'jid' = e->>'jid'; v_ord := coalesce(v_pos, idx + 1); end if;
+    select count(*) into v_n from content_deliveries cd where cd.content_item_id = p_item and cd.destination_jid = e->>'jid';
+    insert into content_deliveries (content_item_id, destination_name, destination_jid, order_index, planned_at, idempotency_key)
+    values (p_item, e->>'name', e->>'jid', v_ord, v_slot, format('%s|v%s|%s|%s', p_item, i.version, e->>'jid', v_n + 1))
+    returning id into v_id;
+    insert into content_audit_log(actor, event, detail) values (p_actor, 'planned', jsonb_build_object('delivery', v_id, 'item', p_item, 'planned_at', v_slot, 'exact', true));
+    delivery_id := v_id; destination_jid := e->>'jid'; planned_at := v_slot; outcome := 'planned'; return next;
+    idx := idx + 1;
+  end loop;
+end $$;
+
+revoke all on function public.momentum_record_distribution(uuid, text, text, text, text, text, timestamptz, text, text, text),
+  public.momentum_retract_distribution(uuid, text, text), public.momentum_distribution_coverage(),
+  public.momentum_plan_exact(uuid, jsonb, timestamptz, text) from public, anon, authenticated;
+grant execute on function public.momentum_record_distribution(uuid, text, text, text, text, text, timestamptz, text, text, text),
+  public.momentum_retract_distribution(uuid, text, text), public.momentum_distribution_coverage(),
+  public.momentum_plan_exact(uuid, jsonb, timestamptz, text) to service_role;

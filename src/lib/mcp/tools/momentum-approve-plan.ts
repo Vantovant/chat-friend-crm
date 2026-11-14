@@ -4,7 +4,7 @@ import { notAuthenticated, supabaseForUser } from "../supabase";
 import { buildBrief } from "./momentum-brief-logic";
 import { buildPreview, executeSteps } from "./momentum-plan-logic";
 import { buildReport } from "./momentum-report-logic";
-import { adminApi, loadBodies, loadState, paramsSchema, refuse, text, toBriefParams } from "./momentum-api";
+import { adminApi, loadBodies, loadDistribution, loadState, paramsSchema, refuse, text, toBriefParams } from "./momentum-api";
 
 // WRITE (scheduling only). Never sends, never changes Engine/Scheduler/allow-list/teaching text.
 export default defineTool({
@@ -17,7 +17,7 @@ export default defineTool({
     proposal_hash: z.string().length(64).describe("proposal_hash from momentum_preview_plan."),
     confirm_phrase: z.string().describe("The exact phrase Vanto typed, e.g. APPROVE 4F7Q2A."),
     user_confirmed: z.literal(true).describe("Must be true, only after Vanto typed the phrase in this conversation."),
-    confirmed_not_distributed: z.array(z.string().uuid()).optional().describe("Nugget item ids Vanto has explicitly confirmed were NOT already distributed (see requires_distribution_confirmation in the preview)."),
+    confirmed_not_distributed: z.array(z.string().uuid()).optional().describe("Item ids Vanto has explicitly confirmed were NOT already distributed to the groups listed in groups_to_confirm (see requires_distribution_confirmation in the preview)."),
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   handler: async (input, ctx) => {
@@ -25,8 +25,9 @@ export default defineTool({
     const api = adminApi(supabaseForUser(ctx));
     const st = await loadState(api); if ("error" in st) return refuse(st.error);
     const { proposal_hash, confirm_phrase, user_confirmed: _u, confirmed_not_distributed, ...params } = input;
+    const distribution = await loadDistribution(api);
     try {
-      const brief = buildBrief({ now: new Date(), items: st.items, settings: st.settings, ...toBriefParams(params) });
+      const brief = buildBrief({ now: new Date(), items: st.items, settings: st.settings, distribution, ...toBriefParams(params) });
       const ids = (brief.weeks.flatMap((w: any) => w.days) as any[]).filter((d) => d.state === "proposed").map((d) => d.recommendation.item.id as string);
       const lb = await loadBodies(api, ids, st.items); if (lb.error !== undefined) return refuse(lb.error); const bodies = lb.bodies;
       const prev = await buildPreview({ brief, bodies, params });
@@ -35,7 +36,7 @@ export default defineTool({
       if (confirm_phrase.trim().toUpperCase() !== prev.confirm_phrase) return refuse(`Refused: the confirmation phrase does not match. Vanto must type exactly: ${prev.confirm_phrase}. Nothing was done.`);
       if (prev.steps.length === 0) return refuse("Nothing to approve or schedule.");
       const unconfirmed = prev.requires_distribution_confirmation.filter((r) => !(confirmed_not_distributed ?? []).includes(r.item_id));
-      if (unconfirmed.length) return refuse(`Refused: Vanto must first confirm these nuggets were never sent before: ${unconfirmed.map((u) => u.title).join(", ")}. If unsure, hold them and choose an alternative. Nothing was done.`, { needs_confirmation: unconfirmed });
+      if (unconfirmed.length) return refuse(`Refused: Vanto must first confirm these were never sent to the listed groups before: ${unconfirmed.map((u) => `${u.title} (${u.groups_to_confirm.map((g) => g.group).join(", ")})`).join("; ")}. If unsure, hold them and choose an alternative. Nothing was done.`, { needs_confirmation: unconfirmed });
       const { results, halted } = await executeSteps(prev.steps, api);
       const after = await loadState(api);
       const report = "error" in after ? null : buildReport({ now: new Date(), items: after.items, settings: after.settings });
