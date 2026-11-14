@@ -70,6 +70,8 @@ import momentumPreviewPlan from "./tools/momentum-preview-plan";
 import momentumApprovePlan from "./tools/momentum-approve-plan";
 import momentumPause from "./tools/momentum-pause";
 import momentumReport from "./tools/momentum-report";
+import momentumConfirmDistribution from "./tools/momentum-confirm-distribution";
+import momentumScanDistribution from "./tools/momentum-scan-distribution";
 
 const projectRef = import.meta.env.VITE_SUPABASE_PROJECT_ID ?? "project-ref-unset";
 
@@ -90,6 +92,8 @@ export default defineMcp({
     momentumApprovePlan,
     momentumPause,
     momentumReport,
+    momentumConfirmDistribution,
+    momentumScanDistribution,
     getDispatchPolicy,
     getDispatcherHealth,
     getMaytapiStatus,

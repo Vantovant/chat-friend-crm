@@ -9,7 +9,7 @@ export async function sha256Hex(text: string): Promise<string> {
 export const ALLOWED_ACTIONS = ["submit", "approve", "plan", "retime", "hold"] as const;
 export type Api = (action: string, body: Record<string, unknown>) => Promise<{ ok: boolean; error?: string; [k: string]: any }>;
 
-export type ScheduleStep = { type: "schedule"; item_id: string; title: string; kind: string; version: number; text_sha256: string; status_before: string; first_at: string; group_jids: string[]; actions: ("submit" | "approve" | "plan")[] };
+export type ScheduleStep = { type: "schedule"; item_id: string; title: string; kind: string; version: number; text_sha256: string; status_before: string; first_at: string; group_jids: string[]; slots?: { jid: string; at: string }[]; skipped_groups?: string[]; unverified?: { group: string; state: string }[]; actions: ("submit" | "approve" | "plan")[] };
 export type RetimeStep = { type: "retime"; item_id: string; title: string; first_at: string; from_times: string[] };
 export type Step = ScheduleStep | RetimeStep;
 
@@ -25,7 +25,8 @@ export function stepsFromBrief(brief: Brief, shaOf: (id: string) => string | nul
       if (!sha) { problems.push(`${it.title}: text hash unavailable`); continue; }
       if (!["draft", "in_review", "approved"].includes(it.status)) { problems.push(`${it.title}: status ${it.status} cannot be scheduled`); continue; }
       const actions: ScheduleStep["actions"] = it.status === "draft" ? ["submit", "approve", "plan"] : it.status === "in_review" ? ["approve", "plan"] : ["plan"];
-      steps.push({ type: "schedule", item_id: it.id, title: it.title, kind: it.kind, version: it.version, text_sha256: sha, status_before: it.status, first_at: r.plan.first_at, group_jids: r.plan.group_jids, actions });
+      steps.push({ type: "schedule", item_id: it.id, title: it.title, kind: it.kind, version: it.version, text_sha256: sha, status_before: it.status, first_at: r.plan.first_at, group_jids: r.plan.group_jids, ...(r.plan.slots ? { slots: r.plan.slots.map((x: any) => ({ jid: x.jid, at: x.at })) } : {}), skipped_groups: r.plan.skipped_groups ?? [], unverified: r.plan.unverified ?? [], actions });
+      if (r.plan.group_jids.length === 0) { problems.push(`${it.title}: already distributed in every group, nothing to schedule`); steps.pop(); }
     }
   }
   return { steps, problems };
@@ -52,11 +53,12 @@ export async function buildPreview(args: { brief: Brief; bodies: Record<string, 
   const messages: Message[] = [];
   for (const s of steps) if (s.type === "schedule") {
     const day = (brief.weeks.flatMap((w: any) => w.days) as any[]).find((d) => d.recommendation?.item?.id === s.item_id);
-    messages.push({ item_id: s.item_id, title: s.title, kind: s.kind, version: s.version, text_sha256: s.text_sha256, text: bodies[s.item_id]?.body ?? "", deliveries: (day?.slots ?? []).map((x: any) => ({ group: x.group, at_sast: x.at_sast })) });
+    messages.push({ item_id: s.item_id, title: s.title, kind: s.kind, version: s.version, text_sha256: s.text_sha256, text: bodies[s.item_id]?.body ?? "", deliveries: (day?.slots ?? []).filter((x: any) => !x.skip).map((x: any) => ({ group: x.group, at_sast: x.at_sast })) });
   }
   return {
     read_only: true, proposal_hash: hash, confirm_phrase: phrase,
-    requires_distribution_confirmation: steps.filter((s) => s.type === "schedule" && s.kind === "nugget").map((s) => ({ item_id: s.item_id, title: s.title, question: "Has Vanto confirmed this nugget has NOT already been sent to these groups? If unsure, hold it and use an alternative." })),
+    // per-group: any group not VERIFIED either way must be confirmed by Vanto (nuggets always when unknown; any kind when a candidate match exists)
+    requires_distribution_confirmation: steps.filter((s): s is ScheduleStep => s.type === "schedule" && (s.unverified ?? []).some((u) => u.state === "candidate" || (s.kind === "nugget" && u.state === "unknown"))).map((s) => ({ item_id: s.item_id, title: s.title, groups_to_confirm: (s.unverified ?? []).filter((u) => u.state === "candidate" || s.kind === "nugget").map((u) => ({ group: u.group, memory_says: u.state === "candidate" ? "possible earlier post found (candidate, needs review)" : "unknown: history incomplete" })), skipped_as_already_distributed: s.skipped_groups ?? [], question: "Has Vanto confirmed this content has NOT already been sent to the groups listed in groups_to_confirm? If unsure, hold it, record any earlier post with momentum_confirm_distribution, or use an alternative." })),
     to_approve: steps.length === 0 ? "Nothing to approve: no unscheduled proposals and no re-timing needed." : `To approve, Vanto must type exactly: ${phrase}`,
     steps, messages, problems, exceptions: brief.exceptions, gates: brief.gates, sending_possible: brief.sending_possible,
     params_used: args.params,
@@ -85,7 +87,7 @@ export async function executeSteps(steps: Step[], api: Api): Promise<{ results: 
     for (const a of step.actions) {
       const r = a === "submit" ? await call("submit", { item_id: step.item_id })
         : a === "approve" ? await call("approve", { item_id: step.item_id, expected_sha256: step.text_sha256 })
-        : await call("plan", { item_id: step.item_id, group_jids: step.group_jids, first_at: step.first_at, exact: true });
+        : await call("plan", { item_id: step.item_id, group_jids: step.group_jids, first_at: step.first_at, exact: true, ...(step.slots ? { slots: step.slots } : {}) });
       if (!r.ok) { failed = `${a}: ${r.error ?? "failed"}`; break; }
       if (a === "plan") {
         const outcomes = (r.planned ?? []).map((p: any) => p.outcome);

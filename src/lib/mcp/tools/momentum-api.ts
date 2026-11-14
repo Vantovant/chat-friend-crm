@@ -3,6 +3,7 @@
 import { z } from "zod";
 import type { Api } from "./momentum-plan-logic";
 import type { Item, Settings, BriefParams } from "./momentum-brief-logic";
+import type { DistributionState } from "./momentum-distribution-logic";
 
 export const paramsSchema = {
   week_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("A Monday (YYYY-MM-DD). Default: next Monday in South Africa."),
@@ -27,6 +28,15 @@ export async function loadState(api: Api): Promise<{ items: Item[]; settings: Se
   if (!l.ok) return { error: `Could not read Momentum items (admin session required): ${l.error ?? "unknown"}` };
   if (!s.ok) return { error: `Could not read Momentum settings: ${s.error ?? "unknown"}` };
   return { items: l.items ?? [], settings: s.settings ?? {} };
+}
+
+/** Distribution memory. Never fails the caller: if it cannot be read, prior distribution is simply UNKNOWN for every group. */
+export async function loadDistribution(api: Api): Promise<DistributionState> {
+  try {
+    const r = await api("distributions", {});
+    if (!r.ok) return { available: false, records: [], coverage: null, error: r.error };
+    return { available: true, records: r.records ?? [], coverage: r.coverage ?? null };
+  } catch (e) { return { available: false, records: [], coverage: null, error: e instanceof Error ? e.message : "unavailable" }; }
 }
 
 export async function loadBodies(api: Api, ids: string[], items: Item[]): Promise<{ bodies: Record<string, { body: string; sha: string }>; error?: undefined } | { error: string; bodies?: undefined }> {

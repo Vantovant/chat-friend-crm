@@ -1,6 +1,7 @@
 // Momentum Intelligence, Phase 1a: PURE briefing logic. No I/O, no writes, no secrets.
 // Input comes from the existing admin gateway (momentum-admin `list` + `status`); output is a structured briefing
 // the assistant reasons over. It never approves, schedules, queues or changes any setting.
+import { type DistributionState, NO_DISTRIBUTION_DATA, groupState, coverageVerdict, recordView } from "./momentum-distribution-logic";
 
 export const SLOT_TIMES = ["09:15", "09:25", "09:35"] as const; // SAST, one per authorised group
 export const SAST_OFFSET_MIN = 120; // South Africa has no DST
@@ -33,14 +34,16 @@ const bool = (v: unknown) => String(v ?? "").trim().toLowerCase() === "true";
 export type Brief = ReturnType<typeof buildBrief>;
 
 export type BriefParams = { weekStart?: string; weeks?: number; assign?: Record<string, string>; exclude?: string[]; firstRelease?: string };
+const sastText = (iso: string) => `${toSast(iso).date} ${toSast(iso).time}`;
 export function slotTimesFrom(first?: string): string[] {
   const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(first ?? "09:15"); if (!m) throw new Error("first_release must be HH:MM (SAST)");
   const base = Number(m[1]) * 60 + Number(m[2]);
   return [0, 10, 20].map((o) => { const t = base + o; if (t >= 24 * 60) throw new Error("first_release too late for three slots"); return `${pad(Math.floor(t / 60))}:${pad(t % 60)}`; });
 }
 
-export function buildBrief(input: { now: Date; items: Item[]; settings: Settings } & BriefParams) {
+export function buildBrief(input: { now: Date; items: Item[]; settings: Settings; distribution?: DistributionState } & BriefParams) {
   const { now, items, settings } = input;
+  const dist = input.distribution ?? NO_DISTRIBUTION_DATA;
   const SLOTS = slotTimesFrom(input.firstRelease);
   const exclude = new Set(input.exclude ?? []);
   const assign = input.assign ?? {};
@@ -59,12 +62,23 @@ export function buildBrief(input: { now: Date; items: Item[]; settings: Settings
   };
   const sendingPossible = gates.engine_enabled && gates.scheduler_enabled && !gates.emergency_paused && !gates.outbound_frozen;
 
+  // Distribution memory, per (item, group). A group is only ever judged by its OWN evidence.
+  const distView = (id: string, g: { name: string; jid: string }) => {
+    const st = groupState(id, g.jid, g.name, dist, now);
+    if (st.state === "verified") return { group: g.name, state: "verified_distributed", ...recordView(st.record, sastText) };
+    if (st.state === "candidate") return { group: g.name, state: "candidate_needs_review", evidence: st.records.map((r) => ({ ...recordView(r, sastText), note: r.note ?? null })) };
+    if (st.state === "unknown") return { group: g.name, state: "unverified_history_incomplete", why: st.reasons };
+    return { group: g.name, state: "no_evidence_history_complete" };
+  };
+  const fullyDistributed = (id: string) => allow.length > 0 && allow.every((g) => groupState(id, g.jid, g.name, dist, now).state === "verified");
+
   const live = items.filter((i) => !["retired", "rejected"].includes(i.status));
   const dels = (i: Item) => (i.deliveries ?? []).filter((d) => d.status !== "cancelled");
   const summary = (i: Item) => ({
     id: i.id, kind: i.kind, title: i.title, version: i.version, status: i.status, held: !!i.held, approved_at: i.approved_at ?? null,
     text_sha256_prefix: (i.body_sha256 ?? "").slice(0, 8) || null, source_slug: i.source_slug ?? null,
     deliveries: dels(i).map((d) => ({ group: d.destination_name ?? null, at_sast: d.planned_at ? `${toSast(d.planned_at).date} ${toSast(d.planned_at).time}` : null, status: d.status })),
+    distribution: allow.map((g) => distView(i.id, g)),
   });
   const rank = (i: Item) => { const k = SERIES_ORDER.indexOf(i.source_slug ?? ""); return k >= 0 ? k : SERIES_ORDER.length + (i.created_at ? Date.parse(i.created_at) / 1e13 : 0); };
   const teachings = live.filter((i) => i.kind === "teaching").sort((a, b) => rank(a) - rank(b));
@@ -76,7 +90,7 @@ export function buildBrief(input: { now: Date; items: Item[]; settings: Settings
   const byDate = new Map<string, { item: Item; d: Delivery }[]>();
   for (const i of live) for (const d of dels(i)) { if (!d.planned_at) continue; const k = toSast(d.planned_at).date; byDate.set(k, [...(byDate.get(k) ?? []), { item: i, d }]); }
 
-  const eligible = (i: Item) => !used.has(i.id) && !exclude.has(i.id) && dels(i).length === 0 && !i.held && !i.source_changed;
+  const eligible = (i: Item) => !used.has(i.id) && !exclude.has(i.id) && dels(i).length === 0 && !i.held && !i.source_changed && !fullyDistributed(i.id);
   const nextOf = (pool: Item[]) => pool.find(eligible);
   const byId = new Map(live.map((i) => [i.id, i]));
   // other planned deliveries of the same group within the minimum interval of a slot (excluding the item's own)
@@ -112,11 +126,24 @@ export function buildBrief(input: { now: Date; items: Item[]; settings: Settings
       if (!pick) { day.state = "gap"; day.recommendation = { text: `No ready content for ${rhythm}. Create or source a ${prefer}.` }; exceptions.push({ severity: "warning", code: "CONTENT_GAP", message: `${day.weekday} ${date}: no unscheduled approved-or-draft ${prefer} available.` }); days.push(day); continue; }
       used.add(pick.id);
       const alternatives = [...nuggets, ...teachings].filter(eligible).slice(0, 4).map((a) => ({ item_id: a.id, kind: a.kind, title: a.title, status: a.status }));
-      const firstAt = slotIso(date, SLOTS[0]);
-      slots.forEach((sl, k) => { if (conflictFor(slotIso(date, SLOTS[k]), sl.group)) exceptions.push({ severity: "action", code: "SLOT_CONFLICT", item: pick!.id, message: `${day.weekday} ${date}: ${sl.group} already has a delivery within ${gates.min_interval_minutes} minutes of ${SLOTS[k]}.` }); });
+      // per-group distribution: verified groups are skipped, every other group keeps its own slot
+      const states = allow.map((g, k) => ({ g, k, st: groupState(pick!.id, g.jid, g.name, dist, now) }));
+      const skipped = states.filter((x) => x.st.state === "verified"), targets = states.filter((x) => x.st.state !== "verified");
+      const unknownG = targets.filter((x) => x.st.state === "unknown"), candG = targets.filter((x) => x.st.state === "candidate");
+      const outSlots = slots.map((sl, k) => { const v = states[k]; return v && v.st.state === "verified" ? { ...sl, skip: { reason: "already_distributed", ...recordView((v.st as any).record, sastText) } } : sl; });
+      day.slots = outSlots;
+      const destinations = targets.filter((x) => x.k < SLOTS.length).map((x) => ({ jid: x.g.jid, name: x.g.name, at: slotIso(date, SLOTS[x.k]) }));
+      const firstAt = destinations[0]?.at ?? slotIso(date, SLOTS[0]);
+      slots.forEach((sl, k) => { if (states[k]?.st.state === "verified") return; if (conflictFor(slotIso(date, SLOTS[k]), sl.group)) exceptions.push({ severity: "action", code: "SLOT_CONFLICT", item: pick!.id, message: `${day.weekday} ${date}: ${sl.group} already has a delivery within ${gates.min_interval_minutes} minutes of ${SLOTS[k]}.` }); });
       const steps = pick.status === "approved" ? ["plan 3 deliveries at the slot times"] : ["submit for review", "Vanto approves the exact text", "plan 3 deliveries at the slot times"];
       day.state = "proposed";
-      day.recommendation = { item: summary(pick), reason: why, alternatives, plan: { first_at: firstAt, group_jids: allow.map((g) => g.jid), steps }, steps, requires_vanto: pick.status === "approved" ? ["confirm the plan"] : ["approve the exact text", "confirm the plan"], warnings: [WORDING_FLAGS[pick.source_slug ?? ""], pick.kind === "nugget" ? "Prior distribution cannot be verified through MCP; Vanto confirms it has not already been sent before approval. If uncertain, hold it and use an alternative." : undefined, pick.kind === "teaching" && !SERIES_ORDER.includes(pick.source_slug ?? "") ? "Series position unconfirmed (only Teachings 2 and 3 are fixed)." : undefined].filter(Boolean) };
+      day.recommendation = { item: summary(pick), reason: why, alternatives, plan: { first_at: firstAt, group_jids: targets.map((x) => x.g.jid), destinations, ...(skipped.length ? { slots: destinations } : {}), skipped_groups: skipped.map((x) => x.g.name), unverified: [...unknownG, ...candG].map((x) => ({ group: x.g.name, state: x.st.state })), steps }, steps, requires_vanto: pick.status === "approved" ? ["confirm the plan"] : ["approve the exact text", "confirm the plan"], warnings: [WORDING_FLAGS[pick.source_slug ?? ""], pick.kind === "nugget" && !dist.available ? "Prior distribution NOT verified: distribution memory is unavailable, so every group is unknown. Vanto confirms it has not already been sent before approval. If uncertain, hold it and use an alternative." : undefined,
+        pick.kind === "nugget" && dist.available && unknownG.length ? `Prior distribution NOT verified for ${unknownG.map((x) => x.g.name).join(", ")} (${[...new Set(unknownG.flatMap((x) => (x.st as any).reasons as string[]))].join("; ")}). This is UNKNOWN, not "never distributed". Vanto confirms per group before approval; if uncertain, hold it and use an alternative.` : undefined,
+        candG.length ? `Possible earlier distribution (candidate match, needs review, NOT a confirmed delivery) in ${candG.map((x) => x.g.name).join(", ")}.` : undefined,
+        skipped.length ? `Already distributed (verified) in ${skipped.map((x) => x.g.name).join(", ")}: those groups are skipped; the other groups are judged on their own evidence.` : undefined, pick.kind === "teaching" && !SERIES_ORDER.includes(pick.source_slug ?? "") ? "Series position unconfirmed (only Teachings 2 and 3 are fixed)." : undefined].filter(Boolean) };
+      for (const x of skipped) exceptions.push({ severity: "info", code: "ALREADY_DISTRIBUTED_IN_GROUP", item: pick.id, message: `${pick.title} is already recorded as distributed in ${x.g.name}; it is not proposed there.` });
+      for (const x of candG) exceptions.push({ severity: "action", code: "DISTRIBUTION_CANDIDATE", item: pick.id, message: `${pick.title}: a possible earlier post was found in ${x.g.name}. Review it (momentum_confirm_distribution) before scheduling there.` });
+      if (pick.kind === "nugget" && unknownG.length) exceptions.push({ severity: "warning", code: "DISTRIBUTION_UNVERIFIED", item: pick.id, message: `${pick.title}: earlier distribution cannot be verified in ${unknownG.map((x) => x.g.name).join(", ")} (incomplete history). Unknown, not "never sent".` });
       exceptions.push({ severity: "action", code: pick.status === "approved" ? "NEEDS_PLANNING" : "NEEDS_APPROVAL", item: pick.id, message: `${day.weekday} ${date}: ${pick.title} (${pick.status}) is proposed but not scheduled.` });
       days.push(day);
     }
@@ -131,6 +158,8 @@ export function buildBrief(input: { now: Date; items: Item[]; settings: Settings
       if (d.status === "planned" && d.planned_at && Date.parse(d.planned_at) < now.getTime() && !sendingPossible) exceptions.push({ severity: "warning", code: "PAST_DUE_NOT_SENT", item: i.id, message: `${i.title} to ${d.destination_name} was due ${toSast(d.planned_at).date} ${toSast(d.planned_at).time} but gates are not ON.` });
     }
   }
+  if (!dist.available) exceptions.push({ severity: "warning", code: "DISTRIBUTION_MEMORY_UNAVAILABLE", message: "Distribution memory could not be read (not installed or not reachable), so prior distribution is unknown for every group." });
+  for (const i of live) if (fullyDistributed(i.id)) exceptions.push({ severity: "info", code: "ALREADY_DISTRIBUTED_EVERYWHERE", item: i.id, message: `${i.title} is recorded as distributed in all allow-listed groups; it is not proposed again.` });
   if (allow.length < 3) exceptions.push({ severity: "warning", code: "GROUPS_INCOMPLETE", message: `Only ${allow.length} allow-listed group(s); the rhythm needs 3.` });
   const sev = { action: 0, warning: 1, info: 2 } as const; exceptions.sort((a, b) => sev[a.severity] - sev[b.severity]);
 
@@ -138,6 +167,7 @@ export function buildBrief(input: { now: Date; items: Item[]; settings: Settings
   return {
     read_only: true, as_of_sast: `${nowSast.date} ${nowSast.time}`, gates, sending_possible: sendingPossible,
     groups: allow, slot_times_sast: [...SLOTS],
+    distribution_memory: { available: dist.available, records: dist.records.filter((r) => r.status !== "retracted").length, coverage: allow.map((g) => coverageVerdict(g.jid, g.name, dist.coverage, now)), note: "A group is judged only by its own evidence. Incomplete history means UNKNOWN, never 'not distributed'. Record outside distribution with momentum_confirm_distribution." },
     inventory: { teachings: teachings.map(summary), nuggets: nuggets.map(summary), already_distributed: ALREADY_DISTRIBUTED },
     weeks: weekPlans, exceptions,
     decision_hint: firstAction ? `Ask Vanto ONE decision first, about: ${firstAction.code} (${firstAction.message})` : "No action needed; offer a brief.",

@@ -95,7 +95,7 @@ describe("acceptance: conversational Momentum with a non-sending simulation", ()
     expect(pv.messages[0].deliveries.map((d: any) => d.at_sast)).toEqual(["2026-11-16 09:15", "2026-11-16 09:25", "2026-11-16 09:35"]);
     expect(pv.steps.find((s: any) => s.type === "retime")).toMatchObject({ item_id: T2, first_at: iso("2026-11-18", "09:15") });
     expect(pv.confirm_phrase).toMatch(/^APPROVE [0-9A-F]{6}$/); expect(pv.requires_distribution_confirmation).toHaveLength(2);
-    expect(sim.calls.every((c: string) => ["list", "status", "get"].includes(c))).toBe(true); expect(sim.audit).toEqual([]);
+    expect(sim.calls.every((c: string) => ["list", "status", "get", "distributions"].includes(c))).toBe(true); expect(sim.audit).toEqual([]);
   });
   it("refuses without exact phrase, hash, distribution confirmation or admin; nothing changes", async () => {
     const pv = J(await preview.handler({ ...W1 }, ctx)); sim.calls = [];
