@@ -1,6 +1,7 @@
 # Vanto CRM Task Roadmap
 
-- [ ] Add Duplication Movement to both connector allowlists; regenerate, deploy and verify the 12-group policy without creating posts.
+- [x] Add Duplication Movement to both connector allowlists; regenerate, deploy and verify the live bridge reports 12 groups without creating posts.
+- [ ] Verify the published OAuth connector policy — requires an OAuth connector session; the app session is rejected with 401.
 
 - [x] Add `list_group_messages` MCP tool (`src/lib/mcp/tools/list-group-messages.ts`)
 - [x] Register tool in `src/lib/mcp/index.ts` and update instructions
