@@ -71,7 +71,8 @@ var ALLOWED_GROUPS = [
   "Ascension Bloemfontein",
   "90 day Challenge and FB Campaign",
   "Botswana APLGO Presentations",
-  "New Day New Life"
+  "New Day New Life",
+  "Duplication Movement"
 ];
 
 // src/lib/mcp/tools/get-dispatch-policy.ts
@@ -320,7 +321,7 @@ import { z as z3 } from "npm:zod@^3.25.76";
 var queue_group_post_default = defineTool6({
   name: "queue_group_post",
   title: "Queue a WhatsApp group post",
-  description: "Schedule one message to one of the 11 approved WhatsApp groups. The post is inserted with status 'pending' so the dispatcher picks it up. Remember: 1 group per 5-minute tick, so an 11-group wave takes ~55 minutes to clear.",
+  description: "Schedule one message to one of the 12 approved WhatsApp groups. The post is inserted with status 'pending' so the dispatcher picks it up. Remember: 1 group per 5-minute tick, so a 12-group wave takes ~60 minutes to clear.",
   inputSchema: {
     group_name: z3.string().min(1).describe("Exact name of an approved WhatsApp group."),
     message_content: z3.string().min(1).describe("Message body to post."),

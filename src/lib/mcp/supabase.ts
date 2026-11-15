@@ -78,6 +78,7 @@ export const ALLOWED_GROUPS = [
   "90 day Challenge and FB Campaign",
   "Botswana APLGO Presentations",
   "New Day New Life",
+  "Duplication Movement",
 ] as const;
 
 /**

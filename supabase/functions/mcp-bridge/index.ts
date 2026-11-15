@@ -13,6 +13,7 @@ const ALLOWED_GROUPS = [
   '90 day Challenge and FB Campaign',
   'Botswana APLGO Presentations',
   'New Day New Life',
+  'Duplication Movement',
 ]
 
 const json = (body: unknown, status = 200) =>
@@ -273,7 +274,7 @@ Deno.serve(async (req) => {
         const imageUrl = body.image_url ? String(body.image_url) : null
 
         if (!ALLOWED_GROUPS.includes(groupName)) {
-          return json({ error: 'group_not_allowed', message: `"${groupName}" is not one of the 11 approved groups`, allowed: ALLOWED_GROUPS }, 400)
+          return json({ error: 'group_not_allowed', message: `"${groupName}" is not one of the ${ALLOWED_GROUPS.length} approved groups`, allowed: ALLOWED_GROUPS }, 400)
         }
         if (!messageContent.trim()) return json({ error: 'message_content_required' }, 400)
         if (!scheduledAt || Number.isNaN(Date.parse(scheduledAt))) {

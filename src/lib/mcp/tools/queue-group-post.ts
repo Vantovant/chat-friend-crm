@@ -6,7 +6,7 @@ export default defineTool({
   name: "queue_group_post",
   title: "Queue a WhatsApp group post",
   description:
-    "Schedule one message to one of the 11 approved WhatsApp groups. The post is inserted with status 'pending' so the dispatcher picks it up. Remember: 1 group per 5-minute tick, so an 11-group wave takes ~55 minutes to clear.",
+    "Schedule one message to one of the 12 approved WhatsApp groups. The post is inserted with status 'pending' so the dispatcher picks it up. Remember: 1 group per 5-minute tick, so a 12-group wave takes ~60 minutes to clear.",
   inputSchema: {
     group_name: z.string().min(1).describe("Exact name of an approved WhatsApp group."),
     message_content: z.string().min(1).describe("Message body to post."),

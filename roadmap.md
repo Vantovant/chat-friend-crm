@@ -1,5 +1,7 @@
 # Vanto CRM Task Roadmap
 
+- [ ] Add Duplication Movement to both connector allowlists; regenerate, deploy and verify the 12-group policy without creating posts.
+
 - [x] Add `list_group_messages` MCP tool (`src/lib/mcp/tools/list-group-messages.ts`)
 - [x] Register tool in `src/lib/mcp/index.ts` and update instructions
 - [x] Verify `maytapi_messages` RLS SELECT policy covers super_admin
