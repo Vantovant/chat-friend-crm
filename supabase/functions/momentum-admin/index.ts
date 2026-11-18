@@ -144,6 +144,16 @@ Deno.serve(async (req) => {
       const { data, error } = await svc.rpc("momentum_retract_distribution", { p_id: id, p_reason: reason, p_actor: who });
       return error ? fail(error) : json({ ok: true, result: data });
     }
+    case "create_content": {
+      const dry = b.dry_run !== false;
+      if (!dry && b.confirm !== "CREATE DRAFT") return json({ ok: false, error: "confirm_phrase_required" }, 400);
+      const { data, error } = await svc.rpc("momentum_create_content", {
+        p_kind: b.kind, p_title: b.title, p_body: b.body,
+        p_source_number: b.source_number ?? null, p_actor: who,
+        p_dry_run: dry, p_expected_sha: b.expected_sha256 ?? null
+      });
+      return error ? fail(error) : json({ ok: true, ...(data as object) });
+    }
     case "import_reference": {   // insert-only, draft-only import of reference nugget summaries; dry run by default (no writes at all)
       const items = Array.isArray(b.items) ? b.items : null; if (!items) return json({ ok: false, error: "items_required" }, 400);
       const dry = b.dry_run !== false;   // only an explicit false performs the import
