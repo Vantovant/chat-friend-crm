@@ -1,0 +1,15 @@
+-- ROLLBACK for momentum_import_reference. Deletes ONLY draft nugget_summary rows created by the function (via audit run ids) that have no deliveries/distributions; then drops function + indexes.
+-- Usage: psql -v run_id="'<uuid>'"  (omit to roll back ALL import runs)   -- never touches approved content, deliveries, distributions.
+begin;
+with created as (
+  select (d->>'content_item_id')::uuid id from content_audit_log, lateral (select detail d) x
+  where event='reference_import_item' and (:'run_id'='' or d->>'run_id'=:'run_id'))
+delete from content_items ci using created c
+ where ci.id=c.id and ci.kind='nugget_summary' and ci.status='draft'
+   and not exists(select 1 from content_deliveries where content_item_id=ci.id)
+   and not exists(select 1 from content_distributions where content_item_id=ci.id);
+insert into content_audit_log(actor,event,detail) values('rollback','reference_import_rolled_back',jsonb_build_object('run_id',nullif(:'run_id','')));
+commit;
+-- Full removal of the feature (separate step):
+-- drop function public.momentum_import_reference(jsonb,text,text,boolean,text);
+-- drop index public.content_items_summary_source_no_uq, public.content_items_summary_title_uq;

@@ -1,0 +1,63 @@
+-- momentum_import_reference: insert-only, draft-only import of reference nugget summaries.
+-- DB-level concurrency guards: (1) advisory xact lock on real runs, (2) unique indexes as the backstop.
+create unique index if not exists content_items_summary_source_no_uq
+  on public.content_items ((substring(title from '^Source #([0-9]+) ')::int)) where kind = 'nugget_summary';
+create unique index if not exists content_items_summary_title_uq
+  on public.content_items (title) where kind = 'nugget_summary';
+
+create or replace function public.momentum_import_reference(
+  p_items jsonb, p_actor text, p_client text default null,
+  p_dry_run boolean default true, p_expected_batch_sha text default null)
+returns jsonb language plpgsql security definer set search_path = public as $fn$
+declare
+  v_n int; v_batch text; v_res jsonb := '[]'; r record; v_verdict text; v_id uuid; v_body text; v_title text;
+  v_new int := 0; v_skip int := 0; v_run text := gen_random_uuid()::text; v_client text := coalesce(nullif(btrim(p_client),''),'unidentified');
+  v_seen int[] := '{}'; v_rows int; v_mc int; v_mid uuid;
+begin
+  if jsonb_typeof(p_items) is distinct from 'array' then raise exception 'items_must_be_array'; end if;
+  v_n := jsonb_array_length(p_items);
+  if v_n < 1 or v_n > 25 then raise exception 'items_count_out_of_range (1..25)'; end if;
+  if p_actor is null or btrim(p_actor)='' then raise exception 'actor_required'; end if;
+  for r in select e from jsonb_array_elements(p_items) e loop
+    if jsonb_typeof(r.e) <> 'object' or (r.e->>'source_number') !~ '^[0-9]{1,2}$' or (r.e->>'source_number')::int not between 1 and 99
+       or coalesce(btrim(r.e->>'title'),'')='' or coalesce(btrim(r.e->>'lesson'),'')='' or length(r.e->>'lesson')>2000 or length(r.e->>'title')>200
+    then raise exception 'invalid_item: %', left(r.e::text,120); end if;
+  end loop;
+  select encode(sha256(convert_to(jsonb_agg(jsonb_build_object('source_number',(e->>'source_number')::int,'title',btrim(e->>'title'),'lesson',btrim(e->>'lesson')) order by (e->>'source_number')::int, e->>'title')::text,'UTF8')),'hex')
+    into v_batch from jsonb_array_elements(p_items) e;
+  if not p_dry_run then
+    if p_expected_batch_sha is distinct from v_batch then raise exception 'batch_sha_mismatch: run a dry run first and pass its batch_sha256'; end if;
+    perform pg_advisory_xact_lock(hashtextextended('momentum_import_reference',0));
+  end if;
+  for r in select (e->>'source_number')::int sn, btrim(e->>'title') t, btrim(e->>'lesson') l from jsonb_array_elements(p_items) e order by 1 loop
+    v_title := format('Source #%s · %s', lpad(r.sn::text,2,'0'), r.t);
+    v_body  := r.t || ' — ' || r.l;
+    v_id := null; v_mid := null;
+    select count(*), min(id::text)::uuid into v_mc, v_mid from content_items where kind='nugget' and regexp_replace(regexp_replace(lower(btrim(title)),'^nugget #[0-9]+[ :.-]*',''),'^the ','') = regexp_replace(lower(r.t),'^the ','');
+    if r.sn = any(v_seen) then v_verdict := 'duplicate_in_batch';
+    elsif v_mc > 1 then v_verdict := 'ambiguous_match'; v_mid := null;
+    elsif v_mc = 1 then v_verdict := 'maps_to_existing';
+    elsif exists(select 1 from content_items where kind='nugget_summary' and substring(title from '^Source #([0-9]+) ')::int = r.sn) then v_verdict := 'duplicate_source_number';
+    elsif exists(select 1 from content_items where kind='nugget_summary' and body = v_body) then v_verdict := 'duplicate_body';
+    elsif exists(select 1 from content_items where kind='nugget_summary' and regexp_replace(title,'^Source #[0-9]+ · ','') = r.t) then v_verdict := 'conflict';
+    else v_verdict := 'new'; end if;
+    v_seen := v_seen || r.sn;
+    if v_verdict = 'new' and not p_dry_run then
+      insert into content_items(kind,title,body,body_sha256,status)
+        values('nugget_summary',v_title,v_body,encode(sha256(convert_to(v_body,'UTF8')),'hex'),'draft')
+        on conflict do nothing returning id into v_id;
+      get diagnostics v_rows = row_count;
+      if v_rows = 0 then v_verdict := 'duplicate_source_number'; else v_new := v_new+1;
+        insert into content_audit_log(actor,event,detail) values(p_actor,'reference_import_item',jsonb_build_object('run_id',v_run,'client',v_client,'content_item_id',v_id,'source_number',r.sn,'title',v_title,'body_sha256',encode(sha256(convert_to(v_body,'UTF8')),'hex')));
+      end if;
+    end if;
+    v_res := v_res || jsonb_build_object('source_number',r.sn,'title',v_title,'verdict',v_verdict,'content_item_id',v_id,'maps_to_id',case when v_verdict='maps_to_existing' then v_mid end);
+  end loop;
+  if not p_dry_run then
+    insert into content_audit_log(actor,event,detail) values(p_actor,'reference_import_run',jsonb_build_object('run_id',v_run,'client',v_client,'batch_sha256',v_batch,'items',v_n,'created',v_new));
+  end if;
+  return jsonb_build_object('dry_run',p_dry_run,'batch_sha256',v_batch,'run_id',case when p_dry_run then null else v_run end,'created',v_new,'verdicts',v_res,
+     'summary',(select jsonb_object_agg(k,c) from (select x->>'verdict' k, count(*) c from jsonb_array_elements(v_res) x group by 1) s));
+end $fn$;
+revoke all on function public.momentum_import_reference(jsonb,text,text,boolean,text) from public, anon, authenticated;
+grant execute on function public.momentum_import_reference(jsonb,text,text,boolean,text) to service_role;

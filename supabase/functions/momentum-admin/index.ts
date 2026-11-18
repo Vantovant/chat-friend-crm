@@ -1,7 +1,7 @@
 // momentum-admin: the single front door for the Momentum approval screen. ADMIN SESSION ONLY (no cron lane, no legacy anon, no service callers:
 // every write needs a real signed-in admin because approvals record WHO approved). It never sends, queues or schedules anything.
 // Actions: list | get | submit | approve | reject | hold | retire | plan | retime | status | group_candidates | group_verify | group_allow
-//          | distributions | distribution_history | distribution_record | distribution_retract   (Distribution Memory; never sends or schedules)
+//          | distributions | distribution_history | distribution_record | distribution_retract | import_reference   (Distribution Memory; never sends or schedules)
 // `via: "mcp"` (optional) only labels the audit actor so MCP-driven actions are distinguishable; it grants nothing.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.4";
 import { requireAdminOrSystem } from "../_shared/require-admin-or-system.ts";
@@ -143,6 +143,13 @@ Deno.serve(async (req) => {
       if (!id || !reason) return json({ ok: false, error: "distribution_id_and_reason_required" }, 400);
       const { data, error } = await svc.rpc("momentum_retract_distribution", { p_id: id, p_reason: reason, p_actor: who });
       return error ? fail(error) : json({ ok: true, result: data });
+    }
+    case "import_reference": {   // insert-only, draft-only import of reference nugget summaries; dry run by default (no writes at all)
+      const items = Array.isArray(b.items) ? b.items : null; if (!items) return json({ ok: false, error: "items_required" }, 400);
+      const dry = b.dry_run !== false;   // only an explicit false performs the import
+      if (!dry && b.confirm !== "IMPORT AS DRAFTS") return json({ ok: false, error: "confirm_phrase_required" }, 400);
+      const { data, error } = await svc.rpc("momentum_import_reference", { p_items: items, p_actor: who, p_client: text(b.client, 120), p_dry_run: dry, p_expected_batch_sha: text(b.expected_batch_sha256, 64) });
+      return error ? fail(error) : json({ ok: true, ...(data as object) });
     }
     default: return json({ ok: false, error: "unknown_action" }, 400);
   }
