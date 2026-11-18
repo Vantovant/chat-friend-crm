@@ -23,7 +23,7 @@ export default defineTool({
   name: "momentum_import_reference",
   title: "Import reference nuggets into Momentum as drafts (dry run first)",
   description:
-    "Dry run by default: validates up to 25 reference nuggets (source_number, title, lesson) against the Momentum library and reports per item: new, duplicate_source_number, duplicate_body, maps_to_existing, conflict or duplicate_in_batch. A dry run writes nothing at all. To import, call again with dry_run=false, confirm='IMPORT AS DRAFTS' and expected_batch_sha256 from the dry run. Imports are insert-only DRAFT rows of kind nugget_summary: it never edits existing content, never approves, plans, schedules or sends anything.",
+    "Dry run by default: validates up to 25 reference nuggets (source_number, title, lesson) against the Momentum library and reports per item: new, duplicate_source_number, duplicate_body, maps_to_existing, ambiguous_match (never written), conflict or duplicate_in_batch. A dry run writes nothing at all. To import, call again with dry_run=false, confirm='IMPORT AS DRAFTS' and expected_batch_sha256 from the dry run. Imports are insert-only DRAFT rows of kind nugget_summary: it never edits existing content, never approves, plans, schedules or sends anything.",
   inputSchema: {
     items: z.array(item).min(1).max(25),
     dry_run: z.boolean().default(true),
