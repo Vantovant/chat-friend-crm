@@ -1467,6 +1467,7 @@ export type Database = {
           planned_at: string
           post_id: string | null
           provider_message_id: string | null
+          sent_at: string | null
           status: string
         }
         Insert: {
@@ -1483,6 +1484,7 @@ export type Database = {
           planned_at: string
           post_id?: string | null
           provider_message_id?: string | null
+          sent_at?: string | null
           status?: string
         }
         Update: {
@@ -1499,6 +1501,7 @@ export type Database = {
           planned_at?: string
           post_id?: string | null
           provider_message_id?: string | null
+          sent_at?: string | null
           status?: string
         }
         Relationships: [
@@ -5689,6 +5692,16 @@ export type Database = {
           verified: boolean
         }[]
       }
+      momentum_import_reference: {
+        Args: {
+          p_actor: string
+          p_client?: string
+          p_dry_run?: boolean
+          p_expected_batch_sha?: string
+          p_items: Json
+        }
+        Returns: Json
+      }
       momentum_last_delivery_at: {
         Args: { p_exclude?: string; p_jid: string }
         Returns: string
@@ -5756,6 +5769,17 @@ export type Database = {
       }
       momentum_slot_conflict: {
         Args: { p_exclude_item?: string; p_jid: string; p_slot: string }
+        Returns: string
+      }
+      momentum_sync_deliveries: {
+        Args: never
+        Returns: {
+          n: number
+          outcome: string
+        }[]
+      }
+      momentum_sync_delivery_from_post: {
+        Args: { p_post: string }
         Returns: string
       }
       momentum_verify_group: {
@@ -5853,6 +5877,20 @@ export type Database = {
           p_source_updated_at: string
         }
         Returns: undefined
+      }
+      restore_held_content_item: {
+        Args: {
+          p_actor: string
+          p_expected_sha: string
+          p_item: string
+          p_reason: string
+          p_slots: Json
+        }
+        Returns: {
+          delivery_id: string
+          destination_jid: string
+          planned_at: string
+        }[]
       }
       retire_content_item: {
         Args: { p_actor?: string; p_item: string }
