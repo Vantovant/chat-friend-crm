@@ -70,6 +70,74 @@
         "outputSchema": null
       },
       {
+        "name": "momentum_import_reference",
+        "title": "Import reference nuggets into Momentum as drafts (dry run first)",
+        "description": "Dry run by default: validates up to 25 reference nuggets (source_number, title, lesson) against the Momentum library and reports per item: new, duplicate_source_number, duplicate_body, maps_to_existing, ambiguous_match (never written), conflict or duplicate_in_batch. A dry run writes nothing at all. To import, call again with dry_run=false, confirm='IMPORT AS DRAFTS' and expected_batch_sha256 from the dry run. Imports are insert-only DRAFT rows of kind nugget_summary: it never edits existing content, never approves, plans, schedules or sends anything.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "source_number": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 99
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "lesson": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000,
+                    "description": "Exact lesson wording from the source. Never invent or reword."
+                  }
+                },
+                "required": [
+                  "source_number",
+                  "title",
+                  "lesson"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 25
+            },
+            "dry_run": {
+              "type": "boolean",
+              "default": true
+            },
+            "confirm": {
+              "type": "string",
+              "description": "Must be exactly 'IMPORT AS DRAFTS' when dry_run is false."
+            },
+            "expected_batch_sha256": {
+              "type": "string",
+              "minLength": 64,
+              "maxLength": 64,
+              "description": "batch_sha256 returned by the dry run of these exact items."
+            }
+          },
+          "required": [
+            "items"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
         "name": "momentum_get_content",
         "title": "Read a Momentum teaching or nugget verbatim",
         "description": "Read-only. Returns one Momentum item's exact stored text, version, status, text hash and recent audit trail via the admin gateway. Quote the text verbatim; never paraphrase, correct or 'improve' Mr Baloyi's wording. Get item ids from momentum_brief.",
