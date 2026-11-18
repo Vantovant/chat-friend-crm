@@ -3693,8 +3693,48 @@ var list_maytapi_auto_replies_default = defineTool65({
   }
 });
 
-// src/lib/mcp/tools/momentum-brief.ts
+// src/lib/mcp/tools/momentum-import-reference.ts
 import { defineTool as defineTool66 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z60 } from "npm:zod@^3.25.76";
+var item = z60.object({
+  source_number: z60.number().int().min(1).max(99),
+  title: z60.string().min(1).max(200),
+  lesson: z60.string().min(1).max(2e3).describe("Exact lesson wording from the source. Never invent or reword.")
+});
+function clientLabel(ctx) {
+  const c = ctx?.clientInfo ?? ctx?.client ?? ctx?.session?.clientInfo ?? null;
+  const name = typeof c?.name === "string" ? c.name : typeof ctx?.clientId === "string" ? ctx.clientId : typeof ctx?.claims?.client_id === "string" ? ctx.claims.client_id : null;
+  const ver = typeof c?.version === "string" ? ` ${c.version}` : "";
+  return name ? `${name}${ver}`.slice(0, 120) : "unidentified";
+}
+var momentum_import_reference_default = defineTool66({
+  name: "momentum_import_reference",
+  title: "Import reference nuggets into Momentum as drafts (dry run first)",
+  description: "Dry run by default: validates up to 25 reference nuggets (source_number, title, lesson) against the Momentum library and reports per item: new, duplicate_source_number, duplicate_body, maps_to_existing, ambiguous_match (never written), conflict or duplicate_in_batch. A dry run writes nothing at all. To import, call again with dry_run=false, confirm='IMPORT AS DRAFTS' and expected_batch_sha256 from the dry run. Imports are insert-only DRAFT rows of kind nugget_summary: it never edits existing content, never approves, plans, schedules or sends anything.",
+  inputSchema: {
+    items: z60.array(item).min(1).max(25),
+    dry_run: z60.boolean().default(true),
+    confirm: z60.string().optional().describe("Must be exactly 'IMPORT AS DRAFTS' when dry_run is false."),
+    expected_batch_sha256: z60.string().length(64).optional().describe("batch_sha256 returned by the dry run of these exact items.")
+  },
+  annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+  handler: async ({ items, dry_run, confirm, expected_batch_sha256 }, ctx) => {
+    if (!ctx.isAuthenticated()) return notAuthenticated;
+    const dry = dry_run !== false;
+    if (!dry && (confirm !== "IMPORT AS DRAFTS" || !expected_batch_sha256))
+      return { content: [{ type: "text", text: "Refused: a real import needs dry_run=false, confirm='IMPORT AS DRAFTS' and expected_batch_sha256 from a dry run of the same items. Nothing was written." }], isError: true };
+    const supabase = supabaseForUser(ctx);
+    const { data, error } = await supabase.functions.invoke("momentum-admin", {
+      body: { action: "import_reference", via: "mcp", items, dry_run: dry, confirm, expected_batch_sha256, client: clientLabel(ctx) }
+    });
+    if (error || !data?.ok) return { content: [{ type: "text", text: `Import ${dry ? "dry run" : ""} failed: ${error?.message ?? data?.error ?? "unknown"}. Nothing was written.` }], isError: true };
+    const out = { dry_run: dry, wrote_anything: !dry && (data.created ?? 0) > 0, created: data.created ?? 0, batch_sha256: data.batch_sha256, run_id: data.run_id ?? null, summary: data.summary ?? {}, verdicts: data.verdicts ?? [] };
+    return { content: [{ type: "text", text: JSON.stringify(out, null, 2) }], structuredContent: out };
+  }
+});
+
+// src/lib/mcp/tools/momentum-brief.ts
+import { defineTool as defineTool67 } from "npm:@lovable.dev/mcp-js@0.26.1";
 
 // src/lib/mcp/tools/momentum-plan-logic.ts
 async function sha256Hex(text2) {
@@ -3836,11 +3876,11 @@ async function matchHistory(items, messages) {
   const prepared = items.map((i) => ({ i, n: normalise(i.body) })).filter((p) => p.n.length >= MIN_MATCH_CHARS);
   for (const m of messages) {
     if (!m.group_jid) continue;
-    const push = (item, kind, score) => {
-      const k = `${item.id}|${m.group_jid}|${m.source}:${m.ref}`;
+    const push = (item2, kind, score) => {
+      const k = `${item2.id}|${m.group_jid}|${m.source}:${m.ref}`;
       if (seen.has(k)) return;
       seen.add(k);
-      out.push({ content_item_id: item.id, content_version: m.content_version ?? item.version ?? null, group_jid: m.group_jid, at: m.at, evidence_ref: `${m.source}:${m.ref}`, source: m.source, kind, score });
+      out.push({ content_item_id: item2.id, content_version: m.content_version ?? item2.version ?? null, group_jid: m.group_jid, at: m.at, evidence_ref: `${m.source}:${m.ref}`, source: m.source, kind, score });
     };
     if (m.content_item_id && byId.has(m.content_item_id)) {
       push(byId.get(m.content_item_id), "identifier", 1);
@@ -4046,17 +4086,17 @@ function buildBrief(input) {
       const existing = byDate.get(date) ?? [];
       const day = { date, weekday: WEEKDAY[dow(date)], rhythm, slots };
       if (existing.length) {
-        const item = existing[0].item;
+        const item2 = existing[0].item;
         day.state = "scheduled";
-        day.item = summary(item);
+        day.item = summary(item2);
         const off2 = existing.filter(({ d }) => !SLOTS.includes(toSast(d.planned_at).time));
         if (off2.length) {
           day.retime_needed = true;
           day.retime_to_first_at = slotIso(date, SLOTS[0]);
-          exceptions.push({ severity: "action", code: "RETIME_NEEDED", item: item.id, message: `${item.title}: ${off2.length} delivery time(s) differ from ${SLOTS.join(" / ")} (currently ${existing.map(({ d }) => toSast(d.planned_at).time).join(" / ")}). Re-time the planned deliveries; never retire and re-plan (the approval would be lost).` });
+          exceptions.push({ severity: "action", code: "RETIME_NEEDED", item: item2.id, message: `${item2.title}: ${off2.length} delivery time(s) differ from ${SLOTS.join(" / ")} (currently ${existing.map(({ d }) => toSast(d.planned_at).time).join(" / ")}). Re-time the planned deliveries; never retire and re-plan (the approval would be lost).` });
         }
-        if (!sendingPossible) exceptions.push({ severity: "info", code: "SCHEDULED_BUT_INERT", item: item.id, message: `${item.title} is planned for ${date} but nothing will send: engine/scheduler gates are not both ON (by design until final activation).` });
-        if (item.status !== "approved") exceptions.push({ severity: "warning", code: "PLANNED_NOT_APPROVED", item: item.id, message: `${item.title} has deliveries but status is ${item.status}.` });
+        if (!sendingPossible) exceptions.push({ severity: "info", code: "SCHEDULED_BUT_INERT", item: item2.id, message: `${item2.title} is planned for ${date} but nothing will send: engine/scheduler gates are not both ON (by design until final activation).` });
+        if (item2.status !== "approved") exceptions.push({ severity: "warning", code: "PLANNED_NOT_APPROVED", item: item2.id, message: `${item2.title} has deliveries but status is ${item2.status}.` });
         days.push(day);
         continue;
       }
@@ -4148,13 +4188,13 @@ function buildBrief(input) {
 }
 
 // src/lib/mcp/tools/momentum-api.ts
-import { z as z60 } from "npm:zod@^3.25.76";
+import { z as z61 } from "npm:zod@^3.25.76";
 var paramsSchema = {
-  week_start: z60.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("A Monday (YYYY-MM-DD). Default: next Monday in South Africa."),
-  weeks: z60.number().int().min(1).max(3).optional().describe("How many weeks to plan (default 2)."),
-  assign: z60.record(z60.string().regex(/^\d{4}-\d{2}-\d{2}$/), z60.string()).optional().describe(`Vanto's revisions: date (YYYY-MM-DD) -> item id to use that day, or "none" to leave the day empty. Use the alternatives from the brief.`),
-  exclude: z60.array(z60.string().uuid()).optional().describe("Item ids to leave out of the plan."),
-  first_release: z60.string().regex(/^\d{2}:\d{2}$/).optional().describe("First group's release time (SAST, HH:MM). Default 09:15; the other groups follow 10 minutes apart.")
+  week_start: z61.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("A Monday (YYYY-MM-DD). Default: next Monday in South Africa."),
+  weeks: z61.number().int().min(1).max(3).optional().describe("How many weeks to plan (default 2)."),
+  assign: z61.record(z61.string().regex(/^\d{4}-\d{2}-\d{2}$/), z61.string()).optional().describe(`Vanto's revisions: date (YYYY-MM-DD) -> item id to use that day, or "none" to leave the day empty. Use the alternatives from the brief.`),
+  exclude: z61.array(z61.string().uuid()).optional().describe("Item ids to leave out of the plan."),
+  first_release: z61.string().regex(/^\d{2}:\d{2}$/).optional().describe("First group's release time (SAST, HH:MM). Default 09:15; the other groups follow 10 minutes apart.")
 };
 var toBriefParams = (p) => ({ weekStart: p.week_start, weeks: p.weeks, assign: p.assign, exclude: p.exclude, firstRelease: p.first_release });
 function adminApi(supabase) {
@@ -4192,7 +4232,7 @@ var text = (o) => ({ content: [{ type: "text", text: JSON.stringify(o, null, 2) 
 var refuse = (m, extra) => ({ content: [{ type: "text", text: m }], structuredContent: { refused: true, message: m, ...extra ?? {} }, isError: true });
 
 // src/lib/mcp/tools/momentum-brief.ts
-var momentum_brief_default = defineTool66({
+var momentum_brief_default = defineTool67({
   name: "momentum_brief",
   title: "Momentum briefing (read-only)",
   description: "Read-only Momentum intelligence. Returns the live state of the A-Team Momentum engine for planning (including per-group DISTRIBUTION MEMORY: which content already went to which group by Momentum, by hand, or on confirmed evidence; a group is never assumed from another, and incomplete history is reported as unknown, never as 'not distributed'): safety gates (engine, scheduler, emergency, freeze, 120-minute gap), allow-listed groups, every teaching and nugget with status/version and planned deliveries (SAST), the Mon/Wed/Fri 09:15/09:25/09:35 rhythm for the coming weeks with what is scheduled, what is proposed and what is a gap, and exceptions (retime needed, needs approval, held, failed, inert). Use it to answer 'what should we do next week?': explain reasoning (each proposed day has a reason and alternatives), then ask Vanto ONE decision. Revisions (assign / exclude / first_release) rebuild the plan when Vanto wants a change. It never approves, schedules, sends or changes any setting. Teaching and nugget wording is Mr Baloyi's and is never edited; read it with momentum_get_content.",
@@ -4214,13 +4254,13 @@ var momentum_brief_default = defineTool66({
 });
 
 // src/lib/mcp/tools/momentum-get-content.ts
-import { defineTool as defineTool67 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z61 } from "npm:zod@^3.25.76";
-var momentum_get_content_default = defineTool67({
+import { defineTool as defineTool68 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z62 } from "npm:zod@^3.25.76";
+var momentum_get_content_default = defineTool68({
   name: "momentum_get_content",
   title: "Read a Momentum teaching or nugget verbatim",
   description: "Read-only. Returns one Momentum item's exact stored text, version, status, text hash and recent audit trail via the admin gateway. Quote the text verbatim; never paraphrase, correct or 'improve' Mr Baloyi's wording. Get item ids from momentum_brief.",
-  inputSchema: { item_id: z61.string().uuid().describe("Item id from momentum_brief.") },
+  inputSchema: { item_id: z62.string().uuid().describe("Item id from momentum_brief.") },
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   handler: async ({ item_id }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
@@ -4234,8 +4274,8 @@ var momentum_get_content_default = defineTool67({
 });
 
 // src/lib/mcp/tools/momentum-preview-plan.ts
-import { defineTool as defineTool68 } from "npm:@lovable.dev/mcp-js@0.26.1";
-var momentum_preview_plan_default = defineTool68({
+import { defineTool as defineTool69 } from "npm:@lovable.dev/mcp-js@0.26.1";
+var momentum_preview_plan_default = defineTool69({
   name: "momentum_preview_plan",
   title: "Preview the Momentum campaign (read-only)",
   description: "Read-only. Builds the exact campaign preview for the coming weeks: the FULL verbatim text of every message that would be scheduled (with its hash), the groups, the exact SAST times, any re-timing of already-scheduled deliveries, problems and exceptions, plus a proposal_hash and the confirm_phrase Vanto must type to approve. Use revisions (assign / exclude / first_release) to change the plan when Vanto asks, and call this again. Show Vanto the exact messages before asking for approval. Nothing is approved, scheduled or sent by this tool.",
@@ -4261,8 +4301,8 @@ var momentum_preview_plan_default = defineTool68({
 });
 
 // src/lib/mcp/tools/momentum-approve-plan.ts
-import { defineTool as defineTool69 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z62 } from "npm:zod@^3.25.76";
+import { defineTool as defineTool70 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z63 } from "npm:zod@^3.25.76";
 
 // src/lib/mcp/tools/momentum-report-logic.ts
 function buildReport(input) {
@@ -4297,16 +4337,16 @@ function buildReport(input) {
 }
 
 // src/lib/mcp/tools/momentum-approve-plan.ts
-var momentum_approve_plan_default = defineTool69({
+var momentum_approve_plan_default = defineTool70({
   name: "momentum_approve_plan",
   title: "Approve and schedule the previewed Momentum campaign",
   description: "WRITES: records Vanto's approval of the EXACT texts shown in momentum_preview_plan (pinned by hash) and schedules their deliveries at the exact previewed times, plus any previewed re-timing. Requires the same revision parameters used for the preview, the proposal_hash, the confirm_phrase Vanto TYPED himself (never fill it in on his behalf) and user_confirmed: true. It re-derives the plan from live data and refuses if anything changed since the preview. Each step is idempotent and the run stops at the first failure. It never sends anything, never turns Engine or Scheduler on, never edits teaching wording, and every action is audit-logged under Vanto's admin session.",
   inputSchema: {
     ...paramsSchema,
-    proposal_hash: z62.string().length(64).describe("proposal_hash from momentum_preview_plan."),
-    confirm_phrase: z62.string().describe("The exact phrase Vanto typed, e.g. APPROVE 4F7Q2A."),
-    user_confirmed: z62.literal(true).describe("Must be true, only after Vanto typed the phrase in this conversation."),
-    confirmed_not_distributed: z62.array(z62.string().uuid()).optional().describe("Item ids Vanto has explicitly confirmed were NOT already distributed to the groups listed in groups_to_confirm (see requires_distribution_confirmation in the preview).")
+    proposal_hash: z63.string().length(64).describe("proposal_hash from momentum_preview_plan."),
+    confirm_phrase: z63.string().describe("The exact phrase Vanto typed, e.g. APPROVE 4F7Q2A."),
+    user_confirmed: z63.literal(true).describe("Must be true, only after Vanto typed the phrase in this conversation."),
+    confirmed_not_distributed: z63.array(z63.string().uuid()).optional().describe("Item ids Vanto has explicitly confirmed were NOT already distributed to the groups listed in groups_to_confirm (see requires_distribution_confirmation in the preview).")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   handler: async (input, ctx) => {
@@ -4340,13 +4380,13 @@ var momentum_approve_plan_default = defineTool69({
 });
 
 // src/lib/mcp/tools/momentum-pause.ts
-import { defineTool as defineTool70 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z63 } from "npm:zod@^3.25.76";
-var momentum_pause_default = defineTool70({
+import { defineTool as defineTool71 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z64 } from "npm:zod@^3.25.76";
+var momentum_pause_default = defineTool71({
   name: "momentum_pause",
   title: "Pause Momentum deliveries (hold)",
   description: "Safe-direction write: puts approved items back on hold, which parks their planned deliveries (nothing is deleted or sent). scope 'all' holds every item that has planned deliveries; scope 'item' holds one. A reason is required. Holding removes the item's approval until Vanto re-approves the exact text, so use it when Vanto says pause/stop. For an instant stop of ALL outbound WhatsApp also offer set_maytapi_freeze. Resuming is a separate, deliberate re-approval; this tool cannot resume.",
-  inputSchema: { scope: z63.enum(["all", "item"]), item_id: z63.string().uuid().optional(), reason: z63.string().min(3).max(300) },
+  inputSchema: { scope: z64.enum(["all", "item"]), item_id: z64.string().uuid().optional(), reason: z64.string().min(3).max(300) },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   handler: async ({ scope, item_id, reason }, ctx) => {
     if (!ctx.isAuthenticated()) return notAuthenticated;
@@ -4366,8 +4406,8 @@ var momentum_pause_default = defineTool70({
 });
 
 // src/lib/mcp/tools/momentum-report.ts
-import { defineTool as defineTool71 } from "npm:@lovable.dev/mcp-js@0.26.1";
-var momentum_report_default = defineTool71({
+import { defineTool as defineTool72 } from "npm:@lovable.dev/mcp-js@0.26.1";
+var momentum_report_default = defineTool72({
   name: "momentum_report",
   title: "Momentum delivery and exception report (read-only)",
   description: "Read-only. What has been delivered, what is planned in the next 7 days, delivery counts by status, and exceptions (failed, needs review, overdue). Use it to answer 'tell me what has been delivered' and for daily check-ins. Never changes anything.",
@@ -4382,24 +4422,24 @@ var momentum_report_default = defineTool71({
 });
 
 // src/lib/mcp/tools/momentum-confirm-distribution.ts
-import { defineTool as defineTool72 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z64 } from "npm:zod@^3.25.76";
-var momentum_confirm_distribution_default = defineTool72({
+import { defineTool as defineTool73 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z65 } from "npm:zod@^3.25.76";
+var momentum_confirm_distribution_default = defineTool73({
   name: "momentum_confirm_distribution",
   title: "Record (or retract) that content was already distributed to a group",
   description: "Records, with an audit trail, that a teaching/nugget was ALREADY distributed to ONE allow-listed WhatsApp group outside Momentum (e.g. Vanto posted it by hand), so Momentum never proposes it again for that group. One record per (content, group): a record for one group says nothing about the others. Use ONLY on Vanto's own statement or evidence he shows (e.g. a WhatsApp screenshot): quote his words in `statement` and describe the evidence in `evidence_ref`; never infer distribution yourself. Without user_confirmed: true it is a dry run that shows exactly what would be recorded. Idempotent (repeating the same evidence creates no duplicate). action 'retract' withdraws a mistaken record (needs record_id and a reason). The original teaching/nugget text is never touched.",
   inputSchema: {
-    action: z64.enum(["record", "retract"]).default("record"),
-    item_id: z64.string().uuid().optional().describe("The content item (required for record)."),
-    group: z64.string().min(2).optional().describe("Allow-listed group name or JID (required for record)."),
-    distributed_at: z64.string().optional().describe("When it was actually posted: ISO with zone, or 'YYYY-MM-DD HH:MM' in South Africa time (required for record)."),
-    origin: z64.enum(["manual_whatsapp", "external_evidence"]).default("manual_whatsapp").describe("manual_whatsapp: posted by hand in the group. external_evidence: confirmed by other evidence."),
-    evidence_ref: z64.string().min(5).max(300).optional().describe("What proves it, e.g. 'WhatsApp screenshot from Vanto, Duplication Movement, 15:09 on 14 Nov 2026'."),
-    statement: z64.string().min(10).max(1e3).optional().describe("Vanto's own words confirming it, verbatim."),
-    note: z64.string().max(500).optional(),
-    record_id: z64.string().uuid().optional().describe("For retract: the record id (see momentum_brief inventory distribution)."),
-    reason: z64.string().min(3).max(300).optional().describe("For retract: why the record is withdrawn."),
-    user_confirmed: z64.boolean().default(false).describe("Must be true to write. Only after Vanto has stated/confirmed it in this conversation.")
+    action: z65.enum(["record", "retract"]).default("record"),
+    item_id: z65.string().uuid().optional().describe("The content item (required for record)."),
+    group: z65.string().min(2).optional().describe("Allow-listed group name or JID (required for record)."),
+    distributed_at: z65.string().optional().describe("When it was actually posted: ISO with zone, or 'YYYY-MM-DD HH:MM' in South Africa time (required for record)."),
+    origin: z65.enum(["manual_whatsapp", "external_evidence"]).default("manual_whatsapp").describe("manual_whatsapp: posted by hand in the group. external_evidence: confirmed by other evidence."),
+    evidence_ref: z65.string().min(5).max(300).optional().describe("What proves it, e.g. 'WhatsApp screenshot from Vanto, Duplication Movement, 15:09 on 14 Nov 2026'."),
+    statement: z65.string().min(10).max(1e3).optional().describe("Vanto's own words confirming it, verbatim."),
+    note: z65.string().max(500).optional(),
+    record_id: z65.string().uuid().optional().describe("For retract: the record id (see momentum_brief inventory distribution)."),
+    reason: z65.string().min(3).max(300).optional().describe("For retract: why the record is withdrawn."),
+    user_confirmed: z65.boolean().default(false).describe("Must be true to write. Only after Vanto has stated/confirmed it in this conversation.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   handler: async (input, ctx) => {
@@ -4415,35 +4455,35 @@ var momentum_confirm_distribution_default = defineTool72({
     if (input.origin === "external_evidence" && !input.statement) return refuse("external_evidence needs Vanto's own words in `statement`.");
     const st = await loadState(api);
     if ("error" in st) return refuse(st.error);
-    const item = st.items.find((i) => i.id === input.item_id);
-    if (!item) return refuse("That content item does not exist.");
+    const item2 = st.items.find((i) => i.id === input.item_id);
+    if (!item2) return refuse("That content item does not exist.");
     const allow = parseAllowList(st.settings.momentum_nugget_target_groups);
     const g = resolveGroup(input.group, allow);
     if (!g) return refuse(`"${input.group}" is not an allow-listed group. Allowed: ${allow.map((x) => x.name).join(", ")}.`);
     const at = parseWhen(input.distributed_at);
     if (!at) return refuse("distributed_at must be ISO with a time zone or 'YYYY-MM-DD HH:MM' (South Africa time).");
     if (Date.parse(at) > Date.now() + 5 * 6e4) return refuse("distributed_at cannot be in the future.");
-    const plan = { item: item.title, version: item.version, group: g.name, group_jid: g.jid, distributed_at_utc: at, origin: input.origin, confidence: "confirmed", evidence_ref: input.evidence_ref, statement: input.statement ?? null };
+    const plan = { item: item2.title, version: item2.version, group: g.name, group_jid: g.jid, distributed_at_utc: at, origin: input.origin, confidence: "confirmed", evidence_ref: input.evidence_ref, statement: input.statement ?? null };
     if (!input.user_confirmed) return text({ dry_run: true, would_record: plan, note: "Nothing written. This records distribution for THIS group only. Repeat with user_confirmed: true after Vanto confirms." });
-    const r = await api("distribution_record", { item_id: item.id, group_jid: g.jid, origin: input.origin, evidence_ref: input.evidence_ref, status: "verified", confidence: "confirmed", distributed_at: at, note: input.note, statement: input.statement, via: "mcp" });
+    const r = await api("distribution_record", { item_id: item2.id, group_jid: g.jid, origin: input.origin, evidence_ref: input.evidence_ref, status: "verified", confidence: "confirmed", distributed_at: at, note: input.note, statement: input.statement, via: "mcp" });
     if (!r.ok) return refuse(`Record failed: ${r.error ?? "unknown"}. Nothing was changed.`);
     const after = await loadDistribution(api);
-    const mine = after.records.filter((x) => x.content_item_id === item.id && x.status !== "retracted").map((x) => ({ group: x.group_name, status: x.status, confidence: x.confidence, origin: x.origin, at: x.distributed_at }));
+    const mine = after.records.filter((x) => x.content_item_id === item2.id && x.status !== "retracted").map((x) => ({ group: x.group_name, status: x.status, confidence: x.confidence, origin: x.origin, at: x.distributed_at }));
     return text({ recorded: r.result, plan, distribution_of_this_content: mine, note: "Content text, approval and schedules are unchanged. Momentum will no longer propose this content for this group." });
   }
 });
 
 // src/lib/mcp/tools/momentum-scan-distribution.ts
-import { defineTool as defineTool73 } from "npm:@lovable.dev/mcp-js@0.26.1";
-import { z as z65 } from "npm:zod@^3.25.76";
-var momentum_scan_distribution_default = defineTool73({
+import { defineTool as defineTool74 } from "npm:@lovable.dev/mcp-js@0.26.1";
+import { z as z66 } from "npm:zod@^3.25.76";
+var momentum_scan_distribution_default = defineTool74({
   name: "momentum_scan_distribution",
   title: "Scan Hub history for already-distributed Momentum content",
   description: "Looks through Hub's existing WhatsApp group history (inbound group messages, Hub-sent group posts, Momentum's own sent deliveries) for the allow-listed groups and reports which teachings/nuggets already appear in which group. Matching: exact hash, normalised text or Momentum's own delivery id = verified; similar or text-with-extra-words = CANDIDATE needing human review (never a confirmed delivery). It also reports per-group history COVERAGE: posts made from the admin's own phone are not captured, so an empty result means UNKNOWN, not 'never distributed'. Dry run by default; record_matches: true writes the records (idempotent, no duplicates on repeat scans). It never edits content, schedules or sends. For something the history cannot see, use momentum_confirm_distribution.",
   inputSchema: {
-    item_id: z65.string().uuid().optional().describe("Limit the scan to one content item."),
-    days_back: z65.number().int().min(1).max(365).default(60),
-    record_matches: z65.boolean().default(false).describe("true = record the matches (verified/candidate). Default false = report only.")
+    item_id: z66.string().uuid().optional().describe("Limit the scan to one content item."),
+    days_back: z66.number().int().min(1).max(365).default(60),
+    record_matches: z66.boolean().default(false).describe("true = record the matches (verified/candidate). Default false = report only.")
   },
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   handler: async (input, ctx) => {
@@ -4496,6 +4536,7 @@ var mcp_default = defineMcp({
   }),
   tools: [
     momentum_brief_default,
+    momentum_import_reference_default,
     momentum_get_content_default,
     momentum_preview_plan_default,
     momentum_approve_plan_default,
