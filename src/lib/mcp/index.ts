@@ -64,6 +64,7 @@ import setDraftStatus from "./tools/set-draft-status";
 import getCallCampaign from "./tools/get-call-campaign";
 import setCallCampaign from "./tools/set-call-campaign";
 import listMaytapiAutoReplies from "./tools/list-maytapi-auto-replies";
+import momentumImportReference from "./tools/momentum-import-reference";
 import momentumBrief from "./tools/momentum-brief";
 import momentumGetContent from "./tools/momentum-get-content";
 import momentumPreviewPlan from "./tools/momentum-preview-plan";
@@ -87,6 +88,7 @@ export default defineMcp({
   }),
   tools: [
     momentumBrief,
+    momentumImportReference,
     momentumGetContent,
     momentumPreviewPlan,
     momentumApprovePlan,
