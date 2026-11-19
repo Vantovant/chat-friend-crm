@@ -138,6 +138,67 @@
         "outputSchema": null
       },
       {
+        "name": "momentum_create_content",
+        "title": "Create a complete Momentum draft (exact wording, dry run first)",
+        "description": "Creates one complete teaching or nugget as a DRAFT, storing the body exactly as supplied (no trimming, rewording or reformatting). Dry run by default: reports verdict new / existing / conflict and a payload_sha256, and writes nothing. To create, call again with the identical payload plus dry_run=false, confirm='CREATE DRAFT' and expected_sha256 from the dry run. A nugget needs source_number (1-99) and a title starting 'Nugget #<that number>'; a number, title or body that already exists is reported as existing (identical) or conflict (never overwritten). It never approves, submits, plans, schedules or sends anything: to publish, use momentum_brief / momentum_preview_plan, then Vanto types the confirmation phrase for momentum_approve_plan.",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "nugget",
+                "teaching"
+              ]
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "body": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 20000,
+              "description": "The complete approved WhatsApp message, exactly as approved. Never reword, correct or reformat."
+            },
+            "source_number": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 99,
+              "description": "Required for a nugget (the N in 'Nugget #N'); not allowed for a teaching."
+            },
+            "dry_run": {
+              "type": "boolean",
+              "default": true
+            },
+            "confirm": {
+              "type": "string",
+              "description": "Must be exactly 'CREATE DRAFT' when dry_run is false."
+            },
+            "expected_sha256": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "payload_sha256 returned by the dry run of this exact payload."
+            }
+          },
+          "required": [
+            "kind",
+            "title",
+            "body"
+          ],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        },
+        "outputSchema": null
+      },
+      {
         "name": "momentum_get_content",
         "title": "Read a Momentum teaching or nugget verbatim",
         "description": "Read-only. Returns one Momentum item's exact stored text, version, status, text hash and recent audit trail via the admin gateway. Quote the text verbatim; never paraphrase, correct or 'improve' Mr Baloyi's wording. Get item ids from momentum_brief.",
