@@ -5670,6 +5670,18 @@ export type Database = {
         Args: { p_actor: string; p_jid: string }
         Returns: boolean
       }
+      momentum_create_content: {
+        Args: {
+          p_actor: string
+          p_body: string
+          p_dry_run: boolean
+          p_expected_sha: string
+          p_kind: string
+          p_source_number: number
+          p_title: string
+        }
+        Returns: Json
+      }
       momentum_distribution_coverage: {
         Args: never
         Returns: {
