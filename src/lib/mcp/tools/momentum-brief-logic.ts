@@ -4,6 +4,7 @@
 import { type DistributionState, NO_DISTRIBUTION_DATA, groupState, coverageVerdict, recordView } from "./momentum-distribution-logic";
 
 export const SLOT_TIMES = ["09:15", "09:25", "09:35"] as const; // SAST, one per authorised group
+export const NUGGET_SLOT_TIMES = ["12:15", "12:25", "12:35"] as const;
 export const SAST_OFFSET_MIN = 120; // South Africa has no DST
 
 // Teaching order. Teaching 3 is Vanto-confirmed; later teachings follow creation order and are flagged unconfirmed.
@@ -44,7 +45,7 @@ export function slotTimesFrom(first?: string): string[] {
 export function buildBrief(input: { now: Date; items: Item[]; settings: Settings; distribution?: DistributionState } & BriefParams) {
   const { now, items, settings } = input;
   const dist = input.distribution ?? NO_DISTRIBUTION_DATA;
-  const SLOTS = slotTimesFrom(input.firstRelease);
+  const teachingSlots = slotTimesFrom(input.firstRelease);
   const exclude = new Set(input.exclude ?? []);
   const assign = input.assign ?? {};
   const nowSast = toSast(now.toISOString());
@@ -61,6 +62,13 @@ export function buildBrief(input: { now: Date; items: Item[]; settings: Settings
     daily_cap: settings.maytapi_daily_cap != null ? Number(settings.maytapi_daily_cap) : null,
   };
   const sendingPossible = gates.engine_enabled && gates.scheduler_enabled && !gates.emergency_paused && !gates.outbound_frozen;
+  // The two schedules are independent but share each group's minimum gap, which the database enforces PER GROUP at release time.
+  // Both waves stagger the groups identically, so group k's teaching and nugget posts are |teaching start - nugget start| apart.
+  // Refuse a teaching wave inside that gap instead of planning deliveries that would have to wait (or go stale).
+  { const gap = Number.isFinite(gates.min_interval_minutes) && gates.min_interval_minutes >= 5 ? gates.min_interval_minutes : 120;
+    const mins = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3)), hhmm = (m: number) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+    const tooClose = teachingSlots.some((t, k) => Math.abs(mins(t) - mins(NUGGET_SLOT_TIMES[k])) < gap);
+    if (tooClose) throw new Error(`first_release ${teachingSlots[0]} puts the teaching wave within ${gap} minutes of the daily nugget wave (${NUGGET_SLOT_TIMES[0]}-${NUGGET_SLOT_TIMES[NUGGET_SLOT_TIMES.length - 1]}) for the same group. Use a teaching start no later than ${hhmm(mins(NUGGET_SLOT_TIMES[0]) - gap)} or at/after ${hhmm(mins(NUGGET_SLOT_TIMES[0]) + gap)}.`); }
 
   // Distribution memory, per (item, group). A group is only ever judged by its OWN evidence.
   const distView = (id: string, g: { name: string; jid: string }) => {
@@ -100,32 +108,39 @@ export function buildBrief(input: { now: Date; items: Item[]; settings: Settings
   for (let w = 0; w < weeks; w++) {
     const monday = addDays(start, 7 * w);
     const days: any[] = [];
-    for (const [off, rhythm, prefer] of [[0, "Understand", "nugget"], [2, "Practise", "teaching"], [4, "Continue and pass it on", "nugget"]] as const) {
+    for (const [off, rhythm, prefer] of Array.from({ length: 7 }, (_, off) => [
+      ...([0, 2, 4].includes(off) ? [[off, "Teaching", "teaching"] as const] : []),
+      [off, "Daily leadership nugget", "nugget"] as const,
+    ]).flat()) {
+      const SLOTS = prefer === "teaching" ? teachingSlots : [...NUGGET_SLOT_TIMES];
       const date = addDays(monday, off);
       const slots = SLOTS.map((t, k) => ({ group: allow[k]?.name ?? null, at_sast: `${date} ${t}` }));
-      const existing = byDate.get(date) ?? [];
-      const day: any = { date, weekday: WEEKDAY[dow(date)], rhythm, slots };
+      // a held item's parked (needs_review) deliveries do not occupy the day: a held plan must never block the other content of that schedule
+      const existing = (byDate.get(date) ?? []).filter(({ item, d }) => item.kind === prefer && !(item.held && d.status === "needs_review"));
+      const slotPast = Date.parse(slotIso(date, SLOTS[0])) <= now.getTime();
+      const day: any = { date, kind: prefer, weekday: WEEKDAY[dow(date)], rhythm, slots };
       if (existing.length) {
         const item = existing[0].item;
         day.state = "scheduled"; day.item = summary(item);
         const off = existing.filter(({ d }) => !SLOTS.includes(toSast(d.planned_at!).time));
-        if (off.length) { day.retime_needed = true; day.retime_to_first_at = slotIso(date, SLOTS[0]); exceptions.push({ severity: "action", code: "RETIME_NEEDED", item: item.id, message: `${item.title}: ${off.length} delivery time(s) differ from ${SLOTS.join(" / ")} (currently ${existing.map(({ d }) => toSast(d.planned_at!).time).join(" / ")}). Re-time the planned deliveries; never retire and re-plan (the approval would be lost).` }); }
+        if (off.length && existing.every(({ d, item }) => d.status === "planned" && item.status === "approved" && !item.held)) { day.retime_needed = true; day.retime_to_first_at = slotIso(date, SLOTS[0]); exceptions.push({ severity: "action", code: "RETIME_NEEDED", item: item.id, message: `${item.title}: ${off.length} delivery time(s) differ from ${SLOTS.join(" / ")} (currently ${existing.map(({ d }) => toSast(d.planned_at!).time).join(" / ")}). Re-time the planned deliveries; never retire and re-plan (the approval would be lost).` }); }
         if (!sendingPossible) exceptions.push({ severity: "info", code: "SCHEDULED_BUT_INERT", item: item.id, message: `${item.title} is planned for ${date} but nothing will send: engine/scheduler gates are not both ON (by design until final activation).` });
         if (item.status !== "approved") exceptions.push({ severity: "warning", code: "PLANNED_NOT_APPROVED", item: item.id, message: `${item.title} has deliveries but status is ${item.status}.` });
         days.push(day); continue;
       }
-      if (assign[date] === "none") { day.state = "skipped"; day.recommendation = { text: "Skipped at Vanto's request." }; days.push(day); continue; }
-      const forced = assign[date] ? byId.get(assign[date]) : undefined;
-      if (assign[date] && (!forced || !eligible(forced))) exceptions.push({ severity: "warning", code: "ASSIGN_INELIGIBLE", message: `${date}: the item chosen for this day is not available (missing, held, already scheduled or excluded); using the default instead.` });
-      // Friday is a nugget-only slot: never fall back to a full teaching there.
-      const other = prefer === "nugget" ? "teaching" : "nugget";
-      let pick: Item | undefined = forced && eligible(forced) ? forced : undefined, why = pick ? "Chosen by Vanto for this day." : "";
-      if (!pick) pick = nextOf(prefer === "nugget" ? nuggets : teachings);
-      if (pick && !why) why = `${prefer} slot in the Mon/Wed/Fri rhythm (${rhythm}).`;
-      else if (!(prefer === "nugget" && off === 4)) { pick = nextOf(other === "nugget" ? nuggets : teachings); if (pick) why = `No ${prefer} left to place, so the next ${other} fills this ${rhythm} slot.`; }
+      if (slotPast) { day.state = "past"; days.push(day); continue; }
+      const plain = assign[date]; // plain date: "none" leaves both schedules empty; an item id applies to the schedule that item belongs to
+      const assigned = assign[`${date}:${prefer}`] ?? (plain === "none" ? "none" : plain && byId.get(plain)?.kind === prefer ? plain : undefined);
+      if (assigned === "none") { day.state = "skipped"; day.recommendation = { text: "Skipped at Vanto's request." }; days.push(day); continue; }
+      const forced = assigned ? byId.get(assigned) : undefined;
+      if (assigned && (!forced || forced.kind !== prefer || !eligible(forced))) exceptions.push({ severity: "warning", code: "ASSIGN_INELIGIBLE", message: `${date}: the item chosen for this day is not available (missing, held, already scheduled or excluded); using the default instead.` });
+      const pool = prefer === "nugget" ? nuggets : teachings;
+      let pick: Item | undefined = forced && forced.kind === prefer && eligible(forced) ? forced : undefined;
+      const why = pick ? "Chosen by Vanto for this content schedule." : `${prefer} slot in its independent schedule.`;
+      if (!pick) pick = nextOf(pool);
       if (!pick) { day.state = "gap"; day.recommendation = { text: `No ready content for ${rhythm}. Create or source a ${prefer}.` }; exceptions.push({ severity: "warning", code: "CONTENT_GAP", message: `${day.weekday} ${date}: no unscheduled approved-or-draft ${prefer} available.` }); days.push(day); continue; }
       used.add(pick.id);
-      const alternatives = [...nuggets, ...teachings].filter(eligible).slice(0, 4).map((a) => ({ item_id: a.id, kind: a.kind, title: a.title, status: a.status }));
+      const alternatives = pool.filter(eligible).slice(0, 4).map((a) => ({ item_id: a.id, kind: a.kind, title: a.title, status: a.status }));
       // per-group distribution: verified groups are skipped, every other group keeps its own slot
       const states = allow.map((g, k) => ({ g, k, st: groupState(pick!.id, g.jid, g.name, dist, now) }));
       const skipped = states.filter((x) => x.st.state === "verified"), targets = states.filter((x) => x.st.state !== "verified");
@@ -166,7 +181,7 @@ export function buildBrief(input: { now: Date; items: Item[]; settings: Settings
   const firstAction = exceptions.find((e) => e.severity === "action");
   return {
     read_only: true, as_of_sast: `${nowSast.date} ${nowSast.time}`, gates, sending_possible: sendingPossible,
-    groups: allow, slot_times_sast: [...SLOTS],
+    groups: allow, slot_times_sast: [...teachingSlots], nugget_slot_times_sast: [...NUGGET_SLOT_TIMES],
     distribution_memory: { available: dist.available, records: dist.records.filter((r) => r.status !== "retracted").length, coverage: allow.map((g) => coverageVerdict(g.jid, g.name, dist.coverage, now)), note: "A group is judged only by its own evidence. Incomplete history means UNKNOWN, never 'not distributed'. Record outside distribution with momentum_confirm_distribution." },
     inventory: { teachings: teachings.map(summary), nuggets: nuggets.map(summary), already_distributed: ALREADY_DISTRIBUTED },
     weeks: weekPlans, exceptions,

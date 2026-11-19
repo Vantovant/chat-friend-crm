@@ -82,17 +82,17 @@ const approveAll = async (pv: any, extra: any = {}) => approve.handler({ ...W1, 
 describe("acceptance: conversational Momentum with a non-sending simulation", () => {
   it("brief explains, offers alternatives and accepts revisions", async () => {
     const b = J(await brief.handler({ ...W1 }, ctx));
-    const mon = b.weeks[0].days[0]; expect(mon.recommendation.item.id).toBe(A1); expect(mon.recommendation.reason).toMatch(/rhythm/);
+    const mon = b.weeks[0].days.find(d => d.kind === "nugget"); expect(mon.recommendation.item.id).toBe(A1); expect(mon.recommendation.reason).toMatch(/independent schedule/);
     expect(mon.recommendation.alternatives.map((a: any) => a.item_id)).toContain(A2);
-    const rev = J(await brief.handler({ ...W1, assign: { "2026-11-20": "none" }, exclude: [A1] }, ctx));
-    expect(rev.weeks[0].days[0].recommendation.item.id).toBe(A2); expect(rev.weeks[0].days[2].state).toBe("skipped");
+    const rev = J(await brief.handler({ ...W1, assign: { "2026-11-20:nugget": "none" }, exclude: [A1] }, ctx));
+    expect(rev.weeks[0].days.find(d => d.kind === "nugget").recommendation.item.id).toBe(A2); expect(rev.weeks[0].days.find(d => d.date === "2026-11-20" && d.kind === "nugget").state).toBe("skipped");
     const t = J(await brief.handler({ ...W1, first_release: "10:00" }, ctx)); expect(t.slot_times_sast).toEqual(["10:00", "10:10", "10:20"]);
   });
   it("preview shows exact verbatim text, times, retime, phrase; changes nothing", async () => {
     const pv = J(await preview.handler({ ...W1 }, ctx));
-    expect(pv.messages.map((m: any) => m.item_id)).toEqual([A1, A2]);
-    expect(pv.messages[0].text).toBe(itemOf(A1).body); expect(pv.messages[0].text_sha256).toBe(sha(itemOf(A1).body));
-    expect(pv.messages[0].deliveries.map((d: any) => d.at_sast)).toEqual(["2026-11-16 09:15", "2026-11-16 09:25", "2026-11-16 09:35"]);
+    expect(pv.messages.filter(m => m.kind === "nugget").map((m: any) => m.item_id)).toEqual([A1, A2]);
+    expect(pv.messages.find(m => m.item_id === A1).text).toBe(itemOf(A1).body); expect(pv.messages.find(m => m.item_id === A1).text_sha256).toBe(sha(itemOf(A1).body));
+    expect(pv.messages.find(m => m.item_id === A1).deliveries.map((d: any) => d.at_sast)).toEqual(["2026-11-16 12:15", "2026-11-16 12:25", "2026-11-16 12:35"]);
     expect(pv.steps.find((s: any) => s.type === "retime")).toMatchObject({ item_id: T2, first_at: iso("2026-11-18", "09:15") });
     expect(pv.confirm_phrase).toMatch(/^APPROVE [0-9A-F]{6}$/); expect(pv.requires_distribution_confirmation).toHaveLength(2);
     expect(sim.calls.every((c: string) => ["list", "status", "get", "distributions"].includes(c))).toBe(true); expect(sim.audit).toEqual([]);
@@ -110,8 +110,8 @@ describe("acceptance: conversational Momentum with a non-sending simulation", ()
     const before = JSON.stringify(sim.settings); const pv = J(await preview.handler({ ...W1 }, ctx));
     const r = await approveAll(pv); const out = J(r); expect(r.isError).toBeUndefined(); expect(out.halted_on_failure).toBe(false);
     const times = (id: string) => sim.dels.filter((d: Del) => d.item === id).map((d: Del) => new Date(Date.parse(d.at) + 2 * 3600000).toISOString().slice(0, 16).replace("T", " ")).sort();
-    expect(times(A1)).toEqual(["2026-11-16 09:15", "2026-11-16 09:25", "2026-11-16 09:35"]);
-    expect(times(A2)).toEqual(["2026-11-20 09:15", "2026-11-20 09:25", "2026-11-20 09:35"]);
+    expect(times(A1)).toEqual(["2026-11-16 12:15", "2026-11-16 12:25", "2026-11-16 12:35"]);
+    expect(times(A2)).toEqual(["2026-11-17 12:15", "2026-11-17 12:25", "2026-11-17 12:35"]);
     expect(times(T2)).toEqual(["2026-11-18 09:15", "2026-11-18 09:25", "2026-11-18 09:35"]);
     expect(sim.dels.filter((d: Del) => d.item === T2)).toHaveLength(3); expect(itemOf(T2).status).toBe("approved");
     expect(itemOf(A1).status).toBe("approved"); expect(itemOf(A1).body).toBe(sim.items.find((i: any) => i.id === A1).body);
@@ -127,7 +127,7 @@ describe("acceptance: conversational Momentum with a non-sending simulation", ()
     expect(out.results.map((x: any) => x.outcome)).toContain("failed");
     expect(sim.dels.filter((d: Del) => d.item === A2)).toHaveLength(0);
     sim.failPlanFor = null; const pv2 = J(await preview.handler({ ...W1 }, ctx));
-    expect(pv2.steps.map((s: any) => s.item_id)).toEqual([A2]); // only what remains
+    expect(pv2.steps.map((s: any) => s.item_id)).toEqual([A2, T2]); // remaining nugget and existing teaching retime
     expect(J(await approveAll(pv2)).halted_on_failure).toBe(false); expect(sim.dels.filter((d: Del) => d.item === A2)).toHaveLength(3);
   });
   it("text drift after the preview is refused", async () => {

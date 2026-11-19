@@ -8,9 +8,9 @@ import type { DistributionState } from "./momentum-distribution-logic";
 export const paramsSchema = {
   week_start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("A Monday (YYYY-MM-DD). Default: next Monday in South Africa."),
   weeks: z.number().int().min(1).max(3).optional().describe("How many weeks to plan (default 2)."),
-  assign: z.record(z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.string()).optional().describe("Vanto's revisions: date (YYYY-MM-DD) -> item id to use that day, or \"none\" to leave the day empty. Use the alternatives from the brief."),
+  assign: z.record(z.string().regex(/^\d{4}-\d{2}-\d{2}(:(teaching|nugget))?$/), z.string()).optional().describe("Vanto's revisions for the two independent schedules. \"YYYY-MM-DD:teaching\" or \"YYYY-MM-DD:nugget\" -> item id of that kind to use in that schedule on that day, or \"none\" to leave that schedule empty that day. A plain \"YYYY-MM-DD\" key with an item id applies to the schedule the item belongs to; a plain date with \"none\" leaves BOTH schedules empty that day. Use the alternatives from the brief."),
   exclude: z.array(z.string().uuid()).optional().describe("Item ids to leave out of the plan."),
-  first_release: z.string().regex(/^\d{2}:\d{2}$/).optional().describe("First group's release time (SAST, HH:MM). Default 09:15; the other groups follow 10 minutes apart."),
+  first_release: z.string().regex(/^\d{2}:\d{2}$/).optional().describe("First group's release time (SAST, HH:MM) for the TEACHING wave (Mon/Wed/Fri). Default 09:15; the other groups follow 10 minutes apart. The daily nugget wave is fixed at 12:15 / 12:25 / 12:35 and the plan is refused if the teaching wave would sit within the minimum gap of it."),
 };
 export type ToolParams = { week_start?: string; weeks?: number; assign?: Record<string, string>; exclude?: string[]; first_release?: string };
 export const toBriefParams = (p: ToolParams): BriefParams => ({ weekStart: p.week_start, weeks: p.weeks, assign: p.assign, exclude: p.exclude, firstRelease: p.first_release });

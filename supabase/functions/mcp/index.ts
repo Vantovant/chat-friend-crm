@@ -4001,6 +4001,7 @@ function parseAllowList(raw) {
 }
 
 // src/lib/mcp/tools/momentum-brief-logic.ts
+var NUGGET_SLOT_TIMES = ["12:15", "12:25", "12:35"];
 var SAST_OFFSET_MIN = 120;
 var SERIES_ORDER = ["4-step-duplication", "three-skills-duplication"];
 var ALREADY_DISTRIBUTED = [{ label: "Teaching 1: The Hero Trap (Lesson 1)", where: "sent before Momentum", note: "never re-propose" }];
@@ -4043,7 +4044,7 @@ function slotTimesFrom(first) {
 function buildBrief(input) {
   const { now, items, settings } = input;
   const dist = input.distribution ?? NO_DISTRIBUTION_DATA;
-  const SLOTS = slotTimesFrom(input.firstRelease);
+  const teachingSlots = slotTimesFrom(input.firstRelease);
   const exclude = new Set(input.exclude ?? []);
   const assign = input.assign ?? {};
   const nowSast = toSast(now.toISOString());
@@ -4066,6 +4067,12 @@ function buildBrief(input) {
     daily_cap: settings.maytapi_daily_cap != null ? Number(settings.maytapi_daily_cap) : null
   };
   const sendingPossible = gates.engine_enabled && gates.scheduler_enabled && !gates.emergency_paused && !gates.outbound_frozen;
+  {
+    const gap = Number.isFinite(gates.min_interval_minutes) && gates.min_interval_minutes >= 5 ? gates.min_interval_minutes : 120;
+    const mins = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3)), hhmm = (m) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+    const tooClose = teachingSlots.some((t, k) => Math.abs(mins(t) - mins(NUGGET_SLOT_TIMES[k])) < gap);
+    if (tooClose) throw new Error(`first_release ${teachingSlots[0]} puts the teaching wave within ${gap} minutes of the daily nugget wave (${NUGGET_SLOT_TIMES[0]}-${NUGGET_SLOT_TIMES[NUGGET_SLOT_TIMES.length - 1]}) for the same group. Use a teaching start no later than ${hhmm(mins(NUGGET_SLOT_TIMES[0]) - gap)} or at/after ${hhmm(mins(NUGGET_SLOT_TIMES[0]) + gap)}.`);
+  }
   const distView = (id, g) => {
     const st = groupState(id, g.jid, g.name, dist, now);
     if (st.state === "verified") return { group: g.name, state: "verified_distributed", ...recordView(st.record, sastText) };
@@ -4112,17 +4119,22 @@ function buildBrief(input) {
   for (let w = 0; w < weeks; w++) {
     const monday = addDays(start, 7 * w);
     const days = [];
-    for (const [off, rhythm, prefer] of [[0, "Understand", "nugget"], [2, "Practise", "teaching"], [4, "Continue and pass it on", "nugget"]]) {
+    for (const [off, rhythm, prefer] of Array.from({ length: 7 }, (_, off2) => [
+      ...[0, 2, 4].includes(off2) ? [[off2, "Teaching", "teaching"]] : [],
+      [off2, "Daily leadership nugget", "nugget"]
+    ]).flat()) {
+      const SLOTS = prefer === "teaching" ? teachingSlots : [...NUGGET_SLOT_TIMES];
       const date = addDays(monday, off);
       const slots = SLOTS.map((t, k) => ({ group: allow[k]?.name ?? null, at_sast: `${date} ${t}` }));
-      const existing = byDate.get(date) ?? [];
-      const day = { date, weekday: WEEKDAY[dow(date)], rhythm, slots };
+      const existing = (byDate.get(date) ?? []).filter(({ item: item2, d }) => item2.kind === prefer && !(item2.held && d.status === "needs_review"));
+      const slotPast = Date.parse(slotIso(date, SLOTS[0])) <= now.getTime();
+      const day = { date, kind: prefer, weekday: WEEKDAY[dow(date)], rhythm, slots };
       if (existing.length) {
         const item2 = existing[0].item;
         day.state = "scheduled";
         day.item = summary(item2);
         const off2 = existing.filter(({ d }) => !SLOTS.includes(toSast(d.planned_at).time));
-        if (off2.length) {
+        if (off2.length && existing.every(({ d, item: item3 }) => d.status === "planned" && item3.status === "approved" && !item3.held)) {
           day.retime_needed = true;
           day.retime_to_first_at = slotIso(date, SLOTS[0]);
           exceptions.push({ severity: "action", code: "RETIME_NEEDED", item: item2.id, message: `${item2.title}: ${off2.length} delivery time(s) differ from ${SLOTS.join(" / ")} (currently ${existing.map(({ d }) => toSast(d.planned_at).time).join(" / ")}). Re-time the planned deliveries; never retire and re-plan (the approval would be lost).` });
@@ -4132,22 +4144,25 @@ function buildBrief(input) {
         days.push(day);
         continue;
       }
-      if (assign[date] === "none") {
+      if (slotPast) {
+        day.state = "past";
+        days.push(day);
+        continue;
+      }
+      const plain = assign[date];
+      const assigned = assign[`${date}:${prefer}`] ?? (plain === "none" ? "none" : plain && byId.get(plain)?.kind === prefer ? plain : void 0);
+      if (assigned === "none") {
         day.state = "skipped";
         day.recommendation = { text: "Skipped at Vanto's request." };
         days.push(day);
         continue;
       }
-      const forced = assign[date] ? byId.get(assign[date]) : void 0;
-      if (assign[date] && (!forced || !eligible(forced))) exceptions.push({ severity: "warning", code: "ASSIGN_INELIGIBLE", message: `${date}: the item chosen for this day is not available (missing, held, already scheduled or excluded); using the default instead.` });
-      const other = prefer === "nugget" ? "teaching" : "nugget";
-      let pick = forced && eligible(forced) ? forced : void 0, why = pick ? "Chosen by Vanto for this day." : "";
-      if (!pick) pick = nextOf(prefer === "nugget" ? nuggets : teachings);
-      if (pick && !why) why = `${prefer} slot in the Mon/Wed/Fri rhythm (${rhythm}).`;
-      else if (!(prefer === "nugget" && off === 4)) {
-        pick = nextOf(other === "nugget" ? nuggets : teachings);
-        if (pick) why = `No ${prefer} left to place, so the next ${other} fills this ${rhythm} slot.`;
-      }
+      const forced = assigned ? byId.get(assigned) : void 0;
+      if (assigned && (!forced || forced.kind !== prefer || !eligible(forced))) exceptions.push({ severity: "warning", code: "ASSIGN_INELIGIBLE", message: `${date}: the item chosen for this day is not available (missing, held, already scheduled or excluded); using the default instead.` });
+      const pool = prefer === "nugget" ? nuggets : teachings;
+      let pick = forced && forced.kind === prefer && eligible(forced) ? forced : void 0;
+      const why = pick ? "Chosen by Vanto for this content schedule." : `${prefer} slot in its independent schedule.`;
+      if (!pick) pick = nextOf(pool);
       if (!pick) {
         day.state = "gap";
         day.recommendation = { text: `No ready content for ${rhythm}. Create or source a ${prefer}.` };
@@ -4156,7 +4171,7 @@ function buildBrief(input) {
         continue;
       }
       used.add(pick.id);
-      const alternatives = [...nuggets, ...teachings].filter(eligible).slice(0, 4).map((a) => ({ item_id: a.id, kind: a.kind, title: a.title, status: a.status }));
+      const alternatives = pool.filter(eligible).slice(0, 4).map((a) => ({ item_id: a.id, kind: a.kind, title: a.title, status: a.status }));
       const states = allow.map((g, k) => ({ g, k, st: groupState(pick.id, g.jid, g.name, dist, now) }));
       const skipped = states.filter((x) => x.st.state === "verified"), targets = states.filter((x) => x.st.state !== "verified");
       const unknownG = targets.filter((x) => x.st.state === "unknown"), candG = targets.filter((x) => x.st.state === "candidate");
@@ -4209,7 +4224,8 @@ function buildBrief(input) {
     gates,
     sending_possible: sendingPossible,
     groups: allow,
-    slot_times_sast: [...SLOTS],
+    slot_times_sast: [...teachingSlots],
+    nugget_slot_times_sast: [...NUGGET_SLOT_TIMES],
     distribution_memory: { available: dist.available, records: dist.records.filter((r) => r.status !== "retracted").length, coverage: allow.map((g) => coverageVerdict(g.jid, g.name, dist.coverage, now)), note: "A group is judged only by its own evidence. Incomplete history means UNKNOWN, never 'not distributed'. Record outside distribution with momentum_confirm_distribution." },
     inventory: { teachings: teachings.map(summary), nuggets: nuggets.map(summary), already_distributed: ALREADY_DISTRIBUTED },
     weeks: weekPlans,
@@ -4224,9 +4240,9 @@ import { z as z62 } from "npm:zod@^3.25.76";
 var paramsSchema = {
   week_start: z62.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().describe("A Monday (YYYY-MM-DD). Default: next Monday in South Africa."),
   weeks: z62.number().int().min(1).max(3).optional().describe("How many weeks to plan (default 2)."),
-  assign: z62.record(z62.string().regex(/^\d{4}-\d{2}-\d{2}$/), z62.string()).optional().describe(`Vanto's revisions: date (YYYY-MM-DD) -> item id to use that day, or "none" to leave the day empty. Use the alternatives from the brief.`),
+  assign: z62.record(z62.string().regex(/^\d{4}-\d{2}-\d{2}(:(teaching|nugget))?$/), z62.string()).optional().describe(`Vanto's revisions for the two independent schedules. "YYYY-MM-DD:teaching" or "YYYY-MM-DD:nugget" -> item id of that kind to use in that schedule on that day, or "none" to leave that schedule empty that day. A plain "YYYY-MM-DD" key with an item id applies to the schedule the item belongs to; a plain date with "none" leaves BOTH schedules empty that day. Use the alternatives from the brief.`),
   exclude: z62.array(z62.string().uuid()).optional().describe("Item ids to leave out of the plan."),
-  first_release: z62.string().regex(/^\d{2}:\d{2}$/).optional().describe("First group's release time (SAST, HH:MM). Default 09:15; the other groups follow 10 minutes apart.")
+  first_release: z62.string().regex(/^\d{2}:\d{2}$/).optional().describe("First group's release time (SAST, HH:MM) for the TEACHING wave (Mon/Wed/Fri). Default 09:15; the other groups follow 10 minutes apart. The daily nugget wave is fixed at 12:15 / 12:25 / 12:35 and the plan is refused if the teaching wave would sit within the minimum gap of it.")
 };
 var toBriefParams = (p) => ({ weekStart: p.week_start, weeks: p.weeks, assign: p.assign, exclude: p.exclude, firstRelease: p.first_release });
 function adminApi(supabase) {
@@ -4267,7 +4283,7 @@ var refuse = (m, extra) => ({ content: [{ type: "text", text: m }], structuredCo
 var momentum_brief_default = defineTool68({
   name: "momentum_brief",
   title: "Momentum briefing (read-only)",
-  description: "Read-only Momentum intelligence. Returns the live state of the A-Team Momentum engine for planning (including per-group DISTRIBUTION MEMORY: which content already went to which group by Momentum, by hand, or on confirmed evidence; a group is never assumed from another, and incomplete history is reported as unknown, never as 'not distributed'): safety gates (engine, scheduler, emergency, freeze, 120-minute gap), allow-listed groups, every teaching and nugget with status/version and planned deliveries (SAST), the Mon/Wed/Fri 09:15/09:25/09:35 rhythm for the coming weeks with what is scheduled, what is proposed and what is a gap, and exceptions (retime needed, needs approval, held, failed, inert). Use it to answer 'what should we do next week?': explain reasoning (each proposed day has a reason and alternatives), then ask Vanto ONE decision. Revisions (assign / exclude / first_release) rebuild the plan when Vanto wants a change. It never approves, schedules, sends or changes any setting. Teaching and nugget wording is Mr Baloyi's and is never edited; read it with momentum_get_content.",
+  description: "Read-only Momentum intelligence. Returns the live state of the A-Team Momentum engine for planning (including per-group DISTRIBUTION MEMORY: which content already went to which group by Momentum, by hand, or on confirmed evidence; a group is never assumed from another, and incomplete history is reported as unknown, never as 'not distributed'): safety gates (engine, scheduler, emergency, freeze, 120-minute gap), allow-listed groups, every teaching and nugget with status/version and planned deliveries (SAST), the two INDEPENDENT schedules for the coming weeks (Mr Baloyi's teachings Mon/Wed/Fri at 09:15/09:25/09:35 SAST; leadership nuggets every day at 12:15/12:25/12:35 SAST; one is never substituted for the other, and a missing nugget is shown as a gap, never filled by a teaching) with what is scheduled, what is proposed and what is a gap, and exceptions (retime needed, needs approval, held, failed, inert). Use it to answer 'what should we do next week?': explain reasoning (each proposed day has a reason and alternatives), then ask Vanto ONE decision. Revisions (assign / exclude / first_release) rebuild the plan when Vanto wants a change. It never approves, schedules, sends or changes any setting. Teaching and nugget wording is Mr Baloyi's and is never edited; read it with momentum_get_content.",
   inputSchema: paramsSchema,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   handler: async (input, ctx) => {
@@ -4310,7 +4326,7 @@ import { defineTool as defineTool70 } from "npm:@lovable.dev/mcp-js@0.26.1";
 var momentum_preview_plan_default = defineTool70({
   name: "momentum_preview_plan",
   title: "Preview the Momentum campaign (read-only)",
-  description: "Read-only. Builds the exact campaign preview for the coming weeks: the FULL verbatim text of every message that would be scheduled (with its hash), the groups, the exact SAST times, any re-timing of already-scheduled deliveries, problems and exceptions, plus a proposal_hash and the confirm_phrase Vanto must type to approve. Use revisions (assign / exclude / first_release) to change the plan when Vanto asks, and call this again. Show Vanto the exact messages before asking for approval. Nothing is approved, scheduled or sent by this tool.",
+  description: "Read-only. Builds the exact campaign preview for the coming weeks: the FULL verbatim text of every message that would be scheduled (with its hash), the groups, the exact SAST times (teachings Mon/Wed/Fri 09:15-09:35; leadership nuggets daily 12:15-12:35; each message is labelled with its kind), any re-timing of already-scheduled deliveries, problems and exceptions, plus a proposal_hash and the confirm_phrase Vanto must type to approve. Use revisions (assign / exclude / first_release) to change the plan when Vanto asks, and call this again. Show Vanto the exact messages before asking for approval. Nothing is approved, scheduled or sent by this tool.",
   inputSchema: paramsSchema,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   handler: async (input, ctx) => {
@@ -4560,7 +4576,7 @@ var projectRef = "nqyyvqcmcyggvlcswkio";
 var mcp_default = defineMcp({
   name: "get-well-hub",
   title: "Get Well Hub",
-  version: "1.17.0",
+  version: "1.18.0",
   instructions: `Tools for Get Well Hub, a WhatsApp CRM. Call get_dispatch_policy before scheduling any WhatsApp campaign: the dispatcher sends 1 group post per 5-minute tick, so an 11-group wave takes ~55 minutes to clear and final waves must start 60-70 minutes before any time-sensitive event. Posts are queued with status 'pending'. All contact tools act as the signed-in user under row-level security. For 1:1 inbox work across Twilio and Maytapi, use list_conversations \u2192 get_conversation_thread (check recent_auto_reply_events before replying) \u2192 reply_to_conversation. For Facebook Page comments, use list_fb_comments to read and reply_to_fb_comment to post a public reply (requires pages_manage_engagement); to privately message a commenter (one private Messenger message per comment, within 7 days of the comment) use send_private_reply_to_comment. For WhatsApp group questions ("how many people are in the group") use get_group_overview and get_group_welcome_status; for join/leave/removal history (including people who already left) use list_group_membership_events; for actual group chat content (who said what, when) use list_group_messages; for scoped 1-on-1 group outreach use list_group_dm_candidates \u2192 create_group_dm_batch (draft, human review) \u2192 approve_group_dm_batch (real sends, requires zazi_group_dm_mode = 'pilot_manual'). For the Lead Call Report, use get_lead_call_report (sorted newest-first by default) and generate_lead_call_summaries to fill in missing AI summaries; edit a lead's type/notes/pipeline stage via update_contact. To post TO a Facebook Page, use create_fb_post \u2014 it refuses to do anything unless you pass either scheduled_publish_time (ISO 8601, 10 minutes to 75 days ahead, queued on Facebook's own scheduler) or publish_now: true; never pass publish_now: true unless the user has clearly asked to publish immediately. Use list_fb_posts to see what is already published, scheduled, or failed before adding more. For the AI Trainer (how the auto-reply bot answers), use list_trainer_rules / get_trainer_rule to read, create_trainer_rule / update_trainer_rule to change (no delete \u2014 switch off with enabled: false; every edit is audited in the rule's notes), and list_reply_corrections / add_reply_correction for the corrections log. Show the operator the exact rule text and get approval before any trainer write. To check the Twilio pipeline against Twilio's own records (account, balance, webhook, sender status, alerts, and Twilio-vs-Hub inbound counts per day), use get_twilio_status \u2014 read-only, admin only. For Group Guard (anti-spam in WhatsApp groups) use get_group_guard_status to read and set_group_guard_mode to change mode. For the Call Sheet (live Hot / Lukewarm / Cold = Tier A / B / C calling list for the active calling campaign), use get_campaign_scorecard for targets, pace and the current time block, list_call_sheet for who to call next, get_call_sheet_card for one person's full context, log_call to record each call (one transaction: call row, activity, dated note line, optional 09:00 SAST reminder), list_calls for the call log and list_followups_due for callbacks (list_call_sheet membership_only: true shows only membership inquiries). Call Sheet writes: set_call_tier (WRITES: tier override, pin, hide \u2014 never edits contact temperature), add_call_signals (WRITES: bulk up to 200 signals, matched by phone first, never creates contacts, returns unmatched rows; registered_elsewhere removes the person from the sheet), save_message_drafts (WRITES: bulk up to 100 drafts, status draft, nothing sent), list_message_drafts (read), set_draft_status (WRITES: approved / rejected / sent_by_vanto; approved only with explicit_user_instruction: true after Vanto explicitly says so), get_call_campaign (read) and set_call_campaign (WRITES: targets, blocks, cutoff_at, is_active). Call Sheet safety rules: the Call Sheet tools never send messages; send_whatsapp_message is the only sender, and before any send you must show Vanto the exact text and get a clear yes, and respect its refusals (do-not-contact, frozen outbound, daily cap, 24-hour window). Use supports-language only: no disease or cure claims and no income promises, in messages and in drafts. Health details a prospect shared are for Vanto's call only; never repeat them in messages or drafts. Never change do_not_contact, opt-outs or consent from these tools. Contact categories: update_contact category family / friend / business marks a person "Belongs in VantoOS" \u2014 they leave the Call Sheet prospect tabs, prospect follow-ups and the prospect auto-reply; only set a category when Vanto asks. The personal WhatsApp number (Maytapi) auto-reply only answers confident product/price/joining/health enquiries from new or prospect contacts who messaged first; use list_maytapi_auto_replies (read) to review every decision, and needs_human_only: true for messages the bot stayed silent on.`,
   auth: auth.oauth.issuer({
     issuer: `https://${projectRef}.supabase.co/auth/v1`,
