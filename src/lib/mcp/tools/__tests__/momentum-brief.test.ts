@@ -25,22 +25,23 @@ describe("momentum brief", () => {
   it("plans next week from real-shaped data without writing anything", () => {
     const b = buildBrief({ now, items, settings });
     expect(b.read_only).toBe(true); expect(b.sending_possible).toBe(false);
-    const [w1, w2] = b.weeks; const [mon, wed, fri] = w1.days;
+    const [w1, w2] = b.weeks; const mon = w1.days.find(d => d.date === "2026-11-16" && d.kind === "nugget"); const wed = w1.days.find(d => d.date === "2026-11-18" && d.kind === "teaching"); const tue = w1.days.find(d => d.date === "2026-11-17" && d.kind === "nugget");
+    expect(w1.days.filter(d => d.kind === "nugget")).toHaveLength(7); expect(w1.days.filter(d => d.kind === "teaching").map(d => d.weekday)).toEqual(["Mon","Wed","Fri"]);
     expect(mon.date).toBe("2026-11-16"); expect(mon.state).toBe("proposed"); expect(mon.recommendation.item.id).toBe("n1");
     expect(mon.recommendation.warnings.join(" ")).toMatch(/Prior distribution/);
     expect(wed.state).toBe("scheduled"); expect(wed.item.id).toBe("t2"); expect(wed.retime_needed).toBe(true);
-    expect(fri.recommendation.item.id).toBe("n21");
-    expect(w2.days[0].recommendation.item.id).toBe("t3"); // Teaching 3 Monday 23
-    expect(w2.days[0].recommendation.warnings.join(" ")).toMatch(/wording flag/);
-    expect(w2.days[1].recommendation.item.id).toBe("t4"); // Wed 25 teaching
-    expect(w2.days[2].state).toBe("gap"); // Fri: no nuggets left, never a teaching
+    expect(tue.recommendation.item.id).toBe("n21");
+    expect(w1.days[0].recommendation.item.id).toBe("t3");
+    expect(w1.days[0].recommendation.warnings.join(" ")).toMatch(/wording flag/);
+    expect(w1.days.find(d => d.weekday === "Fri" && d.kind === "teaching").recommendation.item.id).toBe("t4");
+    expect(w2.days.every(d => d.state === "gap")).toBe(true);
     expect(b.exceptions.some((e) => e.code === "RETIME_NEEDED")).toBe(true);
     expect(b.exceptions.some((e) => e.code === "SCHEDULED_BUT_INERT")).toBe(true);
     expect(b.decision_hint).toMatch(/ONE decision/);
   });
   it("does not duplicate scheduled items and never proposes held/source-changed", () => {
     const b = buildBrief({ now, items: items.map((i) => (i.id === "n1" ? { ...i, held: true } : i)), settings });
-    expect(b.weeks[0].days[0].recommendation.item.id).toBe("n21");
+    expect(b.weeks[0].days.find(d => d.kind === "nugget").recommendation.item.id).toBe("n21");
     const ids = b.weeks.flatMap((w: any) => w.days.map((x: any) => x.recommendation?.item?.id ?? x.item?.id)).filter(Boolean);
     expect(new Set(ids).size).toBe(ids.length);
   });
