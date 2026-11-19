@@ -86,21 +86,21 @@ afterEach(() => vi.useRealTimers());
 const W1 = { weeks: 1 };
 const SHOT = "WhatsApp screenshot from Vanto: Nugget #1 posted in Duplication Movement, 15:09 on 14 Nov 2026";
 const confirmDM = (extra: any = {}) => confirm.handler({ item_id: A1, group: "Duplication Movement", distributed_at: "2026-11-14 15:09", origin: "external_evidence", evidence_ref: SHOT, statement: "I posted Nugget 1 myself in Duplication Movement at 15:09 today", user_confirmed: true, ...extra }, ctx);
-const gm = (b: any, k: number) => b.weeks[0].days[0].slots[k];
+const gm = (b: any, k: number) => b.weeks[0].days.find(d => d.kind === "nugget").slots[k];
 
 describe("ACCEPTANCE: Nugget #1 manually posted in Duplication Movement", () => {
   it("is recognised in future conversations and not proposed again for that group", async () => {
     const before = J(await brief.handler({ ...W1 }, ctx));
-    expect(before.weeks[0].days[0].recommendation.plan.group_jids).toEqual(["1@g.us", "2@g.us", "3@g.us"]);
+    expect(before.weeks[0].days.find(d => d.kind === "nugget").recommendation.plan.group_jids).toEqual(["1@g.us", "2@g.us", "3@g.us"]);
     const dry = J(await confirm.handler({ item_id: A1, group: "Duplication Movement", distributed_at: "2026-11-14 15:09", origin: "external_evidence", evidence_ref: SHOT, statement: "I posted Nugget 1 myself in Duplication Movement", user_confirmed: false }, ctx));
     expect(dry.dry_run).toBe(true); expect(sim.recs).toHaveLength(0);
     const out = J(await confirmDM()); expect(out.recorded[0].outcome).toBe("recorded");
     expect(sim.recs[0]).toMatchObject({ jid: "1@g.us", status: "verified", origin: "external_evidence", at: "2026-11-14T13:09:00.000Z" });
     // a brand-new conversation (fresh calls, nothing carried over) sees it
-    const b = J(await brief.handler({ ...W1 }, ctx)); const mon = b.weeks[0].days[0];
+    const b = J(await brief.handler({ ...W1 }, ctx)); const mon = b.weeks[0].days.find(d => d.kind === "nugget");
     expect(mon.recommendation.item.id).toBe(A1);
     expect(mon.recommendation.plan.group_jids).toEqual(["2@g.us", "3@g.us"]);
-    expect(mon.recommendation.plan.destinations.map((d: any) => d.at)).toEqual([iso("2026-11-16", "09:25"), iso("2026-11-16", "09:35")]);
+    expect(mon.recommendation.plan.destinations.map((d: any) => d.at)).toEqual([iso("2026-11-16", "12:25"), iso("2026-11-16", "12:35")]);
     expect(gm(b, 0).skip).toMatchObject({ reason: "already_distributed", origin: "external_evidence", confidence: "confirmed" });
     expect(mon.recommendation.warnings.join(" ")).toMatch(/Already distributed \(verified\) in Duplication Movement/);
     const d1 = mon.recommendation.item.distribution; expect(d1[0].state).toBe("verified_distributed"); expect(d1[0].at_sast).toBe("2026-11-14 15:09");
@@ -112,17 +112,17 @@ describe("ACCEPTANCE: Nugget #1 manually posted in Duplication Movement", () => 
   it("preview and approval schedule ONLY the other two groups; Duplication Movement gets nothing", async () => {
     await confirmDM();
     const pv = J(await preview.handler({ ...W1 }, ctx));
-    expect(pv.messages[0].item_id).toBe(A1); expect(pv.messages[0].deliveries.map((d: any) => d.group)).toEqual(["APLGO | Health and Biz", "New Day New Life"]);
+    expect(pv.messages.find(m => m.item_id === A1).item_id).toBe(A1); expect(pv.messages.find(m => m.item_id === A1).deliveries.map((d: any) => d.group)).toEqual(["APLGO | Health and Biz", "New Day New Life"]);
     expect(pv.requires_distribution_confirmation[0]).toMatchObject({ item_id: A1, skipped_as_already_distributed: ["Duplication Movement"] });
     expect(pv.requires_distribution_confirmation[0].groups_to_confirm.map((g: any) => g.group)).toEqual(["APLGO | Health and Biz", "New Day New Life"]);
     const r = await approve.handler({ ...W1, proposal_hash: pv.proposal_hash, confirm_phrase: pv.confirm_phrase, user_confirmed: true, confirmed_not_distributed: [A1, A2] }, ctx);
     expect(J(r).halted_on_failure).toBe(false);
     const mine = sim.dels.filter((d: Del) => d.item === A1).map((d: Del) => d.jid).sort(); expect(mine).toEqual(["2@g.us", "3@g.us"]);
-    expect(sim.dels.filter((d: Del) => d.item === A1).map((d: Del) => d.at).sort()).toEqual([iso("2026-11-16", "09:25"), iso("2026-11-16", "09:35")]);
+    expect(sim.dels.filter((d: Del) => d.item === A1).map((d: Del) => d.at).sort()).toEqual([iso("2026-11-16", "12:25"), iso("2026-11-16", "12:35")]);
   });
   it("even a stale/forged plan cannot deliver to a verified group (database refuses)", async () => {
     await confirmDM(); itemOf(A1).status = "approved";
-    const out = await executeSteps([{ type: "schedule", item_id: A1, title: "n1", kind: "nugget", version: 1, text_sha256: "x", status_before: "approved", first_at: iso("2026-11-16", "09:15"), group_jids: ["1@g.us", "2@g.us"], actions: ["plan"] }], async (a, b) => gateway(a, b));
+    const out = await executeSteps([{ type: "schedule", item_id: A1, title: "n1", kind: "nugget", version: 1, text_sha256: "x", status_before: "approved", first_at: iso("2026-11-16", "12:15"), group_jids: ["1@g.us", "2@g.us"], actions: ["plan"] }], async (a, b) => gateway(a, b));
     expect(out.halted).toBe(true); expect(out.results[0].detail).toMatch(/already_distributed/); expect(sim.dels.filter((d: Del) => d.item === A1)).toHaveLength(0);
   });
 });
@@ -147,12 +147,12 @@ describe("recording rules", () => {
     expect(J(await confirm.handler({ action: "retract", record_id: id, reason: "posted in wrong group", user_confirmed: false }, ctx)).dry_run).toBe(true); expect(sim.recs[0].status).toBe("verified");
     expect(J(await confirm.handler({ action: "retract", record_id: id, reason: "posted in wrong group", user_confirmed: true }, ctx)).retracted[0].outcome).toBe("retracted");
     expect(J(await confirm.handler({ action: "retract", record_id: id, reason: "posted in wrong group", user_confirmed: true }, ctx)).retracted[0].outcome).toBe("already_retracted");
-    const b = J(await brief.handler({ ...W1 }, ctx)); expect(b.weeks[0].days[0].recommendation.plan.group_jids).toHaveLength(3);
+    const b = J(await brief.handler({ ...W1 }, ctx)); expect(b.weeks[0].days.find(d => d.kind === "nugget").recommendation.plan.group_jids).toHaveLength(3);
     expect(sim.audit.filter((a: string) => /distribution_/.test(a)).length).toBeGreaterThanOrEqual(2);
   });
   it("one group never proves another; fully distributed content is not proposed again", async () => {
     for (const g of GROUPS) await confirmDM({ group: g.name, evidence_ref: `proof for ${g.name}`, statement: `I posted it in ${g.name} myself` });
-    const b = J(await brief.handler({ ...W1 }, ctx)); const mon = b.weeks[0].days[0];
+    const b = J(await brief.handler({ ...W1 }, ctx)); const mon = b.weeks[0].days.find(d => d.kind === "nugget");
     expect(mon.recommendation.item.id).toBe(A2); expect(b.exceptions.some((e: any) => e.code === "ALREADY_DISTRIBUTED_EVERYWHERE" && e.item === A1)).toBe(true);
     reset(); await confirmDM(); const s = (jid: string) => groupState(A1, jid, null, { available: true, records: sim.recs.map(view), coverage: sim.coverage }, new Date());
     expect(s("1@g.us").state).toBe("verified"); expect(s("2@g.us").state).toBe("unknown"); expect(s("3@g.us").state).toBe("unknown");
@@ -183,11 +183,11 @@ describe("scanning Hub history", () => {
     expect(sim.recs.find((r: any) => r.evidence.endsWith("m-exact"))).toMatchObject({ origin: "manual_whatsapp", status: "verified", confidence: "exact", jid: "2@g.us" });
     expect(sim.recs.filter((r: any) => r.status === "candidate").every((r: any) => r.confidence === "approximate")).toBe(true);
     // the group-specific match did not leak: Nugget #1 verified in group 2 and 3 only, group 1 is a candidate
-    const b = J(await brief.handler({ ...W1 }, ctx)); const d = b.weeks[0].days[0].recommendation.item.distribution;
+    const b = J(await brief.handler({ ...W1 }, ctx)); const d = b.weeks[0].days.find(d => d.kind === "nugget").recommendation.item.distribution;
     expect(d.map((x: any) => x.state)).toEqual(["candidate_needs_review", "verified_distributed", "verified_distributed"]);
     expect(b.exceptions.some((e: any) => e.code === "DISTRIBUTION_CANDIDATE")).toBe(true);
     const pv = J(await preview.handler({ ...W1 }, ctx)); expect(pv.requires_distribution_confirmation[0].groups_to_confirm[0]).toMatchObject({ group: "Duplication Movement" });
-    expect(pv.messages[0].deliveries.map((x: any) => x.group)).toEqual(["Duplication Movement"]);
+    expect(pv.messages.find(m => m.item_id === A1).deliveries.map((x: any) => x.group)).toEqual(["Duplication Movement"]);
   });
   it("a candidate can be reviewed and upgraded by Vanto's confirmation of the same evidence", async () => {
     sim.history = [msg({ ref: "m-extra", group_jid: "1@g.us", body: `Hello!\n${NUGGET1}` })];
@@ -211,9 +211,9 @@ describe("scanning Hub history", () => {
 
 describe("graceful degradation and regressions", () => {
   it("without distribution memory the brief flags every group unknown and keeps the old plan (3 groups, same slots)", async () => {
-    sim.distAvailable = false; const b = J(await brief.handler({ ...W1 }, ctx)); const mon = b.weeks[0].days[0];
+    sim.distAvailable = false; const b = J(await brief.handler({ ...W1 }, ctx)); const mon = b.weeks[0].days.find(d => d.kind === "nugget");
     expect(b.exceptions.some((e: any) => e.code === "DISTRIBUTION_MEMORY_UNAVAILABLE")).toBe(true);
-    expect(mon.recommendation.plan.group_jids).toEqual(["1@g.us", "2@g.us", "3@g.us"]); expect(mon.recommendation.plan.first_at).toBe(iso("2026-11-16", "09:15"));
+    expect(mon.recommendation.plan.group_jids).toEqual(["1@g.us", "2@g.us", "3@g.us"]); expect(mon.recommendation.plan.first_at).toBe(iso("2026-11-16", "12:15"));
     expect(mon.recommendation.warnings.join(" ")).toMatch(/Prior distribution/);
     const pv = J(await preview.handler({ ...W1 }, ctx)); expect(pv.requires_distribution_confirmation).toHaveLength(2);
   });
@@ -222,7 +222,7 @@ describe("graceful degradation and regressions", () => {
     const settings = JSON.stringify(sim.settings), dels = JSON.stringify(sim.dels), bodies = JSON.stringify(sim.items.map((i: any) => [i.body, i.body_sha256, i.status]));
     const pv = J(await preview.handler({ ...W1 }, ctx));
     expect(pv.steps.find((s: any) => s.type === "retime")).toMatchObject({ item_id: T2, first_at: iso("2026-11-18", "09:15") });
-    const fri = pv.steps.find((s: any) => s.item_id === A2); expect(fri.group_jids).toEqual(["1@g.us", "2@g.us"]); expect(fri.slots.map((x: any) => x.at)).toEqual([iso("2026-11-20", "09:15"), iso("2026-11-20", "09:25")]);
+    const fri = pv.steps.find((s: any) => s.item_id === A2); expect(fri.group_jids).toEqual(["1@g.us", "2@g.us"]); expect(fri.slots.map((x: any) => x.at)).toEqual([iso("2026-11-17", "12:15"), iso("2026-11-17", "12:25")]);
     expect(pv.sending_possible).toBe(false); expect(JSON.stringify(sim.settings)).toBe(settings); expect(JSON.stringify(sim.dels)).toBe(dels); expect(JSON.stringify(sim.items.map((i: any) => [i.body, i.body_sha256, i.status]))).toBe(bodies);
     // reads and records never plan, approve, retime, or touch settings
     expect(sim.calls.filter((c: string) => ["plan", "approve", "retime", "submit", "hold"].includes(c))).toEqual([]);
