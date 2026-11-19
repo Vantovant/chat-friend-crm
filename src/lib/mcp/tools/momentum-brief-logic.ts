@@ -62,6 +62,13 @@ export function buildBrief(input: { now: Date; items: Item[]; settings: Settings
     daily_cap: settings.maytapi_daily_cap != null ? Number(settings.maytapi_daily_cap) : null,
   };
   const sendingPossible = gates.engine_enabled && gates.scheduler_enabled && !gates.emergency_paused && !gates.outbound_frozen;
+  // The two schedules are independent but share each group's minimum gap, which the database enforces PER GROUP at release time.
+  // Both waves stagger the groups identically, so group k's teaching and nugget posts are |teaching start - nugget start| apart.
+  // Refuse a teaching wave inside that gap instead of planning deliveries that would have to wait (or go stale).
+  { const gap = Number.isFinite(gates.min_interval_minutes) && gates.min_interval_minutes >= 5 ? gates.min_interval_minutes : 120;
+    const mins = (t: string) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3)), hhmm = (m: number) => `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+    const tooClose = teachingSlots.some((t, k) => Math.abs(mins(t) - mins(NUGGET_SLOT_TIMES[k])) < gap);
+    if (tooClose) throw new Error(`first_release ${teachingSlots[0]} puts the teaching wave within ${gap} minutes of the daily nugget wave (${NUGGET_SLOT_TIMES[0]}-${NUGGET_SLOT_TIMES[NUGGET_SLOT_TIMES.length - 1]}) for the same group. Use a teaching start no later than ${hhmm(mins(NUGGET_SLOT_TIMES[0]) - gap)} or at/after ${hhmm(mins(NUGGET_SLOT_TIMES[0]) + gap)}.`); }
 
   // Distribution memory, per (item, group). A group is only ever judged by its OWN evidence.
   const distView = (id: string, g: { name: string; jid: string }) => {
@@ -108,7 +115,8 @@ export function buildBrief(input: { now: Date; items: Item[]; settings: Settings
       const SLOTS = prefer === "teaching" ? teachingSlots : [...NUGGET_SLOT_TIMES];
       const date = addDays(monday, off);
       const slots = SLOTS.map((t, k) => ({ group: allow[k]?.name ?? null, at_sast: `${date} ${t}` }));
-      const existing = (byDate.get(date) ?? []).filter(({ item }) => item.kind === prefer);
+      // a held item's parked (needs_review) deliveries do not occupy the day: a held plan must never block the other content of that schedule
+      const existing = (byDate.get(date) ?? []).filter(({ item, d }) => item.kind === prefer && !(item.held && d.status === "needs_review"));
       const slotPast = Date.parse(slotIso(date, SLOTS[0])) <= now.getTime();
       const day: any = { date, kind: prefer, weekday: WEEKDAY[dow(date)], rhythm, slots };
       if (existing.length) {
@@ -121,7 +129,8 @@ export function buildBrief(input: { now: Date; items: Item[]; settings: Settings
         days.push(day); continue;
       }
       if (slotPast) { day.state = "past"; days.push(day); continue; }
-      const assigned = assign[`${date}:${prefer}`] ?? (assign[date] === "none" ? undefined : byId.get(assign[date])?.kind === prefer ? assign[date] : undefined);
+      const plain = assign[date]; // plain date: "none" leaves both schedules empty; an item id applies to the schedule that item belongs to
+      const assigned = assign[`${date}:${prefer}`] ?? (plain === "none" ? "none" : plain && byId.get(plain)?.kind === prefer ? plain : undefined);
       if (assigned === "none") { day.state = "skipped"; day.recommendation = { text: "Skipped at Vanto's request." }; days.push(day); continue; }
       const forced = assigned ? byId.get(assigned) : undefined;
       if (assigned && (!forced || forced.kind !== prefer || !eligible(forced))) exceptions.push({ severity: "warning", code: "ASSIGN_INELIGIBLE", message: `${date}: the item chosen for this day is not available (missing, held, already scheduled or excluded); using the default instead.` });

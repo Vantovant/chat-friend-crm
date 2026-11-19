@@ -12,14 +12,14 @@
   "mcp": {
     "server": {
       "name": "get-well-hub",
-      "version": "1.17.0",
+      "version": "1.18.0",
       "title": "Get Well Hub"
     },
     "tools": [
       {
         "name": "momentum_brief",
         "title": "Momentum briefing (read-only)",
-        "description": "Read-only Momentum intelligence. Returns the live state of the A-Team Momentum engine for planning (including per-group DISTRIBUTION MEMORY: which content already went to which group by Momentum, by hand, or on confirmed evidence; a group is never assumed from another, and incomplete history is reported as unknown, never as 'not distributed'): safety gates (engine, scheduler, emergency, freeze, 120-minute gap), allow-listed groups, every teaching and nugget with status/version and planned deliveries (SAST), the Mon/Wed/Fri 09:15/09:25/09:35 rhythm for the coming weeks with what is scheduled, what is proposed and what is a gap, and exceptions (retime needed, needs approval, held, failed, inert). Use it to answer 'what should we do next week?': explain reasoning (each proposed day has a reason and alternatives), then ask Vanto ONE decision. Revisions (assign / exclude / first_release) rebuild the plan when Vanto wants a change. It never approves, schedules, sends or changes any setting. Teaching and nugget wording is Mr Baloyi's and is never edited; read it with momentum_get_content.",
+        "description": "Read-only Momentum intelligence. Returns the live state of the A-Team Momentum engine for planning (including per-group DISTRIBUTION MEMORY: which content already went to which group by Momentum, by hand, or on confirmed evidence; a group is never assumed from another, and incomplete history is reported as unknown, never as 'not distributed'): safety gates (engine, scheduler, emergency, freeze, 120-minute gap), allow-listed groups, every teaching and nugget with status/version and planned deliveries (SAST), the two INDEPENDENT schedules for the coming weeks (Mr Baloyi's teachings Mon/Wed/Fri at 09:15/09:25/09:35 SAST; leadership nuggets every day at 12:15/12:25/12:35 SAST; one is never substituted for the other, and a missing nugget is shown as a gap, never filled by a teaching) with what is scheduled, what is proposed and what is a gap, and exceptions (retime needed, needs approval, held, failed, inert). Use it to answer 'what should we do next week?': explain reasoning (each proposed day has a reason and alternatives), then ask Vanto ONE decision. Revisions (assign / exclude / first_release) rebuild the plan when Vanto wants a change. It never approves, schedules, sends or changes any setting. Teaching and nugget wording is Mr Baloyi's and is never edited; read it with momentum_get_content.",
         "annotations": {
           "readOnlyHint": true,
           "destructiveHint": false,
@@ -46,9 +46,9 @@
                 "type": "string"
               },
               "propertyNames": {
-                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}(:(teaching|nugget))?$"
               },
-              "description": "Vanto's revisions: date (YYYY-MM-DD) -> item id to use that day, or \"none\" to leave the day empty. Use the alternatives from the brief."
+              "description": "Vanto's revisions for the two independent schedules. \"YYYY-MM-DD:teaching\" or \"YYYY-MM-DD:nugget\" -> item id of that kind to use in that schedule on that day, or \"none\" to leave that schedule empty that day. A plain \"YYYY-MM-DD\" key with an item id applies to the schedule the item belongs to; a plain date with \"none\" leaves BOTH schedules empty that day. Use the alternatives from the brief."
             },
             "exclude": {
               "type": "array",
@@ -61,7 +61,7 @@
             "first_release": {
               "type": "string",
               "pattern": "^\\d{2}:\\d{2}$",
-              "description": "First group's release time (SAST, HH:MM). Default 09:15; the other groups follow 10 minutes apart."
+              "description": "First group's release time (SAST, HH:MM) for the TEACHING wave (Mon/Wed/Fri). Default 09:15; the other groups follow 10 minutes apart. The daily nugget wave is fixed at 12:15 / 12:25 / 12:35 and the plan is refused if the teaching wave would sit within the minimum gap of it."
             }
           },
           "additionalProperties": false,
@@ -228,7 +228,7 @@
       {
         "name": "momentum_preview_plan",
         "title": "Preview the Momentum campaign (read-only)",
-        "description": "Read-only. Builds the exact campaign preview for the coming weeks: the FULL verbatim text of every message that would be scheduled (with its hash), the groups, the exact SAST times, any re-timing of already-scheduled deliveries, problems and exceptions, plus a proposal_hash and the confirm_phrase Vanto must type to approve. Use revisions (assign / exclude / first_release) to change the plan when Vanto asks, and call this again. Show Vanto the exact messages before asking for approval. Nothing is approved, scheduled or sent by this tool.",
+        "description": "Read-only. Builds the exact campaign preview for the coming weeks: the FULL verbatim text of every message that would be scheduled (with its hash), the groups, the exact SAST times (teachings Mon/Wed/Fri 09:15-09:35; leadership nuggets daily 12:15-12:35; each message is labelled with its kind), any re-timing of already-scheduled deliveries, problems and exceptions, plus a proposal_hash and the confirm_phrase Vanto must type to approve. Use revisions (assign / exclude / first_release) to change the plan when Vanto asks, and call this again. Show Vanto the exact messages before asking for approval. Nothing is approved, scheduled or sent by this tool.",
         "annotations": {
           "readOnlyHint": true,
           "destructiveHint": false,
@@ -255,9 +255,9 @@
                 "type": "string"
               },
               "propertyNames": {
-                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}(:(teaching|nugget))?$"
               },
-              "description": "Vanto's revisions: date (YYYY-MM-DD) -> item id to use that day, or \"none\" to leave the day empty. Use the alternatives from the brief."
+              "description": "Vanto's revisions for the two independent schedules. \"YYYY-MM-DD:teaching\" or \"YYYY-MM-DD:nugget\" -> item id of that kind to use in that schedule on that day, or \"none\" to leave that schedule empty that day. A plain \"YYYY-MM-DD\" key with an item id applies to the schedule the item belongs to; a plain date with \"none\" leaves BOTH schedules empty that day. Use the alternatives from the brief."
             },
             "exclude": {
               "type": "array",
@@ -270,7 +270,7 @@
             "first_release": {
               "type": "string",
               "pattern": "^\\d{2}:\\d{2}$",
-              "description": "First group's release time (SAST, HH:MM). Default 09:15; the other groups follow 10 minutes apart."
+              "description": "First group's release time (SAST, HH:MM) for the TEACHING wave (Mon/Wed/Fri). Default 09:15; the other groups follow 10 minutes apart. The daily nugget wave is fixed at 12:15 / 12:25 / 12:35 and the plan is refused if the teaching wave would sit within the minimum gap of it."
             }
           },
           "additionalProperties": false,
@@ -308,9 +308,9 @@
                 "type": "string"
               },
               "propertyNames": {
-                "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}(:(teaching|nugget))?$"
               },
-              "description": "Vanto's revisions: date (YYYY-MM-DD) -> item id to use that day, or \"none\" to leave the day empty. Use the alternatives from the brief."
+              "description": "Vanto's revisions for the two independent schedules. \"YYYY-MM-DD:teaching\" or \"YYYY-MM-DD:nugget\" -> item id of that kind to use in that schedule on that day, or \"none\" to leave that schedule empty that day. A plain \"YYYY-MM-DD\" key with an item id applies to the schedule the item belongs to; a plain date with \"none\" leaves BOTH schedules empty that day. Use the alternatives from the brief."
             },
             "exclude": {
               "type": "array",
@@ -323,7 +323,7 @@
             "first_release": {
               "type": "string",
               "pattern": "^\\d{2}:\\d{2}$",
-              "description": "First group's release time (SAST, HH:MM). Default 09:15; the other groups follow 10 minutes apart."
+              "description": "First group's release time (SAST, HH:MM) for the TEACHING wave (Mon/Wed/Fri). Default 09:15; the other groups follow 10 minutes apart. The daily nugget wave is fixed at 12:15 / 12:25 / 12:35 and the plan is refused if the teaching wave would sit within the minimum gap of it."
             },
             "proposal_hash": {
               "type": "string",

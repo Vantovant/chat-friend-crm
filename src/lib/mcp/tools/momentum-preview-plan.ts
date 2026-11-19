@@ -9,7 +9,7 @@ export default defineTool({
   name: "momentum_preview_plan",
   title: "Preview the Momentum campaign (read-only)",
   description:
-    "Read-only. Builds the exact campaign preview for the coming weeks: the FULL verbatim text of every message that would be scheduled (with its hash), the groups, the exact SAST times, any re-timing of already-scheduled deliveries, problems and exceptions, plus a proposal_hash and the confirm_phrase Vanto must type to approve. Use revisions (assign / exclude / first_release) to change the plan when Vanto asks, and call this again. Show Vanto the exact messages before asking for approval. Nothing is approved, scheduled or sent by this tool.",
+    "Read-only. Builds the exact campaign preview for the coming weeks: the FULL verbatim text of every message that would be scheduled (with its hash), the groups, the exact SAST times (teachings Mon/Wed/Fri 09:15-09:35; leadership nuggets daily 12:15-12:35; each message is labelled with its kind), any re-timing of already-scheduled deliveries, problems and exceptions, plus a proposal_hash and the confirm_phrase Vanto must type to approve. Use revisions (assign / exclude / first_release) to change the plan when Vanto asks, and call this again. Show Vanto the exact messages before asking for approval. Nothing is approved, scheduled or sent by this tool.",
   inputSchema: paramsSchema,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   handler: async (input, ctx) => {
